@@ -23,14 +23,16 @@ router.get('/registration-fields', getPublicFormSchemaController);
 router.post('/register', upload.any(), registerDeliveryPartnerController);
 router.get('/check-vehicle/:number', async (req, res) => {
     try {
-        const { FoodDeliveryPartner } = await import('../models/deliveryPartner.model.js');
+        const { prisma } = await import('../../../../config/prisma.js');
         const vNum = String(req.params.number || '').trim().toUpperCase();
         if (!vNum) {
             return res.status(400).json({ success: false, message: 'Vehicle number is required' });
         }
-        const existing = await FoodDeliveryPartner.findOne({ 
-            vehicleNumber: vNum, 
-            status: { $ne: 'rejected' } 
+        // A rejected application does not hold the number, so the rider can
+        // reapply with the same vehicle.
+        const existing = await prisma.foodDeliveryPartner.findFirst({
+            where: { vehicleNumber: vNum, status: { not: 'rejected' } },
+            select: { id: true },
         });
         return res.json({ 
             success: true, 

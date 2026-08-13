@@ -81,10 +81,10 @@ export async function resolveDiscountSplitByCoupon({ couponCode, discount }) {
     let offer = null;
     if (couponCode) {
         try {
-            const { FoodOffer } = await import('../admin/models/offer.model.js');
-            offer = await FoodOffer.findOne({
-                couponCode: String(couponCode).trim().toUpperCase(),
-            }).lean();
+            const { prisma } = await import('../../../config/prisma.js');
+            offer = await prisma.foodOffer.findUnique({
+                where: { couponCode: String(couponCode).trim().toUpperCase() },
+            });
         } catch (err) {
             offer = null;
         }

@@ -1,9 +1,8 @@
 import express from 'express';
-import mongoose from 'mongoose';
 
 import { config } from '../../../config/env.js';
-import { FoodRestaurant } from '../restaurant/models/restaurant.model.js';
-import { FoodItem } from '../admin/models/food.model.js';
+import { prisma } from '../../../config/prisma.js';
+import { isId } from '../../../utils/helpers.js';
 
 const router = express.Router();
 
@@ -164,16 +163,17 @@ router.get('/.well-known/assetlinks.json', (_req, res) => {
 router.get('/restaurant-detail/:id', async (req, res, next) => {
     try {
         const { id } = req.params;
-        if (!mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return notFoundPage(req, res, 'restaurant');
         }
 
-        const restaurant = await FoodRestaurant.findOne({
-            _id: id,
-            status: 'approved',
-        })
-            .select('restaurantName profileImage coverImage coverImages cuisines area city')
-            .lean();
+        const restaurant = await prisma.foodRestaurant.findFirst({
+            where: { id, status: 'approved' },
+            select: {
+                restaurantName: true, profileImage: true, coverImages: true,
+                cuisines: true, area: true, city: true,
+            },
+        });
 
         if (!restaurant) return notFoundPage(req, res, 'restaurant');
 
@@ -190,8 +190,9 @@ router.get('/restaurant-detail/:id', async (req, res, next) => {
                     'Order food on Suvio.',
                 image: absoluteUrl(
                     req,
+                    // `coverImage` singular was a Mongo field that duplicated the
+                    // first entry of coverImages; there is one column now.
                     firstOf(
-                        restaurant.coverImage,
                         restaurant.coverImages || [],
                         restaurant.profileImage,
                     ),
@@ -208,18 +209,22 @@ router.get('/restaurant-detail/:id', async (req, res, next) => {
 router.get('/food-detail', async (req, res, next) => {
     try {
         const id = String(req.query.id || req.query.productId || '').trim();
-        if (!mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return notFoundPage(req, res, 'dish');
         }
 
-        const food = await FoodItem.findOne({ _id: id, approvalStatus: 'approved' })
-            .select('name description price image images restaurantId')
-            .populate('restaurantId', 'restaurantName')
-            .lean();
+        const food = await prisma.foodItem.findFirst({
+            where: { id, approvalStatus: 'approved' },
+            select: {
+                name: true, description: true, price: true, image: true,
+                images: true, restaurantId: true,
+                restaurant: { select: { restaurantName: true } },
+            },
+        });
 
         if (!food) return notFoundPage(req, res, 'dish');
 
-        const restaurantName = food.restaurantId?.restaurantName || '';
+        const restaurantName = food.restaurant?.restaurantName || '';
         const price = Number(food.price);
         const description = [
             Number.isFinite(price) && price > 0 ? `Rs.${price}` : '',
@@ -229,7 +234,7 @@ router.get('/food-detail', async (req, res, next) => {
             .filter(Boolean)
             .join(' · ');
 
-        const restaurantId = String(food.restaurantId?._id || food.restaurantId || '');
+        const restaurantId = String(food.restaurantId || '');
         const query = new URLSearchParams({ id, restaurantId }).toString();
 
         sendPage(

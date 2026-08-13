@@ -2,7 +2,7 @@ import { isId } from '../../../../utils/helpers.js';
 import { registerDeliveryPartner, updateDeliveryPartnerProfile, updateDeliveryPartnerBankDetails, listSupportTicketsByPartner, createSupportTicket, getSupportTicketByIdAndPartner, updateDeliveryPartnerDetails, updateDeliveryPartnerProfilePhotoBase64, updateDeliveryAvailability, getDeliveryPartnerWallet, getDeliveryPartnerEarnings, getDeliveryPartnerTripHistory, getDeliveryPocketDetails, getActiveEarningAddonsForPartner, deleteDeliveryPartnerAccount } from '../services/delivery.service.js';
 import { createDeliveryCashDepositOrder, getDeliveryPartnerWalletEnhanced, requestDeliveryWithdrawal, verifyDeliveryCashDepositPayment } from '../services/deliveryFinance.service.js';
 import { getDeliveryCashLimitSettings, getDeliveryEmergencyHelp } from '../../admin/services/admin.service.js';
-import { DeliveryBonusTransaction } from '../../admin/models/deliveryBonusTransaction.model.js';
+import { prisma } from '../../../../config/prisma.js';
 import { validateDeliveryRegisterDto, validateDeliveryProfileUpdateDto, validateDeliveryBankDetailsDto } from '../validators/delivery.validator.js';
 import { sendResponse } from '../../../../utils/response.js';
 import { getDeliveryReferralStats } from '../services/deliveryReferral.service.js';
@@ -189,16 +189,18 @@ export const getWalletController = async (req, res, next) => {
 
             const wallet = await getDeliveryPartnerWalletEnhanced(deliveryPartnerId);
             if (requestedTypeRaw === 'bonus') {
-                const bonusList = await DeliveryBonusTransaction.find({ deliveryPartnerId })
-                    .sort({ createdAt: -1 })
-                    .limit(limit)
-                    .lean();
+                const bonusList = await prisma.deliveryBonusTransaction.findMany({
+                    where: { deliveryPartnerId },
+                    orderBy: { createdAt: 'desc' },
+                    take: limit,
+                });
 
-                wallet.transactions = (bonusList || []).map((b) => ({
-                    id: b._id,
-                    _id: b._id,
+                wallet.transactions = bonusList.map((b) => ({
+                    id: b.id,
+                    _id: b.id,
                     type: 'bonus',
-                    amount: b.amount || 0,
+                    // Decimal, so it would otherwise reach the app as a string.
+                    amount: Number(b.amount) || 0,
                     status: 'Completed',
                     date: b.createdAt,
                     createdAt: b.createdAt,
