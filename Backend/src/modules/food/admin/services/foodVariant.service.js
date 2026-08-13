@@ -1,4 +1,4 @@
-import mongoose from 'mongoose';
+import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 
 const toTrimmedString = (value) => (value == null ? '' : String(value).trim());
@@ -48,10 +48,9 @@ export const normalizeFoodVariantsInput = (value = [], options = {}) => {
                 otherPrice: toNonNegativeNumber(entry?.otherPrice, 0)
             };
 
+            // A supplied id means "update this variant" rather than "add one".
             const variantId = entry?._id || entry?.id;
-            if (variantId && mongoose.Types.ObjectId.isValid(String(variantId))) {
-                variant._id = new mongoose.Types.ObjectId(String(variantId));
-            }
+            if (isId(variantId)) variant.id = String(variantId);
 
             return variant;
         })

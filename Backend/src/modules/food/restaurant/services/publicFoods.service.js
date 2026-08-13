@@ -65,6 +65,9 @@ export async function listPublicFoods(query = {}) {
 
     const list = await prisma.foodItem.findMany({
         where,
+        // variants is a relation now, so it has to be asked for — an omitted
+        // include silently returns dishes that look like they have no sizes.
+        include: { variants: { orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] } },
         orderBy: { createdAt: 'desc' },
         take: isSwitch99Promo ? Math.max(limit, 2000) : limit,
     });

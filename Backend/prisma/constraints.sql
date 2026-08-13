@@ -78,6 +78,18 @@ ALTER TABLE "delivery_fee_bands" ADD CONSTRAINT "delivery_fee_band_no_overlap"
     numrange("minDistanceKm", "maxDistanceKm", '[)') WITH &&
   );
 
+-- ─── menu item variants ──────────────────────────────────────────────────────
+-- normalizeFoodVariantsInput already rejects a price <= 0, but it was the only
+-- thing asserting it: a variant written by the bulk uploader, an admin script or
+-- a direct query bypassed the check entirely and priced a dish at zero.
+ALTER TABLE "food_item_variants" DROP CONSTRAINT IF EXISTS "food_item_variant_price_positive";
+ALTER TABLE "food_item_variants" ADD CONSTRAINT "food_item_variant_price_positive"
+  CHECK ("price" > 0);
+
+ALTER TABLE "food_item_variants" DROP CONSTRAINT IF EXISTS "food_item_variant_other_price_non_negative";
+ALTER TABLE "food_item_variants" ADD CONSTRAINT "food_item_variant_other_price_non_negative"
+  CHECK ("otherPrice" >= 0);
+
 -- ─── rating / percentage bounds ──────────────────────────────────────────────
 ALTER TABLE "food_users" DROP CONSTRAINT IF EXISTS "user_rating_range";
 ALTER TABLE "food_users" ADD CONSTRAINT "user_rating_range"

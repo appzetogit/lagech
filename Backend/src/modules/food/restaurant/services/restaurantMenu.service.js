@@ -113,6 +113,7 @@ export async function getRestaurantMenu(restaurantId) {
     await restoreExpiredFoodAvailability({ restaurantId: id });
     const foods = await prisma.foodItem.findMany({
         where: { restaurantId: id },
+        include: { variants: { orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] } },
         orderBy: { createdAt: 'desc' },
         take: 5000,
     });
@@ -136,6 +137,7 @@ export async function getPublicApprovedRestaurantMenu(restaurantIdOrSlug) {
     await restoreExpiredFoodAvailability({ restaurantId: restaurant.id });
     const foods = await prisma.foodItem.findMany({
         where: { restaurantId: restaurant.id, approvalStatus: 'approved' },
+        include: { variants: { orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] } },
         orderBy: { createdAt: 'desc' },
         take: 2000,
     });

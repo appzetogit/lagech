@@ -7,8 +7,9 @@ const uniqueIds = (ids = []) =>
 
 function resolveFoodItemPrice(foodDoc, rawItem) {
   const variantId = String(rawItem?.variantId || '').trim();
-  // `variants` is a Json column now; entries carry `id`, and older seeded rows
-  // may still carry the Mongo `_id`, so both are accepted.
+  // `variants` is a relation; each row carries its own id. `_id` is still
+  // accepted because the prisma client extension adds it to every result and
+  // shipped clients echo it back.
   const variants = Array.isArray(foodDoc?.variants) ? foodDoc.variants : [];
 
   if (variantId) {
@@ -55,6 +56,8 @@ export async function resolveOrderCartItems(restaurantId, rawItems = []) {
     itemIds.length
       ? prisma.foodItem.findMany({
           where: { restaurantId: rId, id: { in: itemIds }, approvalStatus: 'approved' },
+          // The variant the customer chose is priced from these rows.
+          include: { variants: { orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] } },
         })
       : [],
     itemIds.length

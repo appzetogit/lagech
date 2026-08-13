@@ -1557,8 +1557,8 @@ model FoodItem {
   /// Compare-at / other-platform price for strikethrough UI.
   otherPrice  Decimal @default(0) @db.Decimal(14, 2)
 
-  /// [{ id, name, price, otherPrice }] — sized per restaurant, never queried across items.
-  variants Json @default("[]")
+  /// Sizes/options. See FoodItemVariant — this is on the checkout path.
+  variants FoodItemVariant[]
 
   /// Primary image, also the first entry of `images`. Kept as its own column
   /// because the user app, admin list, share previews and push payloads all read it.
@@ -1600,6 +1600,38 @@ model FoodItem {
   @@index([stockResumeAt])
   @@index([categoryId])
   @@map("food_items")
+}
+
+/// One size/option on a dish: "Regular", "Large", "Family Pack".
+///
+/// Was a Json array on FoodItem, which put the checkout price lookup — find the
+/// variant whose id matches what the customer chose — inside a JS scan over an
+/// unconstrained blob. Nothing stopped a variant priced at zero or below, or two
+/// variants sharing a name, and neither is visible until someone is billed.
+///
+/// A table gives the price a CHECK and the name a unique constraint, and lets
+/// the row carry its own id rather than one synthesised into the blob.
+model FoodItemVariant {
+  id         String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  foodItemId String @db.VarChar(24)
+
+  name       String
+  price      Decimal @db.Decimal(14, 2)
+  /// Compare-at / other-platform price for strikethrough UI. 0 = not shown.
+  otherPrice Decimal @default(0) @db.Decimal(14, 2)
+  /// Presentation order in the size picker; ties fall back to name.
+  sortOrder  Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  foodItem FoodItem @relation(fields: [foodItemId], references: [id], onDelete: Cascade)
+
+  /// Two "Large" options on one dish is a data-entry slip, and the picker gives
+  /// the customer no way to tell them apart.
+  @@unique([foodItemId, name])
+  @@index([foodItemId, sortOrder])
+  @@map("food_item_variants")
 }
 
 model FoodCategory {
