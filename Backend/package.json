@@ -19,11 +19,13 @@
     "migrate:outlet-timings-from-opening-closing": "node scripts/sync-outlet-timings-from-opening-closing.js",
     "cleanup:legacy-collections": "node scripts/cleanup-legacy-collections.js",
     "test": "node --test \"src/**/*.test.js\"",
-    "db:migrate": "prisma migrate dev",
+    "db:migrate": "prisma migrate deploy && node prisma/apply-constraints.mjs && prisma generate",
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
     "start:scheduler": "node scripts/run-scheduled-jobs.js",
-    "start:socket": "node socket-server.js"
+    "start:socket": "node socket-server.js",
+    "db:constraints": "node prisma/apply-constraints.mjs",
+    "db:reset": "prisma migrate reset --force && node prisma/apply-constraints.mjs"
   },
   "keywords": [],
   "author": "",

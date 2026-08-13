@@ -18,7 +18,7 @@ generator client {
 datasource db {
   provider   = "postgresql"
   url        = env("DATABASE_URL")
-  extensions = [pgcrypto, postgis]
+  extensions = [pgcrypto, postgis, btree_gist]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1970,8 +1970,6 @@ model FoodFeeSettings {
 
   /// No defaults — admin must configure these explicitly.
   deliveryFee      Decimal? @db.Decimal(14, 2)
-  /// [{ min, max, fee, deliveryBoyPerKm, deliveryBoyBasePay }] distance bands.
-  deliveryFeeRanges Json    @default("[]")
   platformFee      Decimal? @db.Decimal(14, 2)
   quickDeliveryFee Decimal? @db.Decimal(14, 2)
   gstRate          Decimal? @db.Decimal(5, 2)
@@ -1983,8 +1981,50 @@ model FoodFeeSettings {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  /// Distance bands. Was a Json array; see DeliveryFeeBand for why.
+  deliveryFeeBands DeliveryFeeBand[]
+
   @@index([isActive, createdAt(sort: Desc)])
   @@map("food_fee_settings")
+}
+
+/// One distance band: what the customer pays and what the rider earns for a trip
+/// of this length.
+///
+/// Was a Json array on FoodFeeSettings, which meant nothing could stop an admin
+/// saving overlapping bands (0–5 and 3–8 both match a 4 km trip, and which one
+/// wins is whichever the JS sort happens to reach first) or leaving a gap that
+/// silently falls through to the flat fallback fee. Both mis-price real
+/// deliveries, and neither is visible until a customer is charged.
+///
+/// As a table the database enforces it: `delivery_fee_band_no_overlap` is an
+/// exclusion constraint over the [min, max) range, so overlapping bands are
+/// rejected at write time. See constraints.sql.
+model DeliveryFeeBand {
+  id            String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  feeSettingsId String @db.VarChar(24)
+
+  /// Inclusive lower bound, km.
+  minDistanceKm Decimal @db.Decimal(8, 2)
+  /// Exclusive upper bound, km — except on the widest band, which includes it.
+  maxDistanceKm Decimal @db.Decimal(8, 2)
+
+  /// What the customer pays for a trip in this band.
+  fee Decimal @db.Decimal(14, 2)
+
+  /// Rider pay. A flat basePay wins; otherwise perKm multiplies the real
+  /// distance. They are mutually exclusive — enforced by a CHECK, not just by
+  /// the admin UI that used to be the only thing asserting it.
+  deliveryBoyBasePay Decimal @default(0) @db.Decimal(14, 2)
+  deliveryBoyPerKm   Decimal @default(0) @db.Decimal(14, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  feeSettings FoodFeeSettings @relation(fields: [feeSettingsId], references: [id], onDelete: Cascade)
+
+  @@index([feeSettingsId, minDistanceKm])
+  @@map("delivery_fee_bands")
 }
 
 model FoodBusinessSettings {

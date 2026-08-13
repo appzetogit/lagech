@@ -210,20 +210,37 @@ function matchFeeRange(ranges, distanceKm, pickValue) {
   return null;
 }
 
+/**
+ * Distance bands are their own table now, but every pricing function below reads
+ * them as `feeSettings.deliveryFeeRanges` — an array of
+ * `{ min, max, fee, deliveryBoyBasePay, deliveryBoyPerKm }`.
+ *
+ * Rebuilding that shape here keeps the pricing logic (and its tests) untouched
+ * while the storage gains real constraints. Ordered by lower bound so
+ * matchFeeRange's "last band is the widest" assumption holds without re-sorting.
+ */
+const toFeeRanges = (bands = []) =>
+  bands.map((band) => ({
+    id: band.id,
+    min: Number(band.minDistanceKm),
+    max: Number(band.maxDistanceKm),
+    fee: Number(band.fee),
+    deliveryBoyBasePay: Number(band.deliveryBoyBasePay),
+    deliveryBoyPerKm: Number(band.deliveryBoyPerKm),
+  }));
+
 export async function loadActiveFeeSettings() {
   const feeDoc = await prisma.foodFeeSettings.findFirst({
     where: { isActive: true },
     orderBy: { createdAt: 'desc' },
+    include: { deliveryFeeBands: { orderBy: { minDistanceKm: 'asc' } } },
   });
 
-  return (
-    feeDoc || {
-      deliveryFee: 0,
-      deliveryFeeRanges: [],
-      platformFee: 0,
-      gstRate: 0,
-    }
-  );
+  if (!feeDoc) {
+    return { deliveryFee: 0, deliveryFeeRanges: [], platformFee: 0, gstRate: 0 };
+  }
+
+  return { ...feeDoc, deliveryFeeRanges: toFeeRanges(feeDoc.deliveryFeeBands) };
 }
 
 export function resolveUserDeliveryFee(feeSettings = {}, { subtotal = 0, distanceKm = null } = {}) {
