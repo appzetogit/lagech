@@ -654,6 +654,9 @@ model FoodRestaurant {
   state        String?
   pincode      String?
   landmark     String?
+  /// Geocoder's one-line address. Lived inside the `location` subdocument in
+  /// Mongo alongside a duplicate `address` key; both are this one column.
+  formattedAddress String?
 
   cuisines    String[]
   openingTime String?
