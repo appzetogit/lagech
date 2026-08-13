@@ -1,0 +1,3031 @@
+// Switcheats — full Postgres schema, translated from the 72 Mongoose models.
+//
+// Conventions applied throughout:
+//   * ids stay 24-char hex so the frontend's /^[a-f0-9]{24}$/ checks keep working
+//   * money is Decimal(14,2), never Float — Mongo stored every rupee as a JS float
+//   * closed enums become Postgres enums; @map covers values Prisma can't name
+//   * scalar arrays use native Postgres arrays instead of join tables
+//   * snapshot/config blobs stay Json; anything filtered or aggregated is a column
+//   * geo columns are PostGIS and invisible to Prisma Client — use $queryRaw
+//
+// See constraints.sql for CHECKs, extensions, and the TTL replacements.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pgcrypto, postgis]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum EntityType {
+  user
+  restaurant
+  deliveryBoy
+  admin
+}
+
+enum OwnerType {
+  USER
+  RESTAURANT
+  DELIVERY_PARTNER
+}
+
+enum ActorRole {
+  USER
+  RESTAURANT
+  DELIVERY_PARTNER
+  ADMIN
+  SYSTEM
+}
+
+enum ChatRole {
+  USER
+  RESTAURANT
+  DELIVERY_PARTNER
+  ADMIN
+}
+
+enum ApprovalStatus {
+  pending
+  approved
+  rejected
+}
+
+enum AddressLabel {
+  Home
+  Office
+  Other
+}
+
+enum Gender {
+  male
+  female
+  other
+  prefer_not_to_say @map("prefer-not-to-say")
+  unset             @map("")
+}
+
+enum TxnType {
+  credit
+  debit
+}
+
+enum TxnStatus {
+  completed
+  pending
+  failed
+  reversed
+}
+
+enum TxnCategory {
+  order_payment
+  order_refund
+  wallet_topup
+  wallet_debit
+  commission
+  delivery_earning
+  platform_fee
+  settlement_payout
+  referral_reward
+  adjustment
+  other
+}
+
+enum PaymentMethod {
+  cash
+  razorpay
+  razorpay_qr
+  wallet
+  upi
+  card
+  netbanking
+}
+
+enum PaymentGateway {
+  razorpay
+  stripe
+  paypal
+  none
+}
+
+enum PaymentStatus {
+  created
+  pending
+  success
+  failed
+  refunded
+}
+
+/// Lifecycle of the per-order split (FoodTransaction). Deliberately not
+/// PaymentStatus — that one is the gateway's view and has no 'captured'.
+enum FoodTxnStatus {
+  pending
+  authorized
+  captured
+  failed
+  refunded
+}
+
+enum RefundStatus {
+  pending
+  processed
+  failed
+}
+
+enum RefundTo {
+  gateway
+  wallet
+}
+
+enum SettlementStatus {
+  pending
+  processing
+  processed
+  failed
+}
+
+enum OrderStatus {
+  pending_payment
+  created
+  confirmed
+  preparing
+  ready_for_pickup
+  reached_pickup
+  picked_up
+  reached_drop
+  delivered
+  cancelled_by_user
+  cancelled_by_restaurant
+  cancelled_by_admin
+}
+
+enum OrderPaymentMethod {
+  cash
+  razorpay
+  razorpay_qr
+  wallet
+}
+
+enum OrderPaymentStatus {
+  cod_pending
+  created
+  authorized
+  paid
+  failed
+  refunded
+  pending_qr
+}
+
+enum OrderRefundStatus {
+  none
+  pending
+  processed
+  failed
+}
+
+enum DispatchStatus {
+  unassigned
+  assigned
+  accepted
+  rejected
+  cancelled
+}
+
+enum DispatchOfferAction {
+  offered
+  rejected
+  timeout
+  deassigned
+}
+
+enum DeliveryPhase {
+  en_route_to_pickup
+  at_pickup
+  en_route_to_delivery
+  at_drop
+  delivered
+  completed
+}
+
+enum DeliveryMode {
+  basic
+  quick
+}
+
+enum PartnerStatus {
+  pending
+  approved
+  rejected
+  deactivated
+}
+
+enum AvailabilityStatus {
+  online
+  offline
+}
+
+enum AdminType {
+  super_admin
+  sub_admin
+}
+
+enum ServiceAccess {
+  food
+  quickCommerce
+  taxi
+}
+
+enum FoodType {
+  Veg
+  NonVeg @map("Non-Veg")
+}
+
+enum AddonFoodType {
+  veg
+  non_veg @map("non-veg")
+}
+
+enum FoodTypeScope {
+  Veg
+  NonVeg @map("Non-Veg")
+  Both
+}
+
+enum StockOffMode {
+  manual
+  specific_time     @map("specific-time")
+  next_business_day @map("next-business-day")
+  custom_date_time  @map("custom-date-time")
+}
+
+enum DiscountType {
+  percentage
+  flat_price @map("flat-price")
+}
+
+enum CustomerScope {
+  all
+  first_time @map("first-time")
+}
+
+enum RestaurantScope {
+  all
+  selected
+}
+
+enum OfferStatus {
+  active
+  paused
+  inactive
+}
+
+enum CreatorRole {
+  ADMIN
+  RESTAURANT
+}
+
+enum CashbackType {
+  percentage
+  flat
+}
+
+enum CommissionValueType {
+  percentage
+  amount
+}
+
+enum TicketStatus {
+  open
+  in_progress @map("in-progress")
+  resolved
+}
+
+enum DeliveryTicketStatus {
+  open
+  in_progress
+  resolved
+  closed
+}
+
+enum TicketPriority {
+  low
+  medium
+  high
+}
+
+enum DeliveryTicketPriority {
+  low
+  medium
+  high
+  urgent
+}
+
+enum UserTicketType {
+  order
+  restaurant
+  other
+}
+
+enum RestaurantTicketCategory {
+  orders
+  payments
+  menu
+  restaurant
+  technical
+  other
+}
+
+enum DeliveryTicketCategory {
+  payment
+  account
+  technical
+  order
+  other
+}
+
+enum EmergencyRequestStatus {
+  open
+  in_progress
+  processing
+  resolved
+  closed
+}
+
+enum SafetyReportStatus {
+  unread
+  read
+  urgent
+  resolved
+}
+
+enum SafetyReportPriority {
+  low
+  medium
+  high
+  critical
+}
+
+enum ChatThreadStatus {
+  open
+  in_progress
+  closed
+}
+
+enum ReferralRole {
+  USER
+  DELIVERY_PARTNER
+}
+
+enum ReferralStatus {
+  pending
+  credited
+  rejected
+}
+
+enum WithdrawalStatus {
+  pending
+  approved
+  rejected
+}
+
+enum CashDepositStatus {
+  Pending
+  Completed
+  Failed
+}
+
+enum CashDepositMethod {
+  cash
+  razorpay
+  upi
+  bank_transfer
+}
+
+enum SubscriptionInvoiceStatus {
+  pending
+  partially_settled
+  settled
+  waived
+}
+
+enum SubscriptionPlan {
+  starter
+  growth
+  premium
+  legacy
+}
+
+enum SubscriptionTxnType {
+  invoice_generated
+  wallet_deduction
+  manual_payment
+  waiver
+  adjustment
+  legacy_carryforward
+}
+
+enum SubscriptionDueStatus {
+  due
+  paid
+}
+
+enum SubscriptionHistoryEvent {
+  subscription_renewal_due_added
+  subscription_payment
+  subscription_auto_deduct
+}
+
+enum BillingRunStatus {
+  pending
+  completed
+  failed
+}
+
+enum InvoiceGeneratedBy {
+  system
+  admin
+  migration
+}
+
+enum ProcessorRole {
+  SYSTEM
+  ADMIN
+}
+
+enum LocationUpdateStatus {
+  none
+  pending
+  approved
+  rejected
+}
+
+enum NotificationSource {
+  ADMIN_BROADCAST
+  FSSAI_EXPIRY
+  SUPPORT_RESPONSE
+}
+
+enum BroadcastTargetType {
+  ALL
+  USER
+  RESTAURANT
+  DELIVERY
+  CUSTOM
+}
+
+enum PageKey {
+  terms
+  privacy
+  refund
+  shipping
+  cancellation
+  about
+  support
+}
+
+enum PageModule {
+  USER
+  DELIVERY
+  RESTAURANT
+  ALL
+}
+
+enum FeedbackModule {
+  user
+  restaurant
+  delivery
+}
+
+enum FeedbackUserModel {
+  FoodUser
+  FoodRestaurant
+  FoodDeliveryPartner
+}
+
+enum ExploreLinkType {
+  offers
+  gourmet
+  top_10 @map("top-10")
+  collections
+  custom
+}
+
+enum ZoneUnit {
+  kilometer
+  miles
+}
+
+enum RegistrationFieldType {
+  text
+  number
+  email
+  phone
+  date
+  select
+  document
+}
+
+enum EarningAddonStatus {
+  active
+  inactive
+}
+
+enum EarningAddonHistoryStatus {
+  pending
+  credited
+  failed
+  cancelled
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Identity — users, restaurants, delivery partners, admins
+// ─────────────────────────────────────────────────────────────────────────────
+
+model FoodUser {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  phone        String  @unique @db.VarChar(20)
+  countryCode  String  @default("+91") @db.VarChar(8)
+  name         String?
+  email        String?
+  profileImage String  @default("")
+
+  fcmTokens      String[]
+  fcmTokenMobile String[]
+
+  dateOfBirth DateTime?
+  anniversary DateTime?
+  gender      Gender    @default(unset)
+
+  referralCode  String?
+  referredById  String? @db.VarChar(24)
+  referralCount Int     @default(0)
+
+  isVerified Boolean @default(false)
+  isActive   Boolean @default(true)
+  role       String  @default("USER")
+
+  rating       Decimal @default(0) @db.Decimal(2, 1)
+  totalRatings Int     @default(0)
+
+  /// Bumped on login and embedded in the JWT; older tokens are rejected.
+  tokenVersion Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  referredBy FoodUser?  @relation("UserReferral", fields: [referredById], references: [id])
+  referrals  FoodUser[] @relation("UserReferral")
+
+  addresses     UserAddress[]
+  orders        FoodOrder[]
+  cart          FoodUserCart?
+  favorites     FoodUserFavorite[]
+  supportTicket FoodSupportTicket[]
+  payments      Payment[]
+  refunds       Refund[]
+  offerUsages   FoodOfferUsage[]
+  safetyReports FoodSafetyEmergencyReport[]
+
+  @@index([referredById])
+  @@index([isActive])
+  @@map("food_users")
+}
+
+/// Was FoodUser.addresses[] — promoted to a table because each entry carried its
+/// own _id, its own timestamps and a 2dsphere index.
+model UserAddress {
+  id     String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  userId String @db.VarChar(24)
+
+  label             AddressLabel @default(Home)
+  street            String
+  additionalDetails String       @default("")
+  city              String
+  state             String
+  zipCode           String       @default("")
+  phone             String       @default("")
+
+  /// Read lat/lng; the geography column is trigger-maintained for GIST queries.
+  latitude  Float?
+  longitude Float?
+  location  Unsupported("geography(Point, 4326)")?
+
+  isDefault Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user FoodUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, isDefault])
+  @@map("food_user_addresses")
+}
+
+model FoodRestaurant {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  restaurantName String
+  ownerName      String
+  ownerEmail     String?
+  ownerPhone     String? @db.VarChar(20)
+
+  /// Derived at write time — the pre('validate') hook moves into the service layer.
+  restaurantNameNormalized String?
+  ownerPhoneDigits         String? @db.VarChar(15)
+  ownerPhoneLast10         String? @db.VarChar(10)
+  primaryContactNumber     String? @db.VarChar(20)
+
+  pureVegRestaurant Boolean @default(false)
+
+  addressLine1 String?
+  addressLine2 String?
+  area         String?
+  city         String?
+  state        String?
+  pincode      String?
+  landmark     String?
+
+  cuisines    String[]
+  openingTime String?
+  closingTime String?
+  openDays    String[]
+
+  /// Manual Online/Offline toggle. false = force offline regardless of outlet timings.
+  isAcceptingOrders Boolean @default(true)
+  /// Legacy, no longer honoured. Cleared whenever the toggle is updated.
+  outsideHoursOverride Boolean @default(false)
+
+  panNumber    String?
+  nameOnPan    String?
+  gstRegistered Boolean @default(false)
+  gstNumber    String?
+  gstLegalName String?
+  gstAddress   String?
+  fssaiNumber  String?
+  fssaiExpiry  DateTime?
+
+  accountNumber     String?
+  ifscCode          String?
+  accountHolderName String?
+  accountType       String?
+  upiId             String?
+  upiQrImage        String?
+
+  menuImages    String[]
+  coverImages   String[]
+  coverImage    String   @default("")
+  /// Storefront photos shown to the rider at pickup and on the customer page.
+  galleryImages String[]
+  profileImage  String?
+
+  fcmTokens      String[]
+  fcmTokenMobile String[]
+
+  /// Published location. Read latitude/longitude; `location` is trigger-maintained
+  /// for GIST/ST_DWithin and is not selectable through Prisma Client.
+  latitude        Float?
+  longitude       Float?
+  location        Unsupported("geography(Point, 4326)")?
+  /// Proposed location awaiting admin approval; the published one stays live.
+  pendingLatitude  Float?
+  pendingLongitude Float?
+  pendingLocation  Unsupported("geography(Point, 4326)")?
+
+  pendingZoneId             String?              @db.VarChar(24)
+  locationUpdateStatus      LocationUpdateStatus @default(none)
+  locationUpdateRequestedAt DateTime?
+  locationUpdateReviewedAt  DateTime?
+  locationRejectionReason   String               @default("")
+
+  zoneId        String? @db.VarChar(24)
+  businessModel String?
+
+  panImage   String?
+  gstImage   String?
+  fssaiImage String?
+
+  estimatedDeliveryTime        String?
+  estimatedDeliveryTimeMinutes Int?
+
+  featuredDish  String?
+  featuredPrice Decimal? @db.Decimal(14, 2)
+  offer         String?
+
+  rating       Decimal @default(0) @db.Decimal(2, 1)
+  totalRatings Int     @default(0)
+
+  diningEnabled  Boolean @default(false)
+  diningMaxGuests Int    @default(6)
+  diningType     String  @default("family-dining")
+
+  /// Duplicated by FoodRestaurantMenu.sections in Mongo; both kept as-is.
+  menuSections Json @default("[]")
+
+  status          ApprovalStatus @default(pending)
+  approvedAt      DateTime?
+  rejectedAt      DateTime?
+  rejectionReason String?
+
+  onboardingFeePaid             Boolean   @default(false)
+  onboardingFeeAmount           Decimal   @default(0) @db.Decimal(14, 2)
+  onboardingFeePaidAt           DateTime?
+  onboardingFeePaymentMethod    String?
+  onboardingFeePaymentOrderId   String?
+  onboardingFeePaymentId        String?
+  onboardingFeePaymentSignature String?
+
+  subscriptionPlan               String?
+  subscriptionAmount             Decimal               @default(0) @db.Decimal(14, 2)
+  subscriptionPaidAmount         Decimal               @default(0) @db.Decimal(14, 2)
+  subscriptionAutoDeductedAmount Decimal               @default(0) @db.Decimal(14, 2)
+  subscriptionDueAmount          Decimal               @default(0) @db.Decimal(14, 2)
+  subscriptionStatus             SubscriptionDueStatus @default(due)
+  subscriptionValidTill          DateTime?
+
+  tokenVersion Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  zone        FoodZone? @relation("RestaurantZone", fields: [zoneId], references: [id])
+  pendingZone FoodZone? @relation("RestaurantPendingZone", fields: [pendingZoneId], references: [id])
+
+  orders                FoodOrder[]
+  foodItems             FoodItem[]
+  addons                FoodAddon[]
+  categories            FoodCategory[]              @relation("CategoryOwner")
+  createdCategories     FoodCategory[]              @relation("CategoryCreator")
+  menu                  FoodRestaurantMenu?
+  outletTimings         FoodRestaurantOutletTimings?
+  commission            FoodRestaurantCommission?
+  supportTickets        FoodRestaurantSupportTicket[]
+  withdrawals           FoodRestaurantWithdrawal[]
+  subscriptionInvoices  FoodSubscriptionInvoice[]
+  subscriptionTxns      FoodSubscriptionTransaction[]
+  subscriptionHistory   FoodRestaurantSubscriptionHistory[]
+  diningProfile         FoodDiningRestaurant?
+  gourmetListing        FoodGourmetRestaurant[]
+  foodTransactions      FoodTransaction[]
+  userSupportTickets    FoodSupportTicket[]
+  emergencyRequests     DeliveryOrderEmergencyRequest[]
+  feedback              FeedbackExperience[]
+  offers                FoodOffer[]
+
+  @@unique([restaurantNameNormalized, ownerPhoneLast10])
+  @@index([ownerPhone])
+  @@index([restaurantName])
+  @@index([restaurantNameNormalized])
+  @@index([city])
+  @@index([status, createdAt(sort: Desc)])
+  @@index([isAcceptingOrders])
+  @@index([zoneId])
+  @@index([estimatedDeliveryTimeMinutes])
+  @@index([rating])
+  @@map("food_restaurants")
+}
+
+model FoodDeliveryPartner {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  name        String
+  phone       String  @unique @db.VarChar(20)
+  email       String?
+  countryCode String  @default("+91") @db.VarChar(8)
+
+  address String?
+  city    String?
+  state   String?
+
+  vehicleType   String?
+  vehicleName   String?
+  vehicleNumber String? @unique
+
+  panNumber            String?
+  aadharNumber         String?
+  drivingLicenseNumber String?
+
+  profilePhoto        String?
+  aadharPhoto         String?
+  panPhoto            String?
+  drivingLicensePhoto String?
+
+  fcmTokens      String[]
+  fcmTokenMobile String[]
+
+  status          PartnerStatus @default(pending)
+  rejectionReason String?
+  rejectedAt      DateTime?
+  approvedAt      DateTime?
+
+  bankAccountHolderName String?
+  bankAccountNumber     String?
+  bankIfscCode          String?
+  bankName              String?
+  upiId                 String?
+  upiQrCode             String?
+
+  availabilityStatus AvailabilityStatus @default(offline)
+
+  lastLocation   Unsupported("geography(Point, 4326)")?
+  lastLat        Float?
+  lastLng        Float?
+  lastLocationAt DateTime?
+
+  referralCode  String?
+  referredById  String? @db.VarChar(24)
+  referralCount Int     @default(0)
+
+  /// Answers to admin-defined registration fields, keyed by field.key.
+  customFields    Json @default("{}")
+  /// Uploaded documents for admin-defined fields, keyed by field.key → URL.
+  customDocuments Json @default("{}")
+
+  rating          Decimal @default(0) @db.Decimal(2, 1)
+  totalRatings    Int     @default(0)
+  totalDeliveries Int     @default(0)
+
+  tokenVersion Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  referredBy FoodDeliveryPartner?  @relation("PartnerReferral", fields: [referredById], references: [id])
+  referrals  FoodDeliveryPartner[] @relation("PartnerReferral")
+
+  dispatchedOrders  FoodOrder[]
+  dispatchOffers    OrderDispatchOffer[]
+  foodTransactions  FoodTransaction[]
+  withdrawals       FoodDeliveryWithdrawal[]
+  cashDeposits      FoodDeliveryCashDeposit[]
+  supportTickets    DeliverySupportTicket[]
+  emergencyRequests DeliveryOrderEmergencyRequest[]
+  bonusTransactions DeliveryBonusTransaction[]
+  earningAddonRuns  FoodEarningAddonHistory[]
+
+  @@index([referralCode])
+  @@index([referredById])
+  @@index([availabilityStatus, status])
+  @@map("food_delivery_partners")
+}
+
+model FoodAdmin {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  email        String  @unique
+  /// bcrypt hash — the pre('save') hook moves into the admin service.
+  password     String
+  name         String  @default("")
+  phone        String  @default("")
+  profileImage String  @default("")
+
+  fcmTokens      String[]
+  fcmTokenMobile String[]
+
+  role      String    @default("ADMIN")
+  adminType AdminType @default(super_admin)
+
+  /// Section → allowed actions. Sections come from constants/permissions.js,
+  /// so this stays Json rather than 20-odd enum array columns that drift.
+  permissions Json @default("{}")
+
+  isActive  Boolean @default(true)
+  isDeleted Boolean @default(false)
+
+  createdById String? @db.VarChar(24)
+  updatedById String? @db.VarChar(24)
+
+  servicesAccess ServiceAccess[] @default([food])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  createdBy FoodAdmin?  @relation("AdminCreatedBy", fields: [createdById], references: [id])
+  created   FoodAdmin[] @relation("AdminCreatedBy")
+  updatedBy FoodAdmin?  @relation("AdminUpdatedBy", fields: [updatedById], references: [id])
+  updated   FoodAdmin[] @relation("AdminUpdatedBy")
+
+  broadcasts        NotificationBroadcast[]
+  resolvedEmergency DeliveryOrderEmergencyRequest[]
+
+  @@index([adminType, isDeleted, isActive])
+  @@map("food_admins")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Auth — OTP and refresh tokens
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// ponytail: Postgres has no TTL index. purgeAt/expiresAt rows must be swept by
+/// the existing maintenance worker (see constraints.sql for the delete statements).
+model FoodOtp {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  phone     String   @db.VarChar(20)
+  otp       String   @db.VarChar(10)
+  expiresAt DateTime
+
+  attempts      Int      @default(0)
+  requestCount  Int      @default(1)
+  lastRequestAt DateTime @default(now())
+
+  /// Fixed rate-limit window anchor. Deliberately not lastRequestAt — a sliding
+  /// anchor let spaced requests accumulate forever and lock out real users.
+  windowStartedAt DateTime @default(now())
+
+  /// Reap time. Distinct from expiresAt (OTP validity) so the rate-limit counter
+  /// outlives the OTP and the per-phone quota is actually enforceable.
+  purgeAt DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([phone])
+  @@index([purgeAt])
+  @@map("food_otps")
+}
+
+model AdminResetOtp {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  email     String   @db.VarChar(255)
+  otp       String   @db.VarChar(10)
+  expiresAt DateTime
+  attempts  Int      @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([email])
+  @@index([expiresAt])
+  @@map("food_admin_reset_otps")
+}
+
+model FoodRefreshToken {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  userId    String   @db.VarChar(24)
+  token     String   @unique
+  device    String?
+  ipAddress String?
+  expiresAt DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("food_refresh_tokens")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Money — wallets, ledger, payments, refunds, settlements
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// One table for all four wallet types. Mongo had four models that
+/// transaction.service.js already unified behind a resolveWallet() switch —
+/// this deletes that switch. Admin is the singleton row
+/// entityId = '000000000000000000000001'. Columns that only apply to some
+/// entity types are nullable.
+model Wallet {
+  entityType   EntityType
+  entityId     String     @db.VarChar(24)
+  balance      Decimal    @default(0) @db.Decimal(14, 2)
+  lockedAmount Decimal    @default(0) @db.Decimal(14, 2)
+
+  // restaurant + deliveryBoy
+  totalEarnings Decimal? @db.Decimal(14, 2)
+  totalSettled  Decimal? @db.Decimal(14, 2)
+
+  // deliveryBoy only
+  cashInHand      Decimal? @db.Decimal(14, 2)
+  totalBonus      Decimal? @db.Decimal(14, 2)
+  totalDeliveries Int?
+
+  // user only
+  referralEarnings Decimal? @db.Decimal(14, 2)
+
+  // admin only
+  totalRevenue Decimal? @db.Decimal(14, 2)
+  totalPayouts Decimal? @db.Decimal(14, 2)
+  totalRefunds Decimal? @db.Decimal(14, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transactions Transaction[]
+
+  @@id([entityType, entityId])
+  @@map("wallets")
+}
+
+/// Universal financial ledger — single source of truth for money movement.
+/// Never write Wallet.balance except through recordTransaction().
+model Transaction {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  paymentId String? @db.VarChar(24)
+  orderId   String? @db.VarChar(24)
+
+  entityType EntityType
+  entityId   String     @db.VarChar(24)
+
+  type         TxnType
+  amount       Decimal   @db.Decimal(14, 2)
+  balanceAfter Decimal   @db.Decimal(14, 2)
+  currency     String    @default("INR") @db.VarChar(3)
+  status       TxnStatus @default(completed)
+
+  description String      @default("")
+  category    TxnCategory @default(other)
+  module      String      @default("food")
+  metadata    Json?
+
+  /// Set by callers that can be retried (gateway webhooks, queue jobs).
+  /// Unique — a replay returns the original row instead of double-crediting.
+  idempotencyKey String? @unique
+
+  /// Replaces Settlement.transactionIds[] — the array is now this FK.
+  settlementId String? @db.VarChar(24)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  wallet     Wallet      @relation(fields: [entityType, entityId], references: [entityType, entityId])
+  payment    Payment?    @relation(fields: [paymentId], references: [id])
+  order      FoodOrder?  @relation(fields: [orderId], references: [id])
+  settlement Settlement? @relation(fields: [settlementId], references: [id])
+
+  @@index([entityType, entityId, createdAt(sort: Desc)])
+  @@index([orderId, entityType])
+  @@index([paymentId, type])
+  @@index([settlementId])
+  @@map("transactions")
+}
+
+model Payment {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  orderId String @db.VarChar(24)
+  userId  String @db.VarChar(24)
+
+  amount   Decimal @db.Decimal(14, 2)
+  currency String  @default("INR") @db.VarChar(3)
+
+  method  PaymentMethod
+  gateway PaymentGateway @default(none)
+
+  gatewayOrderId   String? @db.VarChar(128)
+  gatewayPaymentId String? @db.VarChar(128)
+
+  status PaymentStatus @default(created)
+  module String        @default("food")
+
+  /// Full gateway response snapshot — audit/support only, never sent to clients.
+  rawResponse Json?
+  metadata    Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  order FoodOrder @relation(fields: [orderId], references: [id])
+  user  FoodUser  @relation(fields: [userId], references: [id])
+
+  transactions Transaction[]
+  refunds      Refund[]
+
+  @@index([orderId, createdAt(sort: Desc)])
+  @@index([userId, status, createdAt(sort: Desc)])
+  @@index([module])
+  @@index([gatewayPaymentId])
+  @@map("payments")
+}
+
+model Refund {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  paymentId String @db.VarChar(24)
+  orderId   String @db.VarChar(24)
+  userId    String @db.VarChar(24)
+
+  amount   Decimal @db.Decimal(14, 2)
+  currency String  @default("INR") @db.VarChar(3)
+  reason   String  @default("")
+
+  status   RefundStatus @default(pending)
+  refundTo RefundTo     @default(wallet)
+
+  gatewayRefundId String? @db.VarChar(128)
+
+  processedAt DateTime?
+  processedBy String?   @db.VarChar(24)
+
+  metadata Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payment Payment   @relation(fields: [paymentId], references: [id])
+  order   FoodOrder @relation(fields: [orderId], references: [id])
+  user    FoodUser  @relation(fields: [userId], references: [id])
+
+  @@index([paymentId])
+  @@index([userId])
+  @@index([orderId, status])
+  @@map("refunds")
+}
+
+model Settlement {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  entityType EntityType
+  entityId   String     @db.VarChar(24)
+
+  amount   Decimal @db.Decimal(14, 2)
+  currency String  @default("INR") @db.VarChar(3)
+
+  status    SettlementStatus @default(pending)
+  payoutRef String           @default("")
+
+  processedAt DateTime?
+  processedBy String?   @db.VarChar(24)
+
+  periodStart DateTime?
+  periodEnd   DateTime?
+
+  notes    String @default("")
+  metadata Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transactions Transaction[]
+
+  @@index([entityType, entityId, status, createdAt(sort: Desc)])
+  @@map("settlements")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Orders
+// ─────────────────────────────────────────────────────────────────────────────
+
+model FoodOrder {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  /// Display id, "FOD-<6 ts digits><4 random>". Generated in the order service —
+  /// the pre('save') collision retry moves there.
+  order_id String? @unique @db.VarChar(32)
+  /// ponytail: existed only to satisfy a rogue Mongo index 'orderId_1'. Droppable
+  /// once the frontend is confirmed to read order_id only.
+  orderId  String? @unique @db.VarChar(32)
+
+  userId        String  @db.VarChar(24)
+  restaurantId  String  @db.VarChar(24)
+  zoneId        String? @db.VarChar(24)
+  transactionId String? @db.VarChar(24)
+
+  customerName  String @default("")
+  customerPhone String @default("")
+
+  // ── delivery address (was an embedded subdoc) ──
+  addrLabel             AddressLabel @default(Home)
+  addrName              String       @default("")
+  addrFullName          String       @default("")
+  addrStreet            String
+  addrAdditionalDetails String       @default("")
+  addrCity              String
+  addrState             String
+  addrZipCode           String       @default("")
+  addrPhone             String       @default("")
+  /// Plain lat/lng is what application code reads — Prisma Client cannot select an
+  /// Unsupported column, and buildLiveEta/buildDeliverySocketPayload need the point
+  /// on every order fetch. The geography column below is kept in sync by a trigger
+  /// and exists purely so GIST/ST_DWithin queries work.
+  addrLat               Float?
+  addrLng               Float?
+  addrLocation          Unsupported("geography(Point, 4326)")?
+
+  // ── pricing (was an embedded subdoc; flattened so revenue SQL stays simple) ──
+  subtotal             Decimal      @db.Decimal(14, 2)
+  tax                  Decimal      @default(0) @db.Decimal(14, 2)
+  packagingFee         Decimal      @default(0) @db.Decimal(14, 2)
+  deliveryFee          Decimal      @default(0) @db.Decimal(14, 2)
+  deliveryFeeGst       Decimal      @default(0) @db.Decimal(14, 2)
+  platformFee          Decimal      @default(0) @db.Decimal(14, 2)
+  /// Quick Mode surcharge; also included in platformFee.
+  quickDeliveryFee     Decimal      @default(0) @db.Decimal(14, 2)
+  deliveryMode         DeliveryMode @default(basic)
+  restaurantCommission Decimal      @default(0) @db.Decimal(14, 2)
+  discount             Decimal      @default(0) @db.Decimal(14, 2)
+  couponCode           String?      @db.VarChar(64)
+  total                Decimal      @db.Decimal(14, 2)
+  currency             String       @default("INR") @db.VarChar(3)
+  /// Straight-line restaurant ↔ customer km, used for fee calculation.
+  distanceKm           Decimal?     @db.Decimal(8, 2)
+  /// Driving km / minutes from the Directions API.
+  roadDistanceKm       Decimal?     @db.Decimal(8, 2)
+  roadDurationMins     Int?
+
+  // ── payment snapshot (audit trail lives in Payment/Transaction) ──
+  paymentMethod    OrderPaymentMethod
+  paymentStatus    OrderPaymentStatus @default(cod_pending)
+  paymentAmountDue Decimal?           @db.Decimal(14, 2)
+  razorpayOrderId  String?
+  razorpayPaymentId String?
+  razorpaySignature String?
+  /// QR checkout details — written once, never filtered on.
+  qr               Json?
+  refundStatus     OrderRefundStatus  @default(none)
+  refundAmount     Decimal            @default(0) @db.Decimal(14, 2)
+  refundId         String             @default("")
+  refundProcessedAt DateTime?
+
+  orderStatus OrderStatus @default(created)
+
+  // ── dispatch ──
+  dispatchStatus            DispatchStatus @default(unassigned)
+  dispatchDeliveryPartnerId String?        @db.VarChar(24)
+  dispatchAssignedAt        DateTime?
+  dispatchAcceptedAt        DateTime?
+  dispatchingAt             DateTime?
+
+  // ── delivery state ──
+  deliveryPhase   DeliveryPhase @default(en_route_to_pickup)
+  deliveryStatus  String        @default("")
+  reachedPickupAt DateTime?
+  reachedDropAt   DateTime?
+  pickedUpAt      DateTime?
+  deliveredAt     DateTime?
+
+  // ── ratings given on this order ──
+  restaurantRating        Int?
+  restaurantRatingComment String    @default("")
+  restaurantRatedAt       DateTime?
+  partnerRating           Int?
+  partnerRatingComment    String    @default("")
+  partnerRatedAt          DateTime?
+  /// The customer, rated by the delivery partner after handover.
+  customerRating          Int?
+  customerRatingComment   String    @default("")
+  customerRatedAt         DateTime?
+
+  note                 String @default("")
+  deliveryInstructions String @default("")
+
+  acceptanceWindowSeconds Int       @default(240)
+  acceptanceDeadlineAt    DateTime?
+  /// Idempotency guard so retries never double-push the "new order" alert.
+  restaurantNotifiedAt    DateTime?
+
+  sendCutlery    Boolean   @default(true)
+  deliveryFleet  String    @default("standard")
+  scheduledAt    DateTime?
+
+  riderEarning Decimal @default(0) @db.Decimal(14, 2)
+  /// Can be negative when discounts/rider pay exceed platform income.
+  platformProfit Decimal @default(0) @db.Decimal(14, 2)
+
+  tripDistanceKm   Decimal? @db.Decimal(8, 2)
+  tripDurationMins Int?
+
+  /// Plain 4-digit handover OTP; cleared after verify. Never return to the partner.
+  deliveryOtp        String  @default("") @db.VarChar(8)
+  dropOtpRequired    Boolean @default(false)
+  dropOtpVerified    Boolean @default(false)
+
+  riderLat          Float?
+  riderLng          Float?
+  lastRiderLocation Unsupported("geography(Point, 4326)")?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user            FoodUser             @relation(fields: [userId], references: [id])
+  restaurant      FoodRestaurant       @relation(fields: [restaurantId], references: [id])
+  zone            FoodZone?            @relation(fields: [zoneId], references: [id])
+  deliveryPartner FoodDeliveryPartner? @relation(fields: [dispatchDeliveryPartnerId], references: [id])
+
+  items          OrderItem[]
+  itemRatings    OrderItemRating[]
+  statusHistory  OrderStatusHistory[]
+  dispatchOffers OrderDispatchOffer[]
+
+  payments          Payment[]
+  refunds           Refund[]
+  transactions      Transaction[]
+  foodTransaction   FoodTransaction?
+  chatMessages      FoodChatMessage[]
+  chatConversations FoodChatConversation[]
+  supportTickets    FoodSupportTicket[]
+  emergencyRequests DeliveryOrderEmergencyRequest[]
+
+  @@index([createdAt(sort: Desc)])
+  @@index([orderStatus, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([restaurantId, orderStatus, createdAt(sort: Desc)])
+  @@index([dispatchDeliveryPartnerId, orderStatus])
+  @@index([dispatchStatus, orderStatus])
+  @@index([dispatchStatus, orderStatus, updatedAt(sort: Desc)])
+  @@index([dispatchDeliveryPartnerId, dispatchStatus, updatedAt(sort: Desc)])
+  @@index([paymentStatus, createdAt(sort: Desc)])
+  @@index([paymentMethod, createdAt(sort: Desc)])
+  @@index([zoneId])
+  @@map("food_orders")
+}
+
+/// One line on an order. Prices are recorded, not derived — the customer must
+/// keep being shown what they were actually charged even after the menu changes.
+model OrderItem {
+  id      String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  orderId String @db.VarChar(24)
+
+  itemId       String
+  name         String
+  variantId    String  @default("")
+  variantName  String  @default("")
+  variantPrice Decimal @default(0) @db.Decimal(14, 2)
+  price        Decimal @db.Decimal(14, 2)
+  /// Compare-at / other-platform unit price snapshot at order time.
+  otherPrice   Decimal @default(0) @db.Decimal(14, 2)
+  quantity     Int
+  isVeg        Boolean @default(true)
+  image        String  @default("")
+  notes        String  @default("")
+
+  /// [{ addonId, name, price }] as chosen and priced at order time. Already folded
+  /// into `price`. Json rather than a table — written once, never queried across orders.
+  addons Json @default("[]")
+
+  order FoodOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([itemId])
+  @@map("food_order_items")
+}
+
+/// Per-dish rating from the customer. itemId matches OrderItem.itemId.
+model OrderItemRating {
+  id      String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  orderId String @db.VarChar(24)
+
+  itemId  String
+  name    String   @default("")
+  rating  Int
+  comment String   @default("")
+  ratedAt DateTime @default(now())
+
+  order FoodOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([itemId])
+  @@map("food_order_item_ratings")
+}
+
+model OrderStatusHistory {
+  id      String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  orderId String @db.VarChar(24)
+
+  at     DateTime   @default(now())
+  byRole ActorRole?
+  byId   String?    @db.VarChar(24)
+  from   String?
+  to     String?
+  note   String     @default("")
+
+  order FoodOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, at(sort: Desc)])
+  @@map("food_order_status_history")
+}
+
+/// Partners this order was offered to — prevents repeat offers and tracks timeouts.
+model OrderDispatchOffer {
+  id      String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  orderId String @db.VarChar(24)
+
+  partnerId String              @db.VarChar(24)
+  at        DateTime            @default(now())
+  action    DispatchOfferAction @default(offered)
+
+  order   FoodOrder           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  partner FoodDeliveryPartner @relation(fields: [partnerId], references: [id])
+
+  @@index([orderId, at(sort: Desc)])
+  @@index([partnerId])
+  @@map("food_order_dispatch_offers")
+}
+
+/// Per-order financial split. Distinct from Transaction (the wallet ledger):
+/// this is the one-row-per-order breakdown finance reports against.
+model FoodTransaction {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  orderId           String  @unique @db.VarChar(24)
+  userId            String  @db.VarChar(24)
+  restaurantId      String  @db.VarChar(24)
+  deliveryPartnerId String? @db.VarChar(24)
+
+  paymentMethod OrderPaymentMethod
+  status        FoodTxnStatus      @default(pending)
+  currency      String             @default("INR") @db.VarChar(3)
+
+  // ── order pricing snapshot at transaction creation ──
+  subtotal             Decimal @default(0) @db.Decimal(14, 2)
+  tax                  Decimal @default(0) @db.Decimal(14, 2)
+  packagingFee         Decimal @default(0) @db.Decimal(14, 2)
+  deliveryFee          Decimal @default(0) @db.Decimal(14, 2)
+  deliveryFeeGst       Decimal @default(0) @db.Decimal(14, 2)
+  platformFee          Decimal @default(0) @db.Decimal(14, 2)
+  restaurantCommission Decimal @default(0) @db.Decimal(14, 2)
+  discount             Decimal @default(0) @db.Decimal(14, 2)
+  couponCode           String? @db.VarChar(64)
+  total                Decimal @default(0) @db.Decimal(14, 2)
+
+  // ── payment state snapshot ──
+  /// Free-text mirror of the order's payment.status ('cod_pending', 'pending_qr',
+  /// 'paid'…). Distinct from `status`, which is the transaction's own lifecycle.
+  paymentStatusLabel String  @default("cod_pending")
+  amountDue          Decimal @default(0) @db.Decimal(14, 2)
+
+  gatewayProvider   String  @default("razorpay")
+  razorpayOrderId   String?
+  razorpayPaymentId String?
+  razorpaySignature String?
+  /// Payment-link / QR snapshot: { qrId, imageUrl, paymentLinkId, shortUrl, status, expiresAt }.
+  qr                Json?
+
+  // ── the split ──
+  totalCustomerPaid   Decimal @db.Decimal(14, 2)
+  restaurantShare     Decimal @db.Decimal(14, 2)
+  commissionAmount    Decimal @db.Decimal(14, 2)
+  riderShare          Decimal @db.Decimal(14, 2)
+  /// Can be negative when discounts/rider pay exceed platform income.
+  platformNetProfit   Decimal @db.Decimal(14, 2)
+  taxAmount           Decimal @default(0) @db.Decimal(14, 2)
+  adminDiscountShare  Decimal @default(0) @db.Decimal(14, 2)
+  restaurantDiscountShare Decimal @default(0) @db.Decimal(14, 2)
+  discountAdminBearPercentage      Decimal @default(0) @db.Decimal(5, 2)
+  discountRestaurantBearPercentage Decimal @default(0) @db.Decimal(5, 2)
+
+  // ── settlement tracking ──
+  isRestaurantSettled Boolean   @default(false)
+  restaurantSettledAt DateTime?
+  isRiderSettled      Boolean   @default(false)
+  riderSettledAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  order           FoodOrder            @relation(fields: [orderId], references: [id])
+  restaurant      FoodRestaurant       @relation(fields: [restaurantId], references: [id])
+  deliveryPartner FoodDeliveryPartner? @relation(fields: [deliveryPartnerId], references: [id])
+
+  history FoodTransactionHistory[]
+
+  @@index([userId])
+  @@index([restaurantId])
+  @@index([deliveryPartnerId])
+  @@index([createdAt(sort: Desc)])
+  @@index([isRestaurantSettled, restaurantId])
+  @@index([status, paymentMethod])
+  @@map("food_transactions")
+}
+
+model FoodTransactionHistory {
+  id            String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  transactionId String @db.VarChar(24)
+
+  /// 'created' | 'authorized' | 'captured' | 'refunded' | 'settled'
+  kind           String
+  amount         Decimal?   @db.Decimal(14, 2)
+  at             DateTime   @default(now())
+  note           String     @default("")
+  recordedByRole ActorRole?
+  recordedById   String?    @db.VarChar(24)
+
+  transaction FoodTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  @@index([transactionId, at(sort: Desc)])
+  @@map("food_transaction_history")
+}
+
+model FoodSettings {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  key             String    @unique
+  dispatchMode    String    @default("auto")
+  updatedByRole   String?
+  updatedByAdminId String?  @db.VarChar(24)
+  updatedAtBy     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("food_settings")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Menu — items, categories, add-ons
+// ─────────────────────────────────────────────────────────────────────────────
+
+model FoodItem {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  restaurantId String  @db.VarChar(24)
+  categoryId   String? @db.VarChar(24)
+  categoryName String  @default("")
+
+  name        String
+  description String  @default("")
+  price       Decimal @db.Decimal(14, 2)
+  /// Compare-at / other-platform price for strikethrough UI.
+  otherPrice  Decimal @default(0) @db.Decimal(14, 2)
+
+  /// [{ id, name, price, otherPrice }] — sized per restaurant, never queried across items.
+  variants Json @default("[]")
+
+  /// Primary image, also the first entry of `images`. Kept as its own column
+  /// because the user app, admin list, share previews and push payloads all read it.
+  image  String   @default("")
+  images String[]
+
+  foodType    FoodType @default(NonVeg)
+  isAvailable Boolean  @default(true)
+
+  rating       Decimal @default(0) @db.Decimal(2, 1)
+  totalRatings Int     @default(0)
+
+  /// When set, the item auto-restores to available after this time.
+  stockResumeAt DateTime?
+  stockOffMode  StockOffMode?
+
+  isRecommended   Boolean @default(false)
+  preparationTime String  @default("")
+
+  approvalStatus  ApprovalStatus @default(approved)
+  rejectionReason String         @default("")
+  requestedAt     DateTime?
+  approvedAt      DateTime?
+  rejectedAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant FoodRestaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  category   FoodCategory?  @relation(fields: [categoryId], references: [id])
+
+  @@index([restaurantId, createdAt(sort: Desc)])
+  @@index([approvalStatus, createdAt(sort: Desc)])
+  @@index([approvalStatus, requestedAt(sort: Desc)])
+  @@index([restaurantId, approvalStatus, createdAt(sort: Desc)])
+  @@index([name])
+  @@index([isAvailable])
+  @@index([isRecommended])
+  @@index([stockResumeAt])
+  @@index([categoryId])
+  @@map("food_items")
+}
+
+model FoodCategory {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  name          String
+  image         String        @default("")
+  type          String        @default("")
+  foodTypeScope FoodTypeScope @default(Both)
+
+  /// Null = admin/global category, shareable across restaurants.
+  /// Set = private to that restaurant. Approval moderates content; it does not
+  /// make a restaurant-owned category globally reusable.
+  restaurantId            String? @db.VarChar(24)
+  createdByRestaurantId   String? @db.VarChar(24)
+
+  approvalStatus  ApprovalStatus @default(approved)
+  isApproved      Boolean        @default(true)
+  rejectionReason String         @default("")
+  requestedAt     DateTime?
+  approvedAt      DateTime?
+  rejectedAt      DateTime?
+  globalizedAt    DateTime?
+
+  /// Set = visible only in that zone. Null = visible everywhere.
+  zoneId String? @db.VarChar(24)
+
+  isActive  Boolean @default(true)
+  sortOrder Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant          FoodRestaurant? @relation("CategoryOwner", fields: [restaurantId], references: [id])
+  createdByRestaurant FoodRestaurant? @relation("CategoryCreator", fields: [createdByRestaurantId], references: [id])
+  zone                FoodZone?       @relation(fields: [zoneId], references: [id])
+
+  foodItems FoodItem[]
+
+  @@index([name])
+  @@index([isApproved, createdAt(sort: Desc)])
+  @@index([restaurantId, isApproved, createdAt(sort: Desc)])
+  @@index([approvalStatus, createdAt(sort: Desc)])
+  @@index([createdByRestaurantId, createdAt(sort: Desc)])
+  @@index([zoneId])
+  @@index([isActive, sortOrder])
+  @@map("food_categories")
+}
+
+model FoodAddon {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  restaurantId String @db.VarChar(24)
+
+  /// Menu items this add-on attaches to. EMPTY MEANS RESTAURANT-WIDE.
+  /// ponytail: array of ids rather than a join table, matching the Mongo access
+  /// pattern exactly. Needs a GIN index (see constraints.sql). Promote to a join
+  /// table if referential integrity on these ever matters.
+  foodIds String[]
+
+  // ── grouping rules, so the app can render "Select up to 1 option" sheets ──
+  /// Empty = ungrouped; shown under a generic "Add-ons" heading.
+  groupName      String @default("")
+  /// > 0 makes the group mandatory before the item can be added to the cart.
+  groupMinSelect Int    @default(0)
+  /// 1 renders radio buttons, >1 renders checkboxes capped at this count.
+  groupMaxSelect Int    @default(1)
+  groupSortOrder Int    @default(0)
+
+  /// { name, description, foodType, price, image, images } — what the restaurant
+  /// edits and admin approves.
+  draft     Json
+  /// Same shape; what the user app sees while a draft is pending. Null until first approval.
+  published Json?
+
+  approvalStatus  ApprovalStatus @default(pending)
+  rejectionReason String         @default("")
+  requestedAt     DateTime?
+  approvedAt      DateTime?
+  rejectedAt      DateTime?
+
+  isAvailable Boolean @default(true)
+  /// Soft delete, for safety and auditability.
+  isDeleted   Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant FoodRestaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@index([restaurantId, isDeleted, createdAt(sort: Desc)])
+  @@index([approvalStatus, isDeleted, requestedAt(sort: Desc)])
+  @@index([restaurantId, approvalStatus, isDeleted, requestedAt(sort: Desc)])
+  @@index([restaurantId, approvalStatus, isAvailable])
+  @@map("food_addons")
+}
+
+model FoodRestaurantMenu {
+  id           String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  restaurantId String @unique @db.VarChar(24)
+
+  /// Stored as-is for the UI; validated at the service layer.
+  sections Json @default("[]")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant FoodRestaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@map("food_restaurant_menus")
+}
+
+model FoodRestaurantOutletTimings {
+  id           String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  restaurantId String @unique @db.VarChar(24)
+
+  /// [{ day, isOpen, openingTime: "HH:mm", closingTime: "HH:mm" }] — always read
+  /// as a whole set, never filtered by day in SQL.
+  timings Json @default("[]")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant FoodRestaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@map("food_restaurant_outlet_timings")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cart and favourites
+// ─────────────────────────────────────────────────────────────────────────────
+
+model FoodUserCart {
+  id     String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  userId String @unique @db.VarChar(24)
+
+  restaurantId   String @default("") @db.VarChar(24)
+  restaurantName String @default("")
+
+  /// Line items, replaced wholesale on every cart write.
+  items     Json @default("[]")
+  itemCount Int  @default(0)
+
+  subtotal Decimal @default(0) @db.Decimal(14, 2)
+  /// Full quote incl. fee breakdown and applied coupon. Recomputed, never queried.
+  pricing  Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user FoodUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([updatedAt(sort: Desc)])
+  @@index([restaurantId])
+  @@map("food_user_carts")
+}
+
+/// One favourited restaurant or dish. Its own table rather than an array on
+/// FoodUser so a favourite is one atomic write and rapid taps cannot interleave
+/// into a lost update.
+model FoodUserFavorite {
+  id     String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  userId String @db.VarChar(24)
+
+  entityType FavoriteEntity
+  entityId   String         @db.VarChar(24)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user FoodUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// The duplicate guard: a double-tapped heart fires two adds; without this the
+  /// second inserts a second row and one un-favourite leaves it still favourited.
+  @@unique([userId, entityType, entityId])
+  @@index([userId, entityType, createdAt(sort: Desc)])
+  @@map("food_user_favorites")
+}
+
+enum FavoriteEntity {
+  restaurant
+  food
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Zones and geography
+// ─────────────────────────────────────────────────────────────────────────────
+
+model FoodZone {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  name            String
+  zoneName        String?
+  country         String   @default("India")
+  /// Display label, e.g. city/area. Can mirror name.
+  serviceLocation String?
+  unit            ZoneUnit @default(kilometer)
+
+  /// [{ latitude, longitude }] polygon, ≥3 points. Left as Json because
+  /// point-in-polygon currently runs in geo.utils.js and that code ports as-is.
+  /// ponytail: move to geography(Polygon,4326) + ST_Contains when zone lookup
+  /// shows up in profiling — it is an O(zones) JS scan per order today.
+  coordinates Json
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurants        FoodRestaurant[] @relation("RestaurantZone")
+  pendingRestaurants FoodRestaurant[] @relation("RestaurantPendingZone")
+  orders             FoodOrder[]
+  categories         FoodCategory[]
+  promotionBanners   HomePromotionBanner[]
+
+  @@index([isActive, name])
+  @@index([country, name])
+  @@map("food_zones")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Offers, cashback, referrals
+// ─────────────────────────────────────────────────────────────────────────────
+
+model FoodOffer {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  couponCode    String       @unique @db.VarChar(64)
+  discountType  DiscountType @default(percentage)
+  discountValue Decimal      @db.Decimal(14, 2)
+
+  customerScope   CustomerScope   @default(all)
+  restaurantScope RestaurantScope @default(all)
+  restaurantId    String?         @db.VarChar(24)
+  /// ponytail: id array, matching the Mongo access pattern. GIN index in constraints.sql.
+  restaurantIds   String[]
+
+  minOrderValue Decimal  @default(0) @db.Decimal(14, 2)
+  maxDiscount   Decimal? @db.Decimal(14, 2)
+  usageLimit    Int?
+  perUserLimit  Int?
+  usedCount     Int      @default(0)
+
+  startDate        DateTime?
+  endDate          DateTime?
+  isFirstOrderOnly Boolean   @default(false)
+
+  status     OfferStatus @default(active)
+  showInCart Boolean     @default(true)
+
+  createdByRole            CreatorRole @default(ADMIN)
+  adminBearPercentage      Decimal     @default(100) @db.Decimal(5, 2)
+  restaurantBearPercentage Decimal     @default(0) @db.Decimal(5, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant FoodRestaurant? @relation(fields: [restaurantId], references: [id])
+  usages     FoodOfferUsage[]
+
+  @@index([restaurantId, createdAt(sort: Desc)])
+  @@index([discountType])
+  @@index([customerScope])
+  @@index([restaurantScope])
+  @@index([status])
+  @@index([createdByRole])
+  @@map("food_offers")
+}
+
+model FoodOfferUsage {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  offerId    String    @db.VarChar(24)
+  userId     String    @db.VarChar(24)
+  count      Int       @default(0)
+  lastUsedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  offer FoodOffer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  user  FoodUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([offerId, userId])
+  @@index([userId])
+  @@map("food_offer_usages")
+}
+
+/// Cashback is awarded once per order on delivery and credited to the customer's
+/// wallet as a normal transaction with metadata.source = 'cashback' — the wallet
+/// ledger IS the record, there is no separate cashback ledger.
+model FoodCashbackSettings {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  isEnabled Boolean @default(false)
+  /// percentage → percent of item subtotal; flat → fixed rupees
+  cashbackType  CashbackType @default(percentage)
+  cashbackValue Decimal      @default(0) @db.Decimal(14, 2)
+
+  /// Order subtotal must reach this to qualify.
+  minOrderValue Decimal @default(0) @db.Decimal(14, 2)
+  /// Cap in rupees for a percentage award. 0 = uncapped.
+  maxCashback   Decimal @default(0) @db.Decimal(14, 2)
+
+  /// Only the customer's first ever delivered order qualifies.
+  firstOrderOnly Boolean @default(false)
+  /// Max awards per customer overall. 0 = unlimited.
+  perUserLimit   Int     @default(0)
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, createdAt(sort: Desc)])
+  @@map("food_cashback_settings")
+}
+
+model FoodReferralSettings {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  referralRewardUser     Decimal @default(0) @db.Decimal(14, 2)
+  referralRewardDelivery Decimal @default(0) @db.Decimal(14, 2)
+  referralLimitUser      Int     @default(0)
+  referralLimitDelivery  Int     @default(0)
+
+  /// Invite link templates. Put {code} where the referral code belongs; if omitted,
+  /// ?ref=<code> is appended. Blank shares the bare code instead.
+  referralLinkUser     String @default("")
+  referralLinkDelivery String @default("")
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, createdAt(sort: Desc)])
+  @@map("food_referral_settings")
+}
+
+model FoodReferralLog {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  referrerId String       @db.VarChar(24)
+  refereeId  String       @db.VarChar(24)
+  role       ReferralRole
+
+  rewardAmount Decimal        @default(0) @db.Decimal(14, 2)
+  status       ReferralStatus @default(pending)
+  reason       String         @default("")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// One referral credit decision per created account per role.
+  @@unique([refereeId, role])
+  @@index([referrerId, role, createdAt(sort: Desc)])
+  @@index([status])
+  @@map("food_referral_logs")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin configuration
+// ─────────────────────────────────────────────────────────────────────────────
+
+model FoodFeeSettings {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  /// No defaults — admin must configure these explicitly.
+  deliveryFee      Decimal? @db.Decimal(14, 2)
+  /// [{ min, max, fee, deliveryBoyPerKm, deliveryBoyBasePay }] distance bands.
+  deliveryFeeRanges Json    @default("[]")
+  platformFee      Decimal? @db.Decimal(14, 2)
+  quickDeliveryFee Decimal? @db.Decimal(14, 2)
+  gstRate          Decimal? @db.Decimal(5, 2)
+  /// GST on the delivery fee. Unset means it is not charged at all.
+  deliveryFeeGstRate Decimal? @db.Decimal(5, 2)
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, createdAt(sort: Desc)])
+  @@map("food_fee_settings")
+}
+
+model FoodBusinessSettings {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  companyName      String @default("Switcheats")
+  email            String @default("admin@switcheats.com")
+  phoneCountryCode String @default("+91") @db.VarChar(8)
+  phoneNumber      String @default("") @db.VarChar(20)
+
+  address String @default("")
+  state   String @default("")
+  pincode String @default("")
+  region  String @default("India")
+
+  logoUrl                String @default("")
+  logoPublicId           String @default("")
+  faviconUrl             String @default("")
+  faviconPublicId        String @default("")
+  restaurantLogoUrl      String @default("")
+  restaurantLogoPublicId String @default("")
+  restaurantFaviconUrl   String @default("")
+  restaurantFaviconPublicId String @default("")
+  deliveryLogoUrl        String @default("")
+  deliveryLogoPublicId   String @default("")
+  deliveryFaviconUrl     String @default("")
+  deliveryFaviconPublicId String @default("")
+
+  userThemeColor       String @default("#FA0272")
+  userFontFamily       String @default("Poppins")
+  restaurantThemeColor String @default("#2563EB")
+  restaurantFontFamily String @default("Poppins")
+  deliveryThemeColor   String @default("#00B761")
+  deliveryFontFamily   String @default("Poppins")
+
+  orderAcceptanceTimeMinutes Int @default(4)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("food_business_settings")
+}
+
+model FoodFeatureSetting {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  key         String  @unique
+  name        String
+  description String  @default("")
+  isEnabled   Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("food_feature_settings")
+}
+
+model FoodPageContent {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  key    PageKey
+  module PageModule @default(ALL)
+
+  /// { title, content (HTML), email, mobile }
+  legal Json?
+  /// { appName, version, description, logo, features[], stats[] }
+  about Json?
+
+  updatedBy     String? @db.VarChar(24)
+  updatedByRole String  @default("ADMIN")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([key, module])
+  @@map("food_page_contents")
+}
+
+model FoodRestaurantCommission {
+  id           String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  restaurantId String @unique @db.VarChar(24)
+
+  commissionType  CommissionValueType @default(percentage)
+  commissionValue Decimal             @default(0) @db.Decimal(14, 2)
+
+  notes  String  @default("")
+  status Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant FoodRestaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@map("food_restaurant_commissions")
+}
+
+model FoodDeliveryCommissionRule {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  name            String   @default("")
+  minDistance     Decimal  @db.Decimal(8, 2)
+  maxDistance     Decimal? @db.Decimal(8, 2)
+  commissionPerKm Decimal  @db.Decimal(14, 2)
+  basePayout      Decimal  @db.Decimal(14, 2)
+  status          Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([createdAt(sort: Desc)])
+  @@map("food_delivery_commission_rules")
+}
+
+model FoodDeliveryCashLimit {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  deliveryCashLimit       Decimal @default(0) @db.Decimal(14, 2)
+  deliveryWithdrawalLimit Decimal @default(100) @db.Decimal(14, 2)
+  isActive                Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, createdAt(sort: Desc)])
+  @@map("food_delivery_cash_limits")
+}
+
+model FoodDeliveryEmergencyHelp {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  medicalEmergency String  @default("")
+  accidentHelpline String  @default("")
+  contactPolice    String  @default("")
+  insurance        String  @default("")
+  isActive         Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, createdAt(sort: Desc)])
+  @@map("food_delivery_emergency_help")
+}
+
+model FoodRestaurantSubscriptionSettings {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  starterPrice  Decimal @default(999) @db.Decimal(14, 2)
+  growthPrice   Decimal @default(1999) @db.Decimal(14, 2)
+  premiumPrice  Decimal @default(2999) @db.Decimal(14, 2)
+
+  starterMinGmv Decimal @default(0) @db.Decimal(14, 2)
+  starterMaxGmv Decimal @default(30000) @db.Decimal(14, 2)
+  growthMinGmv  Decimal @default(30000.01) @db.Decimal(14, 2)
+  growthMaxGmv  Decimal @default(60000) @db.Decimal(14, 2)
+  premiumMinGmv Decimal @default(60000.01) @db.Decimal(14, 2)
+
+  onboardingFee Decimal @default(0) @db.Decimal(14, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("food_restaurant_subscription_settings")
+}
+
+/// Admin-defined field on the driver registration form. A "document" upload is
+/// just a field with type 'document'. `page` groups fields into steps.
+model FoodDriverRegistrationField {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  /// Machine key the app sends back, e.g. "bloodGroup". Immutable once created.
+  key   String                @unique
+  label String
+  type  RegistrationFieldType @default(text)
+
+  required Boolean @default(false)
+  page     Int     @default(1)
+  order    Int     @default(0)
+
+  /// For type 'select'.
+  options     String[]
+  placeholder String   @default("")
+  helpText    String   @default("")
+
+  /// Optional light validation. regex is a JS pattern string.
+  regex     String @default("")
+  minLength Int?
+  maxLength Int?
+
+  /// System fields are never editable or removable from the admin UI.
+  isSystem Boolean @default(false)
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, page, order])
+  @@map("food_driver_registration_fields")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Subscriptions and billing
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// One invoice per restaurant per calendar billing month (postpaid). GMV, plan
+/// and amounts freeze at generation; settlement only moves paid/waived/adjustment
+/// via appended FoodSubscriptionTransaction rows. billingMonth 'legacy' holds
+/// pre-migration carried-forward dues.
+model FoodSubscriptionInvoice {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  restaurantId String @db.VarChar(24)
+  /// 'YYYY-MM' or 'legacy'
+  billingMonth String @db.VarChar(16)
+
+  periodStart DateTime?
+  periodEnd   DateTime?
+
+  gmv        Decimal          @default(0) @db.Decimal(14, 2)
+  orderCount Int              @default(0)
+  planName   SubscriptionPlan
+  planAmount Decimal          @db.Decimal(14, 2)
+  gstAmount  Decimal          @default(0) @db.Decimal(14, 2)
+  totalAmount Decimal         @db.Decimal(14, 2)
+
+  paidAmount   Decimal @default(0) @db.Decimal(14, 2)
+  waivedAmount Decimal @default(0) @db.Decimal(14, 2)
+  /// Signed: positive increases the due, negative reduces it.
+  adjustmentAmount  Decimal @default(0) @db.Decimal(14, 2)
+  outstandingAmount Decimal @db.Decimal(14, 2)
+
+  status SubscriptionInvoiceStatus @default(pending)
+
+  isLegacyCarryForward Boolean @default(false)
+  /// Plan prices / GMV bands used at generation, for immutability and audit.
+  settingsSnapshot     Json    @default("{}")
+  generatedBy          InvoiceGeneratedBy @default(system)
+  notes                String  @default("")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant   FoodRestaurant                @relation(fields: [restaurantId], references: [id])
+  transactions FoodSubscriptionTransaction[]
+
+  @@unique([restaurantId, billingMonth])
+  @@index([billingMonth, status])
+  @@index([status, outstandingAmount])
+  @@map("food_subscription_invoices")
+}
+
+/// Append-only audit trail of subscription billing activity. Never updated or
+/// deleted — corrections are new adjustment rows.
+model FoodSubscriptionTransaction {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  restaurantId String @db.VarChar(24)
+  invoiceId    String @db.VarChar(24)
+  billingMonth String @db.VarChar(16)
+
+  type SubscriptionTxnType
+  /// Signed for adjustments; positive for payments, deductions, waivers, invoice totals.
+  amount            Decimal @db.Decimal(14, 2)
+  outstandingAfter  Decimal @db.Decimal(14, 2)
+  invoiceStatusAfter String
+
+  processedByRole ProcessorRole @default(SYSTEM)
+  processedById   String?       @db.VarChar(24)
+  processedByName String        @default("")
+
+  remarks  String @default("")
+  metadata Json   @default("{}")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant FoodRestaurant          @relation(fields: [restaurantId], references: [id])
+  invoice    FoodSubscriptionInvoice @relation(fields: [invoiceId], references: [id])
+
+  @@index([restaurantId, createdAt(sort: Desc)])
+  @@index([invoiceId, createdAt])
+  @@index([billingMonth])
+  @@index([type])
+  @@map("food_subscription_transactions")
+}
+
+model FoodRestaurantSubscriptionHistory {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  restaurantId String                   @db.VarChar(24)
+  eventType    SubscriptionHistoryEvent
+
+  plan        String  @default("")
+  paymentType String  @default("")
+  amount      Decimal @default(0) @db.Decimal(14, 2)
+
+  dueBefore  Decimal @default(0) @db.Decimal(14, 2)
+  dueAfter   Decimal @default(0) @db.Decimal(14, 2)
+  paidBefore Decimal @default(0) @db.Decimal(14, 2)
+  paidAfter  Decimal @default(0) @db.Decimal(14, 2)
+
+  gmvLast30Days Decimal @default(0) @db.Decimal(14, 2)
+  note          String  @default("")
+  metadata      Json    @default("{}")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant FoodRestaurant @relation(fields: [restaurantId], references: [id])
+
+  @@index([restaurantId, createdAt(sort: Desc)])
+  @@index([eventType])
+  @@map("food_restaurant_subscription_history")
+}
+
+/// One row per closed billing month — idempotency plus catch-up for months
+/// missed while the billing worker was down.
+model FoodSubscriptionBillingRun {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  /// 'YYYY-MM'
+  billingMonth String           @unique @db.VarChar(16)
+  status       BillingRunStatus @default(pending)
+
+  invoicedCount        Int      @default(0)
+  skippedZeroGmvCount  Int      @default(0)
+  errorCount           Int      @default(0)
+  errors               String[]
+
+  startedAt  DateTime?
+  finishedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@map("food_subscription_billing_runs")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Payouts — withdrawals, cash deposits, bonuses, earning add-ons
+// ─────────────────────────────────────────────────────────────────────────────
+
+model FoodRestaurantWithdrawal {
+  id           String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  restaurantId String @db.VarChar(24)
+
+  amount Decimal          @db.Decimal(14, 2)
+  status WithdrawalStatus @default(pending)
+
+  paymentMethod String @default("bank_transfer")
+  /// { accountNumber, ifscCode, bankName, accountHolderName } snapshot at request time.
+  bankDetails   Json?
+
+  adminNote       String?
+  rejectionReason String?
+  /// Final bank transaction reference entered by admin.
+  transactionRef  String?
+  processedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant FoodRestaurant @relation(fields: [restaurantId], references: [id])
+
+  @@index([restaurantId])
+  @@index([status])
+  @@index([createdAt(sort: Desc)])
+  @@map("food_restaurant_withdrawals")
+}
+
+model FoodDeliveryWithdrawal {
+  id                String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  deliveryPartnerId String @db.VarChar(24)
+
+  amount Decimal          @db.Decimal(14, 2)
+  status WithdrawalStatus @default(pending)
+
+  paymentMethod String @default("bank_transfer")
+  bankDetails   Json?
+  upiId         String?
+  upiQrCode     String?
+
+  adminNote       String?
+  rejectionReason String?
+  transactionRef  String?
+  processedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  deliveryPartner FoodDeliveryPartner @relation(fields: [deliveryPartnerId], references: [id])
+
+  @@index([deliveryPartnerId])
+  @@index([status])
+  @@index([createdAt(sort: Desc)])
+  @@map("food_delivery_withdrawals")
+}
+
+model FoodDeliveryCashDeposit {
+  id                String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  deliveryPartnerId String @db.VarChar(24)
+
+  amount        Decimal           @db.Decimal(14, 2)
+  paymentMethod CashDepositMethod @default(cash)
+  status        CashDepositStatus @default(Pending)
+
+  razorpayOrderId   String  @default("")
+  razorpayPaymentId String?
+
+  adminId   String? @db.VarChar(24)
+  adminNote String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  deliveryPartner FoodDeliveryPartner @relation(fields: [deliveryPartnerId], references: [id])
+
+  @@index([deliveryPartnerId])
+  @@index([status])
+  @@index([createdAt(sort: Desc)])
+  @@map("food_delivery_cash_deposits")
+}
+
+model DeliveryBonusTransaction {
+  id                String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  deliveryPartnerId String @db.VarChar(24)
+
+  /// Admin-supplied reference; unique so a resubmitted form cannot double-pay.
+  transactionRef String  @unique
+  amount         Decimal @db.Decimal(14, 2)
+  reference      String  @default("")
+
+  createdByAdminId String? @db.VarChar(24)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  deliveryPartner FoodDeliveryPartner @relation(fields: [deliveryPartnerId], references: [id])
+
+  @@index([deliveryPartnerId, createdAt(sort: Desc)])
+  @@map("food_delivery_bonus_transactions")
+}
+
+model FoodEarningAddon {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  title       String
+  description String @default("")
+
+  requiredOrders Int
+  earningAmount  Decimal @db.Decimal(14, 2)
+
+  startDate DateTime
+  endDate   DateTime
+
+  maxRedemptions     Int?
+  currentRedemptions Int  @default(0)
+
+  status EarningAddonStatus @default(active)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  history FoodEarningAddonHistory[]
+
+  @@index([title])
+  @@index([status, startDate, endDate])
+  @@map("food_earning_addons")
+}
+
+model FoodEarningAddonHistory {
+  id                String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  offerId           String @db.VarChar(24)
+  deliveryPartnerId String @db.VarChar(24)
+
+  ordersCompleted Int @default(0)
+  ordersRequired  Int @default(0)
+
+  earningAmount Decimal @default(0) @db.Decimal(14, 2)
+  totalEarning  Decimal @default(0) @db.Decimal(14, 2)
+
+  status      EarningAddonHistoryStatus @default(pending)
+  completedAt DateTime                  @default(now())
+
+  creditedAt    DateTime?
+  creditedNotes String    @default("")
+
+  cancelledAt  DateTime?
+  cancelReason String    @default("")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  offer           FoodEarningAddon    @relation(fields: [offerId], references: [id])
+  deliveryPartner FoodDeliveryPartner @relation(fields: [deliveryPartnerId], references: [id])
+
+  @@index([deliveryPartnerId, completedAt(sort: Desc)])
+  @@index([offerId, deliveryPartnerId, status])
+  @@map("food_earning_addon_history")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Support, chat, notifications, feedback
+// ─────────────────────────────────────────────────────────────────────────────
+
+model FoodSupportTicket {
+  id     String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  userId String @db.VarChar(24)
+
+  type         UserTicketType
+  orderId      String?        @db.VarChar(24)
+  restaurantId String?        @db.VarChar(24)
+
+  issueType     String
+  description   String       @default("")
+  status        TicketStatus @default(open)
+  adminResponse String       @default("")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user       FoodUser        @relation(fields: [userId], references: [id])
+  order      FoodOrder?      @relation(fields: [orderId], references: [id])
+  restaurant FoodRestaurant? @relation(fields: [restaurantId], references: [id])
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([status])
+  @@map("food_support_tickets")
+}
+
+model FoodRestaurantSupportTicket {
+  id           String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  restaurantId String @db.VarChar(24)
+
+  category    RestaurantTicketCategory
+  issueType   String
+  subject     String                   @default("")
+  description String                   @default("")
+  orderRef    String                   @default("")
+
+  priority      TicketPriority @default(medium)
+  status        TicketStatus   @default(open)
+  adminResponse String         @default("")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant FoodRestaurant @relation(fields: [restaurantId], references: [id])
+
+  @@index([restaurantId, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+  @@index([priority])
+  @@map("food_restaurant_support_tickets")
+}
+
+model DeliverySupportTicket {
+  id                String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  deliveryPartnerId String @db.VarChar(24)
+
+  ticketRef String? @unique
+
+  subject     String
+  description String
+
+  category DeliveryTicketCategory @default(other)
+  priority DeliveryTicketPriority @default(medium)
+  status   DeliveryTicketStatus   @default(open)
+
+  adminResponse String?
+  respondedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  deliveryPartner FoodDeliveryPartner @relation(fields: [deliveryPartnerId], references: [id])
+
+  @@index([deliveryPartnerId, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+  @@map("food_delivery_support_tickets")
+}
+
+model DeliveryOrderEmergencyRequest {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  orderId           String @db.VarChar(24)
+  deliveryPartnerId String @db.VarChar(24)
+  restaurantId      String @db.VarChar(24)
+
+  reason String
+  status EmergencyRequestStatus @default(open)
+
+  adminResponse String @default("")
+  failureReason String @default("")
+
+  /// Set while a request is live, cleared on resolve — the unique constraint is
+  /// what stops a partner opening two emergencies on the same order.
+  activeKey String? @unique
+
+  deassignedAt DateTime?
+  resolvedAt   DateTime?
+  resolvedById String?   @db.VarChar(24)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  order           FoodOrder           @relation(fields: [orderId], references: [id])
+  deliveryPartner FoodDeliveryPartner @relation(fields: [deliveryPartnerId], references: [id])
+  restaurant      FoodRestaurant      @relation(fields: [restaurantId], references: [id])
+  resolvedBy      FoodAdmin?          @relation(fields: [resolvedById], references: [id])
+
+  @@index([orderId])
+  @@index([deliveryPartnerId, createdAt(sort: Desc)])
+  @@index([restaurantId])
+  @@index([status, createdAt(sort: Desc)])
+  @@map("food_delivery_order_emergency_requests")
+}
+
+model FoodSafetyEmergencyReport {
+  id     String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  userId String @db.VarChar(24)
+
+  userName  String @default("")
+  userEmail String @default("")
+  userPhone String @default("")
+  message   String @db.VarChar(4000)
+
+  status   SafetyReportStatus   @default(unread)
+  priority SafetyReportPriority @default(medium)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user FoodUser @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([createdAt(sort: Desc)])
+  @@index([status, priority, createdAt(sort: Desc)])
+  @@map("food_safety_emergency_reports")
+}
+
+/// A support conversation thread. Messages remain the source of truth for
+/// lastMessage / lastAt / unread — this row only holds the extra lifecycle state
+/// (subject, status) that no individual message carries.
+model FoodChatConversation {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  /// Same deterministic id the messages carry, so the two join cleanly.
+  conversationId String @unique
+
+  orderId String? @db.VarChar(24)
+
+  /// Subject the user picked, e.g. "I want to cancel my order".
+  title String @default("") @db.VarChar(200)
+
+  status ChatThreadStatus @default(open)
+  /// Only set once status becomes 'closed'; cleared if reopened.
+  closedAt DateTime?
+
+  /// Who the opener is talking to: 'ADMIN' or 'DELIVERY_PARTNER:<id>'.
+  peerToken     String
+  /// The party that opened the thread, same token form.
+  openedByToken String
+  participants  String[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  order FoodOrder? @relation(fields: [orderId], references: [id])
+
+  @@index([orderId, createdAt(sort: Desc)])
+  @@index([status])
+  @@map("food_chat_conversations")
+}
+
+/// One chat message. A "party token" identifies a participant:
+///   USER:<id> | RESTAURANT:<id> | DELIVERY_PARTNER:<id> | ADMIN
+/// ADMIN is a single logical endpoint — any admin can read or reply, so its token
+/// carries no id, while senderId still records the real admin for audit.
+model FoodChatMessage {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  conversationId String
+  orderId        String? @db.VarChar(24)
+
+  senderRole  ChatRole
+  senderId    String   @db.VarChar(24)
+  senderToken String
+
+  recipientRole  ChatRole
+  recipientId    String?  @db.VarChar(24)
+  recipientToken String
+
+  /// [senderToken, recipientToken] — finds "my conversations" with one indexed match.
+  participants String[]
+
+  text   String    @db.VarChar(2000)
+  readAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  order FoodOrder? @relation(fields: [orderId], references: [id])
+
+  @@index([conversationId, createdAt(sort: Desc)])
+  @@index([recipientToken, readAt])
+  @@index([orderId])
+  @@map("food_chat_messages")
+}
+
+/// ponytail: had a 7-day TTL index in Mongo. Postgres needs a scheduled delete —
+/// see constraints.sql.
+model FoodNotification {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  ownerType OwnerType
+  ownerId   String    @db.VarChar(24)
+
+  title    String
+  message  String
+  link     String @default("")
+  category String @default("broadcast")
+
+  source      NotificationSource @default(ADMIN_BROADCAST)
+  broadcastId String?            @db.VarChar(24)
+
+  metadata Json @default("{}")
+
+  isRead      Boolean   @default(false)
+  readAt      DateTime?
+  dismissedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  broadcast NotificationBroadcast? @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+
+  /// One notification per recipient per broadcast — the fan-out is idempotent.
+  @@unique([broadcastId, ownerType, ownerId])
+  @@index([ownerType, ownerId, createdAt(sort: Desc)])
+  @@index([ownerType, ownerId, isRead, dismissedAt])
+  @@index([createdAt])
+  @@map("food_notifications")
+}
+
+model NotificationBroadcast {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  title   String
+  message String
+
+  targetType BroadcastTargetType
+  /// ponytail: id array, matching the Mongo access pattern.
+  targetIds  String[]
+  /// [{ ownerType, ownerId, label, subLabel }] — display snapshot of the audience.
+  targets    Json                @default("[]")
+
+  link        String @default("")
+  createdById String @db.VarChar(24)
+  targetCount Int    @default(0)
+
+  createdAt DateTime @default(now())
+
+  createdBy     FoodAdmin          @relation(fields: [createdById], references: [id])
+  notifications FoodNotification[]
+
+  @@index([targetType])
+  @@index([createdById])
+  @@index([createdAt(sort: Desc)])
+  @@map("food_notification_broadcasts")
+}
+
+model FeedbackExperience {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  /// Polymorphic: userModel says which table userId points at, so no FK here.
+  userId    String            @db.VarChar(24)
+  userModel FeedbackUserModel @default(FoodUser)
+
+  restaurantId String? @db.VarChar(24)
+
+  rating  Int
+  comment String @default("")
+
+  module FeedbackModule
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant FoodRestaurant? @relation(fields: [restaurantId], references: [id])
+
+  @@index([module, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([restaurantId])
+  @@map("food_feedback_experiences")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dining
+// ─────────────────────────────────────────────────────────────────────────────
+
+model FoodDiningCategory {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  name     String
+  slug     String  @unique
+  imageUrl String  @default("")
+  isActive Boolean @default(true)
+  sortOrder Int    @default(0)
+
+  /// ponytail: id array, matching the Mongo access pattern.
+  restaurantIds String[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  primaryFor FoodDiningRestaurant[]
+
+  @@index([isActive, sortOrder, createdAt(sort: Desc)])
+  @@map("food_dining_categories")
+}
+
+model FoodDiningRestaurant {
+  id           String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  restaurantId String @unique @db.VarChar(24)
+
+  /// ponytail: id array, matching the Mongo access pattern.
+  categoryIds       String[]
+  primaryCategoryId String?  @db.VarChar(24)
+
+  isEnabled         Boolean @default(false)
+  maxGuests         Int     @default(6)
+  pureVegRestaurant Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant      FoodRestaurant      @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  primaryCategory FoodDiningCategory? @relation(fields: [primaryCategoryId], references: [id])
+
+  @@index([isEnabled, primaryCategoryId])
+  @@map("food_dining_restaurants")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Landing page content
+// ─────────────────────────────────────────────────────────────────────────────
+
+model FoodHeroBanner {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  imageUrl String
+  publicId String
+  title    String?
+  ctaText  String?
+  ctaLink  String?
+
+  /// ponytail: id array, matching the Mongo access pattern.
+  linkedRestaurantIds String[]
+
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, sortOrder])
+  @@map("food_hero_banners")
+}
+
+model FoodUnder250Banner {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  imageUrl String
+  publicId String
+  title    String?
+  ctaText  String?
+  ctaLink  String?
+  zoneId   String? @db.VarChar(24)
+
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, sortOrder])
+  @@map("food_under250_banners")
+}
+
+model FoodDiningBanner {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  imageUrl   String
+  publicId   String
+  title      String?
+  ctaText    String?
+  ctaLink    String?
+  diningType String?
+
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, sortOrder])
+  @@map("food_dining_banners")
+}
+
+model HomePromotionBanner {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  imageUrl String
+  publicId String
+  title    String?
+  ctaLink  String?
+
+  startDate DateTime?
+  endDate   DateTime?
+
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+  zoneId    String? @db.VarChar(24)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  zone FoodZone? @relation(fields: [zoneId], references: [id])
+
+  @@index([isActive, sortOrder])
+  @@index([zoneId])
+  @@map("food_home_promotion_banners")
+}
+
+/// Promo banners shown inside the restaurant partner app. Distinct from
+/// FoodHeroBanner (customer app) and from a restaurant's own coverImages.
+/// Design size is 350x100 (3.5:1) — the API reports the ratio so clients do not
+/// hardcode it.
+model FoodRestaurantAppBanner {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  imageUrl String
+  publicId String @default("")
+  title    String @default("")
+  /// Optional deep link opened on tap. Blank = not tappable.
+  ctaLink  String @default("")
+
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, sortOrder])
+  @@map("food_restaurant_app_banners")
+}
+
+model TopBanner {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  image    String
+  publicId String?
+  order    Int     @default(0)
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, order])
+  @@map("top_banners")
+}
+
+model FoodExploreIcon {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  label    String
+  iconUrl  String
+  publicId String
+
+  linkType   ExploreLinkType @default(custom)
+  targetPath String?
+
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, sortOrder])
+  @@map("food_explore_icons")
+}
+
+model FoodGourmetRestaurant {
+  id           String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  restaurantId String @db.VarChar(24)
+
+  tags     String[]
+  priority Int      @default(0)
+  isActive Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant FoodRestaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@index([restaurantId])
+  @@index([isActive, priority])
+  @@map("food_gourmet_restaurants")
+}
+
+model FoodLandingSettings {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  exploreMoreHeading String @default("Explore more")
+  /// ponytail: id array, matching the Mongo access pattern.
+  recommendedRestaurantIds String[]
+
+  showHeroBanners  Boolean @default(true)
+  showUnder250     Boolean @default(true)
+  showDining       Boolean @default(true)
+  showExploreIcons Boolean @default(true)
+  showTop10        Boolean @default(true)
+  showGourmet      Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("food_landing_settings")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Misc
+// ─────────────────────────────────────────────────────────────────────────────
+
+model FoodUnregisteredRestaurant {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  ownerName      String
+  restaurantName String
+  mobileNumber   String @db.VarChar(20)
+  emailId        String
+  location       String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([createdAt(sort: Desc)])
+  @@map("food_unregistered_restaurants")
+}
