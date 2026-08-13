@@ -1,9 +1,6 @@
-import mongoose from 'mongoose';
+import { prisma } from '../../../../config/prisma.js';
+import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
-import { FoodDeliveryPartner } from '../models/deliveryPartner.model.js';
-import { FoodReferralSettings } from '../../admin/models/referralSettings.model.js';
-import { DeliveryBonusTransaction } from '../../admin/models/deliveryBonusTransaction.model.js';
-import { FoodReferralLog } from '../../admin/models/referralLog.model.js';
 import { logger } from '../../../../utils/logger.js';
 import { config } from '../../../../config/env.js';
 
@@ -13,14 +10,13 @@ const REFERRAL_SIGNUP_PATH = '/food/delivery/signup';
 /**
  * Build the shareable invite link from an admin-configured template.
  *
- * `template` comes from referral settings (referralLinkDelivery / referralLinkUser) and may
- * contain {code}, so admins can point invites at a web signup OR a store listing:
- *   https://suvio.example.com/food/delivery/signup?ref={code}
- *   https://play.google.com/store/apps/details?id=com.example.app&referrer={code}
- * With no {code}, ?ref=<code> is appended. A bare origin gets the signup path added.
+ * `template` comes from referral settings (referralLinkDelivery / referralLinkUser)
+ * and may contain {code}, so admins can point invites at a web signup OR a store
+ * listing. With no {code}, ?ref=<code> is appended. A bare origin gets the signup
+ * path added.
  *
- * Returns '' when nothing usable is configured (or it still points at localhost), so the
- * app shares the bare code rather than a dead URL.
+ * Returns '' when nothing usable is configured (or it still points at localhost),
+ * so the app shares the bare code rather than a dead URL.
  */
 export const buildReferralLinkFromTemplate = (template, referralCode, defaultPath = REFERRAL_SIGNUP_PATH) => {
     const code = String(referralCode || '').trim();
@@ -54,45 +50,53 @@ const maskPhone = (phone) => {
     return `${p.slice(0, 2)}${'*'.repeat(Math.max(0, p.length - 6))}${p.slice(-4)}`;
 };
 
+/** Newest active referral settings row. */
+const loadReferralSettings = () =>
+    prisma.foodReferralSettings.findFirst({
+        where: { isActive: true },
+        orderBy: { createdAt: 'desc' },
+    });
+
 export const getDeliveryReferralStats = async (deliveryPartnerId) => {
     const id = String(deliveryPartnerId || '');
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
-        throw new ValidationError('Delivery partner not found');
-    }
-    const oid = new mongoose.Types.ObjectId(id);
-    const [partner, settingsDoc, bonusAgg, logs] = await Promise.all([
-        FoodDeliveryPartner.findById(oid).select('_id referralCount referralCode').lean(),
-        FoodReferralSettings.findOne({ isActive: true }).sort({ createdAt: -1 }).lean(),
-        DeliveryBonusTransaction.aggregate([
-            { $match: { deliveryPartnerId: oid, reference: { $regex: /referral/i } } },
-            { $group: { _id: null, total: { $sum: '$amount' } } }
-        ]),
-        FoodReferralLog.find({ referrerId: oid, role: 'DELIVERY_PARTNER' })
-            .sort({ createdAt: -1 })
-            .lean()
+    if (!isId(id)) throw new ValidationError('Delivery partner not found');
+
+    const [partner, settingsDoc, bonusAgg, logs, invitedRaw] = await Promise.all([
+        prisma.foodDeliveryPartner.findUnique({
+            where: { id },
+            select: { id: true, referralCount: true, referralCode: true },
+        }),
+        loadReferralSettings(),
+        prisma.deliveryBonusTransaction.aggregate({
+            where: { deliveryPartnerId: id, reference: { contains: 'referral', mode: 'insensitive' } },
+            _sum: { amount: true },
+        }),
+        prisma.foodReferralLog.findMany({
+            where: { referrerId: id, role: 'DELIVERY_PARTNER' },
+            orderBy: { createdAt: 'desc' },
+        }),
+        // Riders who signed up with this partner's code but have not triggered the
+        // reward yet (not approved, or no completed delivery). They have no log row
+        // until the decision is made.
+        prisma.foodDeliveryPartner.findMany({
+            where: { referredById: id },
+            select: { id: true, name: true, phone: true, status: true, totalDeliveries: true, createdAt: true },
+            orderBy: { createdAt: 'desc' },
+        }),
     ]);
 
-    const totalReferralEarnings = bonusAgg?.[0] ? Number(bonusAgg[0].total) : 0;
+    const totalReferralEarnings = Number(bonusAgg?._sum?.amount) || 0;
     const reward = Math.max(0, Number(settingsDoc?.referralRewardDelivery) || 0);
     const limit = Math.max(0, Number(settingsDoc?.referralLimitDelivery) || 0);
 
-    // Riders who signed up with this partner's code but haven't triggered the reward yet
-    // (not approved, or no completed delivery). They have no log row until the decision.
-    const decidedRefereeIds = new Set((logs || []).map((l) => String(l.refereeId)));
-    const invitedRaw = await FoodDeliveryPartner.find({ referredBy: oid })
-        .select('_id name phone status totalDeliveries createdAt')
-        .sort({ createdAt: -1 })
-        .lean();
+    const decidedRefereeIds = new Set((logs || []).map((l) => l.refereeId));
 
     const invited = (invitedRaw || []).map((p) => {
-        const log = (logs || []).find((l) => String(l.refereeId) === String(p._id));
-        const status = log?.status === 'credited'
-            ? 'credited'
-            : log?.status === 'rejected'
-                ? 'rejected'
-                : 'pending';
+        const log = (logs || []).find((l) => l.refereeId === p.id);
+        const status =
+            log?.status === 'credited' ? 'credited' : log?.status === 'rejected' ? 'rejected' : 'pending';
         return {
-            id: String(p._id),
+            id: p.id,
             name: String(p.name || '').trim() || 'Partner',
             phone: maskPhone(p.phone),
             partnerStatus: p.status,                       // pending | approved | rejected
@@ -101,20 +105,20 @@ export const getDeliveryReferralStats = async (deliveryPartnerId) => {
             reason: log?.reason || '',
             rewardAmount: Math.max(0, Number(log?.rewardAmount) || 0),
             earnedAmount: status === 'credited' ? Math.max(0, Number(log?.rewardAmount) || 0) : 0,
-            invitedAt: p.createdAt || null
+            invitedAt: p.createdAt || null,
         };
     });
 
     const creditedCount = invited.filter((i) => i.status === 'credited').length;
 
     return {
-        // referralCode is what the rider shares — it is the value another rider passes
-        // as `ref` when registering.
-        referralCode: String(partner?.referralCode || partner?._id || ''),
-        // Ready-to-share URL. Empty string when no public origin is configured — the app
-        // should then fall back to sharing referralCode alone.
+        // referralCode is what the rider shares — the value another rider passes as
+        // `ref` when registering.
+        referralCode: String(partner?.referralCode || partner?.id || ''),
+        // Ready-to-share URL. Empty when no public origin is configured, so the app
+        // falls back to sharing referralCode alone.
         referralLink: buildReferralLink(
-            partner?.referralCode || partner?._id,
+            partner?.referralCode || partner?.id,
             settingsDoc?.referralLinkDelivery,
         ),
         referralCount: Number(partner?.referralCount) || 0,
@@ -129,15 +133,15 @@ export const getDeliveryReferralStats = async (deliveryPartnerId) => {
         // Explains the earning condition so the app can render it without hardcoding.
         rewardCondition: 'Your referral must be approved and complete 1 delivery.',
         invitedPartners: invited,
-        decidedCount: decidedRefereeIds.size
+        decidedCount: decidedRefereeIds.size,
     };
 };
 
 /**
  * Credit the referrer once the referred rider completes their FIRST delivery.
  *
- * Idempotent: FoodReferralLog has a unique index on { refereeId, role }, so at most one
- * credit decision is ever recorded per referred rider — safe to call on every delivery.
+ * Idempotent: FoodReferralLog is unique on (refereeId, role), so at most one credit
+ * decision is ever recorded per referred rider — safe to call on every delivery.
  * Never throws; a referral problem must not fail a completed delivery.
  *
  * @param {string} refereePartnerId the rider who just completed a delivery
@@ -145,25 +149,26 @@ export const getDeliveryReferralStats = async (deliveryPartnerId) => {
 export const creditDeliveryReferralOnFirstDelivery = async (refereePartnerId) => {
     try {
         const id = String(refereePartnerId || '');
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) return { credited: false, reason: 'invalid_referee' };
+        if (!isId(id)) return { credited: false, reason: 'invalid_referee' };
 
-        const referee = await FoodDeliveryPartner.findById(id)
-            .select('_id referredBy status name')
-            .lean();
-        if (!referee?.referredBy) return { credited: false, reason: 'no_referrer' };
+        const referee = await prisma.foodDeliveryPartner.findUnique({
+            where: { id },
+            select: { id: true, referredById: true, status: true, name: true },
+        });
+        if (!referee?.referredById) return { credited: false, reason: 'no_referrer' };
 
-        // Already decided for this rider — nothing to do (this is the idempotency gate).
-        const existing = await FoodReferralLog.findOne({
-            refereeId: referee._id,
-            role: 'DELIVERY_PARTNER'
-        }).lean();
+        // Already decided for this rider — nothing to do (the idempotency gate).
+        const existing = await prisma.foodReferralLog.findUnique({
+            where: { refereeId_role: { refereeId: referee.id, role: 'DELIVERY_PARTNER' } },
+        });
         if (existing) return { credited: false, reason: 'already_decided' };
 
         const [settingsDoc, referrer] = await Promise.all([
-            FoodReferralSettings.findOne({ isActive: true }).sort({ createdAt: -1 }).lean(),
-            FoodDeliveryPartner.findById(referee.referredBy)
-                .select('_id referralCount status')
-                .lean()
+            loadReferralSettings(),
+            prisma.foodDeliveryPartner.findUnique({
+                where: { id: referee.referredById },
+                select: { id: true, referralCount: true, status: true },
+            }),
         ]);
 
         const reward = Math.max(0, Number(settingsDoc?.referralRewardDelivery) || 0);
@@ -182,64 +187,66 @@ export const creditDeliveryReferralOnFirstDelivery = async (refereePartnerId) =>
                             : '';
 
         if (rejectReason) {
-            await FoodReferralLog.create({
-                referrerId: new mongoose.Types.ObjectId(String(referee.referredBy)),
-                refereeId: referee._id,
-                role: 'DELIVERY_PARTNER',
-                rewardAmount: reward,
-                status: 'rejected',
-                reason: rejectReason
-            }).catch(() => {});
+            await prisma.foodReferralLog
+                .create({
+                    data: {
+                        referrerId: referee.referredById,
+                        refereeId: referee.id,
+                        role: 'DELIVERY_PARTNER',
+                        rewardAmount: reward,
+                        status: 'rejected',
+                        reason: rejectReason,
+                    },
+                })
+                .catch(() => {});
             logger.info(`Delivery referral not credited for referee ${id}: ${rejectReason}`);
             return { credited: false, reason: rejectReason };
         }
 
-        // Write the log FIRST — the unique index makes it the lock. If two deliveries race,
-        // the loser throws E11000 here and never pays a second bonus.
-        await FoodReferralLog.create({
-            referrerId: referrer._id,
-            refereeId: referee._id,
-            role: 'DELIVERY_PARTNER',
-            rewardAmount: reward,
-            status: 'credited'
+        // Write the log FIRST — the unique constraint is the lock. If two deliveries
+        // race, the loser fails here and never pays a second bonus.
+        await prisma.foodReferralLog.create({
+            data: {
+                referrerId: referrer.id,
+                refereeId: referee.id,
+                role: 'DELIVERY_PARTNER',
+                rewardAmount: reward,
+                status: 'credited',
+            },
         });
 
         const { addDeliveryPartnerBonus } = await import('../../admin/services/admin.service.js');
         await Promise.all([
-            FoodDeliveryPartner.updateOne({ _id: referrer._id }, { $inc: { referralCount: 1 } }),
+            prisma.foodDeliveryPartner.update({
+                where: { id: referrer.id },
+                data: { referralCount: { increment: 1 } },
+            }),
             addDeliveryPartnerBonus(
-                {
-                    deliveryPartnerId: String(referrer._id),
-                    amount: reward,
-                    reference: 'Referral bonus'
-                },
-                null
-            )
+                { deliveryPartnerId: referrer.id, amount: reward, reference: 'Referral bonus' },
+                null,
+            ),
         ]);
 
         // Tell the referrer they earned it.
         try {
             const { notifyOwnerSafely } = await import('../../orders/services/order.helpers.js');
             void notifyOwnerSafely(
-                { ownerType: 'DELIVERY_PARTNER', ownerId: String(referrer._id) },
+                { ownerType: 'DELIVERY_PARTNER', ownerId: referrer.id },
                 {
                     title: 'Referral bonus earned! 🎉',
                     body: `${String(referee.name || 'Your referral').trim()} completed their first delivery. ₹${reward} has been added to your earnings.`,
-                    data: {
-                        type: 'referral_bonus',
-                        amount: String(reward),
-                        refereeId: String(referee._id)
-                    }
-                }
+                    data: { type: 'referral_bonus', amount: String(reward), refereeId: referee.id },
+                },
             );
         } catch {
             /* notification failure must not affect the credit */
         }
 
-        logger.info(`Delivery referral credited: referrer ${referrer._id} +${reward} for referee ${id}`);
-        return { credited: true, amount: reward, referrerId: String(referrer._id) };
+        logger.info(`Delivery referral credited: referrer ${referrer.id} +${reward} for referee ${id}`);
+        return { credited: true, amount: reward, referrerId: referrer.id };
     } catch (e) {
-        if (e?.code === 11000) return { credited: false, reason: 'already_decided' };
+        // P2002 = the unique (refereeId, role) constraint, i.e. a racing delivery won.
+        if (e?.code === 'P2002') return { credited: false, reason: 'already_decided' };
         logger.warn(`creditDeliveryReferralOnFirstDelivery failed: ${e?.message || e}`);
         return { credited: false, reason: 'error' };
     }

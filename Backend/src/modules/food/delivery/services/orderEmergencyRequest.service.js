@@ -1,72 +1,58 @@
-import mongoose from 'mongoose';
+import { prisma } from '../../../../config/prisma.js';
+import { isId } from '../../../../utils/helpers.js';
 import { getFirebaseDB } from '../../../../config/firebase.js';
 import { getIO, rooms } from '../../../../config/socket.js';
-import {
-    NotFoundError,
-    ValidationError
-} from '../../../../core/auth/errors.js';
+import { NotFoundError, ValidationError } from '../../../../core/auth/errors.js';
 import { logger } from '../../../../utils/logger.js';
-import { FoodOrder } from '../../orders/models/order.model.js';
-import { FoodTransaction } from '../../orders/models/foodTransaction.model.js';
 import * as dispatchService from '../../orders/services/order-dispatch.service.js';
-import {
-    buildOrderIdentityFilter,
-    notifyOwnersSafely
-} from '../../orders/services/order.helpers.js';
-import { FoodDeliveryPartner } from '../models/deliveryPartner.model.js';
-import { DeliveryOrderEmergencyRequest } from '../models/orderEmergencyRequest.model.js';
+import { buildOrderIdentityFilter, notifyOwnersSafely } from '../../orders/services/order.helpers.js';
 
 const ACTIVE_REQUEST_STATUSES = ['open', 'in_progress'];
-const PRE_PICKUP_ORDER_STATUSES = [
-    'confirmed',
-    'preparing',
-    'ready_for_pickup',
-    'reached_pickup'
-];
+const PRE_PICKUP_ORDER_STATUSES = ['confirmed', 'preparing', 'ready_for_pickup', 'reached_pickup'];
+const POST_PICKUP_PHASES = ['en_route_to_delivery', 'at_drop', 'delivered', 'completed'];
 
-const isBeforePickup = (order) => {
-    const phase = String(order?.deliveryState?.currentPhase || '');
-    return (
-        PRE_PICKUP_ORDER_STATUSES.includes(String(order?.orderStatus || '')) &&
-        !order?.deliveryState?.pickedUpAt &&
-        !['en_route_to_delivery', 'at_drop', 'delivered', 'completed'].includes(phase)
-    );
+/** Works on a raw Prisma order row (flat columns). */
+const isBeforePickup = (row) =>
+    PRE_PICKUP_ORDER_STATUSES.includes(String(row?.orderStatus || '')) &&
+    !row?.pickedUpAt &&
+    !POST_PICKUP_PHASES.includes(String(row?.deliveryPhase || ''));
+
+/** The relations the old populateRequest() pulled in. */
+const requestInclude = {
+    order: {
+        select: {
+            id: true, order_id: true, orderId: true, orderStatus: true,
+            dispatchStatus: true, dispatchDeliveryPartnerId: true,
+            deliveryPhase: true, pickedUpAt: true, total: true,
+            createdAt: true, updatedAt: true,
+        },
+    },
+    deliveryPartner: {
+        select: { id: true, name: true, phone: true, email: true, vehicleType: true, vehicleNumber: true },
+    },
+    restaurant: {
+        select: {
+            id: true, restaurantName: true, ownerPhone: true, addressLine1: true,
+            area: true, city: true, latitude: true, longitude: true,
+        },
+    },
+    resolvedBy: { select: { id: true, name: true, email: true } },
 };
 
+/**
+ * Mongoose populate replaced the id field with the document, and callers read
+ * both shapes. Prisma puts relations in their own keys, so expose them under the
+ * names the API already returns.
+ */
 const serializeRequest = (request) => {
-    const value = request?.toObject?.() || request;
-    if (!value) return null;
+    if (!request) return null;
     return {
-        ...value,
-        order: value.orderId && typeof value.orderId === 'object'
-            ? value.orderId
-            : undefined,
-        deliveryPartner: value.deliveryPartnerId && typeof value.deliveryPartnerId === 'object'
-            ? value.deliveryPartnerId
-            : undefined,
-        restaurant: value.restaurantId && typeof value.restaurantId === 'object'
-            ? value.restaurantId
-            : undefined
+        ...request,
+        order: request.order || undefined,
+        deliveryPartner: request.deliveryPartner || undefined,
+        restaurant: request.restaurant || undefined,
     };
 };
-
-const populateRequest = (query) => query
-    .populate({
-        path: 'orderId',
-        select: 'order_id orderId orderStatus dispatch deliveryState pricing createdAt updatedAt'
-    })
-    .populate({
-        path: 'deliveryPartnerId',
-        select: 'name phone email vehicleType vehicleNumber'
-    })
-    .populate({
-        path: 'restaurantId',
-        select: 'restaurantName name phone address area city location'
-    })
-    .populate({
-        path: 'resolvedBy',
-        select: 'name email'
-    });
 
 async function deassignOrderForRedispatch({
     orderIdentity,
@@ -74,135 +60,127 @@ async function deassignOrderForRedispatch({
     adminId,
     requestId = null,
     reason,
-    historyNote
+    historyNote,
 }) {
     const identity = buildOrderIdentityFilter(orderIdentity);
     if (!identity) throw new ValidationError('Order id required');
 
-    const existingOrder = await FoodOrder.findOne(identity).lean();
+    const existingOrder = await prisma.foodOrder.findFirst({ where: identity });
     if (!existingOrder) throw new NotFoundError('Order not found');
     if (!isBeforePickup(existingOrder)) {
         throw new ValidationError('Order can no longer be reassigned after pickup');
     }
 
-    const assignedPartnerId = existingOrder.dispatch?.deliveryPartnerId;
+    const assignedPartnerId = existingOrder.dispatchDeliveryPartnerId;
     if (
-        existingOrder.dispatch?.status !== 'accepted' ||
+        existingOrder.dispatchStatus !== 'accepted' ||
         !assignedPartnerId ||
         (deliveryPartnerId && String(assignedPartnerId) !== String(deliveryPartnerId))
     ) {
-        throw new ValidationError(
-            'Order assignment changed or pickup was completed before reassignment'
-        );
+        throw new ValidationError('Order assignment changed or pickup was completed before reassignment');
     }
 
     const nextOrderStatus =
-        existingOrder.orderStatus === 'reached_pickup'
-            ? 'ready_for_pickup'
-            : existingOrder.orderStatus;
+        existingOrder.orderStatus === 'reached_pickup' ? 'ready_for_pickup' : existingOrder.orderStatus;
     const now = new Date();
 
-    const order = await FoodOrder.findOneAndUpdate(
-        {
-            _id: existingOrder._id,
+    // The full guard stays in the WHERE clause, so a pickup landing in this instant
+    // wins instead of being rolled back by the reassignment.
+    const { count } = await prisma.foodOrder.updateMany({
+        where: {
+            id: existingOrder.id,
             orderStatus: existingOrder.orderStatus,
-            'dispatch.status': 'accepted',
-            'dispatch.deliveryPartnerId': assignedPartnerId,
-            'deliveryState.pickedUpAt': null,
-            'deliveryState.currentPhase': {
-                $nin: ['en_route_to_delivery', 'at_drop', 'delivered', 'completed']
-            }
+            dispatchStatus: 'accepted',
+            dispatchDeliveryPartnerId: assignedPartnerId,
+            pickedUpAt: null,
+            deliveryPhase: { notIn: POST_PICKUP_PHASES },
         },
-        {
-            $set: {
-                orderStatus: nextOrderStatus,
-                'dispatch.status': 'unassigned',
-                'dispatch.deliveryPartnerId': null,
-                'deliveryState.currentPhase': 'en_route_to_pickup',
-                'deliveryState.status': '',
-                'deliveryState.reachedPickupAt': null,
-                'deliveryState.reachedDropAt': null,
-                'deliveryState.pickedUpAt': null,
-                'deliveryState.deliveredAt': null
-            },
-            $unset: {
-                'dispatch.assignedAt': '',
-                'dispatch.acceptedAt': '',
-                'dispatch.dispatchingAt': ''
-            },
-            $push: {
-                'dispatch.offeredTo': {
-                    partnerId: assignedPartnerId,
-                    at: now,
-                    action: 'deassigned'
-                },
-                statusHistory: {
-                    byRole: 'ADMIN',
-                    byId: adminId,
-                    from: 'accepted',
-                    to: 'unassigned',
-                    note: historyNote,
-                    at: now
-                }
-            }
+        data: {
+            orderStatus: nextOrderStatus,
+            dispatchStatus: 'unassigned',
+            dispatchDeliveryPartnerId: null,
+            dispatchAssignedAt: null,
+            dispatchAcceptedAt: null,
+            dispatchingAt: null,
+            deliveryPhase: 'en_route_to_pickup',
+            deliveryStatus: '',
+            reachedPickupAt: null,
+            reachedDropAt: null,
+            pickedUpAt: null,
+            deliveredAt: null,
         },
-        { new: true }
-    ).lean();
+    });
 
-    if (!order) {
-        throw new ValidationError(
-            'Order assignment changed or pickup was completed before reassignment'
-        );
+    if (count === 0) {
+        throw new ValidationError('Order assignment changed or pickup was completed before reassignment');
     }
 
-    await FoodTransaction.findOneAndUpdate(
-        { orderId: order._id },
-        { $unset: { deliveryPartnerId: '' } }
-    );
+    // The 'deassigned' offer row permanently excludes this rider from re-offers.
+    await prisma.orderDispatchOffer.create({
+        data: { orderId: existingOrder.id, partnerId: assignedPartnerId, at: now, action: 'deassigned' },
+    });
+
+    await prisma.orderStatusHistory.create({
+        data: {
+            orderId: existingOrder.id,
+            byRole: 'ADMIN',
+            byId: adminId ? String(adminId) : null,
+            from: 'accepted',
+            to: 'unassigned',
+            note: historyNote,
+            at: now,
+        },
+    });
+
+    await prisma.foodTransaction.updateMany({
+        where: { orderId: existingOrder.id },
+        data: { deliveryPartnerId: null },
+    });
+
+    const order = await prisma.foodOrder.findUnique({ where: { id: existingOrder.id } });
 
     const db = getFirebaseDB();
     if (db) {
-        await db.ref(`active_orders/${String(order._id)}`).remove().catch((error) => {
-            logger.warn(
-                `Failed to clear tracking for reassigned order ${order._id}: ${error.message}`
-            );
+        await db.ref(`active_orders/${order.id}`).remove().catch((error) => {
+            logger.warn(`Failed to clear tracking for reassigned order ${order.id}: ${error.message}`);
         });
     }
 
     const payload = {
-        orderId: String(order._id),
-        orderMongoId: String(order._id),
+        orderId: order.id,
+        orderMongoId: order.id,
         ...(requestId ? { requestId: String(requestId) } : {}),
-        reason
+        reason,
     };
+
     const io = getIO();
     if (io) {
         io.to(rooms.delivery(assignedPartnerId)).emit('order_deassigned', payload);
-        io.to(rooms.restaurant(order.restaurantId)).emit(
-            'order_status_update',
-            { ...payload, dispatchStatus: 'unassigned' }
-        );
-        io.to(rooms.user(order.userId)).emit(
-            'order_status_update',
-            { ...payload, dispatchStatus: 'unassigned' }
-        );
+        io.to(rooms.restaurant(order.restaurantId)).emit('order_status_update', {
+            ...payload,
+            dispatchStatus: 'unassigned',
+        });
+        io.to(rooms.user(order.userId)).emit('order_status_update', {
+            ...payload,
+            dispatchStatus: 'unassigned',
+        });
     }
 
     await notifyOwnersSafely(
         [
             { ownerType: 'DELIVERY_PARTNER', ownerId: assignedPartnerId },
             { ownerType: 'RESTAURANT', ownerId: order.restaurantId },
-            { ownerType: 'USER', ownerId: order.userId }
+            { ownerType: 'USER', ownerId: order.userId },
         ],
         {
             title: 'Delivery partner reassignment',
             body: 'The order is being assigned to another delivery partner.',
             data: {
                 type: 'order_deassigned',
-                orderId: String(order._id),
-                ...(requestId ? { requestId: String(requestId) } : {})
-            }
-        }
+                orderId: order.id,
+                ...(requestId ? { requestId: String(requestId) } : {}),
+            },
+        },
     );
 
     return { order, deliveryPartnerId: assignedPartnerId };
@@ -213,32 +191,32 @@ export async function deassignAndResendOrderAdmin(orderId, adminId) {
         orderIdentity: orderId,
         adminId,
         reason: 'Order reassigned by admin',
-        historyNote: 'Delivery partner deassigned and dispatch restarted by admin'
+        historyNote: 'Delivery partner deassigned and dispatch restarted by admin',
     });
 
-    const dispatchResult = await dispatchService.tryAutoAssign(result.order._id);
+    const dispatchResult = await dispatchService.tryAutoAssign(result.order.id);
 
-    await DeliveryOrderEmergencyRequest.updateMany(
-        {
-            orderId: result.order._id,
-            status: { $in: [...ACTIVE_REQUEST_STATUSES, 'processing'] }
+    await prisma.deliveryOrderEmergencyRequest.updateMany({
+        where: {
+            orderId: result.order.id,
+            status: { in: [...ACTIVE_REQUEST_STATUSES, 'processing'] },
         },
-        {
-            $set: {
-                status: 'resolved',
-                deassignedAt: new Date(),
-                resolvedAt: new Date(),
-                resolvedBy: adminId,
-                failureReason: ''
-            },
-            $unset: { activeKey: '' }
-        }
-    );
+        data: {
+            status: 'resolved',
+            deassignedAt: new Date(),
+            resolvedAt: new Date(),
+            resolvedById: adminId ? String(adminId) : null,
+            failureReason: '',
+            // Clearing activeKey releases the unique slot so a future emergency on
+            // this order can be raised.
+            activeKey: null,
+        },
+    });
 
     return {
-        orderId: String(result.order._id),
+        orderId: result.order.id,
         deliveryPartnerId: String(result.deliveryPartnerId),
-        dispatchStarted: Boolean(dispatchResult)
+        dispatchStarted: Boolean(dispatchResult),
     };
 }
 
@@ -248,38 +226,38 @@ export async function createOrderEmergencyRequest(deliveryPartnerId, payload = {
         throw new ValidationError('Emergency reason must be at least 10 characters');
     }
 
-    const partnerObjectId = new mongoose.Types.ObjectId(deliveryPartnerId);
-    const order = await FoodOrder.findOne({
-        'dispatch.deliveryPartnerId': partnerObjectId,
-        'dispatch.status': 'accepted',
-        orderStatus: { $in: PRE_PICKUP_ORDER_STATUSES }
-    }).lean();
+    const partnerId = String(deliveryPartnerId);
+    const order = await prisma.foodOrder.findFirst({
+        where: {
+            dispatchDeliveryPartnerId: partnerId,
+            dispatchStatus: 'accepted',
+            orderStatus: { in: PRE_PICKUP_ORDER_STATUSES },
+        },
+    });
 
     if (!order || !isBeforePickup(order)) {
         throw new ValidationError(
-            'Emergency reassignment is available only for an accepted order before pickup'
+            'Emergency reassignment is available only for an accepted order before pickup',
         );
     }
 
-    const existing = await DeliveryOrderEmergencyRequest.findOne({
-        activeKey: String(order._id)
-    }).lean();
-    if (existing) {
-        throw new ValidationError('An active reassignment request already exists for this order');
-    }
-
     try {
-        const created = await DeliveryOrderEmergencyRequest.create({
-            orderId: order._id,
-            deliveryPartnerId: partnerObjectId,
-            restaurantId: order.restaurantId,
-            reason,
-            activeKey: String(order._id),
-            status: 'open'
+        // activeKey is unique, so it is the lock: a second concurrent request for the
+        // same order fails here rather than creating a duplicate.
+        const created = await prisma.deliveryOrderEmergencyRequest.create({
+            data: {
+                orderId: order.id,
+                deliveryPartnerId: partnerId,
+                restaurantId: order.restaurantId,
+                reason,
+                activeKey: order.id,
+                status: 'open',
+            },
+            include: requestInclude,
         });
         return serializeRequest(created);
     } catch (error) {
-        if (error?.code === 11000) {
+        if (error?.code === 'P2002') {
             throw new ValidationError('An active reassignment request already exists for this order');
         }
         throw error;
@@ -287,156 +265,140 @@ export async function createOrderEmergencyRequest(deliveryPartnerId, payload = {
 }
 
 export async function listOrderEmergencyRequestsByPartner(deliveryPartnerId) {
-    const list = await populateRequest(
-        DeliveryOrderEmergencyRequest.find({ deliveryPartnerId })
-            .sort({ createdAt: -1 })
-    ).lean();
+    const list = await prisma.deliveryOrderEmergencyRequest.findMany({
+        where: { deliveryPartnerId: String(deliveryPartnerId) },
+        include: requestInclude,
+        orderBy: { createdAt: 'desc' },
+    });
     return list.map(serializeRequest);
 }
 
 export async function getOrderEmergencyRequestByPartner(requestId, deliveryPartnerId) {
-    if (!mongoose.isValidObjectId(requestId)) return null;
-    const request = await populateRequest(
-        DeliveryOrderEmergencyRequest.findOne({
-            _id: requestId,
-            deliveryPartnerId
-        })
-    ).lean();
+    if (!isId(requestId)) return null;
+    const request = await prisma.deliveryOrderEmergencyRequest.findFirst({
+        where: { id: String(requestId), deliveryPartnerId: String(deliveryPartnerId) },
+        include: requestInclude,
+    });
     return serializeRequest(request);
 }
 
 export async function listOrderEmergencyRequestsAdmin(query = {}) {
     const page = Math.max(1, Number(query.page) || 1);
     const limit = Math.max(1, Math.min(200, Number(query.limit) || 50));
-    const filter = {};
-    if (query.status) filter.status = String(query.status);
+    const where = {};
+    if (query.status) where.status = String(query.status);
 
     if (query.search && String(query.search).trim()) {
         const term = String(query.search).trim();
-        const partnerIds = await FoodDeliveryPartner
-            .find({
-                $or: [
-                    { name: { $regex: term, $options: 'i' } },
-                    { phone: { $regex: term, $options: 'i' } }
-                ]
-            })
-            .distinct('_id');
-        filter.$or = [
-            { reason: { $regex: term, $options: 'i' } },
-            { deliveryPartnerId: { $in: partnerIds } }
+        // Matched through the relation instead of pre-resolving partner ids.
+        where.OR = [
+            { reason: { contains: term, mode: 'insensitive' } },
+            { deliveryPartner: { name: { contains: term, mode: 'insensitive' } } },
+            { deliveryPartner: { phone: { contains: term, mode: 'insensitive' } } },
         ];
     }
 
     const [list, total] = await Promise.all([
-        populateRequest(
-            DeliveryOrderEmergencyRequest.find(filter)
-                .sort({ createdAt: -1 })
-                .skip((page - 1) * limit)
-                .limit(limit)
-        ).lean(),
-        DeliveryOrderEmergencyRequest.countDocuments(filter)
+        prisma.deliveryOrderEmergencyRequest.findMany({
+            where,
+            include: requestInclude,
+            orderBy: { createdAt: 'desc' },
+            skip: (page - 1) * limit,
+            take: limit,
+        }),
+        prisma.deliveryOrderEmergencyRequest.count({ where }),
     ]);
 
     return {
         requests: list.map(serializeRequest),
-        pagination: {
-            page,
-            limit,
-            total,
-            pages: Math.max(1, Math.ceil(total / limit))
-        }
+        pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) },
     };
 }
 
 export async function getOrderEmergencyRequestAdmin(requestId) {
-    if (!mongoose.isValidObjectId(requestId)) return null;
-    const request = await populateRequest(
-        DeliveryOrderEmergencyRequest.findById(requestId)
-    ).lean();
+    if (!isId(requestId)) return null;
+    const request = await prisma.deliveryOrderEmergencyRequest.findUnique({
+        where: { id: String(requestId) },
+        include: requestInclude,
+    });
     return serializeRequest(request);
 }
 
 export async function updateOrderEmergencyRequestAdmin(requestId, body = {}) {
-    if (!mongoose.isValidObjectId(requestId)) {
-        throw new ValidationError('Invalid emergency request id');
-    }
+    if (!isId(requestId)) throw new ValidationError('Invalid emergency request id');
 
-    const request = await DeliveryOrderEmergencyRequest.findById(requestId);
+    const request = await prisma.deliveryOrderEmergencyRequest.findUnique({
+        where: { id: String(requestId) },
+    });
     if (!request) throw new NotFoundError('Emergency request not found');
     if (request.status === 'processing') {
         throw new ValidationError('Emergency request is currently being processed');
     }
 
+    const data = {};
     if (body.adminResponse !== undefined) {
-        request.adminResponse = String(body.adminResponse || '').trim();
+        data.adminResponse = String(body.adminResponse || '').trim();
     }
     if (body.status !== undefined) {
         const status = String(body.status);
         if (!['open', 'in_progress', 'resolved', 'closed'].includes(status)) {
             throw new ValidationError('Invalid emergency request status');
         }
-        request.status = status;
+        data.status = status;
         if (['resolved', 'closed'].includes(status)) {
-            request.activeKey = undefined;
-            request.resolvedAt = request.resolvedAt || new Date();
+            data.activeKey = null;
+            data.resolvedAt = request.resolvedAt || new Date();
         }
     }
-    await request.save();
-    return serializeRequest(await populateRequest(
-        DeliveryOrderEmergencyRequest.findById(request._id)
-    ).lean());
+
+    const updated = await prisma.deliveryOrderEmergencyRequest.update({
+        where: { id: request.id },
+        data,
+        include: requestInclude,
+    });
+    return serializeRequest(updated);
 }
 
 export async function deassignAndResendEmergencyOrder(requestId, adminId) {
-    if (!mongoose.isValidObjectId(requestId)) {
-        throw new ValidationError('Invalid emergency request id');
-    }
+    if (!isId(requestId)) throw new ValidationError('Invalid emergency request id');
+    const id = String(requestId);
 
-    const alreadyResolved = await DeliveryOrderEmergencyRequest.findOne({
-        _id: requestId,
-        status: 'resolved'
-    }).lean();
+    const alreadyResolved = await prisma.deliveryOrderEmergencyRequest.findFirst({
+        where: { id, status: 'resolved' },
+        include: requestInclude,
+    });
     if (alreadyResolved) {
         return { request: serializeRequest(alreadyResolved), alreadyResolved: true };
     }
 
-    const request = await DeliveryOrderEmergencyRequest.findOneAndUpdate(
-        {
-            _id: requestId,
-            status: { $in: ACTIVE_REQUEST_STATUSES }
-        },
-        {
-            $set: {
-                status: 'processing',
-                failureReason: ''
-            }
-        },
-        { new: true }
-    );
-
-    if (!request) {
+    // Claim the request atomically; only one admin can drive the reassignment.
+    const { count } = await prisma.deliveryOrderEmergencyRequest.updateMany({
+        where: { id, status: { in: ACTIVE_REQUEST_STATUSES } },
+        data: { status: 'processing', failureReason: '' },
+    });
+    if (count === 0) {
         throw new ValidationError('Emergency request is no longer available for reassignment');
     }
 
-    let order = null;
+    const request = await prisma.deliveryOrderEmergencyRequest.findUnique({ where: { id } });
+
     try {
-        const existingOrder = await FoodOrder.findById(request.orderId).lean();
+        const existingOrder = await prisma.foodOrder.findUnique({ where: { id: request.orderId } });
         if (!existingOrder) throw new NotFoundError('Order not found');
 
-        if (request.deassignedAt && existingOrder.dispatch?.status === 'unassigned') {
-            order = existingOrder;
-        } else {
-            const result = await deassignOrderForRedispatch({
+        if (!(request.deassignedAt && existingOrder.dispatchStatus === 'unassigned')) {
+            await deassignOrderForRedispatch({
                 orderIdentity: request.orderId,
                 deliveryPartnerId: request.deliveryPartnerId,
                 adminId,
-                requestId: request._id,
+                requestId: request.id,
                 reason: 'Emergency reassignment approved by admin',
-                historyNote: `Emergency reassignment request ${request._id}`
+                historyNote: `Emergency reassignment request ${request.id}`,
             });
-            order = result.order;
-            request.deassignedAt = new Date();
-            await request.save();
+            await prisma.deliveryOrderEmergencyRequest.update({
+                where: { id },
+                data: { deassignedAt: new Date() },
+            });
         }
 
         const dispatchResult = await dispatchService.tryAutoAssign(request.orderId);
@@ -444,24 +406,31 @@ export async function deassignAndResendEmergencyOrder(requestId, adminId) {
             throw new ValidationError('Delivery dispatch is already busy; retry the request');
         }
 
-        request.status = 'resolved';
-        request.resolvedAt = new Date();
-        request.resolvedBy = adminId;
-        request.activeKey = undefined;
-        request.failureReason = '';
-        await request.save();
-
-        return {
-            request: serializeRequest(request),
-            orderId: String(request.orderId),
-            alreadyResolved: false
-        };
-    } catch (error) {
-        request.status = 'in_progress';
-        request.failureReason = String(error?.message || 'Reassignment failed');
-        await request.save().catch((saveError) => {
-            logger.error(`Failed to persist emergency request failure: ${saveError.message}`);
+        const resolved = await prisma.deliveryOrderEmergencyRequest.update({
+            where: { id },
+            data: {
+                status: 'resolved',
+                resolvedAt: new Date(),
+                resolvedById: adminId ? String(adminId) : null,
+                activeKey: null,
+                failureReason: '',
+            },
+            include: requestInclude,
         });
+
+        return { request: serializeRequest(resolved), orderId: request.orderId, alreadyResolved: false };
+    } catch (error) {
+        await prisma.deliveryOrderEmergencyRequest
+            .update({
+                where: { id },
+                data: {
+                    status: 'in_progress',
+                    failureReason: String(error?.message || 'Reassignment failed'),
+                },
+            })
+            .catch((saveError) => {
+                logger.error(`Failed to persist emergency request failure: ${saveError.message}`);
+            });
         throw error;
     }
 }
