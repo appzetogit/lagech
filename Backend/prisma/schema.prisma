@@ -1798,11 +1798,17 @@ model FoodZone {
   serviceLocation String?
   unit            ZoneUnit @default(kilometer)
 
-  /// [{ latitude, longitude }] polygon, ≥3 points. Left as Json because
-  /// point-in-polygon currently runs in geo.utils.js and that code ports as-is.
-  /// ponytail: move to geography(Polygon,4326) + ST_Contains when zone lookup
-  /// shows up in profiling — it is an O(zones) JS scan per order today.
+  /// [{ latitude, longitude }] ring, ≥3 points. This stays the editable record —
+  /// it is the shape the admin UI sends and renders — and `boundary` below is
+  /// derived from it, so there is still only one thing to write.
   coordinates Json
+
+  /// The ring as a real polygon, maintained by the zone_boundary_sync trigger.
+  ///
+  /// Zone matching used to be a JS ray-casting scan over every active zone on
+  /// every address save. This makes it one GIST-indexed ST_Contains. Invisible
+  /// to Prisma Client (Unsupported) — query it through findZoneForPoint().
+  boundary Unsupported("geography(Polygon, 4326)")?
 
   isActive Boolean @default(true)
 

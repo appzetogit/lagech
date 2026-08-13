@@ -3,7 +3,7 @@ import { uploadImageBuffer } from '../../../../services/cloudinary.service.js';
 import { normalizeMediaUrlForStorage } from '../../../../services/storage.service.js';
 import { ValidationError, NotFoundError } from '../../../../core/auth/errors.js';
 import mongoose from 'mongoose';
-import { FoodZone } from '../../admin/models/zone.model.js';
+import { findZoneForPoint } from '../../shared/zone.service.js';
 import { FoodOffer } from '../../admin/models/offer.model.js';
 import { FoodOfferUsage } from '../../admin/models/offerUsage.model.js';
 import { FoodRestaurantMenu } from '../models/restaurantMenu.model.js';
@@ -432,42 +432,20 @@ const parseSortBy = (value) => {
     return allowed.has(v) ? v : null;
 };
 
-const zoneToPolygon = (zoneDoc) => {
-    const coords = Array.isArray(zoneDoc?.coordinates) ? zoneDoc.coordinates : [];
-    if (coords.length < 3) return null;
-    const ring = coords
-        .map((c) => [Number(c.longitude), Number(c.latitude)])
-        .filter((pair) => pair.every((n) => Number.isFinite(n)));
-    if (ring.length < 3) return null;
-    const first = ring[0];
-    const last = ring[ring.length - 1];
-    if (first[0] !== last[0] || first[1] !== last[1]) ring.push(first);
-    return { type: 'Polygon', coordinates: [ring] };
-};
-
-const isPointInZonePolygon = (lat, lng, polygon = []) => {
-    if (!Array.isArray(polygon) || polygon.length < 3) return false;
-    let inside = false;
-    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-        const xi = Number(polygon[i]?.longitude);
-        const yi = Number(polygon[i]?.latitude);
-        const xj = Number(polygon[j]?.longitude);
-        const yj = Number(polygon[j]?.latitude);
-        if (![xi, yi, xj, yj].every(Number.isFinite)) continue;
-        const intersect =
-            yi > lat !== yj > lat &&
-            lng < ((xj - xi) * (lat - yi)) / (yj - yi + 0.0) + xi;
-        if (intersect) inside = !inside;
-    }
-    return inside;
-};
-
+/**
+ * Which service zone a point falls in.
+ *
+ * Was a ray-casting scan in JS: load every active zone, walk each ring edge by
+ * edge. It ran on every restaurant address save and grew with the zone count.
+ * findZoneForPoint is one GIST-indexed ST_Contains against the trigger-derived
+ * polygon, and resolves overlaps deterministically (tightest zone wins) instead
+ * of returning whichever row the scan reached first.
+ */
 const findMatchedZoneForCoordinates = async (lat, lng) => {
     if (lat === null || lng === null) return null;
-    const activeZones = await FoodZone.find({ isActive: true })
-        .select('_id coordinates name zoneName')
-        .lean();
-    return activeZones.find((zone) => isPointInZonePolygon(lat, lng, zone?.coordinates)) || null;
+    const zone = await findZoneForPoint(lat, lng);
+    // Callers read `_id`; the raw query returns `id`.
+    return zone ? { ...zone, _id: zone.id } : null;
 };
 
 const hasPublishedRestaurantLocation = (restaurant = {}) => {

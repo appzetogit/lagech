@@ -194,6 +194,60 @@ CREATE TRIGGER order_rider_location_sync
   BEFORE INSERT OR UPDATE OF "riderLat", "riderLng" ON "food_orders"
   FOR EACH ROW EXECUTE FUNCTION sync_geography('lastRiderLocation', 'riderLat', 'riderLng');
 
+-- ─── zone boundaries are derived from the coordinate ring ────────────────────
+-- The admin UI writes `coordinates` ([{latitude, longitude}, …]); this builds the
+-- polygon that ST_Contains actually queries. Same contract as sync_geography():
+-- application code writes the plain shape, the database derives the geometry, so
+-- the two cannot drift.
+CREATE OR REPLACE FUNCTION sync_zone_boundary() RETURNS trigger AS $$
+DECLARE
+  ring geometry;
+BEGIN
+  IF NEW."coordinates" IS NULL
+     OR jsonb_typeof(NEW."coordinates") <> 'array'
+     OR jsonb_array_length(NEW."coordinates") < 3 THEN
+    NEW."boundary" := NULL;
+    RETURN NEW;
+  END IF;
+
+  SELECT ST_MakeLine(
+           ST_SetSRID(
+             ST_MakePoint((p->>'longitude')::float8, (p->>'latitude')::float8),
+             4326
+           ) ORDER BY ord
+         )
+    INTO ring
+    FROM jsonb_array_elements(NEW."coordinates") WITH ORDINALITY AS t(p, ord);
+
+  -- A malformed entry (missing or non-numeric lat/lng) collapses the line.
+  IF ring IS NULL OR ST_NPoints(ring) < 3 THEN
+    NEW."boundary" := NULL;
+    RETURN NEW;
+  END IF;
+
+  -- A polygon ring has to close. The admin UI does not repeat the first point,
+  -- so add it back unless the caller already did.
+  IF NOT ST_Equals(ST_StartPoint(ring), ST_EndPoint(ring)) THEN
+    ring := ST_AddPoint(ring, ST_StartPoint(ring));
+  END IF;
+
+  -- ST_MakeValid repairs a self-intersecting ring rather than rejecting the save
+  -- outright: a zone drawn with a crossed edge is an admin slip, and refusing the
+  -- write leaves them with no zone at all. ST_CollectionExtract keeps only the
+  -- polygonal part, so the column type still holds.
+  NEW."boundary" := ST_CollectionExtract(ST_MakeValid(ST_MakePolygon(ring)), 3)::geography;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS zone_boundary_sync ON "food_zones";
+CREATE TRIGGER zone_boundary_sync
+  BEFORE INSERT OR UPDATE OF "coordinates" ON "food_zones"
+  FOR EACH ROW EXECUTE FUNCTION sync_zone_boundary();
+
+CREATE INDEX IF NOT EXISTS "food_zones_boundary_gist"
+  ON "food_zones" USING GIST ("boundary");
+
 -- ─── PostGIS indexes (replacing the 2dsphere indexes) ────────────────────────
 CREATE INDEX IF NOT EXISTS "food_restaurants_location_gist"
   ON "food_restaurants" USING GIST ("location");

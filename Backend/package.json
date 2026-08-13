@@ -25,7 +25,8 @@
     "start:scheduler": "node scripts/run-scheduled-jobs.js",
     "start:socket": "node socket-server.js",
     "db:constraints": "node prisma/apply-constraints.mjs",
-    "db:reset": "prisma migrate reset --force && node prisma/apply-constraints.mjs"
+    "db:reset": "prisma migrate reset --force && node prisma/apply-constraints.mjs",
+    "db:migration:new": "node prisma/new-migration.mjs"
   },
   "keywords": [],
   "author": "",
