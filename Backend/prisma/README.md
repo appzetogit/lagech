@@ -72,8 +72,16 @@ appended to the init migration:
 
 **`prisma.upsert()` with an empty `update: {}` is not atomic.** It compiles to
 `SELECT` then `INSERT` and loses the race under concurrency; with a non-empty
-`update` it compiles to `INSERT … ON CONFLICT` and is safe. Wallet creation hit
-this — see `insertWalletIfMissing` in `core/payments/transaction.service.js`.
+`update` it compiles to `INSERT … ON CONFLICT` and is safe.
+
+This has bitten twice. Wallet creation hit it first — see
+`insertWalletIfMissing` in `core/payments/transaction.service.js`, which uses an
+explicit `ON CONFLICT DO NOTHING`. `findOrCreateUserByPhone` hit it again and
+fixes it by writing an existing column back to itself (`update: { phone }`),
+which is enough to get the atomic path without changing any data.
+
+If an upsert genuinely has nothing to update, one of those two shapes is
+required — `update: {}` is never correct on a path that can run concurrently.
 
 **`updatedAt` has no database default.** Prisma sets it from the client, so any
 raw `INSERT` (a data migration, another service, a `psql` session) fails the

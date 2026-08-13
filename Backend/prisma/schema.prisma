@@ -933,7 +933,11 @@ model FoodAdmin {
 model FoodOtp {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 
-  phone     String   @db.VarChar(20)
+  /// Unique: the service has always treated this as one live OTP per phone
+  /// (findOne, then update or create). Without the constraint a duplicate row
+  /// made that lookup nondeterministic, so a stale code could still verify and
+  /// the per-phone request quota counted only one of the rows.
+  phone     String   @unique @db.VarChar(20)
   otp       String   @db.VarChar(10)
   expiresAt DateTime
 
@@ -952,7 +956,6 @@ model FoodOtp {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([phone])
   @@index([purgeAt])
   @@map("food_otps")
 }
@@ -960,7 +963,9 @@ model FoodOtp {
 model AdminResetOtp {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 
-  email     String   @db.VarChar(255)
+  /// Unique: requesting a new reset code must replace the old one, not leave
+  /// two valid codes in play.
+  email     String   @unique @db.VarChar(255)
   otp       String   @db.VarChar(10)
   expiresAt DateTime
   attempts  Int      @default(0)
@@ -968,7 +973,6 @@ model AdminResetOtp {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([email])
   @@index([expiresAt])
   @@map("food_admin_reset_otps")
 }

@@ -1,21 +1,14 @@
 import crypto from "crypto";
 import ms from "ms";
-import { FoodUser } from "../users/user.model.js";
-import { FoodAdmin } from "../admin/admin.model.js";
-import { AdminResetOtp } from "../admin/adminResetOtp.model.js";
-import { FoodRestaurant } from "../../modules/food/restaurant/models/restaurant.model.js";
-import { FoodDeliveryPartner } from "../../modules/food/delivery/models/deliveryPartner.model.js";
-import { FoodOrder } from "../../modules/food/orders/models/order.model.js";
-import { FoodReferralSettings } from "../../modules/food/admin/models/referralSettings.model.js";
-import { FoodReferralLog } from "../../modules/food/admin/models/referralLog.model.js";
 import { createOrUpdateOtp, verifyOtp } from "../otp/otp.service.js";
 import { signAccessToken, signRefreshToken } from "./token.util.js";
-import { FoodRefreshToken } from "../refreshTokens/refreshToken.model.js";
 import { ValidationError, AuthError } from "./errors.js";
 import { config } from "../../config/env.js";
 import { logger } from "../../utils/logger.js";
 import { sendAdminResetOtpEmail } from "../../utils/email.js";
-import mongoose from "mongoose";
+import { prisma } from "../../config/prisma.js";
+import { isId } from "../../utils/helpers.js";
+import { hashAdminPassword, compareAdminPassword } from "./adminPassword.util.js";
 import { creditReferralReward } from "../../modules/food/user/services/userWallet.service.js";
 import { ADMIN_FULL_PERMISSIONS, sanitizeAdminPermissions } from '../../constants/permissions.js';
 import { isMobilePlatform } from "../../utils/platform.js";
@@ -60,30 +53,10 @@ const saveLoginFcmToken = async ({ ownerType, ownerId, fcmToken, platform, owner
       token: fcmToken,
       platform,
     });
-    // Keep in-memory doc in sync so a later ownerDoc.save() cannot clobber tokens.
-    if (ownerDoc) {
-      const field = isMobilePlatform(platform) ? "fcmTokenMobile" : "fcmTokens";
-      const otherField = field === "fcmTokenMobile" ? "fcmTokens" : "fcmTokenMobile";
-      const model =
-        ownerType === ROLES.USER
-          ? FoodUser
-          : ownerType === ROLES.RESTAURANT
-            ? FoodRestaurant
-            : ownerType === ROLES.DELIVERY_PARTNER
-              ? FoodDeliveryPartner
-              : null;
-      if (model) {
-        const fresh = await model.findById(ownerId).select("fcmTokens fcmTokenMobile").lean();
-        if (fresh) {
-          ownerDoc.fcmTokens = fresh.fcmTokens || [];
-          ownerDoc.fcmTokenMobile = fresh.fcmTokenMobile || [];
-          if (typeof ownerDoc.unmarkModified === "function") {
-            ownerDoc.unmarkModified(field);
-            ownerDoc.unmarkModified(otherField);
-          }
-        }
-      }
-    }
+    // The Mongoose version re-read the token arrays here and un-marked them as
+    // modified, so a later ownerDoc.save() could not clobber what
+    // upsertFirebaseDeviceToken had just written. Prisma has no in-memory
+    // document to save, so there is nothing left to protect against.
   } catch (err) {
     logger.warn({ err, ownerType, ownerId: String(ownerId) }, "Failed to save FCM token during login");
   }
@@ -104,11 +77,12 @@ const saveLoginFcmToken = async ({ ownerType, ownerId, fcmToken, platform, owner
  * browser tabs and machines, and evicting those would be a regression, not a
  * safeguard.
  */
-const bumpTokenVersion = async (model, id) => {
-  const updated = await model
-    .findByIdAndUpdate(id, { $inc: { tokenVersion: 1 } }, { new: true })
-    .select('tokenVersion')
-    .lean();
+const bumpTokenVersion = async (delegate, id) => {
+  const updated = await delegate.update({
+    where: { id: String(id) },
+    data: { tokenVersion: { increment: 1 } },
+    select: { tokenVersion: true },
+  });
   return Number(updated?.tokenVersion) || 0;
 };
 
@@ -141,8 +115,8 @@ export const verifyUserOtpAndLogin = async (
     throw new AuthError(result.reason || "OTP verification failed");
   }
 
-  let userDoc = await FoodUser.findOne({ phone });
-  
+  let userDoc = await prisma.foodUser.findUnique({ where: { phone } });
+
   // Ensure user exists and mark as verified on successful OTP.
   // Check if user is new or hasn't provided a name yet
   const needsNamePrompt = !userDoc || !userDoc.name || String(userDoc.name).trim() === "" || String(userDoc.name).toLowerCase() === "null";
@@ -150,22 +124,22 @@ export const verifyUserOtpAndLogin = async (
   const trimmedName = typeof name === "string" ? name.trim() : "";
 
   if (!userDoc) {
-    userDoc = await FoodUser.create({
-      phone,
-      isVerified: true,
-      ...(trimmedName ? { name: trimmedName } : {}),
+    // An upsert, not a create: two OTP verifications for the same phone landing
+    // together would both see "no user" and both insert, and one would fail on
+    // the unique phone rather than logging in.
+    userDoc = await prisma.foodUser.upsert({
+      where: { phone },
+      create: { phone, isVerified: true, ...(trimmedName ? { name: trimmedName } : {}) },
+      update: { isVerified: true },
     });
   } else {
-    let needsSave = false;
-    if (!userDoc.isVerified) {
-      userDoc.isVerified = true;
-      needsSave = true;
+    const patch = {};
+    if (!userDoc.isVerified) patch.isVerified = true;
+    // Only fills a blank name; it never overwrites one the customer already set.
+    if (trimmedName && !userDoc.name) patch.name = trimmedName;
+    if (Object.keys(patch).length) {
+      userDoc = await prisma.foodUser.update({ where: { id: userDoc.id }, data: patch });
     }
-    if (trimmedName && !userDoc.name) {
-      userDoc.name = trimmedName;
-      needsSave = true;
-    }
-    if (needsSave) await userDoc.save();
   }
 
   // Block login for deactivated users
@@ -179,7 +153,7 @@ export const verifyUserOtpAndLogin = async (
   if (fcmToken) {
     await saveLoginFcmToken({
       ownerType: ROLES.USER,
-      ownerId: userDoc._id,
+      ownerId: userDoc.id,
       fcmToken,
       platform,
       ownerDoc: userDoc,
@@ -188,22 +162,28 @@ export const verifyUserOtpAndLogin = async (
 
   // Ensure referralCode exists (used for share links on older accounts).
   if (!userDoc.referralCode) {
-    userDoc.referralCode = String(userDoc._id);
-    await userDoc.save();
+    userDoc = await prisma.foodUser.update({
+      where: { id: userDoc.id },
+      data: { referralCode: userDoc.id },
+    });
   }
 
   // Referral crediting: only for brand new accounts.
   const refRaw = typeof ref === "string" ? String(ref).trim() : "";
   if (isNewUser && refRaw) {
     try {
-      if (mongoose.Types.ObjectId.isValid(refRaw)) {
-        const referrerId = new mongoose.Types.ObjectId(refRaw);
-        if (String(referrerId) !== String(userDoc._id)) {
+      if (isId(refRaw)) {
+        const referrerId = refRaw;
+        if (referrerId !== userDoc.id) {
           const [referrer, settingsDoc] = await Promise.all([
-            FoodUser.findById(referrerId).select("_id referralCount").lean(),
-            FoodReferralSettings.findOne({ isActive: true })
-              .sort({ createdAt: -1 })
-              .lean(),
+            prisma.foodUser.findUnique({
+              where: { id: referrerId },
+              select: { id: true, referralCount: true },
+            }),
+            prisma.foodReferralSettings.findFirst({
+              where: { isActive: true },
+              orderBy: { createdAt: "desc" },
+            }),
           ]);
 
           if (referrer && settingsDoc) {
@@ -221,41 +201,50 @@ export const verifyUserOtpAndLogin = async (
               limit > 0 &&
               Number(referrer.referralCount || 0) < limit
             ) {
-              userDoc.referredBy = referrerId;
-              await userDoc.save();
+              userDoc = await prisma.foodUser.update({
+                where: { id: userDoc.id },
+                data: { referredById: referrerId },
+              });
 
-              const log = await FoodReferralLog.create({
-                referrerId,
-                refereeId: userDoc._id,
-                role: "USER",
-                rewardAmount: reward,
-                status: "credited",
+              // The log is written FIRST: (refereeId, role) is unique, so it is
+              // the lock. A second concurrent signup with the same ref fails here
+              // and never pays a duplicate reward.
+              const log = await prisma.foodReferralLog.create({
+                data: {
+                  referrerId,
+                  refereeId: userDoc.id,
+                  role: "USER",
+                  rewardAmount: reward,
+                  status: "credited",
+                },
               });
 
               await Promise.all([
-                FoodUser.updateOne(
-                  { _id: referrerId },
-                  { $inc: { referralCount: 1 } },
-                ),
+                prisma.foodUser.update({
+                  where: { id: referrerId },
+                  data: { referralCount: { increment: 1 } },
+                }),
                 creditReferralReward(referrerId, reward, {
                   role: "USER",
-                  refereeId: String(userDoc._id),
-                  referralLogId: String(log._id),
+                  refereeId: userDoc.id,
+                  referralLogId: log.id,
                 }),
               ]);
             } else {
-              await FoodReferralLog.create({
-                referrerId,
-                refereeId: userDoc._id,
-                role: "USER",
-                rewardAmount: reward,
-                status: "rejected",
-                reason:
-                  reward <= 0
-                    ? "reward_disabled"
-                    : limit <= 0
-                      ? "limit_disabled"
-                      : "limit_reached",
+              await prisma.foodReferralLog.create({
+                data: {
+                  referrerId,
+                  refereeId: userDoc.id,
+                  role: "USER",
+                  rewardAmount: reward,
+                  status: "rejected",
+                  reason:
+                    reward <= 0
+                      ? "reward_disabled"
+                      : limit <= 0
+                        ? "limit_disabled"
+                        : "limit_reached",
+                },
               });
             }
           }
@@ -267,11 +256,11 @@ export const verifyUserOtpAndLogin = async (
     }
   }
 
-  const user = userDoc.toObject();
+  const user = userDoc;
   const payload = {
-    userId: user._id.toString(),
+    userId: user.id,
     role: user.role || "USER",
-    tokenVersion: await bumpTokenVersion(FoodUser, user._id),
+    tokenVersion: await bumpTokenVersion(prisma.foodUser, user.id),
   };
 
   const accessToken = signAccessToken(payload);
@@ -280,10 +269,8 @@ export const verifyUserOtpAndLogin = async (
   const ttlMs = ms(config.jwtRefreshExpiresIn || "7d");
   const expiresAt = new Date(Date.now() + ttlMs);
 
-  await FoodRefreshToken.create({
-    userId: user._id,
-    token: refreshToken,
-    expiresAt,
+  await prisma.foodRefreshToken.create({
+    data: { userId: user.id, token: refreshToken, expiresAt },
   });
 
   return { accessToken, refreshToken, user, isNewUser };
@@ -294,7 +281,7 @@ export const adminLogin = async (email, password) => {
     throw new ValidationError("Email and password are required");
   }
 
-  const admin = await FoodAdmin.findOne({ email });
+  const admin = await prisma.foodAdmin.findUnique({ where: { email } });
   if (!admin) {
     throw new AuthError("Invalid credentials");
   }
@@ -303,7 +290,7 @@ export const adminLogin = async (email, password) => {
     throw new AuthError("Admin account is inactive");
   }
 
-  const isMatch = await admin.comparePassword(password);
+  const isMatch = await compareAdminPassword(password, admin.password);
   if (!isMatch) {
     throw new AuthError("Invalid credentials");
   }
@@ -313,7 +300,7 @@ export const adminLogin = async (email, password) => {
     : sanitizeAdminPermissions(admin.permissions || {});
 
   const payload = {
-    userId: admin._id.toString(),
+    userId: admin.id,
     role: admin.role,
     adminType: admin.adminType || "super_admin",
   };
@@ -324,10 +311,12 @@ export const adminLogin = async (email, password) => {
   const ttlMs = ms(config.jwtRefreshExpiresIn || "7d");
   const expiresAt = new Date(Date.now() + ttlMs);
 
-  await FoodRefreshToken.create({
-    userId: admin._id,
+  await prisma.foodRefreshToken.create({
+    data: {
+    userId: admin.id,
     token: refreshToken,
     expiresAt,
+    },
   });
 
   const userObj = admin.toObject();
@@ -361,20 +350,24 @@ export const verifyRestaurantOtpAndLogin = async (phone, otp, fcmToken, platform
   const digits = String(phone || "").replace(/\D/g, "");
   const last10 = digits.slice(-10);
   const phoneCandidates = [phone, digits, last10].filter(Boolean);
+  // Matches an exact candidate, or any stored number ending in the same last 10
+  // digits — onboarding and OTP login normalise country codes differently.
   const phoneOrFields = (field) => [
-    { [field]: { $in: phoneCandidates } },
-    ...(last10 ? [{ [field]: { $regex: new RegExp(last10 + "$") } }] : []),
+    { [field]: { in: phoneCandidates } },
+    ...(last10 ? [{ [field]: { endsWith: last10 } }] : []),
   ];
 
   console.log(`[AUTH] Verifying OTP for restaurant phone: ${phone}`);
-  const restaurant = await FoodRestaurant.findOne({
-    $or: [
-      ...phoneOrFields("ownerPhone"),
-      ...phoneOrFields("primaryContactNumber"),
-    ],
+  const restaurant = await prisma.foodRestaurant.findFirst({
+    where: {
+      OR: [
+        ...phoneOrFields("ownerPhone"),
+        ...phoneOrFields("primaryContactNumber"),
+      ],
+    },
   });
 
-  console.log(`[AUTH] Restaurant lookup result:`, restaurant ? { id: restaurant._id, status: restaurant.status, name: restaurant.restaurantName } : "NOT FOUND");
+  console.log(`[AUTH] Restaurant lookup result:`, restaurant ? { id: restaurant.id, status: restaurant.status, name: restaurant.restaurantName } : "NOT FOUND");
 
   if (!restaurant) {
     console.log(`[AUTH] No restaurant found. Returning needsRegistration: true`);
@@ -390,7 +383,7 @@ export const verifyRestaurantOtpAndLogin = async (phone, otp, fcmToken, platform
   if (fcmToken) {
     await saveLoginFcmToken({
       ownerType: ROLES.RESTAURANT,
-      ownerId: restaurant._id,
+      ownerId: restaurant.id,
       fcmToken,
       platform,
       ownerDoc: restaurant,
@@ -402,8 +395,11 @@ export const verifyRestaurantOtpAndLogin = async (phone, otp, fcmToken, platform
   if (restaurant.status && restaurant.status !== "approved") {
     if (restaurant.status === "pending") {
       const hasHistoricalApproval = Boolean(restaurant.approvedAt);
-      const hasOperationalHistory = await FoodOrder.exists({
-        restaurantId: restaurant._id,
+      // exists() has no Prisma equivalent; findFirst selecting only the id is
+      // the same single indexed lookup.
+      const hasOperationalHistory = await prisma.foodOrder.findFirst({
+        where: { restaurantId: restaurant.id },
+        select: { id: true },
       });
 
       // New onboarding requests (no approval + no orders) must stay blocked.
@@ -421,19 +417,21 @@ export const verifyRestaurantOtpAndLogin = async (phone, otp, fcmToken, platform
   // is required to use the platform — dues are billed at each month end.
 
   const payload = {
-    userId: restaurant._id.toString(),
+    userId: restaurant.id,
     role: ROLES.RESTAURANT,
-    tokenVersion: await bumpTokenVersion(FoodRestaurant, restaurant._id),
+    tokenVersion: await bumpTokenVersion(prisma.foodRestaurant, restaurant.id),
   };
   const accessToken = signAccessToken(payload);
   const refreshToken = signRefreshToken(payload);
   const ttlMs = ms(config.jwtRefreshExpiresIn || "7d");
   const expiresAt = new Date(Date.now() + ttlMs);
 
-  await FoodRefreshToken.create({
-    userId: restaurant._id,
+  await prisma.foodRefreshToken.create({
+    data: {
+    userId: restaurant.id,
     token: refreshToken,
     expiresAt,
+    },
   });
 
   return {
@@ -474,11 +472,10 @@ export const verifyDeliveryOtpAndLogin = async (phone, otp, fcmToken, platform) 
     return { needsRegistration: true, phone };
   }
 
-  const deliveryPartner = await FoodDeliveryPartner.findOne({
-    $or: [
-      { phone: normalized },
-      { phone: { $regex: new RegExp(normalized + "$") } },
-    ],
+  const deliveryPartner = await prisma.foodDeliveryPartner.findFirst({
+    where: {
+      OR: [{ phone: normalized }, { phone: { endsWith: normalized } }],
+    },
   });
 
   if (!deliveryPartner) {
@@ -490,7 +487,7 @@ export const verifyDeliveryOtpAndLogin = async (phone, otp, fcmToken, platform) 
   if (fcmToken) {
     await saveLoginFcmToken({
       ownerType: ROLES.DELIVERY_PARTNER,
-      ownerId: deliveryPartner._id,
+      ownerId: deliveryPartner.id,
       fcmToken,
       platform,
       ownerDoc: deliveryPartner,
@@ -513,19 +510,21 @@ export const verifyDeliveryOtpAndLogin = async (phone, otp, fcmToken, platform) 
   }
 
   const payload = {
-    userId: deliveryPartner._id.toString(),
+    userId: deliveryPartner.id,
     role: ROLES.DELIVERY_PARTNER,
-    tokenVersion: await bumpTokenVersion(FoodDeliveryPartner, deliveryPartner._id),
+    tokenVersion: await bumpTokenVersion(prisma.foodDeliveryPartner, deliveryPartner.id),
   };
   const accessToken = signAccessToken(payload);
   const refreshToken = signRefreshToken(payload);
   const ttlMs = ms(config.jwtRefreshExpiresIn || "7d");
   const expiresAt = new Date(Date.now() + ttlMs);
 
-  await FoodRefreshToken.create({
-    userId: deliveryPartner._id,
+  await prisma.foodRefreshToken.create({
+    data: {
+    userId: deliveryPartner.id,
     token: refreshToken,
     expiresAt,
+    },
   });
 
   return {
@@ -553,7 +552,7 @@ export const logout = async (refreshToken, fcmToken, platform) => {
   }
 
   // 2. Invalidate the refresh token (standard logout procedure)
-  const deleted = await FoodRefreshToken.deleteOne({ token: refreshToken });
+  const deleted = await prisma.foodRefreshToken.deleteMany({ where: { token: refreshToken } });
   return { invalidated: deleted.deletedCount > 0 };
 };
 
@@ -566,10 +565,14 @@ export const getProfile = async (userId, role) => {
 
   switch (role) {
     case ROLES.USER:
-      profile = await FoodUser.findById(id).lean();
+      profile = await prisma.foodUser.findUnique({ where: { id } });
       break;
     case ROLES.ADMIN:
-      profile = await FoodAdmin.findById(id).select("-password").lean();
+      profile = await prisma.foodAdmin.findUnique({
+        where: { id },
+        // Never hand the password hash back to a caller.
+        omit: { password: true },
+      });
       if (profile) {
         profile.effectivePermissions = profile.adminType === "super_admin"
           ? ADMIN_FULL_PERMISSIONS
@@ -578,7 +581,7 @@ export const getProfile = async (userId, role) => {
       break;
     case ROLES.RESTAURANT:
       {
-        const doc = await FoodRestaurant.findById(id).lean();
+        const doc = await prisma.foodRestaurant.findUnique({ where: { id } });
         if (!doc) break;
 
         const location =
@@ -636,7 +639,7 @@ export const getProfile = async (userId, role) => {
       }
       break;
     case ROLES.DELIVERY_PARTNER: {
-      const partner = await FoodDeliveryPartner.findById(id).lean();
+      const partner = await prisma.foodDeliveryPartner.findUnique({ where: { id } });
       if (!partner) break;
       const deliveryId = partner._id
         ? `DP-${partner._id.toString().slice(-8).toUpperCase()}`
@@ -724,11 +727,13 @@ export const updateAdminProfile = async (userId, body) => {
   if (!userId) {
     throw new AuthError("Invalid token payload");
   }
-  const admin = await FoodAdmin.findById(userId);
+  const admin = await prisma.foodAdmin.findUnique({ where: { id: String(userId) } });
   if (!admin) {
     throw new AuthError("Profile not found");
   }
-  if (body.name !== undefined) admin.name = String(body.name || "").trim();
+
+  const patch = {};
+  if (body.name !== undefined) patch.name = String(body.name || "").trim();
   if (body.email !== undefined) {
     const normalizedEmail = String(body.email || "")
       .trim()
@@ -749,33 +754,32 @@ export const updateAdminProfile = async (userId, body) => {
     }
 
     if (normalizedEmail !== admin.email) {
-      const duplicateAdmin = await FoodAdmin.findOne({
-        _id: { $ne: admin._id },
-        email: normalizedEmail,
-      })
-        .select("_id")
-        .lean();
+      const duplicateAdmin = await prisma.foodAdmin.findFirst({
+        where: { id: { not: admin.id }, email: normalizedEmail },
+        select: { id: true },
+      });
       if (duplicateAdmin) {
         throw new ValidationError("Email is already in use");
       }
     }
-    admin.email = normalizedEmail;
+    patch.email = normalizedEmail;
   }
-  if (body.phone !== undefined) admin.phone = String(body.phone || "").trim();
+  if (body.phone !== undefined) patch.phone = String(body.phone || "").trim();
   if (body.profileImage !== undefined)
-    admin.profileImage = String(body.profileImage || "").trim();
-  // Normalize servicesAccess so legacy values (e.g. 'zomato') don't fail schema validation on save
-  if (Array.isArray(admin.servicesAccess)) {
-    const valid = admin.servicesAccess.filter((s) =>
-      ADMIN_SERVICES_ALLOWED.includes(s),
-    );
-    admin.servicesAccess = valid.length ? valid : ["food"];
-  } else {
-    admin.servicesAccess = ["food"];
-  }
-  await admin.save();
-  const profile = admin.toObject();
-  delete profile.password;
+    patch.profileImage = String(body.profileImage || "").trim();
+
+  // Normalise servicesAccess so legacy values (e.g. 'zomato') cannot fail the
+  // enum on write.
+  const services = Array.isArray(admin.servicesAccess)
+    ? admin.servicesAccess.filter((v) => ADMIN_SERVICES_ALLOWED.includes(v))
+    : [];
+  patch.servicesAccess = services.length ? services : ["food"];
+
+  const profile = await prisma.foodAdmin.update({
+    where: { id: admin.id },
+    data: patch,
+    omit: { password: true },
+  });
   return { user: profile };
 };
 
@@ -788,19 +792,23 @@ export const changeAdminPassword = async (
   if (!userId) {
     throw new AuthError("Invalid token payload");
   }
-  const admin = await FoodAdmin.findById(userId);
+  const admin = await prisma.foodAdmin.findUnique({ where: { id: String(userId) } });
   if (!admin) {
     throw new AuthError("Profile not found");
   }
-  const isMatch = await admin.comparePassword(currentPassword);
+  const isMatch = await compareAdminPassword(currentPassword, admin.password);
   if (!isMatch) {
     throw new AuthError("Current password is incorrect");
   }
   if (!newPassword || String(newPassword).length < 6) {
     throw new ValidationError("New password must be at least 6 characters");
   }
-  admin.password = newPassword;
-  await admin.save();
+  // Hashed explicitly: the pre('save') hook that used to do this does not exist
+  // in Prisma, and a missed call here stores the password in plaintext.
+  await prisma.foodAdmin.update({
+    where: { id: admin.id },
+    data: { password: await hashAdminPassword(newPassword) },
+  });
 
   try {
     const { notifyAdminsSafely } = await import("../../core/notifications/firebase.service.js");
@@ -829,7 +837,7 @@ export const requestAdminForgotPasswordOtp = async (email) => {
     throw new ValidationError("Email is required");
   }
 
-  const admin = await FoodAdmin.findOne({ email: normalizedEmail });
+  const admin = await prisma.foodAdmin.findUnique({ where: { email: normalizedEmail } });
   if (!admin) {
     throw new AuthError("This email is not registered as an admin account.");
   }
@@ -840,11 +848,13 @@ export const requestAdminForgotPasswordOtp = async (email) => {
   const ttlMs = (config.otpExpiryMinutes || 10) * 60 * 1000;
   const expiresAt = new Date(Date.now() + ttlMs);
 
-  await AdminResetOtp.findOneAndUpdate(
-    { email: normalizedEmail },
-    { otp, expiresAt, attempts: 0 },
-    { upsert: true, new: true },
-  );
+  // One live reset code per admin email, so requesting a new one replaces the
+  // old rather than leaving two valid codes in play.
+  await prisma.adminResetOtp.upsert({
+    where: { email: normalizedEmail },
+    create: { email: normalizedEmail, otp, expiresAt, attempts: 0 },
+    update: { otp, expiresAt, attempts: 0 },
+  });
 
   if (config.useDefaultOtp) {
     logger.info(`Admin reset OTP for ${normalizedEmail}: ${otp}`);
@@ -876,32 +886,38 @@ export const resetAdminPasswordWithOtp = async (email, otp, newPassword) => {
     throw new ValidationError("New password must be at least 6 characters");
   }
 
-  const record = await AdminResetOtp.findOne({ email: normalizedEmail });
+  const record = await prisma.adminResetOtp.findUnique({ where: { email: normalizedEmail } });
   if (!record) {
     throw new AuthError("OTP not found or expired. Please request a new code.");
   }
   if (record.expiresAt < new Date()) {
-    await record.deleteOne();
+    await prisma.adminResetOtp.deleteMany({ where: { email: normalizedEmail } });
     throw new AuthError("OTP has expired. Please request a new code.");
   }
   if (record.attempts >= (config.otpMaxAttempts || 5)) {
     throw new AuthError("Too many attempts. Please request a new code.");
   }
-  record.attempts += 1;
   if (record.otp !== otpStr) {
-    await record.save();
+    // Incremented by the database so parallel guesses cannot share one attempt.
+    await prisma.adminResetOtp.update({
+      where: { id: record.id },
+      data: { attempts: { increment: 1 } },
+    });
     throw new AuthError("Invalid OTP.");
   }
 
-  const admin = await FoodAdmin.findOne({ email: normalizedEmail });
+  const admin = await prisma.foodAdmin.findUnique({ where: { email: normalizedEmail } });
   if (!admin) {
-    await record.deleteOne();
+    await prisma.adminResetOtp.deleteMany({ where: { email: normalizedEmail } });
     throw new AuthError("Account not found.");
   }
 
-  admin.password = newPassword;
-  await admin.save();
-  await record.deleteOne();
+  await prisma.foodAdmin.update({
+    where: { id: admin.id },
+    data: { password: await hashAdminPassword(newPassword) },
+  });
+  // The code is consumed, so it cannot be replayed.
+  await prisma.adminResetOtp.deleteMany({ where: { email: normalizedEmail } });
 
   try {
     const { notifyAdminsSafely } = await import("../../core/notifications/firebase.service.js");
@@ -926,7 +942,7 @@ export const refreshAccessToken = async (token) => {
     throw new ValidationError("Refresh token is required");
   }
 
-  const stored = await FoodRefreshToken.findOne({ token }).lean();
+  const stored = await prisma.foodRefreshToken.findUnique({ where: { token } });
   if (!stored) {
     throw new AuthError("Invalid refresh token");
   }
@@ -941,7 +957,10 @@ export const refreshAccessToken = async (token) => {
 
   // If deactivated user, do not issue fresh access tokens (forces logout on client)
   if (payload?.role === "USER") {
-    const u = await FoodUser.findById(payload.userId).select("isActive").lean();
+    const u = await prisma.foodUser.findUnique({
+      where: { id: String(payload.userId) },
+      select: { isActive: true },
+    });
     if (!u || u.isActive === false) {
       throw new AuthError("User account is deactivated");
     }
@@ -950,18 +969,18 @@ export const refreshAccessToken = async (token) => {
   // Carry the session version forward, and refuse a refresh from a device that has
   // already been replaced. Without this, an evicted device could mint itself a
   // brand-new access token from its still-valid refresh token and stay signed in.
-  const sessionModel = {
-    USER: FoodUser,
-    RESTAURANT: FoodRestaurant,
-    DELIVERY_PARTNER: FoodDeliveryPartner,
+  const sessionDelegate = {
+    USER: () => prisma.foodUser,
+    RESTAURANT: () => prisma.foodRestaurant,
+    DELIVERY_PARTNER: () => prisma.foodDeliveryPartner,
   }[payload?.role];
 
   let tokenVersion = payload?.tokenVersion;
-  if (sessionModel) {
-    const owner = await sessionModel
-      .findById(payload.userId)
-      .select('tokenVersion')
-      .lean();
+  if (sessionDelegate) {
+    const owner = await sessionDelegate().findUnique({
+      where: { id: String(payload.userId) },
+      select: { tokenVersion: true },
+    });
     const stored = Number(owner?.tokenVersion) || 0;
     if (tokenVersion !== undefined && Number(tokenVersion) !== stored) {
       throw new AuthError(

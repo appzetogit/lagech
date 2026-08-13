@@ -38,7 +38,11 @@ const withMongoId = (value) => {
  * this wants to be small, on a dedicated instance larger.
  */
 function poolUrl(raw) {
-    if (!raw) return raw;
+    // Fail by name. Prisma's own message for a missing url talks about the
+    // constructor signature, which reads as a bug in this file rather than as
+    // "you forgot the env var" — and it fires on import, so it lands in the
+    // middle of an unrelated stack trace.
+    if (!raw) throw new Error('DATABASE_URL is not set. See Backend/prisma/README.md for local setup.');
     try {
         const url = new URL(raw);
         if (!url.searchParams.has('connection_limit')) {

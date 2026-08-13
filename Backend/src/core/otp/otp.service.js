@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import ms from 'ms';
-import { FoodOtp } from './otp.model.js';
+import { prisma } from '../../config/prisma.js';
 import { config } from '../../config/env.js';
 import { logger } from '../../utils/logger.js';
 import { RateLimitError } from '../auth/errors.js';
@@ -71,7 +71,7 @@ const sendSmsViaIndiaHub = async (phone, otp) => {
 };
 
 export const createOrUpdateOtp = async (phone) => {
-    const existing = await FoodOtp.findOne({ phone });
+    const existing = await prisma.foodOtp.findUnique({ where: { phone } });
     const now = new Date();
 
     const windowMs = (config.otpRateWindow || 600) * 1000;
@@ -89,10 +89,6 @@ export const createOrUpdateOtp = async (phone) => {
             `Too many OTP requests. Please try again in ${Math.ceil(decision.retryAfterSeconds / 60)} minute(s).`,
             decision.retryAfterSeconds,
         );
-    }
-
-    if (existing) {
-        existing.requestCount = decision.requestCount;
     }
 
     let otp;
@@ -117,25 +113,30 @@ export const createOrUpdateOtp = async (phone) => {
     // quota window — otherwise the TTL reaper resets the per-phone limit early.
     const purgeAt = new Date(now.getTime() + Math.max(ttlMs, windowMs));
 
-    if (existing) {
-        existing.otp = otp;
-        existing.expiresAt = expiresAt;
-        existing.purgeAt = purgeAt;
-        existing.attempts = 0;
-        existing.lastRequestAt = now;
-        existing.windowStartedAt = windowStartedAt;
-        await existing.save();
-    } else {
-        await FoodOtp.create({
+    // One row per phone (unique), so this is a single upsert rather than a
+    // read-then-branch. requestCount comes from the rate-window decision, which
+    // already accounts for whether the window rolled over.
+    await prisma.foodOtp.upsert({
+        where: { phone },
+        create: {
             phone,
             otp,
             expiresAt,
             purgeAt,
             requestCount: 1,
             lastRequestAt: now,
-            windowStartedAt: now
-        });
-    }
+            windowStartedAt: now,
+        },
+        update: {
+            otp,
+            expiresAt,
+            purgeAt,
+            attempts: 0,
+            requestCount: decision.requestCount,
+            lastRequestAt: now,
+            windowStartedAt,
+        },
+    });
 
     // Only send SMS if not in default OTP mode
     if (!config.useDefaultOtp) {
@@ -146,7 +147,7 @@ export const createOrUpdateOtp = async (phone) => {
 };
 
 export const verifyOtp = async (phone, otp) => {
-    const record = await FoodOtp.findOne({ phone });
+    const record = await prisma.foodOtp.findUnique({ where: { phone } });
     if (!record) {
         return { valid: false, reason: 'OTP not found' };
     }
@@ -159,14 +160,20 @@ export const verifyOtp = async (phone, otp) => {
         return { valid: false, reason: 'Max attempts exceeded' };
     }
 
-    record.attempts += 1;
-
     if (record.otp !== otp) {
-        await record.save();
+        // The attempt counter is incremented by the database, not by writing back
+        // a value read a moment ago: parallel guesses against the same phone would
+        // otherwise each save "attempts + 1" from the same starting point and burn
+        // a single attempt between them.
+        await prisma.foodOtp.update({
+            where: { phone },
+            data: { attempts: { increment: 1 } },
+        });
         return { valid: false, reason: 'Invalid OTP' };
     }
 
-    await record.deleteOne();
+    // A correct code is consumed, so it cannot be replayed.
+    await prisma.foodOtp.deleteMany({ where: { phone } });
     return { valid: true };
 };
 

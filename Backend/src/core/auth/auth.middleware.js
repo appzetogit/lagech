@@ -1,8 +1,7 @@
 import { verifyAccessToken } from './token.util.js';
 import { sendError } from '../../utils/response.js';
-import { FoodUser } from '../users/user.model.js';
-import { FoodRestaurant } from '../../modules/food/restaurant/models/restaurant.model.js';
-import { FoodDeliveryPartner } from '../../modules/food/delivery/models/deliveryPartner.model.js';
+import { prisma } from '../../config/prisma.js';
+import { isId } from '../../utils/helpers.js';
 
 export const requireAdmin = (req, res, next) => {
     if (req.user?.role !== 'ADMIN') {
@@ -19,9 +18,9 @@ export const requireAdmin = (req, res, next) => {
  * regression rather than a safeguard.
  */
 const SESSION_SCOPED_MODELS = {
-    USER: FoodUser,
-    RESTAURANT: FoodRestaurant,
-    DELIVERY_PARTNER: FoodDeliveryPartner
+    USER: () => prisma.foodUser,
+    RESTAURANT: () => prisma.foodRestaurant,
+    DELIVERY_PARTNER: () => prisma.foodDeliveryPartner
 };
 
 export const authMiddleware = (req, res, next) => {
@@ -45,16 +44,25 @@ export const authMiddleware = (req, res, next) => {
         adminType: decoded.adminType
     };
 
-    const model = SESSION_SCOPED_MODELS[decoded.role];
-    if (!model) return next();
+    const delegate = SESSION_SCOPED_MODELS[decoded.role];
+    if (!delegate) return next();
+
+    // A malformed id would otherwise reach the database as a query that cannot
+    // match; reject it here as the bad token it is.
+    if (!isId(decoded.userId)) return sendError(res, 401, 'Invalid or expired token');
 
     // One indexed lookup of two small fields. USER already paid for this to check
     // isActive; the version travels in the same query rather than a second round
     // trip, and the other two roles now share the same path.
-    model
-        .findById(decoded.userId)
-        .select('isActive tokenVersion')
-        .lean()
+    //
+    // isActive is selected for every role even though only USER has the column
+    // read below — restaurants and partners use `status`, which this check has
+    // never consulted.
+    delegate()
+        .findUnique({
+            where: { id: decoded.userId },
+            select: { tokenVersion: true, ...(decoded.role === 'USER' ? { isActive: true } : {}) },
+        })
         .then((doc) => {
             if (!doc) return sendError(res, 401, 'Account not found');
             if (decoded.role === 'USER' && doc.isActive === false) {
