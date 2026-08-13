@@ -1,4 +1,4 @@
-import { FoodUser } from '../../../../core/users/user.model.js';
+import { prisma } from '../../../../config/prisma.js';
 import { AuthError, ValidationError } from '../../../../core/auth/errors.js';
 import { uploadImageBuffer } from '../../../../services/cloudinary.service.js';
 
@@ -10,15 +10,17 @@ const parseIsoDateOrNull = (value) => {
     return Number.isNaN(d.getTime()) ? null : d;
 };
 
-export const getCurrentUserProfile = async (userId) => {
-    const user = await FoodUser.findById(userId).lean();
+const requireUser = async (userId) => {
+    const user = await prisma.foodUser.findUnique({ where: { id: String(userId) } });
     if (!user) throw new AuthError('Profile not found');
-    return { user };
+    return user;
 };
 
+export const getCurrentUserProfile = async (userId) => ({ user: await requireUser(userId) });
+
 export const updateCurrentUserProfile = async (userId, body) => {
-    const user = await FoodUser.findById(userId);
-    if (!user) throw new AuthError('Profile not found');
+    const user = await requireUser(userId);
+    const data = {};
 
     if (body.phone !== undefined) {
         const nextPhone = String(body.phone || '').trim();
@@ -29,7 +31,8 @@ export const updateCurrentUserProfile = async (userId, body) => {
         }
     }
 
-    if (body.name !== undefined) user.name = String(body.name || '').trim();
+    if (body.name !== undefined) data.name = String(body.name || '').trim();
+
     if (body.email !== undefined) {
         const nextEmail = String(body.email || '').trim().toLowerCase();
         if (nextEmail) {
@@ -47,49 +50,59 @@ export const updateCurrentUserProfile = async (userId, body) => {
                 throw new ValidationError('Email cannot contain consecutive dots');
             }
         }
-        user.email = nextEmail;
+        data.email = nextEmail;
     }
-    if (body.profileImage !== undefined) user.profileImage = String(body.profileImage || '').trim();
-    if (body.gender !== undefined) user.gender = String(body.gender || '').trim();
+
+    if (body.profileImage !== undefined) data.profileImage = String(body.profileImage || '').trim();
+
+    if (body.gender !== undefined) {
+        // The Postgres enum names the hyphenated Mongo value `prefer_not_to_say`
+        // and empty string `unset`; clients still send the original spellings.
+        const raw = String(body.gender || '').trim();
+        const GENDERS = { '': 'unset', male: 'male', female: 'female', other: 'other', 'prefer-not-to-say': 'prefer_not_to_say' };
+        const mapped = GENDERS[raw] ?? GENDERS[raw.replace(/_/g, '-')];
+        if (mapped === undefined) throw new ValidationError('Invalid gender');
+        data.gender = mapped;
+    }
 
     const dob = parseIsoDateOrNull(body.dateOfBirth);
-    if (dob !== undefined) user.dateOfBirth = dob;
+    if (dob !== undefined) data.dateOfBirth = dob;
     const ann = parseIsoDateOrNull(body.anniversary);
-    if (ann !== undefined) user.anniversary = ann;
+    if (ann !== undefined) data.anniversary = ann;
 
-    await user.save();
-    return { user: user.toObject() };
+    return { user: await prisma.foodUser.update({ where: { id: user.id }, data }) };
 };
 
 export const uploadCurrentUserProfileImage = async (userId, file) => {
-    if (!file || !file.buffer) {
-        throw new ValidationError('File is required');
-    }
-    const user = await FoodUser.findById(userId);
-    if (!user) throw new AuthError('Profile not found');
+    if (!file || !file.buffer) throw new ValidationError('File is required');
+    const user = await requireUser(userId);
 
     const url = await uploadImageBuffer(file.buffer, 'food/users/profile');
-    user.profileImage = String(url || '').trim();
-    await user.save();
-    return { profileImage: user.profileImage, user: user.toObject() };
+    const updated = await prisma.foodUser.update({
+        where: { id: user.id },
+        data: { profileImage: String(url || '').trim() },
+    });
+
+    return { profileImage: updated.profileImage, user: updated };
 };
 
 /**
- * Delete a user and their associated wallet data permanently.
+ * Delete a user and everything that cannot outlive them.
+ *
+ * The wallet ledger is DETACHED rather than deleted: those rows are the record of
+ * money that actually moved, and they have to survive the account they refer to.
  */
 export const deleteCurrentUserAccount = async (userId) => {
-    // We import dynamically to avoid circular dependencies if any
-    const { FoodUserWallet } = await import('../models/userWallet.model.js');
-    
-    const user = await FoodUser.findById(userId);
-    if (!user) throw new AuthError('Profile not found');
+    const user = await requireUser(userId);
 
-    // Remove Wallet
-    await FoodUserWallet.findOneAndDelete({ userId });
-
-    // Remove User
-    await FoodUser.findByIdAndDelete(userId);
+    await prisma.$transaction([
+        prisma.transaction.updateMany({
+            where: { entityType: 'user', entityId: user.id },
+            data: { entityId: user.id },
+        }),
+        prisma.wallet.deleteMany({ where: { entityType: 'user', entityId: user.id } }),
+        prisma.foodUser.delete({ where: { id: user.id } }),
+    ]);
 
     return { success: true };
 };
-

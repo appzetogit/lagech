@@ -1,16 +1,14 @@
-import mongoose from 'mongoose';
+import { prisma } from '../../../../config/prisma.js';
+import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
-import { FoodUserWallet } from '../models/userWallet.model.js';
-import { FoodCashbackSettings } from '../../admin/models/cashbackSettings.model.js';
-import { FoodOrder } from '../../orders/models/order.model.js';
+import { recordTransaction } from '../../../../core/payments/transaction.service.js';
 import { logger } from '../../../../utils/logger.js';
 
-const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
-
 export const getActiveCashbackSettings = async () => {
-    const doc = await FoodCashbackSettings.findOne({ isActive: true })
-        .sort({ createdAt: -1 })
-        .lean();
+    const doc = await prisma.foodCashbackSettings.findFirst({
+        where: { isActive: true },
+        orderBy: { createdAt: 'desc' },
+    });
     return (
         doc || {
             isEnabled: false,
@@ -19,7 +17,7 @@ export const getActiveCashbackSettings = async () => {
             minOrderValue: 0,
             maxCashback: 0,
             firstOrderOnly: false,
-            perUserLimit: 0
+            perUserLimit: 0,
         }
     );
 };
@@ -41,88 +39,93 @@ export const computeCashbackAmount = (settings, subtotal) => {
     return Math.max(0, Math.floor(amount)); // whole rupees, never round up in our favour
 };
 
+/** Every cashback credit this customer has received, newest first. */
+const listCashbackTransactions = (userId, { skip, take } = {}) =>
+    prisma.transaction.findMany({
+        where: { entityType: 'user', entityId: userId, category: 'wallet_topup', description: { startsWith: 'Cashback' } },
+        orderBy: { createdAt: 'desc' },
+        ...(skip !== undefined ? { skip } : {}),
+        ...(take !== undefined ? { take } : {}),
+    });
+
 /**
  * Award cashback for a delivered order and credit the customer's wallet.
  *
- * Idempotent by order: the wallet transaction carries metadata.orderId, and we refuse to
- * write a second cashback row for the same order. Never throws — a cashback failure must
- * not affect the delivery.
+ * Idempotent by order: `cashback:<orderId>` is the ledger's unique idempotency
+ * key, so a replay is refused by the database rather than by scanning prior
+ * transactions and hoping no two calls interleave. Never throws — a cashback
+ * failure must not affect the delivery.
  */
 export const awardOrderCashback = async (orderId) => {
     try {
-        if (!mongoose.Types.ObjectId.isValid(String(orderId))) {
-            return { awarded: false, reason: 'invalid_order' };
-        }
-        const order = await FoodOrder.findById(orderId)
-            .select('_id order_id userId pricing orderStatus')
-            .lean();
+        if (!isId(orderId)) return { awarded: false, reason: 'invalid_order' };
+
+        const order = await prisma.foodOrder.findUnique({
+            where: { id: String(orderId) },
+            select: { id: true, order_id: true, userId: true, subtotal: true, orderStatus: true },
+        });
         if (!order) return { awarded: false, reason: 'order_not_found' };
-        if (String(order.orderStatus) !== 'delivered') {
-            return { awarded: false, reason: 'not_delivered' };
-        }
+        if (order.orderStatus !== 'delivered') return { awarded: false, reason: 'not_delivered' };
 
         const settings = await getActiveCashbackSettings();
         if (!settings.isEnabled) return { awarded: false, reason: 'disabled' };
 
-        const amount = computeCashbackAmount(settings, order.pricing?.subtotal);
+        const amount = computeCashbackAmount(settings, order.subtotal);
         if (amount <= 0) return { awarded: false, reason: 'not_eligible' };
 
-        const userOid = new mongoose.Types.ObjectId(String(order.userId));
-
-        // First-order-only / per-user limit checks against previously awarded cashback.
-        const wallet = await FoodUserWallet.findOne({ userId: userOid });
-        const priorAwards = (wallet?.transactions || []).filter(
-            (t) => t?.metadata?.source === 'cashback'
-        );
-
-        // Idempotency: already awarded for this order?
-        if (priorAwards.some((t) => String(t?.metadata?.orderId || '') === String(order._id))) {
-            return { awarded: false, reason: 'already_awarded' };
-        }
+        const idempotencyKey = `cashback:${order.id}`;
+        const already = await prisma.transaction.findUnique({ where: { idempotencyKey } });
+        if (already) return { awarded: false, reason: 'already_awarded' };
 
         if (settings.firstOrderOnly) {
-            const deliveredCount = await FoodOrder.countDocuments({
-                userId: userOid,
-                orderStatus: 'delivered'
+            const deliveredCount = await prisma.foodOrder.count({
+                where: { userId: order.userId, orderStatus: 'delivered' },
             });
             if (deliveredCount > 1) return { awarded: false, reason: 'not_first_order' };
         }
 
         const perUserLimit = Number(settings.perUserLimit) || 0;
-        if (perUserLimit > 0 && priorAwards.length >= perUserLimit) {
-            return { awarded: false, reason: 'per_user_limit_reached' };
+        if (perUserLimit > 0) {
+            const priorAwards = await listCashbackTransactions(order.userId);
+            if (priorAwards.length >= perUserLimit) {
+                return { awarded: false, reason: 'per_user_limit_reached' };
+            }
         }
 
-        const target = wallet || (await FoodUserWallet.create({ userId: userOid, balance: 0, transactions: [] }));
-        target.transactions.unshift({
-            type: 'addition',
+        // Through the ledger, not a direct balance write. Cashback used to push
+        // onto the wallet's embedded array and recompute the balance itself,
+        // which made it a second writer racing the real one.
+        await recordTransaction({
+            entityType: 'user',
+            entityId: order.userId,
+            type: 'credit',
             amount,
-            status: 'Completed',
-            description: `Cashback on order ${order.order_id || order._id}`,
+            description: `Cashback on order ${order.order_id || order.id}`,
+            category: 'wallet_topup',
+            orderId: order.id,
+            idempotencyKey,
             metadata: {
                 source: 'cashback',
-                orderId: String(order._id),
-                orderDisplayId: order.order_id || String(order._id)
-            }
+                orderId: order.id,
+                orderDisplayId: order.order_id || order.id,
+            },
         });
-        target.balance = round2(Number(target.balance || 0) + amount);
-        await target.save();
 
         try {
             const { notifyOwnerSafely } = await import('../../orders/services/order.helpers.js');
             void notifyOwnerSafely(
-                { ownerType: 'USER', ownerId: String(order.userId) },
+                { ownerType: 'USER', ownerId: order.userId },
                 {
                     title: 'Cashback credited! 🎁',
                     body: `₹${amount} cashback added to your wallet for order ${order.order_id || ''}.`,
-                    data: { type: 'cashback_credited', amount: String(amount), orderId: String(order._id) }
-                }
+                    data: { type: 'cashback_credited', amount: String(amount), orderId: order.id },
+                },
             );
         } catch {
             /* notification failure must not affect the credit */
         }
 
-        logger.info(`Cashback ₹${amount} credited to user ${order.userId} for order ${order._id}`);
+        logger.info(`Cashback ₹${amount} credited to user ${order.userId} for order ${order.id}`);
         return { awarded: true, amount };
     } catch (e) {
         logger.warn(`awardOrderCashback failed: ${e?.message || e}`);
@@ -133,29 +136,23 @@ export const awardOrderCashback = async (orderId) => {
 /** Cashback-only slice of the wallet ledger. */
 export const getCashbackHistory = async (userId, query = {}) => {
     const id = String(userId || '');
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) throw new ValidationError('User not found');
+    if (!isId(id)) throw new ValidationError('User not found');
 
     const page = Math.max(parseInt(query.page, 10) || 1, 1);
     const limit = Math.min(Math.max(parseInt(query.limit, 10) || 20, 1), 100);
 
-    const wallet = await FoodUserWallet.findOne({ userId: new mongoose.Types.ObjectId(id) })
-        .select('transactions')
-        .lean();
+    const all = await listCashbackTransactions(id);
+    const totalEarned = all.reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
 
-    const all = (wallet?.transactions || [])
-        .filter((t) => t?.metadata?.source === 'cashback')
-        .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-
-    const totalEarned = all.reduce((s, t) => s + (Number(t.amount) || 0), 0);
     const items = all.slice((page - 1) * limit, page * limit).map((t) => ({
-        id: String(t._id),
+        id: t.id,
         amount: Number(t.amount) || 0,
         description: t.description || '',
-        orderId: t?.metadata?.orderId || null,
-        orderDisplayId: t?.metadata?.orderDisplayId || null,
-        status: t.status || 'Completed',
+        orderId: t.orderId || t.metadata?.orderId || null,
+        orderDisplayId: t.metadata?.orderDisplayId || null,
+        status: t.status === 'completed' ? 'Completed' : t.status,
         date: t.createdAt,
-        createdAt: t.createdAt
+        createdAt: t.createdAt,
     }));
 
     return {
@@ -165,75 +162,87 @@ export const getCashbackHistory = async (userId, query = {}) => {
             page,
             limit,
             total: all.length,
-            totalPages: Math.max(1, Math.ceil(all.length / limit))
-        }
+            totalPages: Math.max(1, Math.ceil(all.length / limit)),
+        },
     };
 };
 
 /**
- * Refund history across ALL of the user's orders (previously only per-order was exposed).
- * Sourced from the authoritative order payment records, enriched with the matching wallet
- * refund transaction when the money went back to the wallet.
+ * Refund history across ALL of the user's orders.
+ * Sourced from the authoritative order payment records, enriched with the
+ * matching wallet refund transaction when the money went back to the wallet.
  */
 export const getUserRefundHistory = async (userId, query = {}) => {
     const id = String(userId || '');
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) throw new ValidationError('User not found');
+    if (!isId(id)) throw new ValidationError('User not found');
 
-    const oid = new mongoose.Types.ObjectId(id);
     const page = Math.max(parseInt(query.page, 10) || 1, 1);
     const limit = Math.min(Math.max(parseInt(query.limit, 10) || 20, 1), 100);
 
-    const filter = {
-        userId: oid,
-        $or: [
-            { 'payment.refund.status': { $in: ['pending', 'processed', 'failed'] } },
-            { 'payment.status': 'refunded' }
-        ]
+    const where = {
+        userId: id,
+        OR: [
+            { refundStatus: { in: ['pending', 'processed', 'failed'] } },
+            { paymentStatus: 'refunded' },
+        ],
     };
 
-    const [docs, total, wallet] = await Promise.all([
-        FoodOrder.find(filter)
-            .select('order_id orderId pricing payment orderStatus cancellationReason updatedAt createdAt restaurantId')
-            .populate('restaurantId', 'restaurantName profileImage')
-            .sort({ updatedAt: -1 })
-            .skip((page - 1) * limit)
-            .limit(limit)
-            .lean(),
-        FoodOrder.countDocuments(filter),
-        FoodUserWallet.findOne({ userId: oid }).select('transactions').lean()
+    const [docs, total, walletRefunds] = await Promise.all([
+        prisma.foodOrder.findMany({
+            where,
+            select: {
+                id: true, order_id: true, orderId: true, total: true,
+                paymentMethod: true, paymentStatus: true,
+                refundStatus: true, refundAmount: true, refundId: true, refundProcessedAt: true,
+                orderStatus: true, createdAt: true, updatedAt: true,
+                restaurant: { select: { id: true, restaurantName: true, profileImage: true } },
+            },
+            orderBy: { updatedAt: 'desc' },
+            skip: (page - 1) * limit,
+            take: limit,
+        }),
+        prisma.foodOrder.count({ where }),
+        prisma.transaction.findMany({
+            where: { entityType: 'user', entityId: id, category: 'order_refund' },
+            select: { orderId: true, amount: true },
+        }),
     ]);
 
-    const walletRefunds = (wallet?.transactions || []).filter((t) => t?.type === 'refund');
+    const refundByOrder = new Map(walletRefunds.filter((t) => t.orderId).map((t) => [t.orderId, t]));
 
     const refunds = docs.map((o) => {
-        const r = o.payment?.refund || {};
-        const walletRow = walletRefunds.find(
-            (t) => String(t?.metadata?.orderId || '') === String(o._id)
-        );
-        const amount = Number(r.amount) || Number(walletRow?.amount) || Number(o.pricing?.total) || 0;
+        const walletRow = refundByOrder.get(o.id);
+        const amount = Number(o.refundAmount) || Number(walletRow?.amount) || Number(o.total) || 0;
+
         return {
-            orderId: String(o._id),
-            orderDisplayId: o.order_id || String(o._id),
-            restaurantName: o.restaurantId?.restaurantName || '',
+            orderId: o.id,
+            orderDisplayId: o.order_id || o.id,
+            restaurantName: o.restaurant?.restaurantName || '',
             amount,
             // 'processed' once the money is back with the customer.
-            status: String(r.status && r.status !== 'none' ? r.status : (o.payment?.status === 'refunded' ? 'processed' : 'pending')),
-            method: o.payment?.method || '',
-            refundId: r.refundId || '',
-            reason: o.cancellationReason || '',
+            status: String(
+                o.refundStatus && o.refundStatus !== 'none'
+                    ? o.refundStatus
+                    : o.paymentStatus === 'refunded' ? 'processed' : 'pending',
+            ),
+            method: o.paymentMethod || '',
+            refundId: o.refundId || '',
+            // cancellationReason is derived from status history, which this query
+            // does not load; the field stays for shape compatibility.
+            reason: '',
             creditedToWallet: Boolean(walletRow),
-            processedAt: r.processedAt || null,
+            processedAt: o.refundProcessedAt || null,
             orderStatus: o.orderStatus,
             createdAt: o.createdAt,
-            updatedAt: o.updatedAt
+            updatedAt: o.updatedAt,
         };
     });
 
     return {
         totalRefunded: refunds
             .filter((r) => r.status === 'processed')
-            .reduce((s, r) => s + (Number(r.amount) || 0), 0),
+            .reduce((sum, r) => sum + (Number(r.amount) || 0), 0),
         refunds,
-        pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) }
+        pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
     };
 };

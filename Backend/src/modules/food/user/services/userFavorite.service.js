@@ -1,67 +1,64 @@
-import mongoose from 'mongoose';
+import { prisma } from '../../../../config/prisma.js';
+import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
-import { FoodUserFavorite } from '../models/userFavorite.model.js';
-import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
-import { FoodItem } from '../../admin/models/food.model.js';
 
-const toObjectId = (value, label) => {
+const requireId = (value, label) => {
     const raw = String(value || '').trim();
-    if (!mongoose.Types.ObjectId.isValid(raw)) {
-        throw new ValidationError(`Invalid ${label}`);
-    }
-    return new mongoose.Types.ObjectId(raw);
+    if (!isId(raw)) throw new ValidationError(`Invalid ${label}`);
+    return raw;
 };
 
 /**
  * Everything this user has favourited.
  *
- * Returns the ids AND the populated entities in one call. The ids are what every
- * heart icon binds to, so they must be present even when the underlying restaurant
- * or dish has since been deleted or unapproved — otherwise a heart would silently
- * un-fill and the user would think their tap was lost. The populated lists are what
+ * Returns the ids AND the entities in one call. The ids are what every heart
+ * icon binds to, so they must be present even when the underlying restaurant or
+ * dish has since been deleted or unapproved — otherwise a heart would silently
+ * un-fill and the user would think their tap was lost. The entity lists are what
  * the Favourites screen renders, and those legitimately omit anything no longer
  * orderable.
  */
 export const getUserFavorites = async (userId) => {
-    const owner = toObjectId(userId, 'user id');
+    const owner = requireId(userId, 'user id');
 
-    const rows = await FoodUserFavorite.find({ userId: owner })
-        .select('entityType entityId')
-        .sort({ createdAt: -1 })
-        .lean();
+    const rows = await prisma.foodUserFavorite.findMany({
+        where: { userId: owner },
+        select: { entityType: true, entityId: true },
+        orderBy: { createdAt: 'desc' },
+    });
 
-    const restaurantIds = rows
-        .filter((r) => r.entityType === 'restaurant')
-        .map((r) => String(r.entityId));
-    const foodIds = rows
-        .filter((r) => r.entityType === 'food')
-        .map((r) => String(r.entityId));
+    const restaurantIds = rows.filter((r) => r.entityType === 'restaurant').map((r) => r.entityId);
+    const foodIds = rows.filter((r) => r.entityType === 'food').map((r) => r.entityId);
 
     const [restaurants, foods] = await Promise.all([
         restaurantIds.length
-            ? FoodRestaurant.find({
-                  _id: { $in: restaurantIds },
-                  status: 'approved'
-              })
-                  .select(
-                      'restaurantName profileImage coverImage coverImages cuisines rating totalRatings area city location offer estimatedDeliveryTimeMinutes isAcceptingOrders'
-                  )
-                  .lean()
+            ? prisma.foodRestaurant.findMany({
+                where: { id: { in: restaurantIds }, status: 'approved' },
+                select: {
+                    id: true, restaurantName: true, profileImage: true, coverImage: true,
+                    coverImages: true, cuisines: true, rating: true, totalRatings: true,
+                    area: true, city: true, latitude: true, longitude: true, offer: true,
+                    estimatedDeliveryTimeMinutes: true, isAcceptingOrders: true,
+                },
+            })
             : [],
         foodIds.length
-            ? FoodItem.find({
-                  _id: { $in: foodIds },
-                  approvalStatus: 'approved'
-              })
-                  .select(
-                      'name description price otherPrice image images foodType restaurantId rating totalRatings isAvailable variants'
-                  )
-                  .lean()
-            : []
+            ? prisma.foodItem.findMany({
+                where: { id: { in: foodIds }, approvalStatus: 'approved' },
+                select: {
+                    id: true, name: true, description: true, price: true, otherPrice: true,
+                    image: true, images: true, foodType: true, restaurantId: true,
+                    rating: true, totalRatings: true, isAvailable: true,
+                    // A relation now, so it has to be asked for — the favourites
+                    // screen renders a size picker from it.
+                    variants: { orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] },
+                },
+            })
+            : [],
     ]);
 
-    // Preserve the newest-first order the ids came back in; $in does not guarantee it.
-    const byId = (list) => new Map(list.map((d) => [String(d._id), d]));
+    // Preserve the newest-first order the ids came back in; `in` does not guarantee it.
+    const byId = (list) => new Map(list.map((d) => [d.id, d]));
     const restaurantMap = byId(restaurants);
     const foodMap = byId(foods);
 
@@ -69,7 +66,7 @@ export const getUserFavorites = async (userId) => {
         restaurantIds,
         foodIds,
         restaurants: restaurantIds.map((id) => restaurantMap.get(id)).filter(Boolean),
-        foods: foodIds.map((id) => foodMap.get(id)).filter(Boolean)
+        foods: foodIds.map((id) => foodMap.get(id)).filter(Boolean),
     };
 };
 
@@ -77,30 +74,32 @@ export const getUserFavorites = async (userId) => {
  * Adds a favourite, or succeeds silently if it is already there.
  *
  * Idempotent on purpose: a double-tapped heart sends two adds, and the second
- * colliding on the unique index means "already favourited", not an error. Treating
- * it as success keeps the client's optimistic state correct without needing a
- * debounce to stay safe.
+ * colliding on the unique constraint means "already favourited", not an error.
+ * Treating it as success keeps the client's optimistic state correct without
+ * needing a debounce to stay safe.
  */
 const addFavorite = async (userId, entityType, entityId) => {
-    const owner = toObjectId(userId, 'user id');
-    const target = toObjectId(entityId, `${entityType} id`);
+    const owner = requireId(userId, 'user id');
+    const target = requireId(entityId, `${entityType} id`);
 
     try {
-        await FoodUserFavorite.create({ userId: owner, entityType, entityId: target });
+        await prisma.foodUserFavorite.create({ data: { userId: owner, entityType, entityId: target } });
     } catch (err) {
-        // 11000 is the unique index doing its job.
-        if (err?.code !== 11000) throw err;
+        // P2002 is the unique constraint doing its job.
+        if (err?.code !== 'P2002') throw err;
     }
-    return { favorited: true, entityType, entityId: String(target) };
+    return { favorited: true, entityType, entityId: target };
 };
 
 /** Removing something that was never favourited is also success — same reasoning. */
 const removeFavorite = async (userId, entityType, entityId) => {
-    const owner = toObjectId(userId, 'user id');
-    const target = toObjectId(entityId, `${entityType} id`);
+    const owner = requireId(userId, 'user id');
+    const target = requireId(entityId, `${entityType} id`);
 
-    await FoodUserFavorite.deleteOne({ userId: owner, entityType, entityId: target });
-    return { favorited: false, entityType, entityId: String(target) };
+    await prisma.foodUserFavorite.deleteMany({
+        where: { userId: owner, entityType, entityId: target },
+    });
+    return { favorited: false, entityType, entityId: target };
 };
 
 export const addFavoriteRestaurant = (userId, restaurantId) =>
@@ -111,5 +110,4 @@ export const removeFavoriteRestaurant = (userId, restaurantId) =>
 
 export const addFavoriteFood = (userId, foodId) => addFavorite(userId, 'food', foodId);
 
-export const removeFavoriteFood = (userId, foodId) =>
-    removeFavorite(userId, 'food', foodId);
+export const removeFavoriteFood = (userId, foodId) => removeFavorite(userId, 'food', foodId);

@@ -78,6 +78,14 @@ ALTER TABLE "delivery_fee_bands" ADD CONSTRAINT "delivery_fee_band_no_overlap"
     numrange("minDistanceKm", "maxDistanceKm", '[)') WITH &&
   );
 
+-- ─── one default address per customer ────────────────────────────────────────
+-- A partial unique index: many non-default addresses, at most one default. This
+-- was previously "whatever the last save happened to leave true" across an
+-- embedded array, so a failed write could leave a customer with two defaults or
+-- none, and checkout silently picked the first it found.
+CREATE UNIQUE INDEX IF NOT EXISTS "food_user_addresses_one_default_per_user"
+  ON "food_user_addresses" ("userId") WHERE "isDefault";
+
 -- ─── menu item variants ──────────────────────────────────────────────────────
 -- normalizeFoodVariantsInput already rejects a price <= 0, but it was the only
 -- thing asserting it: a variant written by the bulk uploader, an admin script or

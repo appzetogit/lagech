@@ -1,6 +1,5 @@
-import mongoose from 'mongoose';
-import { FoodUser } from '../../../../core/users/user.model.js';
-import { FoodUserCart } from '../models/userCart.model.js';
+import { prisma } from '../../../../config/prisma.js';
+import { isId } from '../../../../utils/helpers.js';
 import { ValidationError, NotFoundError } from '../../../../core/auth/errors.js';
 import { calculateOrderPricing } from '../../orders/services/order-pricing.service.js';
 
@@ -119,9 +118,7 @@ async function enrichStoredCartPricing(cart, storedPricing) {
         };
     }
 
-    if (!cart.restaurantId || !mongoose.Types.ObjectId.isValid(String(cart.restaurantId))) {
-        return storedPricing;
-    }
+    if (!isId(cart.restaurantId)) return storedPricing;
 
     try {
         const result = await calculateOrderPricing(
@@ -161,55 +158,36 @@ async function enrichStoredCartPricing(cart, storedPricing) {
 }
 
 export async function syncUserCart(userId, rawItems = [], rawPricing = null) {
-    if (!userId || !mongoose.Types.ObjectId.isValid(String(userId))) {
-        throw new ValidationError('Invalid user');
-    }
+    if (!isId(userId)) throw new ValidationError('Invalid user');
 
-    const userObjectId = new mongoose.Types.ObjectId(String(userId));
+    const id = String(userId);
     const items = normalizeCartItems(rawItems);
 
     if (items.length === 0) {
-        await FoodUserCart.deleteOne({ userId: userObjectId });
+        // deleteMany, not delete: emptying a cart that was never saved is a
+        // no-op, not a missing-record error.
+        await prisma.foodUserCart.deleteMany({ where: { userId: id } });
         return null;
     }
 
-    const firstItem = items[0];
     const rawFirst = Array.isArray(rawItems) ? rawItems[0] : null;
-    const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
-    const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-    const pricing = normalizePricingSnapshot(rawPricing);
+    const data = {
+        restaurantId: String(rawFirst?.restaurantId || ''),
+        restaurantName: String(rawFirst?.restaurant || rawFirst?.restaurantName || ''),
+        // The cart is replaced wholesale on every sync and never queried across
+        // users, so items and pricing stay snapshots rather than tables.
+        items,
+        itemCount: items.reduce((sum, item) => sum + item.quantity, 0),
+        subtotal: items.reduce((sum, item) => sum + item.price * item.quantity, 0),
+        pricing: normalizePricingSnapshot(rawPricing) ?? undefined,
+    };
 
-    return FoodUserCart.findOneAndUpdate(
-        { userId: userObjectId },
-        {
-            userId: userObjectId,
-            restaurantId: String(rawFirst?.restaurantId || ''),
-            restaurantName: String(rawFirst?.restaurant || rawFirst?.restaurantName || ''),
-            items: items.map((item) => ({
-                ...item,
-            })),
-            itemCount,
-            subtotal,
-            pricing,
-        },
-        { upsert: true, new: true, setDefaultsOnInsert: true },
-    ).lean();
+    return prisma.foodUserCart.upsert({
+        where: { userId: id },
+        create: { userId: id, ...data },
+        update: data,
+    });
 }
-
-const buildSearchUserIds = async (search = '') => {
-    const term = String(search || '').trim();
-    if (!term) return null;
-
-    const regex = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-    const users = await FoodUser.find({
-        $or: [{ name: regex }, { phone: regex }, { email: regex }],
-    })
-        .select('_id')
-        .limit(200)
-        .lean();
-
-    return users.map((user) => user._id);
-};
 
 export async function listUserCartsForAdmin(query = {}) {
     const page = Math.max(1, toPositiveInt(query.page, 1));
@@ -217,37 +195,36 @@ export async function listUserCartsForAdmin(query = {}) {
     const skip = (page - 1) * limit;
     const search = String(query.search || '').trim();
 
-    const filter = { 'items.0': { $exists: true } };
+    // itemCount is maintained on every sync, so "has items" is a plain column
+    // test rather than probing for the existence of items[0].
+    const where = { itemCount: { gt: 0 } };
 
     if (search) {
-        const restaurantRegex = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-        const userIds = await buildSearchUserIds(search);
-
-        const orConditions = [
-            { restaurantName: restaurantRegex },
-            { restaurantId: restaurantRegex },
+        // The customer is matched through the relation instead of pre-resolving
+        // up to 200 ids and hoping the real match falls inside that slice.
+        where.OR = [
+            { restaurantName: { contains: search, mode: 'insensitive' } },
+            { restaurantId: { contains: search, mode: 'insensitive' } },
+            { user: { name: { contains: search, mode: 'insensitive' } } },
+            { user: { phone: { contains: search, mode: 'insensitive' } } },
+            { user: { email: { contains: search, mode: 'insensitive' } } },
         ];
-
-        if (Array.isArray(userIds) && userIds.length > 0) {
-            orConditions.push({ userId: { $in: userIds } });
-        }
-
-        filter.$or = orConditions;
     }
 
     const [carts, total] = await Promise.all([
-        FoodUserCart.find(filter)
-            .populate('userId', 'name phone email profileImage')
-            .sort({ updatedAt: -1 })
-            .skip(skip)
-            .limit(limit)
-            .lean(),
-        FoodUserCart.countDocuments(filter),
+        prisma.foodUserCart.findMany({
+            where,
+            include: { user: { select: { id: true, name: true, phone: true, email: true, profileImage: true } } },
+            orderBy: { updatedAt: 'desc' },
+            skip,
+            take: limit,
+        }),
+        prisma.foodUserCart.count({ where }),
     ]);
 
     const normalized = await Promise.all(
         carts.map(async (cart) => {
-            const user = cart.userId && typeof cart.userId === 'object' ? cart.userId : null;
+            const user = cart.user || null;
             let pricing = cart.pricing || null;
             if (pricing) {
                 pricing = normalizePricingSnapshot(pricing);
@@ -257,8 +234,8 @@ export async function listUserCartsForAdmin(query = {}) {
             }
 
             return {
-                id: String(cart._id),
-                userId: user?._id ? String(user._id) : String(cart.userId || ''),
+                id: cart.id,
+                userId: user?.id || cart.userId || '',
                 userName: user?.name || 'Unknown user',
                 userPhone: user?.phone || '',
                 userEmail: user?.email || '',
@@ -285,11 +262,9 @@ export async function listUserCartsForAdmin(query = {}) {
 }
 
 export async function getUserCartPricingForAdmin(cartId) {
-    if (!cartId || !mongoose.Types.ObjectId.isValid(String(cartId))) {
-        throw new ValidationError('Invalid cart id');
-    }
+    if (!isId(cartId)) throw new ValidationError('Invalid cart id');
 
-    const cart = await FoodUserCart.findById(cartId).lean();
+    const cart = await prisma.foodUserCart.findUnique({ where: { id: String(cartId) } });
     if (!cart || !Array.isArray(cart.items) || cart.items.length === 0) {
         throw new NotFoundError('Cart not found');
     }
@@ -299,7 +274,7 @@ export async function getUserCartPricingForAdmin(cartId) {
         return normalizePricingSnapshot(enriched) || enriched;
     }
 
-    if (!cart.restaurantId || !mongoose.Types.ObjectId.isValid(String(cart.restaurantId))) {
+    if (!isId(cart.restaurantId)) {
         const subtotal = Number(cart.subtotal) || 0;
         return {
             subtotal,
