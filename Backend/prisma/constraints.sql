@@ -27,6 +27,22 @@ ALTER TABLE "wallets" ADD CONSTRAINT "wallet_locked_within_balance"
     AND ("entityType" = 'admin' OR "lockedAmount" <= "balance")
   );
 
+-- One wallets table serves four entity types, so most counters only apply to
+-- some of them. Without this a user wallet could carry cashInHand and a rider
+-- wallet totalRevenue — meaningless values that still show up in aggregates and
+-- reconciliation. Zero is always allowed; it is the resting state.
+ALTER TABLE "wallets" DROP CONSTRAINT IF EXISTS "wallet_counters_match_entity_type";
+ALTER TABLE "wallets" ADD CONSTRAINT "wallet_counters_match_entity_type" CHECK (
+  -- rider-only
+  ("entityType" = 'deliveryBoy' OR ("cashInHand" = 0 AND "totalBonus" = 0 AND "totalDeliveries" = 0))
+  -- customer-only
+  AND ("entityType" = 'user' OR "referralEarnings" = 0)
+  -- platform-only
+  AND ("entityType" = 'admin' OR ("totalRevenue" = 0 AND "totalPayouts" = 0 AND "totalRefunds" = 0))
+  -- earnings/settlement belong to the two payee types
+  AND ("entityType" IN ('restaurant', 'deliveryBoy') OR ("totalEarnings" = 0 AND "totalSettled" = 0))
+);
+
 -- Amounts are always positive; direction lives in Transaction.type.
 ALTER TABLE "transactions" DROP CONSTRAINT IF EXISTS "txn_amount_positive";
 ALTER TABLE "transactions" ADD CONSTRAINT "txn_amount_positive"

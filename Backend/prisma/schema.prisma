@@ -1005,22 +1005,28 @@ model Wallet {
   balance      Decimal    @default(0) @db.Decimal(14, 2)
   lockedAmount Decimal    @default(0) @db.Decimal(14, 2)
 
+  // Lifetime counters. Every one defaults to 0 rather than being nullable,
+  // because `increment` on NULL is a no-op in SQL — NULL + 250 is NULL — so a
+  // nullable counter silently never accumulates. Which counters apply to which
+  // entityType is enforced by wallet_counters_match_entity_type in
+  // constraints.sql, so a user wallet still cannot hold cashInHand.
+
   // restaurant + deliveryBoy
-  totalEarnings Decimal? @db.Decimal(14, 2)
-  totalSettled  Decimal? @db.Decimal(14, 2)
+  totalEarnings Decimal @default(0) @db.Decimal(14, 2)
+  totalSettled  Decimal @default(0) @db.Decimal(14, 2)
 
   // deliveryBoy only
-  cashInHand      Decimal? @db.Decimal(14, 2)
-  totalBonus      Decimal? @db.Decimal(14, 2)
-  totalDeliveries Int?
+  cashInHand      Decimal @default(0) @db.Decimal(14, 2)
+  totalBonus      Decimal @default(0) @db.Decimal(14, 2)
+  totalDeliveries Int     @default(0)
 
   // user only
-  referralEarnings Decimal? @db.Decimal(14, 2)
+  referralEarnings Decimal @default(0) @db.Decimal(14, 2)
 
   // admin only
-  totalRevenue Decimal? @db.Decimal(14, 2)
-  totalPayouts Decimal? @db.Decimal(14, 2)
-  totalRefunds Decimal? @db.Decimal(14, 2)
+  totalRevenue Decimal @default(0) @db.Decimal(14, 2)
+  totalPayouts Decimal @default(0) @db.Decimal(14, 2)
+  totalRefunds Decimal @default(0) @db.Decimal(14, 2)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

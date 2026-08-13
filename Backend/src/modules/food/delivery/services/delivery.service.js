@@ -813,15 +813,34 @@ export const getActiveEarningAddonsForPartner = async (deliveryPartnerId) => {
 
 /**
  * Delete a delivery partner and everything that cannot outlive them.
+ *
+ * Seven tables reference a partner with ON DELETE RESTRICT, so the delete has to
+ * name all of them. Mongo left every one of these orphaned — bonus rows,
+ * withdrawals and cash deposits pointing at a partner that no longer existed,
+ * which quietly skewed finance reports.
+ *
+ * The wallet LEDGER is deliberately not touched: `transactions.entityId` is a
+ * plain column with no foreign key, so those rows survive. They are the record
+ * of money that actually moved, and reconciliation still needs them after the
+ * account is gone. Orders and the per-order split keep their history too — those
+ * FKs are ON DELETE SET NULL, so a delivered order stays delivered.
  */
 export const deleteDeliveryPartnerAccount = async (partnerId) => {
     const id = String(partnerId);
     const partner = await prisma.foodDeliveryPartner.findUnique({ where: { id } });
     if (!partner) throw new ValidationError('Delivery partner not found');
 
+    const byPartner = { where: { deliveryPartnerId: id } };
+
     await prisma.$transaction([
+        prisma.deliveryBonusTransaction.deleteMany(byPartner),
+        prisma.foodDeliveryCashDeposit.deleteMany(byPartner),
+        prisma.foodDeliveryWithdrawal.deleteMany(byPartner),
+        prisma.foodEarningAddonHistory.deleteMany(byPartner),
+        prisma.deliveryOrderEmergencyRequest.deleteMany(byPartner),
+        prisma.deliverySupportTicket.deleteMany(byPartner),
+        prisma.orderDispatchOffer.deleteMany({ where: { partnerId: id } }),
         prisma.wallet.deleteMany({ where: { entityType: 'deliveryBoy', entityId: id } }),
-        prisma.deliverySupportTicket.deleteMany({ where: { deliveryPartnerId: id } }),
         prisma.foodDeliveryPartner.delete({ where: { id } }),
     ]);
 

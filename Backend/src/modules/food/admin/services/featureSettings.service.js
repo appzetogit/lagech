@@ -1,4 +1,4 @@
-import { FoodFeatureSetting } from '../models/featureSetting.model.js';
+import { prisma } from '../../../../config/prisma.js';
 
 export const FEATURE_KEYS = {
     RESTAURANT_SUBSCRIPTION: 'restaurant_subscription',
@@ -35,18 +35,15 @@ const DEFAULT_FEATURES = [
 ];
 
 export async function ensureDefaultFeatureSettings() {
-    for (const feature of DEFAULT_FEATURES) {
-        await FoodFeatureSetting.updateOne(
-            { key: feature.key },
-            { $setOnInsert: feature },
-            { upsert: true }
-        );
-    }
+    // createMany + skipDuplicates is one statement instead of four upserts, and
+    // it only ever inserts: an admin who has switched a flag off must not have it
+    // silently switched back on the next time this runs.
+    await prisma.foodFeatureSetting.createMany({ data: DEFAULT_FEATURES, skipDuplicates: true });
 }
 
 export async function listFeatureSettings() {
     await ensureDefaultFeatureSettings();
-    const docs = await FoodFeatureSetting.find({}).sort({ createdAt: 1 }).lean();
+    const docs = await prisma.foodFeatureSetting.findMany({ orderBy: { createdAt: 'asc' } });
     return docs.map((doc) => ({
         key: doc.key,
         name: doc.name,
@@ -59,11 +56,13 @@ export async function listFeatureSettings() {
 export async function updateFeatureSetting(key, payload = {}) {
     await ensureDefaultFeatureSettings();
     const nextEnabled = Boolean(payload?.isEnabled);
-    const updated = await FoodFeatureSetting.findOneAndUpdate(
-        { key: String(key || '').trim() },
-        { $set: { isEnabled: nextEnabled } },
-        { new: true }
-    ).lean();
+    // updateMany, so an unknown key returns null rather than throwing P2025.
+    const trimmed = String(key || '').trim();
+    const { count } = await prisma.foodFeatureSetting.updateMany({
+        where: { key: trimmed },
+        data: { isEnabled: nextEnabled },
+    });
+    const updated = count ? await prisma.foodFeatureSetting.findUnique({ where: { key: trimmed } }) : null;
 
     return updated
         ? {
@@ -79,7 +78,10 @@ export async function updateFeatureSetting(key, payload = {}) {
 export async function isFeatureEnabled(key, fallback = true) {
     if (!key) return fallback;
     await ensureDefaultFeatureSettings();
-    const doc = await FoodFeatureSetting.findOne({ key: String(key).trim() }).select('isEnabled').lean();
+    const doc = await prisma.foodFeatureSetting.findUnique({
+        where: { key: String(key).trim() },
+        select: { isEnabled: true },
+    });
     if (!doc) return fallback;
     return Boolean(doc.isEnabled);
 }

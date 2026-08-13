@@ -24,7 +24,39 @@ const withMongoId = (value) => {
     return mapped;
 };
 
-export const prisma = new PrismaClient().$extends({
+/**
+ * Explicit connection pool sizing.
+ *
+ * Prisma's default is `num_cpus * 2 + 1`, which is a guess about the machine
+ * rather than about the workload — and it is silently wrong in both directions
+ * here. recordTransaction holds a connection for the whole interactive
+ * transaction, so a burst of concurrent wallet writes exhausts a small pool and
+ * the surplus queues until pool_timeout fires; the failure surfaces as an opaque
+ * timeout, not as "you are out of connections".
+ *
+ * Set it deliberately, and leave it overridable per environment: behind PgBouncer
+ * this wants to be small, on a dedicated instance larger.
+ */
+function poolUrl(raw) {
+    if (!raw) return raw;
+    try {
+        const url = new URL(raw);
+        if (!url.searchParams.has('connection_limit')) {
+            url.searchParams.set('connection_limit', process.env.DATABASE_POOL_SIZE || '25');
+        }
+        if (!url.searchParams.has('pool_timeout')) {
+            url.searchParams.set('pool_timeout', process.env.DATABASE_POOL_TIMEOUT || '20');
+        }
+        return url.toString();
+    } catch {
+        // A malformed URL is the datasource's problem to report, not ours.
+        return raw;
+    }
+}
+
+export const prisma = new PrismaClient({
+    datasources: { db: { url: poolUrl(process.env.DATABASE_URL) } },
+}).$extends({
     query: {
         $allModels: {
             async $allOperations({ query, args }) {

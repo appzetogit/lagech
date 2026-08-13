@@ -66,6 +66,21 @@ import {
     computeRestaurantOrderShare,
 } from '../../shared/restaurantPayout.util.js';
 
+/**
+ * Platform settings live in adminSettings.service.js — they are read by the
+ * delivery, restaurant and referral modules, and had no business sitting inside
+ * this file. Re-exported so existing imports keep working.
+ */
+export {
+    getDeliveryCashLimitSettings,
+    upsertDeliveryCashLimitSettings,
+    getDeliveryEmergencyHelp,
+    upsertDeliveryEmergencyHelp,
+    getRestaurantSubscriptionSettings,
+    addDeliveryPartnerBonus,
+} from './adminSettings.service.js';
+
+
 const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 const parseBooleanLike = (value, fieldName) => {
@@ -2449,95 +2464,7 @@ export async function getContactMessages(query = {}) {
 }
 
 // ----- Delivery Cash Limit (admin) -----
-export async function getDeliveryCashLimitSettings() {
-    const doc = await FoodDeliveryCashLimit.findOne({ isActive: true }).sort({ createdAt: -1 }).lean();
-    const settings = doc || { deliveryCashLimit: 0, deliveryWithdrawalLimit: 100, isActive: true };
-    return {
-        deliveryCashLimit: Number(settings.deliveryCashLimit) || 0,
-        deliveryWithdrawalLimit: Number(settings.deliveryWithdrawalLimit) || 100
-    };
-}
-
-export async function upsertDeliveryCashLimitSettings(body = {}) {
-    const existing = await FoodDeliveryCashLimit.findOne({ isActive: true }).sort({ createdAt: -1 });
-    const nextCashLimit = body.deliveryCashLimit;
-    const nextWithdrawalLimit = body.deliveryWithdrawalLimit;
-
-    if (existing) {
-        if (nextCashLimit !== undefined) existing.deliveryCashLimit = Math.max(0, Number(nextCashLimit) || 0);
-        if (nextWithdrawalLimit !== undefined) existing.deliveryWithdrawalLimit = Math.max(0, Number(nextWithdrawalLimit) || 0);
-        await existing.save();
-        return {
-            deliveryCashLimit: existing.deliveryCashLimit,
-            deliveryWithdrawalLimit: existing.deliveryWithdrawalLimit
-        };
-    }
-
-    const created = await FoodDeliveryCashLimit.create({
-        deliveryCashLimit: nextCashLimit !== undefined ? Math.max(0, Number(nextCashLimit) || 0) : 0,
-        deliveryWithdrawalLimit: nextWithdrawalLimit !== undefined ? Math.max(0, Number(nextWithdrawalLimit) || 0) : 100,
-        isActive: true
-    });
-
-    return {
-        deliveryCashLimit: created.deliveryCashLimit,
-        deliveryWithdrawalLimit: created.deliveryWithdrawalLimit
-    };
-}
-
 // ----- Delivery Emergency Help (admin) -----
-export async function getDeliveryEmergencyHelp() {
-    const doc = await FoodDeliveryEmergencyHelp.findOne({ isActive: true }).sort({ createdAt: -1 }).lean();
-    
-    // Provide sensible defaults for India if numbers are not configured
-    const defaults = {
-        medicalEmergency: '102',
-        accidentHelpline: '108',
-        contactPolice: '100',
-        insurance: '',
-        isActive: true
-    };
-
-    const data = doc || defaults;
-
-    return {
-        medicalEmergency: (data.medicalEmergency || defaults.medicalEmergency).trim(),
-        accidentHelpline: (data.accidentHelpline || defaults.accidentHelpline).trim(),
-        contactPolice: (data.contactPolice || defaults.contactPolice).trim(),
-        insurance: (data.insurance || '').trim()
-    };
-}
-
-export async function upsertDeliveryEmergencyHelp(body = {}) {
-    const existing = await FoodDeliveryEmergencyHelp.findOne({ isActive: true }).sort({ createdAt: -1 });
-    if (existing) {
-        if (body.medicalEmergency !== undefined) existing.medicalEmergency = String(body.medicalEmergency || '').trim();
-        if (body.accidentHelpline !== undefined) existing.accidentHelpline = String(body.accidentHelpline || '').trim();
-        if (body.contactPolice !== undefined) existing.contactPolice = String(body.contactPolice || '').trim();
-        if (body.insurance !== undefined) existing.insurance = String(body.insurance || '').trim();
-        await existing.save();
-        return {
-            medicalEmergency: existing.medicalEmergency || '',
-            accidentHelpline: existing.accidentHelpline || '',
-            contactPolice: existing.contactPolice || '',
-            insurance: existing.insurance || ''
-        };
-    }
-    const created = await FoodDeliveryEmergencyHelp.create({
-        medicalEmergency: String(body.medicalEmergency || '').trim(),
-        accidentHelpline: String(body.accidentHelpline || '').trim(),
-        contactPolice: String(body.contactPolice || '').trim(),
-        insurance: String(body.insurance || '').trim(),
-        isActive: true
-    });
-    return {
-        medicalEmergency: created.medicalEmergency || '',
-        accidentHelpline: created.accidentHelpline || '',
-        contactPolice: created.contactPolice || '',
-        insurance: created.insurance || ''
-    };
-}
-
 export async function getRestaurantReviews(query = {}) {
     const limit = Math.min(Math.max(parseInt(query.limit, 10) || 50, 1), 1000);
     const page = Math.max(parseInt(query.page, 10) || 1, 1);
@@ -4678,63 +4605,6 @@ export async function updateDeliverySupportTicket(id, body = {}) {
 /**
  * Subscription Settings
  */
-export const getRestaurantSubscriptionSettings = async () => {
-    const settings = await FoodRestaurantSubscriptionSettings.findOne();
-    const raw = settings ? settings.toObject() : {};
-    const starterPrice = Number(raw?.starterPrice ?? raw?.silverPrice ?? 999) || 999;
-    const growthPrice = Number(raw?.growthPrice ?? raw?.goldPrice ?? 1999) || 1999;
-    const premiumPrice = Number(raw?.premiumPrice ?? 2999) || 2999;
-    const starterMinGmv = Number(raw?.starterMinGmv ?? 0) || 0;
-    const starterMaxGmv = Number(raw?.starterMaxGmv ?? 30000) || 30000;
-    const growthMinGmv = Number(raw?.growthMinGmv ?? (starterMaxGmv + 0.01)) || (starterMaxGmv + 0.01);
-    const growthMaxGmv = Number(raw?.growthMaxGmv ?? 60000) || 60000;
-    const premiumMinGmv = Number(raw?.premiumMinGmv ?? (growthMaxGmv + 0.01)) || (growthMaxGmv + 0.01);
-    const onboardingFee = Math.max(0, Number(raw?.onboardingFee ?? 0) || 0);
-
-    let planCatalog = null;
-    try {
-        const { buildPlanCatalog, GST_RATE } = await import('../../restaurant/services/subscriptionPlan.service.js');
-        planCatalog = buildPlanCatalog({
-            starterPrice,
-            growthPrice,
-            premiumPrice,
-            starterMinGmv,
-            starterMaxGmv,
-            growthMinGmv,
-            growthMaxGmv,
-            premiumMinGmv,
-        });
-        return {
-            ...raw,
-            starterPrice,
-            growthPrice,
-            premiumPrice,
-            starterMinGmv,
-            starterMaxGmv,
-            growthMinGmv,
-            growthMaxGmv,
-            premiumMinGmv,
-            onboardingFee,
-            planCatalog,
-            gstRate: GST_RATE,
-        };
-    } catch {
-        return {
-            ...raw,
-            starterPrice,
-            growthPrice,
-            premiumPrice,
-            starterMinGmv,
-            starterMaxGmv,
-            growthMinGmv,
-            growthMaxGmv,
-            premiumMinGmv,
-            onboardingFee,
-        };
-    }
-};
-
-
 export const updateRestaurantSubscriptionSettings = async (data) => {
     let settings = await FoodRestaurantSubscriptionSettings.findOne();
     if (!settings) {
@@ -4948,12 +4818,6 @@ export async function getDeliveryPartners(query) {
 }
 
 // ----- Delivery partner bonus (admin) -----
-function generateBonusTransactionId() {
-    const n = Date.now().toString(36).slice(-6).toUpperCase();
-    const r = Math.random().toString(36).slice(2, 6).toUpperCase();
-    return `BON-${n}${r}`;
-}
-
 export async function getDeliveryPartnerBonusTransactions(query = {}) {
     const { page = 1, limit = 1000, search } = query;
     const filter = {};
@@ -5014,65 +4878,6 @@ export async function getDeliveryPartnerBonusTransactions(query = {}) {
     };
 }
 
-export async function addDeliveryPartnerBonus(body, adminUser) {
-    const partner = await FoodDeliveryPartner.findById(body.deliveryPartnerId).lean();
-    if (!partner) {
-        throw new ValidationError('Delivery partner not found');
-    }
-    if (partner.status !== 'approved') {
-        throw new ValidationError('Delivery partner must be approved');
-    }
-
-    let transactionId = generateBonusTransactionId();
-    let exists = await DeliveryBonusTransaction.findOne({ transactionId }).lean();
-    while (exists) {
-        transactionId = generateBonusTransactionId();
-        exists = await DeliveryBonusTransaction.findOne({ transactionId }).lean();
-    }
-
-    const amountToCredit = Number(body.amount) || 0;
-    if (amountToCredit <= 0) {
-        throw new ValidationError('Bonus amount must be greater than 0');
-    }
-
-    const created = await DeliveryBonusTransaction.create({
-        deliveryPartnerId: body.deliveryPartnerId,
-        transactionId,
-        amount: amountToCredit,
-        reference: body.reference || '',
-        createdByAdminId: adminUser?._id
-    });
-
-    // Keep wallet ledger in sync so pocket balance updates immediately in delivery app.
-    await FoodDeliveryWallet.findOneAndUpdate(
-        { deliveryPartnerId: body.deliveryPartnerId },
-        { $inc: { balance: amountToCredit, totalBonus: amountToCredit } },
-        { upsert: true }
-    );
-
-    try {
-        const { notifyOwnerSafely } = await import('../../../../core/notifications/firebase.service.js');
-        await notifyOwnerSafely(
-            { ownerType: 'DELIVERY_PARTNER', ownerId: body.deliveryPartnerId },
-            {
-                title: 'Bonus Credited!',
-                body: `You have received a bonus of \u20B9${amountToCredit}. ${body.reference || 'Great job!'}`,
-                image: 'https://i.ibb.co/5GzXz7r/Switcheats-Brand-Image.png',
-                data: {
-                    type: 'bonus_credited',
-                    amount: String(amountToCredit),
-                    transactionId: created.transactionId
-                }
-            }
-        );
-    } catch (e) {
-        console.error('Failed to send bonus notification:', e);
-    }
-
-    return created.toObject();
-}
-
-// ----- Delivery Earnings (admin) -----
 export async function getDeliveryEarnings(query = {}) {
     const page = Math.max(parseInt(query.page, 10) || 1, 1);
     const limit = Math.max(1, Math.min(1000, parseInt(query.limit, 10) || 50));

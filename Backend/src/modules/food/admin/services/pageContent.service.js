@@ -1,4 +1,8 @@
-import { FoodPageContent } from '../models/pageContent.model.js';
+import pkg from '@prisma/client';
+import { prisma } from '../../../../config/prisma.js';
+
+// DbNull writes SQL NULL to a Json column; a bare null would store JSON `null`.
+const { Prisma } = pkg;
 import { ValidationError } from '../../../../core/auth/errors.js';
 
 const normalizeKey = (key) => String(key || '').trim().toLowerCase();
@@ -41,13 +45,13 @@ export const getPublicPageByKey = async (key, module = 'ALL') => {
     const k = normalizeKey(key);
     const m = String(module || 'ALL').toUpperCase();
     
-    // Try to find the module-specific document first
-    let doc = await FoodPageContent.findOne({ key: k, module: m }).lean();
-    
-    // Fallback to 'ALL' if specific module is not found and we're not already looking for 'ALL'
-    if (!doc && m !== 'ALL') {
-        doc = await FoodPageContent.findOne({ key: k, module: 'ALL' }).lean();
-    }
+    // The module-specific page wins; 'ALL' is the shared fallback. Both are
+    // fetched in one round trip and picked in JS rather than two sequential
+    // queries where the second only runs on a miss.
+    const docs = await prisma.foodPageContent.findMany({
+        where: { key: k, module: m === 'ALL' ? 'ALL' : { in: [m, 'ALL'] } },
+    });
+    const doc = docs.find((d) => d.module === m) || docs.find((d) => d.module === 'ALL') || null;
     
     if (!doc) return { key: k, module: m, data: null };
     if (k === 'about') return { key: k, module: m, data: normalizeAboutForResponse(doc.about || null) };
@@ -67,20 +71,19 @@ export const upsertLegalPage = async (key, payload, updatedBy, module = 'ALL') =
     const email = String(payload?.email || '').trim();
     const mobile = String(payload?.mobile || '').trim();
 
-    const doc = await FoodPageContent.findOneAndUpdate(
-        { key: k, module: m },
-        {
-            $set: {
-                key: k,
-                module: m,
-                legal: { title, content, email, mobile },
-                about: undefined,
-                updatedBy: updatedBy || null,
-                updatedByRole: 'ADMIN'
-            }
-        },
-        { upsert: true, new: true }
-    ).lean();
+    // legal and about are alternatives on one row; writing one clears the other
+    // so a page cannot answer as both.
+    const data = {
+        legal: { title, content, email, mobile },
+        about: Prisma.DbNull,
+        updatedBy: updatedBy ? String(updatedBy) : null,
+        updatedByRole: 'ADMIN',
+    };
+    const doc = await prisma.foodPageContent.upsert({
+        where: { key_module: { key: k, module: m } },
+        create: { key: k, module: m, ...data },
+        update: data,
+    });
 
     return { key: k, module: m, data: normalizeLegalForResponse(doc?.legal || null) };
 };
@@ -103,20 +106,17 @@ export const upsertAboutPage = async (payload, updatedBy, module = 'ALL') => {
         order: Number.isFinite(Number(f?.order)) ? Number(f.order) : idx
     }));
 
-    const doc = await FoodPageContent.findOneAndUpdate(
-        { key: 'about', module: m },
-        {
-            $set: {
-                key: 'about',
-                module: m,
-                about: { appName, version, description, logo, features: normalizedFeatures, stats },
-                legal: undefined,
-                updatedBy: updatedBy || null,
-                updatedByRole: 'ADMIN'
-            }
-        },
-        { upsert: true, new: true }
-    ).lean();
+    const data = {
+        about: { appName, version, description, logo, features: normalizedFeatures, stats },
+        legal: Prisma.DbNull,
+        updatedBy: updatedBy ? String(updatedBy) : null,
+        updatedByRole: 'ADMIN',
+    };
+    const doc = await prisma.foodPageContent.upsert({
+        where: { key_module: { key: 'about', module: m } },
+        create: { key: 'about', module: m, ...data },
+        update: data,
+    });
 
     return { key: 'about', module: m, data: normalizeAboutForResponse(doc?.about || null) };
 };
