@@ -1,8 +1,6 @@
-import mongoose from 'mongoose';
+import { prisma } from '../../../../config/prisma.js';
+import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
-import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
-import { FoodDiningCategory } from '../models/diningCategory.model.js';
-import { FoodDiningRestaurant } from '../models/diningRestaurant.model.js';
 
 const slugify = (value) =>
     String(value || '')
@@ -11,52 +9,91 @@ const slugify = (value) =>
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/(^-|-$)/g, '');
 
-const toObjectIdArray = (values) =>
+const toIdArray = (values) =>
     Array.from(
         new Set(
             (Array.isArray(values) ? values : [values])
                 .map((value) => String(value || '').trim())
-                .filter((value) => mongoose.Types.ObjectId.isValid(value))
+                .filter(isId)
         )
-    ).map((value) => new mongoose.Types.ObjectId(value));
+    );
 
-async function syncRestaurantDiningSettings(restaurantId, diningDoc) {
-    const primaryCategory = diningDoc?.primaryCategoryId
-        ? await FoodDiningCategory.findById(diningDoc.primaryCategoryId).select('slug').lean()
+/** Restaurant columns the dining screens read. */
+const RESTAURANT_FIELDS = {
+    id: true, restaurantName: true, ownerName: true, ownerPhone: true,
+    profileImage: true, coverImages: true, menuImages: true,
+    area: true, city: true, status: true, rating: true, pureVegRestaurant: true,
+    diningEnabled: true, diningMaxGuests: true, diningType: true,
+};
+
+/**
+ * Mirror the dining row onto the restaurant's own columns.
+ *
+ * The restaurant carries a flattened copy because the customer-facing feed
+ * filters on it, and joining every listing to food_dining_restaurants to answer
+ * "is dining on" is not worth it. It is a cache, and this is the only writer.
+ */
+async function syncRestaurantDiningSettings(tx, restaurantId, dining) {
+    const primarySlug = dining?.primaryCategoryId
+        ? (await tx.foodDiningCategory.findUnique({
+            where: { id: dining.primaryCategoryId },
+            select: { slug: true },
+        }))?.slug
         : null;
 
-    await FoodRestaurant.findByIdAndUpdate(
-        restaurantId,
-        {
-            $set: {
-                diningSettings: {
-                    isEnabled: Boolean(diningDoc?.isEnabled),
-                    maxGuests: Math.max(1, Number(diningDoc?.maxGuests) || 6),
-                    diningType: primaryCategory?.slug || 'family-dining'
-                }
-            }
+    await tx.foodRestaurant.update({
+        where: { id: restaurantId },
+        data: {
+            diningEnabled: Boolean(dining?.isEnabled),
+            diningMaxGuests: Math.max(1, Number(dining?.maxGuests) || 6),
+            diningType: primarySlug || 'family-dining',
         },
-        { new: false }
-    );
+    });
 }
 
-async function syncCategoryRestaurantLinks(restaurantId, categoryIds) {
-    await FoodDiningCategory.updateMany(
-        { restaurantIds: restaurantId, _id: { $nin: categoryIds } },
-        { $pull: { restaurantIds: restaurantId } }
-    );
+/**
+ * Keep FoodDiningCategory.restaurantIds agreeing with the dining rows.
+ *
+ * ponytail: the link is stored in both directions — categoryIds here,
+ * restaurantIds there — so the two can drift. food_dining_restaurants is the
+ * writer's side; the mirror exists only so the admin grid can show a count.
+ * A join table would remove the question entirely, and needs a migration.
+ *
+ * Both halves run in the caller's transaction: as two loose updateMany calls, a
+ * failure between them left a restaurant listed under a category it had just
+ * been removed from.
+ */
+async function syncCategoryRestaurantLinks(tx, restaurantId, categoryIds) {
+    const stale = await tx.foodDiningCategory.findMany({
+        where: { restaurantIds: { has: restaurantId }, id: { notIn: categoryIds } },
+        select: { id: true, restaurantIds: true },
+    });
 
-    if (categoryIds.length > 0) {
-        await FoodDiningCategory.updateMany(
-            { _id: { $in: categoryIds } },
-            { $addToSet: { restaurantIds: restaurantId } }
-        );
+    for (const category of stale) {
+        await tx.foodDiningCategory.update({
+            where: { id: category.id },
+            data: { restaurantIds: category.restaurantIds.filter((id) => id !== restaurantId) },
+        });
+    }
+
+    if (categoryIds.length) {
+        const linked = await tx.foodDiningCategory.findMany({
+            where: { id: { in: categoryIds } },
+            select: { id: true, restaurantIds: true },
+        });
+        for (const category of linked) {
+            if (category.restaurantIds.includes(restaurantId)) continue;
+            await tx.foodDiningCategory.update({
+                where: { id: category.id },
+                data: { restaurantIds: [...category.restaurantIds, restaurantId] },
+            });
+        }
     }
 }
 
 function mapCategory(doc) {
     return {
-        _id: doc._id,
+        _id: doc.id,
         name: doc.name,
         slug: doc.slug,
         imageUrl: doc.imageUrl || '',
@@ -64,66 +101,58 @@ function mapCategory(doc) {
         sortOrder: doc.sortOrder || 0,
         restaurantCount: Array.isArray(doc.restaurantIds) ? doc.restaurantIds.length : 0,
         createdAt: doc.createdAt,
-        updatedAt: doc.updatedAt
+        updatedAt: doc.updatedAt,
     };
 }
 
-function getRestaurantZone(restaurant) {
-    return (
-        restaurant?.location?.area ||
-        restaurant?.location?.city ||
-        restaurant?.area ||
-        restaurant?.city ||
-        'N/A'
-    );
-}
+const getRestaurantZone = (restaurant) => restaurant?.area || restaurant?.city || 'N/A';
 
+/** First usable image: cover, then menu, then the profile picture. */
 function getRestaurantImage(restaurant) {
-    const coverImage = Array.isArray(restaurant?.coverImages)
-        ? restaurant.coverImages
-            .map((image) => (typeof image === 'string' ? image : image?.url || ''))
-            .find(Boolean)
-        : '';
-    if (coverImage) return coverImage;
+    const firstUrl = (list) =>
+        Array.isArray(list)
+            ? list.map((image) => (typeof image === 'string' ? image : image?.url || '')).find(Boolean)
+            : '';
 
-    const menuImage = Array.isArray(restaurant?.menuImages)
-        ? restaurant.menuImages
-            .map((image) => (typeof image === 'string' ? image : image?.url || ''))
-            .find(Boolean)
-        : '';
-    if (menuImage) return menuImage;
+    const cover = firstUrl(restaurant?.coverImages);
+    if (cover) return cover;
 
-    const value = restaurant?.profileImage;
-    if (!value) return '';
-    if (typeof value === 'string') return value;
-    return value?.url || '';
+    const menu = firstUrl(restaurant?.menuImages);
+    if (menu) return menu;
+
+    const profile = restaurant?.profileImage;
+    if (!profile) return '';
+    return typeof profile === 'string' ? profile : profile?.url || '';
 }
 
-function mapDiningRestaurant(restaurant, diningDoc, categoriesById) {
-    const categoryIds = (diningDoc?.categoryIds || []).map((id) => String(id));
+function mapDiningRestaurant(restaurant, dining, categoriesById) {
+    const categoryIds = (dining?.categoryIds || []).map(String);
     const categories = categoryIds
         .map((id) => categoriesById.get(id))
         .filter(Boolean)
         .map((category) => ({
-            _id: category._id,
+            _id: category.id,
             name: category.name,
             slug: category.slug,
-            imageUrl: category.imageUrl || ''
+            imageUrl: category.imageUrl || '',
         }));
 
-    const primaryCategoryId = diningDoc?.primaryCategoryId ? String(diningDoc.primaryCategoryId) : '';
-    const primaryCategory = categories.find((category) => String(category._id) === primaryCategoryId) || categories[0] || null;
+    const primaryCategoryId = dining?.primaryCategoryId ? String(dining.primaryCategoryId) : '';
+    const primaryCategory =
+        categories.find((category) => String(category._id) === primaryCategoryId) || categories[0] || null;
+
+    const pureVeg = dining?.pureVegRestaurant === true || restaurant?.pureVegRestaurant === true;
 
     return {
-        _id: restaurant._id,
-        id: restaurant._id,
-        name: restaurant.restaurantName || restaurant.name || 'N/A',
-        restaurantName: restaurant.restaurantName || restaurant.name || 'N/A',
+        _id: restaurant.id,
+        id: restaurant.id,
+        name: restaurant.restaurantName || 'N/A',
+        restaurantName: restaurant.restaurantName || 'N/A',
         ownerName: restaurant.ownerName || 'N/A',
-        ownerPhone: restaurant.ownerPhone || restaurant.phone || 'N/A',
-        pureVegRestaurant: diningDoc?.pureVegRestaurant === true || restaurant?.pureVegRestaurant === true,
+        ownerPhone: restaurant.ownerPhone || 'N/A',
+        pureVegRestaurant: pureVeg,
         zone: getRestaurantZone(restaurant),
-        city: restaurant?.location?.city || restaurant?.city || '',
+        city: restaurant?.city || '',
         status: restaurant.status,
         isActive: restaurant.status === 'approved',
         rating: Number(restaurant.rating || 0),
@@ -132,207 +161,241 @@ function mapDiningRestaurant(restaurant, diningDoc, categoriesById) {
         categoryIds,
         primaryCategoryId: primaryCategory?._id || null,
         diningSettings: {
-            isEnabled: Boolean(diningDoc?.isEnabled),
-            maxGuests: Math.max(1, Number(diningDoc?.maxGuests) || 6),
-            pureVegRestaurant: diningDoc?.pureVegRestaurant === true || restaurant?.pureVegRestaurant === true,
-            diningType: primaryCategory?.slug || restaurant?.diningSettings?.diningType || ''
-        }
+            isEnabled: Boolean(dining?.isEnabled),
+            maxGuests: Math.max(1, Number(dining?.maxGuests) || 6),
+            pureVegRestaurant: pureVeg,
+            diningType: primaryCategory?.slug || restaurant?.diningType || '',
+        },
     };
 }
 
 export async function listDiningCategoriesAdmin() {
-    const categories = await FoodDiningCategory.find({})
-        .sort({ sortOrder: 1, createdAt: -1 })
-        .lean();
+    const categories = await prisma.foodDiningCategory.findMany({
+        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }],
+    });
     return { categories: categories.map(mapCategory) };
 }
 
 export async function createDiningCategory(body = {}) {
     const name = String(body.name || '').trim();
-    if (!name) {
-        throw new ValidationError('Category name is required');
-    }
+    if (!name) throw new ValidationError('Category name is required');
 
     const slug = slugify(body.slug || name);
-    if (!slug) {
-        throw new ValidationError('Category slug is required');
+    if (!slug) throw new ValidationError('Category slug is required');
+
+    try {
+        const created = await prisma.foodDiningCategory.create({
+            data: {
+                name,
+                slug,
+                imageUrl: String(body.imageUrl || '').trim(),
+                isActive: body.isActive !== false,
+                sortOrder: Number(body.sortOrder) || 0,
+            },
+        });
+        return mapCategory(created);
+    } catch (error) {
+        // slug is unique in the database, so let the insert decide rather than
+        // checking first — the check-then-insert let two admins create the same
+        // category at the same time.
+        if (error?.code === 'P2002') throw new ValidationError('Dining category already exists');
+        throw error;
     }
-
-    const existing = await FoodDiningCategory.findOne({ slug }).lean();
-    if (existing) {
-        throw new ValidationError('Dining category already exists');
-    }
-
-    const created = await FoodDiningCategory.create({
-        name,
-        slug,
-        imageUrl: String(body.imageUrl || '').trim(),
-        isActive: body.isActive !== false,
-        sortOrder: Number(body.sortOrder) || 0
-    });
-
-    return mapCategory(created.toObject());
 }
 
 export async function updateDiningCategory(id, body = {}) {
-    if (!mongoose.Types.ObjectId.isValid(id)) return null;
+    if (!isId(id)) return null;
 
-    const doc = await FoodDiningCategory.findById(id);
-    if (!doc) return null;
+    const existing = await prisma.foodDiningCategory.findUnique({ where: { id } });
+    if (!existing) return null;
 
-    if (body.name !== undefined) {
-        doc.name = String(body.name || '').trim();
-    }
+    const data = {};
+    if (body.name !== undefined) data.name = String(body.name || '').trim();
     if (body.slug !== undefined || body.name !== undefined) {
-        const nextSlug = slugify(body.slug || doc.name);
-        const conflict = await FoodDiningCategory.findOne({ slug: nextSlug, _id: { $ne: doc._id } }).lean();
-        if (conflict) {
-            throw new ValidationError('Dining category slug already exists');
-        }
-        doc.slug = nextSlug;
+        data.slug = slugify(body.slug || data.name || existing.name);
     }
-    if (body.imageUrl !== undefined) {
-        doc.imageUrl = String(body.imageUrl || '').trim();
-    }
-    if (body.isActive !== undefined) {
-        doc.isActive = body.isActive !== false;
-    }
-    if (body.sortOrder !== undefined) {
-        doc.sortOrder = Number(body.sortOrder) || 0;
-    }
+    if (body.imageUrl !== undefined) data.imageUrl = String(body.imageUrl || '').trim();
+    if (body.isActive !== undefined) data.isActive = body.isActive !== false;
+    if (body.sortOrder !== undefined) data.sortOrder = Number(body.sortOrder) || 0;
 
-    await doc.save();
+    const updated = await prisma
+        .$transaction(async (tx) => {
+            const category = await tx.foodDiningCategory.update({ where: { id }, data });
 
-    const linkedDiningDocs = await FoodDiningRestaurant.find({ categoryIds: doc._id }).select('_id restaurantId').lean();
-    await Promise.all(linkedDiningDocs.map(async (item) => {
-        await syncRestaurantDiningSettings(item.restaurantId, await FoodDiningRestaurant.findById(item._id).lean());
-    }));
+            // The restaurant's diningType mirrors its primary category's slug, so
+            // a renamed slug has to be pushed out to everyone using it.
+            if (data.slug && data.slug !== existing.slug) {
+                const affected = await tx.foodDiningRestaurant.findMany({
+                    where: { primaryCategoryId: id },
+                });
+                for (const dining of affected) {
+                    await syncRestaurantDiningSettings(tx, dining.restaurantId, dining);
+                }
+            }
 
-    return mapCategory(doc.toObject());
+            return category;
+        })
+        .catch((error) => {
+            if (error?.code === 'P2002') {
+                throw new ValidationError('Dining category slug already exists');
+            }
+            throw error;
+        });
+
+    return mapCategory(updated);
 }
 
 export async function deleteDiningCategory(id) {
-    if (!mongoose.Types.ObjectId.isValid(id)) return null;
+    if (!isId(id)) return null;
 
-    const category = await FoodDiningCategory.findByIdAndDelete(id).lean();
+    const category = await prisma.foodDiningCategory.findUnique({ where: { id } });
     if (!category) return null;
 
-    const categoryId = new mongoose.Types.ObjectId(id);
-    const diningDocs = await FoodDiningRestaurant.find({ categoryIds: categoryId });
+    await prisma.$transaction(async (tx) => {
+        // primaryCategoryId is a real foreign key now, so every reference has to
+        // be cleared before the delete rather than left dangling as it was in
+        // Mongo — otherwise the delete is refused.
+        const affected = await tx.foodDiningRestaurant.findMany({
+            where: { OR: [{ categoryIds: { has: id } }, { primaryCategoryId: id }] },
+        });
 
-    for (const doc of diningDocs) {
-        doc.categoryIds = (doc.categoryIds || []).filter((value) => String(value) !== id);
-        if (doc.primaryCategoryId && String(doc.primaryCategoryId) === id) {
-            doc.primaryCategoryId = doc.categoryIds[0] || null;
+        for (const dining of affected) {
+            const categoryIds = (dining.categoryIds || []).filter((value) => String(value) !== id);
+            const next = await tx.foodDiningRestaurant.update({
+                where: { id: dining.id },
+                data: {
+                    categoryIds,
+                    primaryCategoryId:
+                        String(dining.primaryCategoryId) === id
+                            ? categoryIds[0] || null
+                            : dining.primaryCategoryId,
+                },
+            });
+            await syncRestaurantDiningSettings(tx, next.restaurantId, next);
         }
-        if (typeof doc.pureVegRestaurant !== 'boolean') {
-            const sourceRestaurant = await FoodRestaurant.findById(doc.restaurantId).select('pureVegRestaurant').lean();
-            doc.pureVegRestaurant = sourceRestaurant?.pureVegRestaurant === true;
-        }
-        await doc.save();
-        await syncRestaurantDiningSettings(doc.restaurantId, doc);
-    }
+
+        await tx.foodDiningCategory.delete({ where: { id } });
+    });
 
     return { id };
 }
 
 export async function listDiningRestaurantsAdmin() {
-    const [restaurants, diningDocs, categories] = await Promise.all([
-        FoodRestaurant.find({})
-            .sort({ createdAt: -1 })
-            .select('restaurantName ownerName ownerPhone profileImage coverImages menuImages location area city status rating pureVegRestaurant diningSettings')
-            .lean(),
-        FoodDiningRestaurant.find({})
-            .select('restaurantId categoryIds primaryCategoryId isEnabled maxGuests pureVegRestaurant')
-            .lean(),
-        FoodDiningCategory.find({}).select('name slug imageUrl').lean()
+    const [restaurants, diningRows, categories] = await Promise.all([
+        prisma.foodRestaurant.findMany({
+            orderBy: { createdAt: 'desc' },
+            select: RESTAURANT_FIELDS,
+        }),
+        prisma.foodDiningRestaurant.findMany({
+            select: {
+                restaurantId: true, categoryIds: true, primaryCategoryId: true,
+                isEnabled: true, maxGuests: true, pureVegRestaurant: true,
+            },
+        }),
+        prisma.foodDiningCategory.findMany({
+            select: { id: true, name: true, slug: true, imageUrl: true },
+        }),
     ]);
 
-    const categoriesById = new Map(categories.map((category) => [String(category._id), category]));
-    const diningByRestaurantId = new Map(diningDocs.map((doc) => [String(doc.restaurantId), doc]));
+    const categoriesById = new Map(categories.map((category) => [category.id, category]));
+    const diningByRestaurantId = new Map(diningRows.map((row) => [row.restaurantId, row]));
 
-    const items = restaurants.map((restaurant) =>
-        mapDiningRestaurant(restaurant, diningByRestaurantId.get(String(restaurant._id)), categoriesById)
-    );
-
-    return { restaurants: items };
+    return {
+        restaurants: restaurants.map((restaurant) =>
+            mapDiningRestaurant(restaurant, diningByRestaurantId.get(restaurant.id), categoriesById)
+        ),
+    };
 }
 
-export async function updateDiningRestaurant(restaurantId, body = {}) {
-    if (!mongoose.Types.ObjectId.isValid(restaurantId)) return null;
+/** Accepts a real boolean or the strings a multipart form sends. */
+const toBoolean = (value, fallback) => {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase();
+        if (['true', '1', 'yes'].includes(normalized)) return true;
+        if (['false', '0', 'no'].includes(normalized)) return false;
+    }
+    return fallback;
+};
 
-    const restaurant = await FoodRestaurant.findById(restaurantId).lean();
+export async function updateDiningRestaurant(restaurantId, body = {}) {
+    if (!isId(restaurantId)) return null;
+
+    const restaurant = await prisma.foodRestaurant.findUnique({
+        where: { id: String(restaurantId) },
+        select: RESTAURANT_FIELDS,
+    });
     if (!restaurant) return null;
 
-    let diningDoc = await FoodDiningRestaurant.findOne({ restaurantId });
-    if (!diningDoc) {
-        diningDoc = new FoodDiningRestaurant({
-            restaurantId,
-            pureVegRestaurant: restaurant.pureVegRestaurant === true
+    const dining = await prisma.$transaction(async (tx) => {
+        const existing = await tx.foodDiningRestaurant.findUnique({
+            where: { restaurantId: restaurant.id },
         });
-    }
 
-    const categoryIds = body.categoryIds !== undefined
-        ? toObjectIdArray(body.categoryIds)
-        : (diningDoc.categoryIds || []);
+        const requestedIds =
+            body.categoryIds !== undefined
+                ? toIdArray(body.categoryIds)
+                : existing?.categoryIds || [];
 
-    const validCategories = categoryIds.length > 0
-        ? await FoodDiningCategory.find({ _id: { $in: categoryIds } }).select('_id').lean()
-        : [];
-    const validCategoryIds = validCategories.map((category) => category._id);
+        // Drop ids that no longer name a category, so a stale admin tab cannot
+        // write a dangling reference.
+        const categoryIds = requestedIds.length
+            ? (await tx.foodDiningCategory.findMany({
+                where: { id: { in: requestedIds } },
+                select: { id: true },
+            })).map((category) => category.id)
+            : [];
 
-    if (body.categoryIds !== undefined) {
-        diningDoc.categoryIds = validCategoryIds;
-    }
-    if (body.isEnabled !== undefined) {
-        diningDoc.isEnabled = body.isEnabled === true;
-    }
-    if (body.maxGuests !== undefined) {
-        diningDoc.maxGuests = Math.max(1, parseInt(body.maxGuests, 10) || 6);
-    }
-    if (body.pureVegRestaurant !== undefined) {
-        if (typeof body.pureVegRestaurant === 'boolean') {
-            diningDoc.pureVegRestaurant = body.pureVegRestaurant;
-        } else if (typeof body.pureVegRestaurant === 'string') {
-            const normalized = body.pureVegRestaurant.trim().toLowerCase();
-            if (normalized === 'true' || normalized === '1' || normalized === 'yes') {
-                diningDoc.pureVegRestaurant = true;
-            } else if (normalized === 'false' || normalized === '0' || normalized === 'no') {
-                diningDoc.pureVegRestaurant = false;
-            }
+        let primaryCategoryId =
+            body.primaryCategoryId !== undefined
+                ? (isId(body.primaryCategoryId) ? String(body.primaryCategoryId) : null)
+                : existing?.primaryCategoryId || null;
+
+        // The primary has to be one of the selected categories.
+        if (!primaryCategoryId || !categoryIds.includes(primaryCategoryId)) {
+            primaryCategoryId = categoryIds[0] || null;
         }
-    }
 
-    if (body.primaryCategoryId !== undefined) {
-        diningDoc.primaryCategoryId = mongoose.Types.ObjectId.isValid(body.primaryCategoryId)
-            ? new mongoose.Types.ObjectId(body.primaryCategoryId)
-            : null;
-    }
+        const data = {
+            categoryIds,
+            primaryCategoryId,
+            isEnabled: body.isEnabled !== undefined
+                ? body.isEnabled === true
+                : existing?.isEnabled ?? false,
+            maxGuests: body.maxGuests !== undefined
+                ? Math.max(1, parseInt(body.maxGuests, 10) || 6)
+                : existing?.maxGuests ?? 6,
+            pureVegRestaurant: toBoolean(
+                body.pureVegRestaurant,
+                existing?.pureVegRestaurant ?? restaurant.pureVegRestaurant === true,
+            ),
+        };
 
-    const primaryCategoryIsAllowed = diningDoc.primaryCategoryId
-        && validCategoryIds.some((categoryId) => String(categoryId) === String(diningDoc.primaryCategoryId));
+        const saved = await tx.foodDiningRestaurant.upsert({
+            where: { restaurantId: restaurant.id },
+            create: { restaurantId: restaurant.id, ...data },
+            update: data,
+        });
 
-    if (!primaryCategoryIsAllowed) {
-        diningDoc.primaryCategoryId = validCategoryIds[0] || null;
-    }
-    if (typeof diningDoc.pureVegRestaurant !== 'boolean') {
-        diningDoc.pureVegRestaurant = restaurant.pureVegRestaurant === true;
-    }
+        await syncCategoryRestaurantLinks(tx, restaurant.id, categoryIds);
+        await syncRestaurantDiningSettings(tx, restaurant.id, saved);
 
-    await diningDoc.save();
-    await syncCategoryRestaurantLinks(restaurant._id, validCategoryIds);
-    await syncRestaurantDiningSettings(restaurant._id, diningDoc);
+        return saved;
+    });
 
-    const categories = await FoodDiningCategory.find({}).select('name slug imageUrl').lean();
-    const categoriesById = new Map(categories.map((category) => [String(category._id), category]));
+    const categories = await prisma.foodDiningCategory.findMany({
+        select: { id: true, name: true, slug: true, imageUrl: true },
+    });
+    const categoriesById = new Map(categories.map((category) => [category.id, category]));
 
-    return mapDiningRestaurant(restaurant, diningDoc.toObject(), categoriesById);
+    return mapDiningRestaurant(restaurant, dining, categoriesById);
 }
 
 export async function listDiningCategoriesPublic() {
-    const categories = await FoodDiningCategory.find({ isActive: true })
-        .sort({ sortOrder: 1, createdAt: -1 })
-        .lean();
+    const categories = await prisma.foodDiningCategory.findMany({
+        where: { isActive: true },
+        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }],
+    });
     return categories.map(mapCategory);
 }
 
@@ -340,71 +403,72 @@ export async function listDiningRestaurantsPublic(query = {}) {
     const categoryValue = String(query.category || '').trim();
     const cityValue = String(query.city || '').trim();
 
-    // 1. Build the base filter for FoodRestaurant
-    const restaurantFilter = {
-        'diningSettings.isEnabled': true,
-        status: 'approved'
-    };
+    const where = { diningEnabled: true, status: 'approved' };
+    if (cityValue) where.city = { contains: cityValue, mode: 'insensitive' };
 
-    // 2. Apply city filter if provided
-    if (cityValue) {
-        restaurantFilter.$or = [
-            { city: { $regex: cityValue, $options: 'i' } },
-            { 'location.city': { $regex: cityValue, $options: 'i' } }
-        ];
-    }
-
-    // 3. Apply category filter if provided
     if (categoryValue) {
-        const category = await FoodDiningCategory.findOne({
-            $or: [
-                mongoose.Types.ObjectId.isValid(categoryValue) ? { _id: categoryValue } : null,
-                { slug: categoryValue.toLowerCase() }
-            ].filter(Boolean)
-        }).lean();
+        const category = await prisma.foodDiningCategory.findFirst({
+            where: isId(categoryValue)
+                ? { OR: [{ id: categoryValue }, { slug: categoryValue.toLowerCase() }] }
+                : { slug: categoryValue.toLowerCase() },
+            select: { id: true },
+        });
+        if (!category) return [];
 
-        if (!category) {
-            return [];
-        }
-        restaurantFilter._id = { $in: category.restaurantIds || [] };
+        // Read the membership from the dining rows, which is the side the writes
+        // go to, rather than from the mirrored restaurantIds array.
+        const members = await prisma.foodDiningRestaurant.findMany({
+            where: { categoryIds: { has: category.id } },
+            select: { restaurantId: true },
+        });
+        if (!members.length) return [];
+        where.id = { in: members.map((m) => m.restaurantId) };
     }
 
-    // 4. Fetch restaurants
-    const restaurants = await FoodRestaurant.find(restaurantFilter)
-        .select('restaurantName restaurantNameNormalized ownerName ownerPhone profileImage coverImages menuImages cuisines location area city status rating diningSettings estimatedDeliveryTime estimatedDeliveryTimeMinutes featuredDish featuredPrice offer openingTime closingTime openDays isAcceptingOrders costForTwo pureVegRestaurant')
-        .lean();
-
-    if (restaurants.length === 0) {
-        return [];
-    }
-
-    const restaurantIds = restaurants.map(r => r._id);
-
-    // 5. Fetch dining metadata from FoodDiningRestaurant for these restaurants
-    const diningMetadata = await FoodDiningRestaurant.find({
-        restaurantId: { $in: restaurantIds }
-    })
-    .populate('categoryIds', 'name slug imageUrl')
-    .lean();
-
-    const metadataMap = new Map();
-    diningMetadata.forEach(m => {
-        metadataMap.set(String(m.restaurantId), m);
+    const restaurants = await prisma.foodRestaurant.findMany({
+        where,
+        select: {
+            ...RESTAURANT_FIELDS,
+            restaurantNameNormalized: true, cuisines: true, slug: true,
+            estimatedDeliveryTime: true, estimatedDeliveryTimeMinutes: true,
+            featuredDish: true, featuredPrice: true, offer: true,
+            openingTime: true, closingTime: true, openDays: true,
+            isAcceptingOrders: true, costForTwo: true,
+        },
     });
+    if (!restaurants.length) return [];
 
-    // 6. Map combined results
-    return restaurants.map((r) => {
-        const meta = metadataMap.get(String(r._id));
+    const diningRows = await prisma.foodDiningRestaurant.findMany({
+        where: { restaurantId: { in: restaurants.map((r) => r.id) } },
+    });
+    const categoryIds = [...new Set(diningRows.flatMap((row) => row.categoryIds || []))];
+    const categories = categoryIds.length
+        ? await prisma.foodDiningCategory.findMany({
+            where: { id: { in: categoryIds } },
+            select: { id: true, name: true, slug: true, imageUrl: true },
+        })
+        : [];
+
+    const categoriesById = new Map(categories.map((category) => [category.id, category]));
+    const diningByRestaurantId = new Map(diningRows.map((row) => [row.restaurantId, row]));
+
+    return restaurants.map((restaurant) => {
+        const dining = diningByRestaurantId.get(restaurant.id);
+        // categoryIds was a .populate() in Mongo; the ids are a plain column, so
+        // the categories are gathered in one query above and mapped here.
+        const linked = (dining?.categoryIds || []).map((id) => categoriesById.get(id)).filter(Boolean);
+
         return {
-            ...r,
-            restaurant: r,
-            categories: meta?.categoryIds || [],
+            ...restaurant,
+            restaurant,
+            categories: linked,
             diningSettings: {
                 isEnabled: true,
-                maxGuests: Math.max(1, Number(meta?.maxGuests || r.diningSettings?.maxGuests) || 6),
-                pureVegRestaurant: r.pureVegRestaurant === true || meta?.pureVegRestaurant === true,
-                diningType: meta?.categoryIds?.[0]?.slug || r.diningSettings?.diningType || 'family-dining'
-            }
+                maxGuests: Math.max(1, Number(dining?.maxGuests || restaurant.diningMaxGuests) || 6),
+                pureVegRestaurant:
+                    restaurant.pureVegRestaurant === true || dining?.pureVegRestaurant === true,
+                diningType: linked[0]?.slug || restaurant.diningType || 'family-dining',
+            },
         };
     });
 }

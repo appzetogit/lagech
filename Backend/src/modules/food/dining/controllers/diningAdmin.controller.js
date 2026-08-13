@@ -1,4 +1,4 @@
-import mongoose from 'mongoose';
+import { isId } from '../../../../utils/helpers.js';
 import * as diningService from '../services/dining.service.js';
 
 export async function getDiningCategories(req, res, next) {
@@ -22,7 +22,7 @@ export async function createDiningCategory(req, res, next) {
 export async function updateDiningCategory(req, res, next) {
     try {
         const { id } = req.params;
-        if (!mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid dining category id' });
         }
         const category = await diningService.updateDiningCategory(id, req.body || {});
@@ -38,7 +38,7 @@ export async function updateDiningCategory(req, res, next) {
 export async function deleteDiningCategory(req, res, next) {
     try {
         const { id } = req.params;
-        if (!mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid dining category id' });
         }
         const result = await diningService.deleteDiningCategory(id);
@@ -63,7 +63,7 @@ export async function getDiningRestaurants(req, res, next) {
 export async function updateDiningRestaurant(req, res, next) {
     try {
         const { restaurantId } = req.params;
-        if (!mongoose.Types.ObjectId.isValid(restaurantId)) {
+        if (!isId(restaurantId)) {
             return res.status(400).json({ success: false, message: 'Invalid restaurant id' });
         }
         const restaurant = await diningService.updateDiningRestaurant(restaurantId, req.body || {});

@@ -1,7 +1,6 @@
-import mongoose from 'mongoose';
-import { FoodChatMessage } from '../models/chatMessage.model.js';
-import { FoodChatConversation } from '../models/chatConversation.model.js';
-import { FoodOrder } from '../../orders/models/order.model.js';
+import { Prisma } from '@prisma/client';
+import { prisma } from '../../../../config/prisma.js';
+import { isId } from '../../../../utils/helpers.js';
 import { ValidationError, ForbiddenError } from '../../../../core/auth/errors.js';
 import { getIO, rooms } from '../../../../config/socket.js';
 import { notifyOwnersSafely } from '../../orders/services/order.helpers.js';
@@ -9,6 +8,9 @@ import { notifyAdminsSafely } from '../../../../core/notifications/firebase.serv
 import { logger } from '../../../../utils/logger.js';
 
 const ROLES = ['USER', 'RESTAURANT', 'DELIVERY_PARTNER', 'ADMIN'];
+
+/** The order columns that decide who may talk to whom. */
+const ORDER_PARTIES = { userId: true, restaurantId: true, deliveryPartnerId: true };
 
 /** Stable identifier for a participant. ADMIN carries no id (shared inbox). */
 export const partyToken = (role, id) => (role === 'ADMIN' ? 'ADMIN' : `${role}:${String(id)}`);
@@ -28,22 +30,25 @@ const roomForToken = (role, id) => {
     return null;
 };
 
+const loadOrderParties = async (orderId) => {
+    if (!isId(orderId)) throw new ValidationError('Invalid order id');
+    const order = await prisma.foodOrder.findUnique({
+        where: { id: String(orderId) },
+        select: ORDER_PARTIES,
+    });
+    if (!order) throw new ValidationError('Order not found');
+    return order;
+};
+
 /** Both non-admin parties must actually belong to the order they're chatting about. */
 async function assertOrderParticipants(orderId, tokens) {
-    if (!mongoose.Types.ObjectId.isValid(String(orderId))) {
-        throw new ValidationError('Invalid order id');
-    }
-    const order = await FoodOrder.findById(orderId)
-        .select('userId restaurantId dispatch.deliveryPartnerId')
-        .lean();
-    if (!order) throw new ValidationError('Order not found');
+    const order = await loadOrderParties(orderId);
 
     const orderTokens = new Set(
         [
             order.userId && partyToken('USER', order.userId),
             order.restaurantId && partyToken('RESTAURANT', order.restaurantId),
-            order.dispatch?.deliveryPartnerId &&
-                partyToken('DELIVERY_PARTNER', order.dispatch.deliveryPartnerId)
+            order.deliveryPartnerId && partyToken('DELIVERY_PARTNER', order.deliveryPartnerId),
         ].filter(Boolean)
     );
 
@@ -56,11 +61,6 @@ async function assertOrderParticipants(orderId, tokens) {
 }
 
 /**
- * Persist a message, deliver it live over sockets, and push to the recipient.
- * @param sender {{ role, id }}
- * @param dto {{ peerRole, peerId?, orderId?, text }}
- */
-/**
  * Work out who the message is for, from the ORDER — never from a client-supplied peerId,
  * which a caller could point at an unrelated user.
  *
@@ -68,20 +68,15 @@ async function assertOrderParticipants(orderId, tokens) {
  * assigned rider and vice versa. peerRole is honoured when supplied so a restaurant can
  * pick which side of the order it is addressing.
  */
-async function resolveOrderRecipient(sender, order, requestedPeerRole = '') {
-    const userId = order?.userId ? String(order.userId) : '';
-    const riderId = order?.dispatch?.deliveryPartnerId ? String(order.dispatch.deliveryPartnerId) : '';
-    const restaurantId = order?.restaurantId ? String(order.restaurantId) : '';
-    const me = String(sender.id);
-
+function resolveOrderRecipient(sender, order, requestedPeerRole = '') {
     const parties = {
-        USER: userId,
-        DELIVERY_PARTNER: riderId,
-        RESTAURANT: restaurantId
+        USER: order?.userId ? String(order.userId) : '',
+        DELIVERY_PARTNER: order?.deliveryPartnerId ? String(order.deliveryPartnerId) : '',
+        RESTAURANT: order?.restaurantId ? String(order.restaurantId) : '',
     };
 
     // The sender must actually be on this order.
-    if (String(parties[sender.role] || '') !== me) {
+    if (String(parties[sender.role] || '') !== String(sender.id)) {
         throw new ForbiddenError('You are not a participant of this order');
     }
 
@@ -100,12 +95,14 @@ async function resolveOrderRecipient(sender, order, requestedPeerRole = '') {
 
     // Default counterpart: customer <-> assigned rider.
     if (sender.role === 'USER') {
-        if (!riderId) throw new ValidationError('No delivery partner is assigned to this order yet');
-        return { role: 'DELIVERY_PARTNER', id: riderId };
+        if (!parties.DELIVERY_PARTNER) {
+            throw new ValidationError('No delivery partner is assigned to this order yet');
+        }
+        return { role: 'DELIVERY_PARTNER', id: parties.DELIVERY_PARTNER };
     }
     if (sender.role === 'DELIVERY_PARTNER') {
-        if (!userId) throw new ValidationError('This order has no customer to message');
-        return { role: 'USER', id: userId };
+        if (!parties.USER) throw new ValidationError('This order has no customer to message');
+        return { role: 'USER', id: parties.USER };
     }
     // A restaurant has two possible counterparts, so it must say which.
     throw new ValidationError('peerRole is required for this sender');
@@ -138,53 +135,47 @@ export async function sendMessage(sender, dto) {
     let peerId;
 
     if (orderIdRaw && !adminInvolved) {
-        if (!mongoose.Types.ObjectId.isValid(orderIdRaw)) {
-            throw new ValidationError('Invalid order id');
-        }
-        const order = await FoodOrder.findById(orderIdRaw)
-            .select('userId restaurantId dispatch.deliveryPartnerId')
-            .lean();
-        if (!order) throw new ValidationError('Order not found');
+        const order = await loadOrderParties(orderIdRaw);
+        orderId = orderIdRaw;
 
-        orderId = order._id;
-        const peer = await resolveOrderRecipient(sender, order, requestedPeerRole);
+        const peer = resolveOrderRecipient(sender, order, requestedPeerRole);
         peerRole = peer.role;
         peerId = peer.id;
     } else {
         // Admin support thread: no order, so the peer must be stated.
         peerRole = requestedPeerRole || 'ADMIN';
         if (peerRole !== 'ADMIN') {
-            if (!mongoose.Types.ObjectId.isValid(String(dto?.peerId || ''))) {
+            if (!isId(dto?.peerId)) {
                 throw new ValidationError('peerId is required for non-admin recipients');
             }
             peerId = String(dto.peerId);
         }
-        if (orderIdRaw && mongoose.Types.ObjectId.isValid(orderIdRaw)) {
-            orderId = new mongoose.Types.ObjectId(orderIdRaw);
-        }
+        if (isId(orderIdRaw)) orderId = orderIdRaw;
     }
 
     const senderToken = partyToken(sender.role, sender.id);
     const recipientToken = partyToken(peerRole, peerId);
 
-    // Customer <-> rider threads are keyed on the order's Mongo _id exactly, because the
+    // Customer <-> rider threads are keyed on the order id exactly, because the
     // client looks the thread up by the order id it already holds.
     const conversationId =
         orderId && isUserRiderPair(sender.role, peerRole)
             ? String(orderId)
             : buildConversationId(senderToken, recipientToken, orderId);
 
-    const message = await FoodChatMessage.create({
-        conversationId,
-        orderId,
-        senderRole: sender.role,
-        senderId: new mongoose.Types.ObjectId(String(sender.id)),
-        senderToken,
-        recipientRole: peerRole,
-        recipientId: peerRole === 'ADMIN' ? null : new mongoose.Types.ObjectId(String(peerId)),
-        recipientToken,
-        participants: [senderToken, recipientToken],
-        text
+    const message = await prisma.foodChatMessage.create({
+        data: {
+            conversationId,
+            orderId,
+            senderRole: sender.role,
+            senderId: String(sender.id),
+            senderToken,
+            recipientRole: peerRole,
+            recipientId: peerRole === 'ADMIN' ? null : String(peerId),
+            recipientToken,
+            participants: [senderToken, recipientToken],
+            text,
+        },
     });
 
     const payload = serializeMessage(message);
@@ -206,7 +197,7 @@ export async function sendMessage(sender, dto) {
     const pushPayload = {
         title: chatTitle(sender.role),
         body: text.slice(0, 120),
-        data: { type: 'chat_message', conversationId, orderId: orderId ? String(orderId) : '' }
+        data: { type: 'chat_message', conversationId, orderId: orderId ? String(orderId) : '' },
     };
     if (peerRole === 'ADMIN') {
         notifyAdminsSafely(pushPayload).catch(() => {});
@@ -225,19 +216,18 @@ const chatTitle = (senderRole) => {
     return 'New message';
 };
 
-export function serializeMessage(doc) {
-    const m = doc?.toObject ? doc.toObject() : doc;
+export function serializeMessage(row) {
     return {
-        id: String(m._id),
-        conversationId: m.conversationId,
-        orderId: m.orderId ? String(m.orderId) : null,
-        senderRole: m.senderRole,
-        senderId: String(m.senderId),
-        recipientRole: m.recipientRole,
-        recipientId: m.recipientId ? String(m.recipientId) : null,
-        text: m.text,
-        readAt: m.readAt || null,
-        createdAt: m.createdAt
+        id: String(row.id),
+        conversationId: row.conversationId,
+        orderId: row.orderId ? String(row.orderId) : null,
+        senderRole: row.senderRole,
+        senderId: String(row.senderId),
+        recipientRole: row.recipientRole,
+        recipientId: row.recipientId ? String(row.recipientId) : null,
+        text: row.text,
+        readAt: row.readAt || null,
+        createdAt: row.createdAt,
     };
 }
 
@@ -246,7 +236,10 @@ export async function getHistory(me, { conversationId, page = 1, limit = 30 }) {
     if (!conversationId) throw new ValidationError('conversationId is required');
     const myToken = partyToken(me.role, me.id);
 
-    const first = await FoodChatMessage.findOne({ conversationId }).select('participants').lean();
+    const first = await prisma.foodChatMessage.findFirst({
+        where: { conversationId },
+        select: { participants: true },
+    });
     if (!first) return { messages: [], pagination: { page: 1, limit, total: 0, totalPages: 1 } };
     if (!first.participants.includes(myToken)) {
         throw new ForbiddenError('Not your conversation');
@@ -256,40 +249,45 @@ export async function getHistory(me, { conversationId, page = 1, limit = 30 }) {
     const l = Math.min(Math.max(parseInt(limit, 10) || 30, 1), 100);
 
     const [docs, total] = await Promise.all([
-        FoodChatMessage.find({ conversationId }).sort({ createdAt: -1 }).skip((p - 1) * l).limit(l).lean(),
-        FoodChatMessage.countDocuments({ conversationId })
+        prisma.foodChatMessage.findMany({
+            where: { conversationId },
+            orderBy: { createdAt: 'desc' },
+            skip: (p - 1) * l,
+            take: l,
+        }),
+        prisma.foodChatMessage.count({ where: { conversationId } }),
     ]);
 
     await markRead(me, conversationId);
 
     return {
         messages: docs.map(serializeMessage).reverse(), // oldest → newest for UI
-        pagination: { page: p, limit: l, total, totalPages: Math.max(1, Math.ceil(total / l)) }
+        pagination: { page: p, limit: l, total, totalPages: Math.max(1, Math.ceil(total / l)) },
     };
 }
 
 /** Mark every message sent TO me in this conversation as read. */
 export async function markRead(me, conversationId) {
     const myToken = partyToken(me.role, me.id);
-    const res = await FoodChatMessage.updateMany(
-        { conversationId, recipientToken: myToken, readAt: null },
-        { $set: { readAt: new Date() } }
-    );
-    return { updated: res.modifiedCount || 0 };
+    const { count } = await prisma.foodChatMessage.updateMany({
+        where: { conversationId, recipientToken: myToken, readAt: null },
+        data: { readAt: new Date() },
+    });
+    return { updated: count };
 }
 
-/** All conversations I'm a party to, newest activity first, with unread counts. */
 /**
  * Conversations I take part in, newest first.
  *
  * Messages stay the source of truth for lastMessage / lastAt / unread; the
- * conversation document only contributes the support metadata (title, status,
- * closedAt). A thread with no document — every order chat created before support
- * threads existed — still lists, defaulted to an open conversation with no title,
- * so nothing needed backfilling.
+ * conversation row only contributes the support metadata (title, status,
+ * closedAt). A thread with no row — every order chat created before support
+ * threads existed — still lists, defaulted to an open conversation with no
+ * title, so nothing needed backfilling. Threads opened but never written to
+ * would be invisible if we only grouped messages, so they are merged in too.
  *
- * Threads that were opened but never written to would be invisible if we only
- * grouped messages, so documents with no messages yet are merged in too.
+ * The grouping was a Mongo aggregation pipeline; DISTINCT ON is the Postgres
+ * idiom for "latest row per group" and does it in one indexed pass.
  *
  * @param {{orderId?: string}} [query] Pass orderId to list only that order's threads.
  */
@@ -297,64 +295,61 @@ export async function listConversations(me, query = {}) {
     const myToken = partyToken(me.role, me.id);
 
     const orderId = String(query.orderId || '').trim();
-    if (orderId && !mongoose.Types.ObjectId.isValid(orderId)) {
-        throw new ValidationError('Invalid order id');
-    }
-    const orderObjectId = orderId ? new mongoose.Types.ObjectId(orderId) : null;
+    if (orderId && !isId(orderId)) throw new ValidationError('Invalid order id');
+    const orderFilter = orderId ? Prisma.sql`AND "orderId" = ${orderId}` : Prisma.empty;
 
-    const rows = await FoodChatMessage.aggregate([
-        {
-            $match: {
-                participants: myToken,
-                ...(orderObjectId ? { orderId: orderObjectId } : {})
-            }
-        },
-        { $sort: { createdAt: -1 } },
-        {
-            $group: {
-                _id: '$conversationId',
-                orderId: { $first: '$orderId' },
-                lastText: { $first: '$text' },
-                lastAt: { $first: '$createdAt' },
-                lastSenderToken: { $first: '$senderToken' },
-                participants: { $first: '$participants' },
-                firstAt: { $last: '$createdAt' },
-                unread: {
-                    $sum: {
-                        $cond: [
-                            { $and: [{ $eq: ['$recipientToken', myToken] }, { $eq: ['$readAt', null] }] },
-                            1,
-                            0
-                        ]
-                    }
-                }
-            }
-        },
-        { $sort: { lastAt: -1 } }
-    ]);
+    const rows = await prisma.$queryRaw`
+        WITH mine AS (
+            SELECT * FROM "food_chat_messages"
+            WHERE ${myToken} = ANY("participants") ${orderFilter}
+        ),
+        agg AS (
+            SELECT "conversationId",
+                   MIN("createdAt") AS "firstAt",
+                   COUNT(*) FILTER (
+                       WHERE "recipientToken" = ${myToken} AND "readAt" IS NULL
+                   ) AS "unread"
+            FROM mine
+            GROUP BY "conversationId"
+        ),
+        latest AS (
+            SELECT DISTINCT ON ("conversationId")
+                   "conversationId", "orderId", "text", "createdAt", "participants"
+            FROM mine
+            ORDER BY "conversationId", "createdAt" DESC
+        )
+        SELECT latest."conversationId", latest."orderId",
+               latest."text" AS "lastText", latest."createdAt" AS "lastAt",
+               latest."participants", agg."firstAt", agg."unread"
+        FROM latest
+        JOIN agg ON agg."conversationId" = latest."conversationId"
+        ORDER BY latest."createdAt" DESC
+    `;
 
-    const docs = await FoodChatConversation.find({
-        participants: myToken,
-        ...(orderObjectId ? { orderId: orderObjectId } : {})
-    }).lean();
+    const docs = await prisma.foodChatConversation.findMany({
+        where: {
+            participants: { has: myToken },
+            ...(orderId ? { orderId } : {}),
+        },
+    });
     const docById = new Map(docs.map((d) => [d.conversationId, d]));
 
     const merged = rows.map((r) => {
-        const doc = docById.get(r._id);
-        docById.delete(r._id);
+        const doc = docById.get(r.conversationId);
+        docById.delete(r.conversationId);
         return {
-            conversationId: r._id,
+            conversationId: r.conversationId,
             orderId: r.orderId ? String(r.orderId) : doc?.orderId ? String(doc.orderId) : null,
             title: doc?.title || '',
-            peerToken:
-                (r.participants || []).find((t) => t !== myToken) || doc?.peerToken || null,
+            peerToken: (r.participants || []).find((t) => t !== myToken) || doc?.peerToken || null,
             lastMessage: r.lastText,
             lastAt: r.lastAt,
-            unread: r.unread,
+            // COUNT is int8, which the driver hands back as a BigInt.
+            unread: Number(r.unread),
             status: doc?.status || 'open',
-            // Without a document the thread began with its first message.
+            // Without a row the thread began with its first message.
             createdAt: doc?.createdAt || r.firstAt,
-            closedAt: doc?.closedAt || null
+            closedAt: doc?.closedAt || null,
         };
     });
 
@@ -370,7 +365,7 @@ export async function listConversations(me, query = {}) {
             unread: 0,
             status: doc.status,
             createdAt: doc.createdAt,
-            closedAt: doc.closedAt || null
+            closedAt: doc.closedAt || null,
         });
     }
 
@@ -393,7 +388,7 @@ const serializeConversation = (doc, extra = {}) => ({
     lastMessage: '',
     lastAt: null,
     unread: 0,
-    ...extra
+    ...extra,
 });
 
 function emitConversationUpdate(doc) {
@@ -426,9 +421,7 @@ export async function createConversation(me, dto = {}) {
     const title = String(dto.title || '').trim().slice(0, 200);
 
     const orderId = String(dto.orderId || '').trim();
-    if (orderId && !mongoose.Types.ObjectId.isValid(orderId)) {
-        throw new ValidationError('Invalid order id');
-    }
+    if (orderId && !isId(orderId)) throw new ValidationError('Invalid order id');
     if (peerToken !== 'ADMIN') {
         const [peerRole] = peerToken.split(':');
         if (!ROLES.includes(peerRole)) throw new ValidationError('Invalid peer');
@@ -439,23 +432,23 @@ export async function createConversation(me, dto = {}) {
     const conversationId = buildConversationId(myToken, peerToken, orderId || null);
 
     // Upsert so a double-tap on "start chat" reuses the thread instead of
-    // colliding on the unique index.
-    const doc = await FoodChatConversation.findOneAndUpdate(
-        { conversationId },
-        {
-            $setOnInsert: {
-                conversationId,
-                orderId: orderId ? new mongoose.Types.ObjectId(orderId) : null,
-                title,
-                peerToken,
-                openedByToken: myToken,
-                participants: [myToken, peerToken].sort(),
-                status: 'open',
-                closedAt: null
-            }
+    // colliding on the unique index. `update` writes conversationId back to
+    // itself: a no-op that keeps it non-empty, which is what makes Prisma
+    // compile this to INSERT … ON CONFLICT. See prisma/README.md.
+    const doc = await prisma.foodChatConversation.upsert({
+        where: { conversationId },
+        create: {
+            conversationId,
+            orderId: orderId || null,
+            title,
+            peerToken,
+            openedByToken: myToken,
+            participants: [myToken, peerToken].sort(),
+            status: 'open',
+            closedAt: null,
         },
-        { new: true, upsert: true, setDefaultsOnInsert: true }
-    ).lean();
+        update: { conversationId },
+    });
 
     emitConversationUpdate(doc);
     return { conversation: serializeConversation(doc) };
@@ -474,9 +467,9 @@ export async function updateConversationStatus(me, conversationId, status) {
         throw new ValidationError('Status must be open, in_progress or closed');
     }
 
-    const existing = await FoodChatConversation.findOne({
-        conversationId: String(conversationId || '').trim()
-    }).lean();
+    const existing = await prisma.foodChatConversation.findUnique({
+        where: { conversationId: String(conversationId || '').trim() },
+    });
     if (!existing) throw new ValidationError('Conversation not found');
 
     // ADMIN is a shared inbox, so any admin may act on a thread it is part of.
@@ -484,11 +477,10 @@ export async function updateConversationStatus(me, conversationId, status) {
         throw new ForbiddenError('Not your conversation');
     }
 
-    const doc = await FoodChatConversation.findOneAndUpdate(
-        { conversationId: existing.conversationId },
-        { $set: { status: next, closedAt: next === 'closed' ? new Date() : null } },
-        { new: true }
-    ).lean();
+    const doc = await prisma.foodChatConversation.update({
+        where: { conversationId: existing.conversationId },
+        data: { status: next, closedAt: next === 'closed' ? new Date() : null },
+    });
 
     emitConversationUpdate(doc);
     return { conversation: serializeConversation(doc) };
