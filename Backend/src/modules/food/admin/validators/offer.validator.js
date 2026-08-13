@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import mongoose from 'mongoose';
+import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 
 const createOfferSchema = z.object({
@@ -54,7 +54,7 @@ export const validateCreateOfferDto = (body) => {
             ...(result.data.restaurantIds || []),
             ...(result.data.restaurantId ? [result.data.restaurantId] : [])
         ];
-        if (restaurantIds.length === 0 || restaurantIds.some((id) => !mongoose.Types.ObjectId.isValid(id))) {
+        if (restaurantIds.length === 0 || restaurantIds.some((id) => !isId(id))) {
             throw new ValidationError('At least one valid restaurant is required for selected restaurant scope');
         }
     }

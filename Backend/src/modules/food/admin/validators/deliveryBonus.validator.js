@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import mongoose from 'mongoose';
+import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 
 const addBonusSchema = z.object({
@@ -19,7 +19,7 @@ export const validateAddDeliveryBonusDto = (body) => {
     if (!result.success) {
         throw new ValidationError(result.error.errors[0].message);
     }
-    if (!mongoose.Types.ObjectId.isValid(result.data.deliveryPartnerId)) {
+    if (!isId(result.data.deliveryPartnerId)) {
         throw new ValidationError('Invalid deliveryPartnerId');
     }
     return {

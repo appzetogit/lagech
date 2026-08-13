@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import mongoose from 'mongoose';
+import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 
 const addonUpsertSchema = z.object({
@@ -66,7 +66,7 @@ export const validateCheckCompletionsDto = (body) => {
     const deliveryPartnerId = body?.deliveryPartnerId ? String(body.deliveryPartnerId) : '';
     const force = Boolean(body?.force);
     
-    const isValidId = mongoose.Types.ObjectId.isValid(deliveryPartnerId);
+    const isValidId = isId(deliveryPartnerId);
     if (!deliveryPartnerId || (!isValidId && deliveryPartnerId !== 'all')) {
         throw new ValidationError('Invalid deliveryPartnerId');
     }

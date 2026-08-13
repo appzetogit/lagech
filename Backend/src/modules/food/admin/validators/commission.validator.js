@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import mongoose from 'mongoose';
+import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 
 const restaurantCommissionUpsertSchema = z.object({
@@ -25,7 +25,7 @@ export const validateRestaurantCommissionUpsertDto = (body) => {
     if (!result.success) {
         throw new ValidationError(result.error.errors[0].message);
     }
-    if (!mongoose.Types.ObjectId.isValid(result.data.restaurantId)) {
+    if (!isId(result.data.restaurantId)) {
         throw new ValidationError('Invalid restaurantId');
     }
     if (result.data.defaultCommission.type === 'percentage' && (result.data.defaultCommission.value < 0 || result.data.defaultCommission.value > 100)) {
