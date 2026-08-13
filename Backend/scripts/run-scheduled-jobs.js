@@ -1,5 +1,5 @@
 import { validateConfig } from '../src/config/validateEnv.js';
-import { connectDB, disconnectDB } from '../src/config/db.js';
+import { connectDB, disconnectDB } from '../src/config/prisma.js';
 import { connectRedis, closeRedis } from '../src/config/redis.js';
 import { config } from '../src/config/env.js';
 import { expireExpiredOffers } from '../src/modules/food/admin/services/admin.service.js';

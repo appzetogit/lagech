@@ -201,15 +201,16 @@ export const initSocket = async (server) => {
             // only the customer, the restaurant, and the assigned rider for THIS order may
             // subscribe. Without this any authenticated user could track any order.
             try {
-                const [{ FoodOrder }, { buildOrderIdentityFilter }] = await Promise.all([
-                    import('../modules/food/orders/models/order.model.js'),
+                const [{ prisma }, { buildOrderIdentityFilter }] = await Promise.all([
+                    import('./prisma.js'),
                     import('../modules/food/orders/services/order.helpers.js'),
                 ]);
                 const identity = buildOrderIdentityFilter(orderId);
                 if (!identity) return;
-                const order = await FoodOrder.findOne(identity)
-                    .select('userId restaurantId dispatch.deliveryPartnerId')
-                    .lean();
+                const order = await prisma.foodOrder.findFirst({
+                    where: identity,
+                    select: { userId: true, restaurantId: true, deliveryPartnerId: true },
+                });
                 if (!order) return;
 
                 const me = String(userId || '');
@@ -217,7 +218,7 @@ export const initSocket = async (server) => {
                     (role === 'USER' && String(order.userId || '') === me) ||
                     (role === 'RESTAURANT' && String(order.restaurantId || '') === me) ||
                     (role === 'DELIVERY_PARTNER' &&
-                        String(order.dispatch?.deliveryPartnerId || '') === me);
+                        String(order.deliveryPartnerId || '') === me);
 
                 if (!isParticipant) {
                     logger.warn(

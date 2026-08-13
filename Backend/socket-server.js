@@ -3,7 +3,7 @@ import express from 'express';
 
 import { config } from './src/config/env.js';
 import { validateConfig } from './src/config/validateEnv.js';
-import { connectDB, disconnectDB } from './src/config/db.js';
+import { connectDB, disconnectDB } from './src/config/prisma.js';
 import { connectRedis, closeRedis } from './src/config/redis.js';
 import { initSocket } from './src/config/socket.js';
 import { closeBullMQConnection } from './src/queues/index.js';

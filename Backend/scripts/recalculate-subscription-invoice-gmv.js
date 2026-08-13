@@ -12,7 +12,7 @@
  */
 import 'dotenv/config';
 import mongoose from 'mongoose';
-import { connectDB, disconnectDB } from '../src/config/db.js';
+import { connectDB, disconnectDB } from '../src/config/prisma.js';
 import { FoodSubscriptionInvoice } from '../src/modules/food/restaurant/models/subscriptionInvoice.model.js';
 import { FoodRestaurant } from '../src/modules/food/restaurant/models/restaurant.model.js';
 import {

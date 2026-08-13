@@ -1,5 +1,6 @@
 import { sendError } from '../../utils/response.js';
-import { FoodAdmin } from '../admin/admin.model.js';
+import { prisma } from '../../config/prisma.js';
+import { isId } from '../../utils/helpers.js';
 
 const isSuperAdmin = (admin) =>
     !admin?.adminType || admin?.adminType === 'super_admin' || admin?.isSuperAdmin === true;
@@ -11,9 +12,14 @@ const hasAction = (permissions, section, action) => {
 
 const hydrateAdmin = async (req) => {
     if (req.adminAccess) return req.adminAccess;
-    const admin = await FoodAdmin.findById(req.user?.userId)
-        .select('adminType permissions isActive isDeleted')
-        .lean();
+    if (!isId(req.user?.userId)) return null;
+
+    const admin = await prisma.foodAdmin.findUnique({
+        where: { id: String(req.user.userId) },
+        select: { adminType: true, permissions: true, isActive: true, isDeleted: true },
+    });
+    // Cached on the request so a route guarded by several permission checks
+    // still costs one query.
     req.adminAccess = admin;
     return admin;
 };

@@ -1,7 +1,5 @@
-import { FoodDeliveryPartner } from '../../modules/food/delivery/models/deliveryPartner.model.js';
-import { FoodOrder } from '../../modules/food/orders/models/order.model.js';
+import { prisma, connectDB } from '../../config/prisma.js';
 import { logger } from '../../utils/logger.js';
-import { connectDB } from '../../config/db.js';
 import { getRedisClient } from '../../config/redis.js';
 
 let isDBConnected = false;
@@ -13,14 +11,14 @@ const ensureDB = async () => {
 };
 
 /**
- * Syncs the latest location from "HOT" Redis storage to "COLD" MongoDB storage.
+ * Flushes the latest rider location from hot Redis storage down to Postgres.
  */
 export const processTrackingJob = async (job) => {
     await ensureDB();
     const { name, data } = job;
 
     if (name === 'sync-hot-locations') {
-        return await handleHotSync(data);
+        return handleHotSync(data);
     }
     return null;
 };
@@ -30,10 +28,9 @@ const handleHotSync = async ({ userId, orderId }) => {
     if (!redis) return;
 
     try {
-        // Fetch the absolute latest location for both rider and order from Redis
         const [riderRaw, orderRaw] = await Promise.all([
             redis.hGet('rider:locations:hot', String(userId)),
-            redis.hGet('order:locations:hot', String(orderId))
+            redis.hGet('order:locations:hot', String(orderId)),
         ]);
 
         const riderData = riderRaw ? JSON.parse(riderRaw) : null;
@@ -41,35 +38,39 @@ const handleHotSync = async ({ userId, orderId }) => {
 
         const updates = [];
 
+        // Plain lat/lng columns; the PostGIS point beside them is maintained by
+        // the sync_geography trigger, so there is still one thing to write.
         if (riderData && userId) {
             updates.push(
-                FoodDeliveryPartner.findByIdAndUpdate(userId, {
-                    $set: {
-                        lastLocation: {
-                            type: 'Point',
-                            coordinates: [riderData.lng, riderData.lat]
-                        }
-                    }
+                prisma.foodDeliveryPartner.updateMany({
+                    where: { id: String(userId) },
+                    data: {
+                        lastLat: riderData.lat,
+                        lastLng: riderData.lng,
+                        // Stamped so a stale fix is distinguishable from a rider
+                        // parked at the same spot. The column existed and nothing
+                        // was writing it.
+                        lastLocationAt: new Date(),
+                    },
                 })
             );
         }
 
         if (orderData && orderId) {
             updates.push(
-                FoodOrder.findOneAndUpdate({ orderId }, {
-                    $set: {
-                        lastRiderLocation: {
-                            type: 'Point',
-                            coordinates: [orderData.lng, orderData.lat]
-                        }
-                    }
+                prisma.foodOrder.updateMany({
+                    where: { orderId: String(orderId) },
+                    data: { riderLat: orderData.lat, riderLng: orderData.lng },
                 })
             );
         }
 
-        if (updates.length > 0) {
+        if (updates.length) {
+            // updateMany rather than update: a job for a rider or order that has
+            // since been deleted is a no-op instead of a thrown P2025 that would
+            // retry the job forever.
             await Promise.all(updates);
-            logger.info(`Synced hot location to MongoDB for Order ${orderId} / Rider ${userId}`);
+            logger.info(`Synced hot location to Postgres for Order ${orderId} / Rider ${userId}`);
         }
     } catch (err) {
         logger.error(`Failed to handle hot sync for ${orderId}: ${err.message}`);

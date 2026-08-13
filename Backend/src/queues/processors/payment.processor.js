@@ -1,3 +1,4 @@
+import { prisma } from '../../config/prisma.js';
 import { logger } from '../../utils/logger.js';
 import { creditWallet } from '../../core/payments/wallet.service.js';
 import { createPayment, markPaymentSuccess } from '../../core/payments/payment.service.js';
@@ -89,13 +90,12 @@ async function handleDeliveryCompleted(data) {
                 metadata: { orderId, paymentMethod }
             });
 
-            // Increment delivery count
-            const { FoodDeliveryWallet } = await import('../../modules/food/delivery/models/deliveryWallet.model.js');
-            const mongoose = await import('mongoose');
-            await FoodDeliveryWallet.updateOne(
-                { deliveryPartnerId: new mongoose.default.Types.ObjectId(deliveryPartnerId) },
-                { $inc: { totalDeliveries: 1 } }
-            );
+            // Increment delivery count. creditWallet has already created the
+            // wallet row, so this is an update rather than an upsert.
+            await prisma.wallet.updateMany({
+                where: { entityType: 'deliveryBoy', entityId: String(deliveryPartnerId) },
+                data: { totalDeliveries: { increment: 1 } },
+            });
 
             logger.info(`[PaymentProcessor] Delivery partner ${deliveryPartnerId} credited ${riderEarning} for order ${orderId}`);
         } catch (err) {

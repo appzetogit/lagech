@@ -16,7 +16,7 @@
  */
 import 'dotenv/config';
 import mongoose from 'mongoose';
-import { connectDB, disconnectDB } from '../src/config/db.js';
+import { connectDB, disconnectDB } from '../src/config/prisma.js';
 import { FoodOrder } from '../src/modules/food/orders/models/order.model.js';
 
 const isLive = process.argv.includes('--live');

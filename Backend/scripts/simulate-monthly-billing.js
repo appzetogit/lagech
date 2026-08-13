@@ -7,7 +7,7 @@
  */
 import 'dotenv/config';
 import mongoose from 'mongoose';
-import { connectDB, disconnectDB } from '../src/config/db.js';
+import { connectDB, disconnectDB } from '../src/config/prisma.js';
 import {
     runMonthlyBilling,
     runBillingCatchUp,

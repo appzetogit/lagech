@@ -26,7 +26,9 @@ app.use(requestIdMiddleware);
 app.get('/health', async (_req, res) => {
     try {
         const data = await healthCheck();
-        res.status(200).json(data);
+        // 503 when the database is unreachable, so a load balancer stops
+        // routing to this instance instead of only the body saying DOWN.
+        res.status(data.status === 'UP' ? 200 : 503).json(data);
     } catch (err) {
         res.status(503).json({ status: 'DOWN', error: 'Health check failed' });
     }

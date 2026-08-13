@@ -1,3 +1,4 @@
+import { prisma } from '../../config/prisma.js';
 import { sendResponse } from '../../utils/response.js';
 import { getPaymentsByOrder } from './payment.service.js';
 import { getTransactionsByOrder } from './transaction.service.js';
@@ -91,17 +92,21 @@ export const getAdminWalletController = async (req, res, next) => {
 
 export const getAdminFinanceSummaryController = async (req, res, next) => {
     try {
-        const { FoodAdminWallet } = await import('../../modules/food/admin/models/adminWallet.model.js');
-        const adminWallet = await FoodAdminWallet.findOne({ key: 'platform' }).lean();
+        const adminWallet = await prisma.wallet.findUnique({
+            where: { entityType_entityId: { entityType: 'admin', entityId: 'platform' } },
+        });
         const pendingSettlements = await listSettlements({ status: 'pending', limit: 100 });
         const pendingRefunds = await listRefunds({ status: 'pending', limit: 100 });
 
         return sendResponse(res, 200, 'Finance summary', {
             platform: {
-                balance: adminWallet?.balance || 0,
-                totalRevenue: adminWallet?.totalRevenue || 0,
-                totalPayouts: adminWallet?.totalPayouts || 0,
-                totalRefunds: adminWallet?.totalRefunds || 0
+                // Number(), not the raw column: these are Decimal now, and a
+                // Decimal serializes to a JSON *string*, so the dashboard would
+                // render "1234.00" and arithmetic on it would concatenate.
+                balance: Number(adminWallet?.balance || 0),
+                totalRevenue: Number(adminWallet?.totalRevenue || 0),
+                totalPayouts: Number(adminWallet?.totalPayouts || 0),
+                totalRefunds: Number(adminWallet?.totalRefunds || 0)
             },
             pendingSettlements: {
                 count: pendingSettlements.total,

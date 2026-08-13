@@ -6,7 +6,7 @@ import { exec } from 'child_process';
 import app from './src/app.js';
 import { config } from './src/config/env.js';
 import { validateConfig } from './src/config/validateEnv.js';
-import { connectDB, disconnectDB } from './src/config/db.js';
+import { connectDB, disconnectDB } from './src/config/prisma.js';
 // Both databases run side by side until the last Mongoose model is gone.
 import { connectDB as connectPostgres, disconnectDB as disconnectPostgres } from './src/config/prisma.js';
 import { connectRedis, closeRedis } from './src/config/redis.js';
