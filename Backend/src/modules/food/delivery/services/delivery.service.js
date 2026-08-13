@@ -1,15 +1,13 @@
-import mongoose from 'mongoose';
-import { FoodDeliveryPartner } from '../models/deliveryPartner.model.js';
-import { DeliverySupportTicket } from '../models/supportTicket.model.js';
-import { DeliveryBonusTransaction } from '../../admin/models/deliveryBonusTransaction.model.js';
-import { FoodEarningAddon } from '../../admin/models/earningAddon.model.js';
-import { FoodOrder } from '../../orders/models/order.model.js';
+import { prisma } from '../../../../config/prisma.js';
+import { isId } from '../../../../utils/helpers.js';
 import { uploadImageBuffer } from '../../../../services/cloudinary.service.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { getDeliveryCashLimitSettings } from '../../admin/services/admin.service.js';
 import { upsertFirebaseDeviceToken } from '../../../../core/notifications/firebase.service.js';
 import { logger } from '../../../../utils/logger.js';
 import { collectDynamicRegistration } from './driverRegistrationField.service.js';
+
+const num = (v) => Number(v) || 0;
 
 const savePartnerFcmToken = async (partnerId, fcmToken, platform) => {
     if (!fcmToken || !partnerId) return;
@@ -25,76 +23,56 @@ const savePartnerFcmToken = async (partnerId, fcmToken, platform) => {
     }
 };
 
+const requirePartner = async (userId) => {
+    const partner = await prisma.foodDeliveryPartner.findUnique({ where: { id: String(userId) } });
+    if (!partner) throw new ValidationError('Delivery partner not found');
+    return partner;
+};
+
 export const registerDeliveryPartner = async (payload, files, rawBody = {}) => {
-    const { 
-        name, phone, email, countryCode, address, city, state, 
+    const {
+        name, phone, email, countryCode, address, city, state,
         vehicleType, vehicleName, vehicleNumber, drivingLicenseNumber, panNumber, aadharNumber,
-        fcmToken, platform 
+        fcmToken, platform,
     } = payload;
     const refRaw = typeof payload?.ref === 'string' ? String(payload.ref).trim() : '';
 
-    const existing = await FoodDeliveryPartner.findOne({ phone });
+    const existing = await prisma.foodDeliveryPartner.findUnique({ where: { phone } });
     if (existing) {
         if (existing.status !== 'rejected') {
             throw new ValidationError('Delivery partner with this phone already exists');
         }
-        // If rejected, delete the old record so they can start fresh with same phone
-        await FoodDeliveryPartner.deleteMany({ phone });
+        // Rejected: clear the old record so they can start fresh on the same phone.
+        await prisma.foodDeliveryPartner.deleteMany({ where: { phone } });
     }
 
     if (vehicleNumber && String(vehicleNumber).trim()) {
         const vNum = String(vehicleNumber).trim().toUpperCase();
-        
-        // 1. Check for active/pending partners with this vehicle
-        const activeVehicle = await FoodDeliveryPartner.findOne({ 
-            vehicleNumber: vNum, 
-            status: { $ne: 'rejected' } 
+
+        const activeVehicle = await prisma.foodDeliveryPartner.findFirst({
+            where: { vehicleNumber: vNum, status: { not: 'rejected' } },
         });
         if (activeVehicle) {
             throw new ValidationError('Vehicle number already registered with another partner');
         }
-        
-        // 2. Clean up any rejected records with this vehicle (to satisfy unique index)
-        await FoodDeliveryPartner.deleteMany({ 
-            vehicleNumber: vNum, 
-            status: 'rejected' 
+
+        // Clear rejected records holding this vehicle, so the unique constraint allows it.
+        await prisma.foodDeliveryPartner.deleteMany({
+            where: { vehicleNumber: vNum, status: 'rejected' },
         });
     }
 
     const uploadTasks = [];
-
-    if (files?.profilePhoto?.[0]) {
+    const photoField = (field, folder) => {
+        if (!files?.[field]?.[0]) return;
         uploadTasks.push(
-            uploadImageBuffer(files.profilePhoto[0].buffer, 'food/delivery/profile').then((url) => [
-                'profilePhoto',
-                url
-            ])
+            uploadImageBuffer(files[field][0].buffer, folder).then((url) => [field, url]),
         );
-    }
-    if (files?.aadharPhoto?.[0]) {
-        uploadTasks.push(
-            uploadImageBuffer(files.aadharPhoto[0].buffer, 'food/delivery/aadhar').then((url) => [
-                'aadharPhoto',
-                url
-            ])
-        );
-    }
-    if (files?.panPhoto?.[0]) {
-        uploadTasks.push(
-            uploadImageBuffer(files.panPhoto[0].buffer, 'food/delivery/pan').then((url) => [
-                'panPhoto',
-                url
-            ])
-        );
-    }
-    if (files?.drivingLicensePhoto?.[0]) {
-        uploadTasks.push(
-            uploadImageBuffer(
-                files.drivingLicensePhoto[0].buffer,
-                'food/delivery/license'
-            ).then((url) => ['drivingLicensePhoto', url])
-        );
-    }
+    };
+    photoField('profilePhoto', 'food/delivery/profile');
+    photoField('aadharPhoto', 'food/delivery/aadhar');
+    photoField('panPhoto', 'food/delivery/pan');
+    photoField('drivingLicensePhoto', 'food/delivery/license');
 
     const images = Object.fromEntries(await Promise.all(uploadTasks));
 
@@ -102,21 +80,21 @@ export const registerDeliveryPartner = async (payload, files, rawBody = {}) => {
     const fileKeys = new Set(Object.keys(files || {}));
     const { customFields, documentKeys } = await collectDynamicRegistration(rawBody || {}, fileKeys);
 
-    // Upload any admin-defined document files (skip keys already handled as known photos).
-    const KNOWN_DOC_FIELDS = new Set(['profilePhoto', 'aadharPhoto', 'panPhoto', 'drivingLicensePhoto', 'upiQrCode']);
+    // Upload admin-defined document files (skipping keys already handled above).
+    const KNOWN_DOC_FIELDS = new Set([
+        'profilePhoto', 'aadharPhoto', 'panPhoto', 'drivingLicensePhoto', 'upiQrCode',
+    ]);
     const customDocuments = {};
     const dynamicDocTasks = [];
     for (const key of documentKeys) {
         if (KNOWN_DOC_FIELDS.has(key)) continue;
         const file = files?.[key]?.[0];
         if (!file) continue;
-        dynamicDocTasks.push(
-            uploadImageBuffer(file.buffer, `food/delivery/${key}`).then((url) => [key, url])
-        );
+        dynamicDocTasks.push(uploadImageBuffer(file.buffer, `food/delivery/${key}`).then((url) => [key, url]));
     }
     for (const [k, v] of await Promise.all(dynamicDocTasks)) customDocuments[k] = v;
 
-    let normalizedEmail = undefined;
+    let normalizedEmail;
     if (email && String(email).trim()) {
         normalizedEmail = String(email).trim().toLowerCase();
         const emailRegex = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9\-]+(?:\.[a-zA-Z0-9\-]+)*\.[a-zA-Z]{2,10}$/;
@@ -130,206 +108,179 @@ export const registerDeliveryPartner = async (payload, files, rawBody = {}) => {
         }
     }
 
-    const partner = await FoodDeliveryPartner.create({
-        name,
-        phone,
-        email: normalizedEmail,
-        countryCode,
-        address,
-        city,
-        state,
-        vehicleType,
-        vehicleName,
-        vehicleNumber,
-        drivingLicenseNumber,
-        panNumber,
-        aadharNumber,
-        status: 'pending',
-        ...images,
-        ...(Object.keys(customFields).length ? { customFields } : {}),
-        ...(Object.keys(customDocuments).length ? { customDocuments } : {})
+    // referredBy is resolved before the insert. Mongo created the row and then
+    // patched it in a second save; one write is simpler and cannot half-apply.
+    let referredById = null;
+    if (refRaw && isId(refRaw)) {
+        const referrer = await prisma.foodDeliveryPartner.findUnique({
+            where: { id: refRaw },
+            select: { id: true },
+        });
+        if (referrer) referredById = referrer.id;
+    }
+
+    let partner = await prisma.foodDeliveryPartner.create({
+        data: {
+            name,
+            phone,
+            email: normalizedEmail,
+            ...(countryCode ? { countryCode } : {}),
+            address,
+            city,
+            state,
+            vehicleType,
+            vehicleName,
+            vehicleNumber: vehicleNumber ? String(vehicleNumber).trim().toUpperCase() : null,
+            drivingLicenseNumber,
+            panNumber,
+            aadharNumber,
+            status: 'pending',
+            referredById,
+            ...images,
+            ...(Object.keys(customFields).length ? { customFields } : {}),
+            ...(Object.keys(customDocuments).length ? { customDocuments } : {}),
+        },
     });
 
-    // Ensure referralCode exists for sharing.
+    // The referral code defaults to the partner's own id, which only exists after
+    // the insert.
     if (!partner.referralCode) {
-        partner.referralCode = String(partner._id);
+        partner = await prisma.foodDeliveryPartner.update({
+            where: { id: partner.id },
+            data: { referralCode: partner.id },
+        });
     }
 
-    // Store referredBy (no credit here; credit happens on admin approval).
-    if (refRaw && mongoose.Types.ObjectId.isValid(refRaw) && String(refRaw) !== String(partner._id)) {
-        const referrer = await FoodDeliveryPartner.findById(refRaw).select('_id').lean();
-        if (referrer) {
-            partner.referredBy = referrer._id;
-        }
-    }
-
-    await partner.save();
-
-    // Save FCM via shared upsert so this token can't live on another account/bucket.
-    if (fcmToken) {
-        await savePartnerFcmToken(partner._id, fcmToken, platform);
-    }
+    // Save FCM through the shared upsert, so this token cannot live on another account.
+    if (fcmToken) await savePartnerFcmToken(partner.id, fcmToken, platform);
 
     try {
         const { notifyAdminsSafely } = await import('../../../../core/notifications/firebase.service.js');
         void notifyAdminsSafely({
             title: 'New Delivery Partner Registration 🚲',
             body: `A new delivery partner "${partner.name}" has signed up and is pending approval.`,
-            data: {
-                type: 'new_registration',
-                subType: 'delivery_partner',
-                id: String(partner._id)
-            }
+            data: { type: 'new_registration', subType: 'delivery_partner', id: partner.id },
         });
     } catch (e) {
-        // eslint-disable-next-line no-console
-        console.error('Failed to notify admins of new delivery partner registration:', e);
+        logger.warn(`Failed to notify admins of new delivery partner registration: ${e?.message || e}`);
     }
 
-    return partner.toObject();
+    return partner;
 };
 
-export const updateDeliveryPartnerProfile = async (userId, payload, files) => {
-    const partner = await FoodDeliveryPartner.findById(userId);
-    if (!partner) {
-        throw new ValidationError('Delivery partner not found');
+/** Shared vehicle-number guard for the profile-update paths. */
+async function claimVehicleNumber(vNum, selfId) {
+    if (!vNum) return;
+    const activeVehicle = await prisma.foodDeliveryPartner.findFirst({
+        where: { vehicleNumber: vNum, id: { not: String(selfId) }, status: { not: 'rejected' } },
+    });
+    if (activeVehicle) {
+        throw new ValidationError('Vehicle number already registered with another partner');
     }
+    // Clear rejected records holding this vehicle, so the unique constraint allows it.
+    await prisma.foodDeliveryPartner.deleteMany({ where: { vehicleNumber: vNum, status: 'rejected' } });
+}
+
+export const updateDeliveryPartnerProfile = async (userId, payload, files) => {
+    const partner = await requirePartner(userId);
 
     const {
         name, countryCode, address, city, state,
-        vehicleType, vehicleName, vehicleNumber, drivingLicenseNumber, panNumber, aadharNumber,
-        fcmToken, platform
+        vehicleType, vehicleName, vehicleNumber, drivingLicenseNumber,
+        fcmToken, platform,
     } = payload;
 
-    if (name) partner.name = name;
-    if (countryCode !== undefined) partner.countryCode = countryCode;
-    if (address !== undefined) partner.address = address;
-    if (city !== undefined) partner.city = city;
-    if (state !== undefined) partner.state = state;
-    if (vehicleType !== undefined) partner.vehicleType = vehicleType;
-    if (vehicleName !== undefined) partner.vehicleName = vehicleName;
-    if (vehicleNumber !== undefined && String(vehicleNumber).trim().toUpperCase() !== String(partner.vehicleNumber || '').trim().toUpperCase()) {
-        const vNum = String(vehicleNumber).trim().toUpperCase();
-        if (vNum) {
-            const activeVehicle = await FoodDeliveryPartner.findOne({ 
-                vehicleNumber: vNum,
-                _id: { $ne: userId },
-                status: { $ne: 'rejected' }
-            });
-            if (activeVehicle) {
-                throw new ValidationError('Vehicle number already registered with another partner');
-            }
-            
-            // Clean up rejected records with this vehicle if we are taking it
-            await FoodDeliveryPartner.deleteMany({ 
-                vehicleNumber: vNum, 
-                status: 'rejected' 
-            });
-        }
-        partner.vehicleNumber = vNum;
-    }
-    if (drivingLicenseNumber !== undefined) partner.drivingLicenseNumber = drivingLicenseNumber;
+    const data = {};
+    if (name) data.name = name;
+    if (countryCode !== undefined) data.countryCode = countryCode;
+    if (address !== undefined) data.address = address;
+    if (city !== undefined) data.city = city;
+    if (state !== undefined) data.state = state;
+    if (vehicleType !== undefined) data.vehicleType = vehicleType;
+    if (vehicleName !== undefined) data.vehicleName = vehicleName;
 
-    let updatedDocsRequiringReapproval = false;
+    if (
+        vehicleNumber !== undefined &&
+        String(vehicleNumber).trim().toUpperCase() !== String(partner.vehicleNumber || '').trim().toUpperCase()
+    ) {
+        const vNum = String(vehicleNumber).trim().toUpperCase();
+        await claimVehicleNumber(vNum, partner.id);
+        data.vehicleNumber = vNum || null;
+    }
+    if (drivingLicenseNumber !== undefined) data.drivingLicenseNumber = drivingLicenseNumber;
 
     if (files?.profilePhoto?.[0]) {
-        partner.profilePhoto = await uploadImageBuffer(files.profilePhoto[0].buffer, 'food/delivery/profile');
+        data.profilePhoto = await uploadImageBuffer(files.profilePhoto[0].buffer, 'food/delivery/profile');
     }
 
-    await partner.save();
+    const updated = await prisma.foodDeliveryPartner.update({ where: { id: partner.id }, data });
 
-    if (fcmToken) {
-        await savePartnerFcmToken(partner._id, fcmToken, platform);
-    }
+    if (fcmToken) await savePartnerFcmToken(partner.id, fcmToken, platform);
 
-    return {
-        partner: partner.toObject(),
-        requiresReapproval: false
-    };
+    return { partner: updated, requiresReapproval: false };
 };
 
 export const updateDeliveryPartnerDetails = async (userId, payload) => {
-    const partner = await FoodDeliveryPartner.findById(userId);
-    if (!partner) {
-        throw new ValidationError('Delivery partner not found');
-    }
+    const partner = await requirePartner(userId);
+    const data = {};
 
     const vehicle = payload?.vehicle;
     if (vehicle && typeof vehicle === 'object') {
-        if (vehicle.number !== undefined && String(vehicle.number || '').trim().toUpperCase() !== String(partner.vehicleNumber || '').trim().toUpperCase()) {
+        if (
+            vehicle.number !== undefined &&
+            String(vehicle.number || '').trim().toUpperCase() !== String(partner.vehicleNumber || '').trim().toUpperCase()
+        ) {
             const vNum = String(vehicle.number || '').trim().toUpperCase();
-            if (vNum) {
-                const activeVehicle = await FoodDeliveryPartner.findOne({ 
-                    vehicleNumber: vNum,
-                    _id: { $ne: userId },
-                    status: { $ne: 'rejected' }
-                });
-                if (activeVehicle) {
-                    throw new ValidationError('Vehicle number already registered with another partner');
-                }
-                
-                // Clean up rejected records with this vehicle
-                await FoodDeliveryPartner.deleteMany({ 
-                    vehicleNumber: vNum, 
-                    status: 'rejected' 
-                });
-            }
-            partner.vehicleNumber = vNum;
+            await claimVehicleNumber(vNum, partner.id);
+            data.vehicleNumber = vNum || null;
         }
-        if (vehicle.type !== undefined) partner.vehicleType = String(vehicle.type || '').trim();
-        if (vehicle.brand !== undefined) partner.vehicleName = String(vehicle.brand || '').trim();
-        if (vehicle.model !== undefined) partner.vehicleName = String(vehicle.model || '').trim();
+        if (vehicle.type !== undefined) data.vehicleType = String(vehicle.type || '').trim();
+        if (vehicle.brand !== undefined) data.vehicleName = String(vehicle.brand || '').trim();
+        if (vehicle.model !== undefined) data.vehicleName = String(vehicle.model || '').trim();
     }
 
     if (payload?.profilePhoto !== undefined) {
-        partner.profilePhoto = payload.profilePhoto ? String(payload.profilePhoto).trim() : '';
+        data.profilePhoto = payload.profilePhoto ? String(payload.profilePhoto).trim() : '';
     }
 
-    await partner.save();
-    return partner.toObject();
+    return prisma.foodDeliveryPartner.update({ where: { id: partner.id }, data });
 };
 
 export const updateDeliveryPartnerProfilePhotoBase64 = async (userId, payload) => {
-    const partner = await FoodDeliveryPartner.findById(userId);
-    if (!partner) {
-        throw new ValidationError('Delivery partner not found');
-    }
+    const partner = await requirePartner(userId);
+
     const base64 = payload?.base64;
-    const mimeType = payload?.mimeType || 'image/jpeg';
-    if (!base64 || typeof base64 !== 'string') {
-        throw new ValidationError('base64 is required');
-    }
+    if (!base64 || typeof base64 !== 'string') throw new ValidationError('base64 is required');
+
     const buffer = Buffer.from(base64, 'base64');
-    if (!buffer || !buffer.length) {
-        throw new ValidationError('Invalid base64 image');
-    }
-    if (buffer.length > 8 * 1024 * 1024) {
-        throw new ValidationError('Image too large (max 8MB)');
-    }
-    // uploadImageBuffer expects raw bytes; mimeType is ignored by current implementation, but buffer is valid.
-    partner.profilePhoto = await uploadImageBuffer(buffer, 'food/delivery/profile');
-    await partner.save();
-    return partner.toObject();
+    if (!buffer || !buffer.length) throw new ValidationError('Invalid base64 image');
+    if (buffer.length > 8 * 1024 * 1024) throw new ValidationError('Image too large (max 8MB)');
+
+    const profilePhoto = await uploadImageBuffer(buffer, 'food/delivery/profile');
+    return prisma.foodDeliveryPartner.update({ where: { id: partner.id }, data: { profilePhoto } });
 };
 
 export const updateDeliveryPartnerBankDetails = async (userId, payload, files) => {
-    const partner = await FoodDeliveryPartner.findById(userId);
-    if (!partner) {
-        throw new ValidationError('Delivery partner not found');
-    }
+    const partner = await requirePartner(userId);
+    const data = {};
 
-    // Handle both nested JSON and flat FormData from multer
+    // Handle both nested JSON and flat FormData from multer.
     let bankDetails = payload?.documents?.bankDetails;
     let panDetails = payload?.documents?.pan;
 
-    // Multer flattens FormData keys like 'documents[bankDetails][accountNumber]'
+    // Multer flattens FormData keys like 'documents[bankDetails][accountNumber]'.
     if (!bankDetails && payload) {
         const b = {};
-        if (payload['documents[bankDetails][accountHolderName]'] !== undefined) b.accountHolderName = payload['documents[bankDetails][accountHolderName]'];
-        if (payload['documents[bankDetails][accountNumber]'] !== undefined) b.accountNumber = payload['documents[bankDetails][accountNumber]'];
-        if (payload['documents[bankDetails][ifscCode]'] !== undefined) b.ifscCode = payload['documents[bankDetails][ifscCode]'];
-        if (payload['documents[bankDetails][bankName]'] !== undefined) b.bankName = payload['documents[bankDetails][bankName]'];
-        if (payload['documents[bankDetails][upiId]'] !== undefined) b.upiId = payload['documents[bankDetails][upiId]'];
+        const flat = {
+            accountHolderName: 'documents[bankDetails][accountHolderName]',
+            accountNumber: 'documents[bankDetails][accountNumber]',
+            ifscCode: 'documents[bankDetails][ifscCode]',
+            bankName: 'documents[bankDetails][bankName]',
+            upiId: 'documents[bankDetails][upiId]',
+        };
+        for (const [key, formKey] of Object.entries(flat)) {
+            if (payload[formKey] !== undefined) b[key] = payload[formKey];
+        }
         if (Object.keys(b).length > 0) bankDetails = b;
     }
 
@@ -339,23 +290,23 @@ export const updateDeliveryPartnerBankDetails = async (userId, payload, files) =
 
     if (bankDetails) {
         const b = bankDetails;
-        if (b.accountHolderName !== undefined) partner.bankAccountHolderName = b.accountHolderName ? String(b.accountHolderName).trim() : '';
-        if (b.accountNumber !== undefined) partner.bankAccountNumber = b.accountNumber ? String(b.accountNumber).trim() : '';
-        if (b.ifscCode !== undefined) partner.bankIfscCode = b.ifscCode ? String(b.ifscCode).trim().toUpperCase() : '';
-        if (b.bankName !== undefined) partner.bankName = b.bankName ? String(b.bankName).trim() : '';
-        if (b.upiId !== undefined) partner.upiId = b.upiId ? String(b.upiId).trim() : '';
+        const trim = (v) => (v ? String(v).trim() : '');
+        if (b.accountHolderName !== undefined) data.bankAccountHolderName = trim(b.accountHolderName);
+        if (b.accountNumber !== undefined) data.bankAccountNumber = trim(b.accountNumber);
+        if (b.ifscCode !== undefined) data.bankIfscCode = trim(b.ifscCode).toUpperCase();
+        if (b.bankName !== undefined) data.bankName = trim(b.bankName);
+        if (b.upiId !== undefined) data.upiId = trim(b.upiId);
     }
 
     if (panDetails?.number !== undefined) {
-        partner.panNumber = panDetails.number ? String(panDetails.number).trim().toUpperCase() : '';
+        data.panNumber = panDetails.number ? String(panDetails.number).trim().toUpperCase() : '';
     }
 
     if (files?.upiQrCode?.[0]) {
-        partner.upiQrCode = await uploadImageBuffer(files.upiQrCode[0].buffer, 'food/delivery/upi');
+        data.upiQrCode = await uploadImageBuffer(files.upiQrCode[0].buffer, 'food/delivery/upi');
     }
 
-    await partner.save();
-    return partner.toObject();
+    return prisma.foodDeliveryPartner.update({ where: { id: partner.id }, data });
 };
 
 function generateTicketId() {
@@ -364,12 +315,11 @@ function generateTicketId() {
     return `TKT-${n}${r}`;
 }
 
-export const listSupportTicketsByPartner = async (deliveryPartnerId) => {
-    const list = await DeliverySupportTicket.find({ deliveryPartnerId })
-        .sort({ createdAt: -1 })
-        .lean();
-    return list;
-};
+export const listSupportTicketsByPartner = async (deliveryPartnerId) =>
+    prisma.deliverySupportTicket.findMany({
+        where: { deliveryPartnerId: String(deliveryPartnerId) },
+        orderBy: { createdAt: 'desc' },
+    });
 
 export const createSupportTicket = async (deliveryPartnerId, payload) => {
     const { subject, description, category = 'other', priority = 'medium' } = payload;
@@ -379,39 +329,43 @@ export const createSupportTicket = async (deliveryPartnerId, payload) => {
     if (description.trim().length < 10) {
         throw new ValidationError('Description must be at least 10 characters');
     }
-    let ticketId = generateTicketId();
-    let exists = await DeliverySupportTicket.findOne({ ticketId }).lean();
-    while (exists) {
-        ticketId = generateTicketId();
-        exists = await DeliverySupportTicket.findOne({ ticketId }).lean();
-    }
-    const ticket = await DeliverySupportTicket.create({
-        deliveryPartnerId,
-        ticketId,
+
+    const data = {
+        deliveryPartnerId: String(deliveryPartnerId),
         subject: subject.trim(),
         description: description.trim(),
         category: ['payment', 'account', 'technical', 'order', 'other'].includes(category) ? category : 'other',
         priority: ['low', 'medium', 'high', 'urgent'].includes(priority) ? priority : 'medium',
-        status: 'open'
-    });
-    return ticket.toObject();
+        status: 'open',
+    };
+
+    // ticketId is unique, so a collision just retries. The old check-then-insert
+    // loop raced with itself anyway.
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+        try {
+            return await prisma.deliverySupportTicket.create({
+                data: { ...data, ticketId: generateTicketId() },
+            });
+        } catch (err) {
+            if (err?.code === 'P2002') continue;
+            throw err;
+        }
+    }
+    throw new ValidationError('Could not allocate a ticket id. Please try again.');
 };
 
 export const getSupportTicketByIdAndPartner = async (ticketId, deliveryPartnerId) => {
-    const ticket = await DeliverySupportTicket.findOne({
-        _id: ticketId,
-        deliveryPartnerId
-    }).lean();
-    return ticket;
+    if (!isId(ticketId)) return null;
+    return prisma.deliverySupportTicket.findFirst({
+        where: { id: String(ticketId), deliveryPartnerId: String(deliveryPartnerId) },
+    });
 };
 
 export const updateDeliveryAvailability = async (userId, payload) => {
-    const partner = await FoodDeliveryPartner.findById(userId);
-    if (!partner) {
-        throw new ValidationError('Delivery partner not found');
-    }
-    // Accept both field spellings clients send: status/availabilityStatus, lat/lng
-    // or latitude/longitude, and numeric strings. Coordinates are coordinates.
+    const partner = await requirePartner(userId);
+
+    // Accept both field spellings clients send: status/availabilityStatus,
+    // lat/lng or latitude/longitude, and numeric strings.
     const rawStatus = payload?.status ?? payload?.availabilityStatus;
     const lat = Number(payload?.latitude ?? payload?.lat);
     const lng = Number(payload?.longitude ?? payload?.lng);
@@ -420,223 +374,117 @@ export const updateDeliveryAvailability = async (userId, payload) => {
     if (rawStatus === 'online' || rawStatus === true || rawStatus === 'true') validStatus = 'online';
     else if (rawStatus === 'offline' || rawStatus === false || rawStatus === 'false') validStatus = 'offline';
 
-    partner.availabilityStatus = validStatus;
+    const data = { availabilityStatus: validStatus };
     if (Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
-        partner.lastLocation = {
-            type: 'Point',
-            coordinates: [lng, lat]
-        };
-        partner.lastLat = lat;
-        partner.lastLng = lng;
-        partner.lastLocationAt = new Date();
+        // Only the plain coordinates are written; the lastLocation geography column
+        // is derived by the partner_location_sync trigger.
+        data.lastLat = lat;
+        data.lastLng = lng;
+        data.lastLocationAt = new Date();
     }
-    await partner.save();
-    return { availabilityStatus: partner.availabilityStatus };
+
+    const updated = await prisma.foodDeliveryPartner.update({ where: { id: partner.id }, data });
+    return { availabilityStatus: updated.availabilityStatus };
 };
 
 // ----- Delivery partner wallet (Pocket / requests page) -----
 export const getDeliveryPartnerWallet = async (deliveryPartnerId) => {
-    if (!deliveryPartnerId || !mongoose.Types.ObjectId.isValid(deliveryPartnerId)) {
-        throw new ValidationError('Delivery partner not found');
-    }
-    const partner = await FoodDeliveryPartner.findById(deliveryPartnerId).lean();
-    if (!partner) {
-        throw new ValidationError('Delivery partner not found');
-    }
+    if (!isId(deliveryPartnerId)) throw new ValidationError('Delivery partner not found');
+    const partnerId = String(deliveryPartnerId);
+
+    const partner = await prisma.foodDeliveryPartner.findUnique({ where: { id: partnerId } });
+    if (!partner) throw new ValidationError('Delivery partner not found');
 
     const cashLimitSettings = await getDeliveryCashLimitSettings();
-    const totalCashLimit = Number(cashLimitSettings.deliveryCashLimit) || 0;
-    const deliveryWithdrawalLimit = Number(cashLimitSettings.deliveryWithdrawalLimit) || 100;
+    const totalCashLimit = num(cashLimitSettings.deliveryCashLimit);
+    const deliveryWithdrawalLimit = num(cashLimitSettings.deliveryWithdrawalLimit) || 100;
 
-    const partnerId = new mongoose.Types.ObjectId(deliveryPartnerId);
-
-    // Earnings paid to rider through completed deliveries
-    const [earningsAgg, cashAgg] = await Promise.all([
-        FoodOrder.aggregate([
-            {
-                $match: {
-                    'dispatch.deliveryPartnerId': partnerId,
-                    orderStatus: 'delivered',
-                }
+    const [earningsAgg, cashAgg, bonusAgg, paymentTxList, bonusTxList] = await Promise.all([
+        prisma.foodOrder.aggregate({
+            where: { dispatchDeliveryPartnerId: partnerId, orderStatus: 'delivered' },
+            _sum: { riderEarning: true },
+        }),
+        prisma.foodOrder.aggregate({
+            where: {
+                dispatchDeliveryPartnerId: partnerId,
+                orderStatus: 'delivered',
+                paymentMethod: 'cash',
+                paymentStatus: 'paid',
             },
-            {
-                $group: {
-                    _id: null,
-                    totalEarned: { $sum: { $ifNull: ['$riderEarning', 0] } }
-                }
-            }
-        ]),
-        FoodOrder.aggregate([
-            {
-                $match: {
-                    'dispatch.deliveryPartnerId': partnerId,
-                    orderStatus: 'delivered',
-                    'payment.method': 'cash',
-                    'payment.status': 'paid'
-                }
+            _sum: { riderEarning: true },
+        }),
+        prisma.deliveryBonusTransaction.aggregate({
+            where: { deliveryPartnerId: partnerId },
+            _sum: { amount: true },
+        }),
+        prisma.foodOrder.findMany({
+            where: { dispatchDeliveryPartnerId: partnerId, orderStatus: 'delivered' },
+            orderBy: [{ deliveredAt: 'desc' }, { createdAt: 'desc' }],
+            select: {
+                id: true, orderId: true, riderEarning: true, paymentMethod: true,
+                orderStatus: true, deliveredAt: true, createdAt: true,
             },
-            {
-                $group: {
-                    _id: null,
-                    cashInHand: { $sum: { $ifNull: ['$riderEarning', 0] } }
-                }
-            }
-        ])
+            take: 2000,
+        }),
+        prisma.deliveryBonusTransaction.findMany({
+            where: { deliveryPartnerId: partnerId },
+            orderBy: { createdAt: 'desc' },
+            take: 1000,
+        }),
     ]);
 
-    const totalEarned = Number(earningsAgg?.[0]?.totalEarned) || 0;
-    const cashInHand = Number(cashAgg?.[0]?.cashInHand) || 0;
-
-    // Admin-set delivery bonuses / earning addons
-    const bonusAgg = await DeliveryBonusTransaction.aggregate([
-        { $match: { deliveryPartnerId: partnerId } },
-        { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
-    const totalBonus = bonusAgg?.[0] ? Number(bonusAgg[0].total) : 0;
-
-    // Keep transactions list reasonably small (UI only needs recent data for charts)
-    const [paymentTxList, bonusTxList] = await Promise.all([
-        FoodOrder.find({
-            'dispatch.deliveryPartnerId': partnerId,
-            orderStatus: 'delivered',
-        })
-            .sort({ 'deliveryState.deliveredAt': -1, createdAt: -1 })
-            .select('orderId riderEarning payment orderStatus deliveryState createdAt deliveryState.deliveredAt')
-            .limit(2000)
-            .lean(),
-        DeliveryBonusTransaction.find({ deliveryPartnerId: partnerId })
-            .sort({ createdAt: -1 })
-            .limit(1000)
-            .lean(),
-    ]);
+    const totalEarned = num(earningsAgg?._sum?.riderEarning);
+    const cashInHand = num(cashAgg?._sum?.riderEarning);
+    const totalBonus = num(bonusAgg?._sum?.amount);
 
     const paymentTransactions = (paymentTxList || []).map((o) => {
-        const deliveredAt = o?.deliveryState?.deliveredAt || o?.deliveredAt || null;
-        const date = deliveredAt || o?.createdAt || new Date();
+        const date = o.deliveredAt || o.createdAt || new Date();
         return {
-            _id: o._id,
+            _id: o.id,
             type: 'payment',
-            amount: Number(o.riderEarning) || 0,
+            amount: num(o.riderEarning),
             status: 'Completed',
             date,
             createdAt: date,
-            orderId: o.orderId || String(o._id),
-            paymentMethod: o?.payment?.method || '',
-            metadata: { orderId: o.orderId || String(o._id) },
-            description: o?.payment?.method === 'cash' ? 'COD delivery earning' : 'Online delivery earning'
+            orderId: o.orderId || o.id,
+            paymentMethod: o.paymentMethod || '',
+            metadata: { orderId: o.orderId || o.id },
+            description: o.paymentMethod === 'cash' ? 'COD delivery earning' : 'Online delivery earning',
         };
     });
 
-    // Frontend weekly earnings expects bonus transactions as `earning_addon`.
+    // The weekly-earnings screen expects bonus rows typed as `earning_addon`.
     const bonusTransactions = (bonusTxList || []).map((t) => ({
-        _id: t._id,
+        _id: t.id,
         type: 'earning_addon',
-        amount: Number(t.amount) || 0,
+        amount: num(t.amount),
         status: 'Completed',
         date: t.createdAt,
         createdAt: t.createdAt,
         metadata: { reference: t.reference || '' },
-        description: t.reference ? `Bonus - ${t.reference}` : 'Bonus'
+        description: t.reference ? `Bonus - ${t.reference}` : 'Bonus',
     }));
 
-    const totalWithdrawn = 0;
     const totalBalance = totalEarned + totalBonus;
-    const availableCashLimit = Math.max(0, totalCashLimit - cashInHand);
 
     return {
         totalBalance,
         pocketBalance: totalBalance,
         cashInHand,
-        totalWithdrawn,
+        totalWithdrawn: 0,
         totalEarned,
         totalCashLimit,
-        availableCashLimit,
+        availableCashLimit: Math.max(0, totalCashLimit - cashInHand),
         deliveryWithdrawalLimit,
-        transactions: [...paymentTransactions, ...bonusTransactions].sort((a, b) => {
-            const ad = a?.date ? new Date(a.date).getTime() : 0;
-            const bd = b?.date ? new Date(b.date).getTime() : 0;
-            return bd - ad;
-        }),
+        transactions: [...paymentTransactions, ...bonusTransactions].sort(
+            (a, b) => new Date(b?.date || 0).getTime() - new Date(a?.date || 0).getTime(),
+        ),
         joiningBonusClaimed: false,
-        joiningBonusAmount: 0
+        joiningBonusAmount: 0,
     };
 };
 
-// ----- Delivery partner earnings summary (Pocket / requests page) -----
-export const getDeliveryPartnerEarnings = async (deliveryPartnerId, query = {}) => {
-    if (!deliveryPartnerId || !mongoose.Types.ObjectId.isValid(deliveryPartnerId)) {
-        throw new ValidationError('Delivery partner not found');
-    }
-    const period = String(query.period || 'week').toLowerCase();
-    const date = query.date ? new Date(query.date) : new Date();
-    const page = Math.max(parseInt(query.page, 10) || 1, 1);
-    const limit = Math.min(Math.max(parseInt(query.limit, 10) || 50, 1), 1000);
-
-    const partnerId = new mongoose.Types.ObjectId(deliveryPartnerId);
-
-    let range = null;
-    if (period === 'today') {
-        range = { start: toStartOfDay(date), end: toEndOfDay(date) };
-    } else if (period === 'week') {
-        range = getWeekRange(date);
-    } else if (period === 'month') {
-        range = getMonthRange(date);
-    } else if (period === 'all') {
-        range = null;
-    } else {
-        // fallback to week
-        range = getWeekRange(date);
-    }
-
-    const match = {
-        'dispatch.deliveryPartnerId': partnerId,
-        orderStatus: 'delivered',
-    };
-    if (range) {
-        match['deliveryState.deliveredAt'] = { $gte: range.start, $lte: range.end };
-    }
-
-    const [totalOrders, agg] = await Promise.all([
-        FoodOrder.countDocuments(match),
-        FoodOrder.aggregate([
-            { $match: match },
-            {
-                $group: {
-                    _id: null,
-                    totalEarnings: { $sum: { $ifNull: ['$riderEarning', 0] } }
-                }
-            }
-        ])
-    ]);
-
-    const totalEarnings = Number(agg?.[0]?.totalEarnings) || 0;
-
-    // Frontend only strongly relies on totalEarnings + totalOrders.
-    const summary = {
-        totalEarnings,
-        totalOrders,
-        totalHours: 0,
-        totalMinutes: 0,
-        orderEarning: totalEarnings,
-        incentive: 0,
-        otherEarnings: 0
-    };
-
-    return {
-        summary,
-        period,
-        date: date.toISOString(),
-        pagination: { page, limit, total: totalOrders }
-    };
-};
-
-const normalizeStatusFilter = (status) => {
-    if (!status) return null;
-    const s = String(status || '').trim();
-    if (!s || s.toUpperCase() === 'ALL TRIPS') return null;
-    // UI uses Completed/Cancelled/Pending
-    return s;
-};
+// ----- Date helpers -----
 
 const toStartOfDay = (d) => {
     const x = new Date(d);
@@ -673,80 +521,140 @@ const computeRange = (period, date) => {
     const anchor = date instanceof Date && !Number.isNaN(date.getTime()) ? date : new Date();
     if (p === 'weekly' || p === 'week') return getWeekRange(anchor);
     if (p === 'monthly' || p === 'month') return getMonthRange(anchor);
-    // daily
     return { start: toStartOfDay(anchor), end: toEndOfDay(anchor) };
+};
+
+/**
+ * A trip counts as inside the window if ANY of its timeline stamps falls in it.
+ * `completedAt` was in the Mongo filter but is not a field on the order, so it
+ * never matched anything — dropped rather than carried over.
+ */
+const withinRange = (start, end) => [
+    { deliveredAt: { gte: start, lte: end } },
+    { updatedAt: { gte: start, lte: end } },
+    { createdAt: { gte: start, lte: end } },
+];
+
+const TRIP_ORDER_BY = [{ deliveredAt: 'desc' }, { updatedAt: 'desc' }, { createdAt: 'desc' }];
+
+// ----- Earnings summary -----
+export const getDeliveryPartnerEarnings = async (deliveryPartnerId, query = {}) => {
+    if (!isId(deliveryPartnerId)) throw new ValidationError('Delivery partner not found');
+    const partnerId = String(deliveryPartnerId);
+
+    const period = String(query.period || 'week').toLowerCase();
+    const date = query.date ? new Date(query.date) : new Date();
+    const page = Math.max(parseInt(query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(query.limit, 10) || 50, 1), 1000);
+
+    let range = null;
+    if (period === 'today') range = { start: toStartOfDay(date), end: toEndOfDay(date) };
+    else if (period === 'month') range = getMonthRange(date);
+    else if (period === 'all') range = null;
+    else range = getWeekRange(date); // week, and anything unrecognised
+
+    const where = {
+        dispatchDeliveryPartnerId: partnerId,
+        orderStatus: 'delivered',
+        ...(range ? { deliveredAt: { gte: range.start, lte: range.end } } : {}),
+    };
+
+    const [totalOrders, agg] = await Promise.all([
+        prisma.foodOrder.count({ where }),
+        prisma.foodOrder.aggregate({ where, _sum: { riderEarning: true } }),
+    ]);
+
+    const totalEarnings = num(agg?._sum?.riderEarning);
+
+    return {
+        summary: {
+            totalEarnings,
+            totalOrders,
+            totalHours: 0,
+            totalMinutes: 0,
+            orderEarning: totalEarnings,
+            incentive: 0,
+            otherEarnings: 0,
+        },
+        period,
+        date: date.toISOString(),
+        pagination: { page, limit, total: totalOrders },
+    };
+};
+
+const normalizeStatusFilter = (status) => {
+    const s = String(status || '').trim();
+    if (!s || s.toUpperCase() === 'ALL TRIPS') return null;
+    return s;
 };
 
 const toTripDto = (order) => {
     const createdAt = order?.createdAt || null;
-    const deliveredAt = order?.deliveryState?.deliveredAt || order?.deliveredAt || order?.completedAt || null;
+    const deliveredAt = order?.deliveredAt || null;
     const dateForUi = deliveredAt || createdAt || order?.updatedAt || null;
 
     // Pre-formatted for older app builds that render this string directly.
     //
-    // 'en-IN' selects the FORMAT (12-hour, en-IN digits) and says nothing about the
-    // timezone: with no timeZone option Node uses the system zone, and this server
-    // runs UTC. Riders therefore saw every trip 5h30m early. The zone is now
-    // explicit.
+    // 'en-IN' selects the FORMAT and says nothing about the timezone: with no
+    // timeZone option Node uses the system zone, and this server runs UTC, so
+    // riders saw every trip 5h30m early. The zone is explicit.
     //
-    // Deprecated: clients should format `date` (a real ISO-8601 timestamp, right
-    // below) in the device's own timezone. Formatting a time on the server can only
-    // ever be correct for one zone, and bakes that assumption into the API.
+    // Deprecated: clients should format `date` (a real ISO-8601 timestamp) in the
+    // device's own timezone.
     const time = dateForUi
         ? new Date(dateForUi).toLocaleTimeString('en-IN', {
               hour: '2-digit',
               minute: '2-digit',
-              timeZone: process.env.DISPLAY_TIME_ZONE || 'Asia/Kolkata'
+              timeZone: process.env.DISPLAY_TIME_ZONE || 'Asia/Kolkata',
           })
         : '';
 
-    const orderStatus = String(order?.orderStatus || order?.status || '').toLowerCase();
-    const isDelivered = orderStatus === 'delivered' || String(order?.deliveryState?.currentPhase || '').toLowerCase() === 'delivered';
-    const isCancelled = orderStatus.startsWith('cancelled') || String(order?.deliveryState?.status || '').toLowerCase().includes('cancel');
+    const orderStatus = String(order?.orderStatus || '').toLowerCase();
+    const isDelivered =
+        orderStatus === 'delivered' || String(order?.deliveryPhase || '').toLowerCase() === 'delivered';
+    const isCancelled =
+        orderStatus.startsWith('cancelled') ||
+        String(order?.deliveryStatus || '').toLowerCase().includes('cancel');
 
     const status = isDelivered ? 'Completed' : isCancelled ? 'Cancelled' : 'Pending';
 
-    const restaurantName =
-        order?.restaurantId?.restaurantName ||
-        order?.restaurantName ||
-        order?.restaurant?.restaurantName ||
-        '';
+    const restaurantName = order?.restaurant?.restaurantName || '';
+    const paymentMethod = order?.paymentMethod || '';
+    const pricingTotal = num(order?.total);
 
-    const paymentMethod = order?.payment?.method || order?.paymentMethod || '';
-    const pricingTotal = Number(order?.pricing?.total) || Number(order?.totalAmount) || 0;
+    const earningAmount = num(order?.riderEarning);
+    const codAmount = paymentMethod === 'cash' ? num(order?.paymentAmountDue) : 0;
+    const codCollectedAmount = paymentMethod === 'cash' && order?.paymentStatus === 'paid' ? codAmount : 0;
 
-    const earningAmount = Number(order?.riderEarning ?? order?.deliveryEarning ?? 0) || 0;
-    const codAmount = paymentMethod === 'cash' ? Number(order?.payment?.amountDue) || 0 : 0;
-    const codCollectedAmount = paymentMethod === 'cash' && order?.payment?.status === 'paid' ? codAmount : 0;
     return {
-        id: order?._id,
-        _id: order?._id,
-        orderId: order?.orderId || order?._id,
+        id: order?.id,
+        _id: order?.id,
+        orderId: order?.orderId || order?.id,
         status,
         restaurantName,
         restaurant: restaurantName,
-        items: order?.items || order?.orderItems || [],
-        orderItems: order?.orderItems || order?.items || [],
+        items: order?.items || [],
+        orderItems: order?.items || [],
         paymentMethod,
         totalAmount: pricingTotal,
         orderTotal: pricingTotal,
-        codAmount: codAmount,
+        codAmount,
         codCollectedAmount,
         deliveryEarning: earningAmount,
-        earningAmount: earningAmount,
+        earningAmount,
         amount: earningAmount, // legacy fallback
         createdAt: order?.createdAt,
-        deliveredAt: deliveredAt,
+        deliveredAt,
         completedAt: deliveredAt,
         date: dateForUi,
-        time
+        time,
     };
 };
 
 export const getDeliveryPartnerTripHistory = async (deliveryPartnerId, query = {}) => {
-    if (!deliveryPartnerId || !mongoose.Types.ObjectId.isValid(deliveryPartnerId)) {
-        throw new ValidationError('Delivery partner not found');
-    }
+    if (!isId(deliveryPartnerId)) throw new ValidationError('Delivery partner not found');
+    const partnerId = String(deliveryPartnerId);
+
     const period = query.period || 'daily';
     const date = query.date ? new Date(query.date) : new Date();
     const statusFilter = normalizeStatusFilter(query.status);
@@ -754,137 +662,112 @@ export const getDeliveryPartnerTripHistory = async (deliveryPartnerId, query = {
 
     const { start, end } = computeRange(period, date);
 
-    const partnerId = new mongoose.Types.ObjectId(deliveryPartnerId);
-    const match = { 'dispatch.deliveryPartnerId': partnerId };
-    const rangeOrDates = [
-        { 'deliveryState.deliveredAt': { $gte: start, $lte: end } },
-        { deliveredAt: { $gte: start, $lte: end } },
-        { completedAt: { $gte: start, $lte: end } },
-        { updatedAt: { $gte: start, $lte: end } },
-        { createdAt: { $gte: start, $lte: end } }
-    ];
+    const where = {
+        dispatchDeliveryPartnerId: partnerId,
+        OR: withinRange(start, end),
+    };
 
     const sf = String(statusFilter || '').toLowerCase();
     if (sf === 'completed') {
-        match.orderStatus = 'delivered';
-        match.$or = rangeOrDates;
+        where.orderStatus = 'delivered';
     } else if (sf === 'cancelled') {
-        match.orderStatus = { $regex: '^cancelled', $options: 'i' };
-        match.$or = rangeOrDates;
+        where.orderStatus = { startsWith: 'cancelled' };
     } else if (sf === 'pending') {
-        match.$or = rangeOrDates;
-        // Pending = not delivered and not cancelled
-        match.$and = [
-            { orderStatus: { $ne: 'delivered' } },
-            { orderStatus: { $not: { $regex: '^cancelled', $options: 'i' } } },
+        // Pending = neither delivered nor cancelled.
+        where.AND = [
+            { orderStatus: { not: 'delivered' } },
+            { NOT: { orderStatus: { startsWith: 'cancelled' } } },
         ];
-    } else {
-        // ALL TRIPS: include trips by delivery/completion timeline, not only createdAt.
-        match.$or = rangeOrDates;
     }
 
-    const orders = await FoodOrder.find(match)
-        .populate({ path: 'restaurantId', select: 'restaurantName' })
-        .sort({ 'deliveryState.deliveredAt': -1, deliveredAt: -1, completedAt: -1, updatedAt: -1, createdAt: -1 })
-        .limit(limit)
-        .lean();
+    const orders = await prisma.foodOrder.findMany({
+        where,
+        include: { items: true, restaurant: { select: { id: true, restaurantName: true } } },
+        orderBy: TRIP_ORDER_BY,
+        take: limit,
+    });
 
     return {
         period,
         date: (date || new Date()).toISOString(),
         range: { start: start.toISOString(), end: end.toISOString() },
-        trips: (orders || []).map(toTripDto)
+        trips: (orders || []).map(toTripDto),
     };
 };
 
 export const getDeliveryPocketDetails = async (deliveryPartnerId, query = {}) => {
-    if (!deliveryPartnerId || !mongoose.Types.ObjectId.isValid(deliveryPartnerId)) {
-        throw new ValidationError('Delivery partner not found');
-    }
+    if (!isId(deliveryPartnerId)) throw new ValidationError('Delivery partner not found');
+    const partnerId = String(deliveryPartnerId);
+
     const date = query.date ? new Date(query.date) : new Date();
     const { start, end } = getWeekRange(date);
     const limit = Math.min(Math.max(parseInt(query.limit, 10) || 1000, 1), 2000);
 
-    const partnerId = new mongoose.Types.ObjectId(deliveryPartnerId);
-
-    const orders = await FoodOrder.find({
-        'dispatch.deliveryPartnerId': partnerId,
-        orderStatus: 'delivered',
-        $or: [
-            { 'deliveryState.deliveredAt': { $gte: start, $lte: end } },
-            { deliveredAt: { $gte: start, $lte: end } },
-            { completedAt: { $gte: start, $lte: end } },
-            { updatedAt: { $gte: start, $lte: end } },
-            { createdAt: { $gte: start, $lte: end } }
-        ]
-    })
-        .populate({ path: 'restaurantId', select: 'restaurantName' })
-        .sort({ 'deliveryState.deliveredAt': -1, deliveredAt: -1, completedAt: -1, updatedAt: -1, createdAt: -1 })
-        .limit(limit)
-        .lean();
-
-    const bonusTxList = await DeliveryBonusTransaction.find({
-        deliveryPartnerId: partnerId,
-        createdAt: { $gte: start, $lte: end }
-    })
-        .sort({ createdAt: -1 })
-        .limit(limit)
-        .lean();
+    const [orders, bonusTxList] = await Promise.all([
+        prisma.foodOrder.findMany({
+            where: {
+                dispatchDeliveryPartnerId: partnerId,
+                orderStatus: 'delivered',
+                OR: withinRange(start, end),
+            },
+            include: { items: true, restaurant: { select: { id: true, restaurantName: true } } },
+            orderBy: TRIP_ORDER_BY,
+            take: limit,
+        }),
+        prisma.deliveryBonusTransaction.findMany({
+            where: { deliveryPartnerId: partnerId, createdAt: { gte: start, lte: end } },
+            orderBy: { createdAt: 'desc' },
+            take: limit,
+        }),
+    ]);
 
     const trips = (orders || []).map(toTripDto);
 
     const paymentTransactions = (orders || []).map((o) => ({
-        _id: o._id,
+        _id: o.id,
         type: 'payment',
-        amount: Number(o.riderEarning) || 0,
+        amount: num(o.riderEarning),
         status: 'Completed',
-        date: o?.deliveryState?.deliveredAt || o?.deliveredAt || o?.createdAt,
-        createdAt: o?.deliveryState?.deliveredAt || o?.deliveredAt || o?.createdAt,
-        orderId: o.orderId || String(o._id),
-        metadata: { orderId: o.orderId || String(o._id) },
-        description: o?.restaurantId?.restaurantName ? `Order earning - ${o.restaurantId.restaurantName}` : 'Order earning'
+        date: o.deliveredAt || o.createdAt,
+        createdAt: o.deliveredAt || o.createdAt,
+        orderId: o.orderId || o.id,
+        metadata: { orderId: o.orderId || o.id },
+        description: o.restaurant?.restaurantName
+            ? `Order earning - ${o.restaurant.restaurantName}`
+            : 'Order earning',
     }));
 
     const bonusTransactions = (bonusTxList || []).map((t) => ({
-        _id: t._id,
+        _id: t.id,
         type: 'bonus',
-        amount: Number(t.amount) || 0,
+        amount: num(t.amount),
         status: 'Completed',
         date: t.createdAt,
         createdAt: t.createdAt,
         metadata: { reference: t.reference || '' },
-        description: t.reference ? `Bonus - ${t.reference}` : 'Bonus'
+        description: t.reference ? `Bonus - ${t.reference}` : 'Bonus',
     }));
 
-    const totalEarning = paymentTransactions.reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
-    const totalBonus = bonusTransactions.reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+    const totalEarning = paymentTransactions.reduce((sum, t) => sum + num(t.amount), 0);
+    const totalBonus = bonusTransactions.reduce((sum, t) => sum + num(t.amount), 0);
 
     return {
         week: { start: start.toISOString(), end: end.toISOString() },
         summary: { totalEarning, totalBonus, grandTotal: totalEarning + totalBonus },
         trips,
-        transactions: {
-            payment: paymentTransactions,
-            bonus: bonusTransactions
-        }
+        transactions: { payment: paymentTransactions, bonus: bonusTransactions },
     };
 };
 
 export const getActiveEarningAddonsForPartner = async (deliveryPartnerId) => {
-    if (!deliveryPartnerId || !mongoose.Types.ObjectId.isValid(deliveryPartnerId)) {
-        throw new ValidationError('Delivery partner not found');
-    }
-
-    const partnerId = new mongoose.Types.ObjectId(deliveryPartnerId);
+    if (!isId(deliveryPartnerId)) throw new ValidationError('Delivery partner not found');
+    const partnerId = String(deliveryPartnerId);
     const now = new Date();
 
-    const addons = await FoodEarningAddon.find({
-        status: 'active',
-        startDate: { $lte: now },
-        endDate: { $gte: now }
-    })
-        .sort({ endDate: 1, createdAt: 1 })
-        .lean();
+    const addons = await prisma.foodEarningAddon.findMany({
+        where: { status: 'active', startDate: { lte: now }, endDate: { gte: now } },
+        orderBy: [{ endDate: 'asc' }, { createdAt: 'asc' }],
+    });
 
     const liveAddons = (addons || []).filter((addon) => {
         if (!addon) return false;
@@ -898,70 +781,49 @@ export const getActiveEarningAddonsForPartner = async (deliveryPartnerId) => {
             const startDate = addon.startDate ? new Date(addon.startDate) : null;
             const endDate = addon.endDate ? new Date(addon.endDate) : null;
 
-            const baseMatch = {
-                'dispatch.deliveryPartnerId': partnerId,
-                orderStatus: 'delivered'
+            const where = {
+                dispatchDeliveryPartnerId: partnerId,
+                orderStatus: 'delivered',
+                ...(startDate && endDate ? { deliveredAt: { gte: startDate, lte: endDate } } : {}),
             };
 
-            if (startDate && endDate) {
-                baseMatch['deliveryState.deliveredAt'] = { $gte: startDate, $lte: endDate };
-            }
-
             const [currentOrders, earningsAgg] = await Promise.all([
-                FoodOrder.countDocuments(baseMatch),
-                FoodOrder.aggregate([
-                    { $match: baseMatch },
-                    {
-                        $group: {
-                            _id: null,
-                            total: { $sum: { $ifNull: ['$riderEarning', 0] } }
-                        }
-                    }
-                ])
+                prisma.foodOrder.count({ where }),
+                prisma.foodOrder.aggregate({ where, _sum: { riderEarning: true } }),
             ]);
 
-            const currentEarnings = Number(earningsAgg?.[0]?.total) || 0;
-
             return {
-                id: addon._id,
+                id: addon.id,
                 title: addon.title || 'Earnings Guarantee',
                 description: addon.description || '',
-                targetAmount: Number(addon.earningAmount) || 0,
-                targetOrders: Number(addon.requiredOrders) || 0,
-                currentOrders: Number(currentOrders) || 0,
-                currentEarnings,
+                targetAmount: num(addon.earningAmount),
+                targetOrders: num(addon.requiredOrders),
+                currentOrders: num(currentOrders),
+                currentEarnings: num(earningsAgg?._sum?.riderEarning),
                 startDate,
                 endDate,
                 validTill: endDate ? endDate.toISOString() : null,
-                isLive: true
+                isLive: true,
             };
-        })
+        }),
     );
 
-    return {
-        activeOffer: offers[0] || null,
-        offers
-    };
+    return { activeOffer: offers[0] || null, offers };
 };
 
-
 /**
- * Delete a delivery partner and all associated data (wallet, tickets) permanently.
+ * Delete a delivery partner and everything that cannot outlive them.
  */
 export const deleteDeliveryPartnerAccount = async (partnerId) => {
-    // Dynamic imports
-    const { DeliverySupportTicket } = await import('../models/supportTicket.model.js');
-    const { FoodDeliveryWallet } = await import('../models/deliveryWallet.model.js');
-
-    const partner = await FoodDeliveryPartner.findById(partnerId);
+    const id = String(partnerId);
+    const partner = await prisma.foodDeliveryPartner.findUnique({ where: { id } });
     if (!partner) throw new ValidationError('Delivery partner not found');
 
-    // Remove associated documents
-    await FoodDeliveryWallet.findOneAndDelete({ deliveryPartnerId: partnerId });
-    await DeliverySupportTicket.deleteMany({ deliveryPartnerId: partnerId });
-
-    // Remove Partner
-    await FoodDeliveryPartner.findByIdAndDelete(partnerId);
+    await prisma.$transaction([
+        prisma.wallet.deleteMany({ where: { entityType: 'deliveryBoy', entityId: id } }),
+        prisma.deliverySupportTicket.deleteMany({ where: { deliveryPartnerId: id } }),
+        prisma.foodDeliveryPartner.delete({ where: { id } }),
+    ]);
 
     return { success: true };
 };

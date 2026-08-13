@@ -2340,7 +2340,7 @@ model FoodRestaurantWithdrawal {
   adminNote       String?
   rejectionReason String?
   /// Final bank transaction reference entered by admin.
-  transactionRef  String?
+  transactionId   String?
   processedAt     DateTime?
 
   createdAt DateTime @default(now())
@@ -2368,7 +2368,7 @@ model FoodDeliveryWithdrawal {
 
   adminNote       String?
   rejectionReason String?
-  transactionRef  String?
+  transactionId   String?
   processedAt     DateTime?
 
   createdAt DateTime @default(now())
@@ -2412,7 +2412,7 @@ model DeliveryBonusTransaction {
   deliveryPartnerId String @db.VarChar(24)
 
   /// Admin-supplied reference; unique so a resubmitted form cannot double-pay.
-  transactionRef String  @unique
+  transactionId  String  @unique
   amount         Decimal @db.Decimal(14, 2)
   reference      String  @default("")
 
@@ -2543,7 +2543,7 @@ model DeliverySupportTicket {
   id                String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
   deliveryPartnerId String @db.VarChar(24)
 
-  ticketRef String? @unique
+  ticketId  String? @unique
 
   subject     String
   description String
