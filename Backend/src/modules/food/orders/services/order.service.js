@@ -1,22 +1,8 @@
-import mongoose from 'mongoose';
-import { FoodOrder, FoodSettings } from '../models/order.model.js';
-// import { paymentSnapshotFromOrder } from './foodOrderPayment.service.js';
+import { prisma } from '../../../../config/prisma.js';
+import { toOrder, toOrders, fromOrder, orderInclude } from '../order.mapper.js';
 import { logger } from '../../../../utils/logger.js';
-import { FoodUser } from '../../../../core/users/user.model.js';
-import { FoodItem } from '../../admin/models/food.model.js';
-import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
-import { FoodDeliveryPartner } from '../../delivery/models/deliveryPartner.model.js';
-import { FoodZone } from '../../admin/models/zone.model.js';
 import { ValidationError, ForbiddenError, NotFoundError } from '../../../../core/auth/errors.js';
-import { buildPaginationOptions, buildPaginatedResult } from '../../../../utils/helpers.js';
-import { FoodOffer } from '../../admin/models/offer.model.js';
-import { FoodOfferUsage } from '../../admin/models/offerUsage.model.js';
-import { FoodDeliveryCommissionRule } from '../../admin/models/deliveryCommissionRule.model.js';
-import { FoodRestaurantCommission } from '../../admin/models/restaurantCommission.model.js';
-import { FoodBusinessSettings } from '../../admin/models/businessSettings.model.js';
-import { FoodTransaction } from '../models/foodTransaction.model.js';
-import { FoodSupportTicket } from '../../user/models/supportTicket.model.js';
-import { config } from '../../../../config/env.js';
+import { buildPaginationOptions, buildPaginatedResult, isId } from '../../../../utils/helpers.js';
 import {
     createRazorpayOrder,
     verifyPaymentSignature,
@@ -27,7 +13,6 @@ import {
 } from '../helpers/razorpay.helper.js';
 import { getIO, rooms } from '../../../../config/socket.js';
 import { addOrderJob } from '../../../../queues/producers/order.producer.js';
-import { fetchPolyline } from '../utils/googleMaps.js';
 import { getFirebaseDB } from '../../../../config/firebase.js';
 import * as foodTransactionService from './foodTransaction.service.js';
 import * as userWalletService from '../../user/services/userWallet.service.js';
@@ -45,15 +30,10 @@ import * as deliveryService from './order-delivery.service.js';
 import * as paymentService from './order-payment.service.js';
 import {
   enqueueOrderEvent,
-  haversineKm,
-  generateFourDigitDeliveryOtp,
   sanitizeOrderForExternal,
   sanitizeOrderForDeliveryPartner,
-  emitDeliveryDropOtpToUser,
   notifyOwnersSafely,
-  notifyOwnerSafely,
   buildOrderIdentityFilter,
-  toGeoPoint,
   pushStatusHistory,
   normalizeOrderForClient,
   applyAggregateRating,
@@ -64,13 +44,40 @@ import {
   STATUS_PRIORITY,
 } from './order.helpers.js';
 
-
-
-
-const COMMISSION_CACHE_MS = 10 * 1000;
-let commissionRulesCache = null;
-let commissionRulesLoadedAt = 0;
 const ORDER_ACCEPTANCE_WINDOW_SECONDS = 240;
+const PENDING_PAYMENT_TTL_MS = 30 * 60 * 1000;
+
+/** Projections that replace the old `.populate(path, fields)` calls. */
+const RESTAURANT_CARD = {
+  id: true, restaurantName: true, profileImage: true, area: true, city: true,
+  latitude: true, longitude: true, rating: true, totalRatings: true,
+};
+const RESTAURANT_DETAIL = { ...RESTAURANT_CARD, ownerPhone: true, primaryContactNumber: true };
+const RESTAURANT_ADMIN = {
+  id: true, restaurantName: true, area: true, city: true, ownerPhone: true, zoneId: true,
+};
+const PARTNER_CARD = {
+  id: true, name: true, phone: true, rating: true, totalRatings: true, profilePhoto: true,
+  vehicleType: true, vehicleName: true, vehicleNumber: true, totalDeliveries: true,
+};
+const PARTNER_WITH_LOCATION = {
+  ...PARTNER_CARD, lastLat: true, lastLng: true, lastLocationAt: true,
+};
+const USER_CARD = { id: true, name: true, phone: true, email: true };
+
+const withRelations = (restaurant = RESTAURANT_CARD, partner = PARTNER_CARD, user = USER_CARD) => ({
+  ...orderInclude,
+  restaurant: { select: restaurant },
+  deliveryPartner: { select: partner },
+  user: { select: user },
+});
+
+/** Validates an id's shape, replacing the old toObjectId() cast. */
+function requireId(id, fieldName = 'ID') {
+  if (!id) return null;
+  if (!isId(id)) throw new ValidationError(`Invalid ${fieldName} format`);
+  return String(id);
+}
 
 function normalizeAcceptanceWindowSeconds(minutes) {
   const numeric = Number(minutes);
@@ -82,9 +89,9 @@ function normalizeAcceptanceWindowSeconds(minutes) {
 
 async function getOrderAcceptanceWindowSeconds() {
   try {
-    const settings = await FoodBusinessSettings.findOne()
-      .select('orderAcceptanceTimeMinutes')
-      .lean();
+    const settings = await prisma.foodBusinessSettings.findFirst({
+      select: { orderAcceptanceTimeMinutes: true },
+    });
     return normalizeAcceptanceWindowSeconds(settings?.orderAcceptanceTimeMinutes);
   } catch (err) {
     logger.warn(`Failed to load order acceptance setting: ${err?.message || err}`);
@@ -92,74 +99,51 @@ async function getOrderAcceptanceWindowSeconds() {
   }
 }
 
-const PENDING_PAYMENT_TTL_MS = 30 * 60 * 1000;
-
 function isAwaitingOnlinePaymentMethod(paymentMethod) {
   const method = String(paymentMethod || "").toLowerCase();
   return method === "razorpay" || method === "card";
 }
 
-async function incrementCouponUsageForOrder(order, userId) {
-  const couponCode = order?.pricing?.couponCode
-    ? String(order.pricing.couponCode).trim().toUpperCase()
-    : "";
-  if (!couponCode) return;
-  // A stored code with no applied discount means the coupon was rejected at
-  // pricing time — don't consume the user's/offer's usage allowance for it.
-  if (!(Number(order?.pricing?.discount) > 0)) return;
+function buildAcceptanceDeadline(date = new Date(), windowSeconds = ORDER_ACCEPTANCE_WINDOW_SECONDS) {
+  const seconds = Number(windowSeconds);
+  return new Date(date.getTime() + (Number.isFinite(seconds) && seconds > 0 ? seconds : ORDER_ACCEPTANCE_WINDOW_SECONDS) * 1000);
+}
 
-  try {
-    const offer = await FoodOffer.findOne({ couponCode }).lean();
-    if (offer) {
-      // Conditional increment so concurrent orders cannot push usedCount past usageLimit.
-      const incrementResult = await FoodOffer.updateOne(
-        {
-          _id: offer._id,
-          $or: [
-            { usageLimit: { $in: [0, null] } },
-            { usageLimit: { $exists: false } },
-            { $expr: { $lt: [{ $ifNull: ["$usedCount", 0] }, "$usageLimit"] } },
-          ],
-        },
-        { $inc: { usedCount: 1 } },
-      );
-      if (incrementResult.modifiedCount === 0 && Number(offer.usageLimit) > 0) {
-        // Payment is already processed at this point, so honor the discount but flag the overflow.
-        logger.warn(
-          `Coupon ${couponCode} reached usage limit before increment for order ${order?._id}; discount honored.`,
-        );
-      }
-      await FoodOfferUsage.updateOne(
-        { offerId: offer._id, userId: toObjectId(userId, "User ID") },
-        { $inc: { count: 1 }, $set: { lastUsedAt: new Date() } },
-        { upsert: true },
-      );
-    }
-  } catch (err) {
-    logger.error(`Coupon usage update failed: ${err.message}`);
-  }
+// ----- Order deletion -----
+
+/**
+ * Remove an order and everything that cannot outlive it.
+ *
+ * Mongo simply deleted the document; Postgres has real foreign keys, so the
+ * dependants have to be dealt with explicitly. Ledger rows are DETACHED rather
+ * than deleted — money records must survive the order they refer to, or a
+ * deleted order silently erases its own wallet history.
+ */
+async function purgeOrder(orderId) {
+  const id = String(orderId);
+  await prisma.$transaction([
+    prisma.foodSupportTicket.updateMany({ where: { orderId: id }, data: { orderId: null } }),
+    prisma.transaction.updateMany({ where: { orderId: id }, data: { orderId: null } }),
+    prisma.foodChatMessage.updateMany({ where: { orderId: id }, data: { orderId: null } }),
+    prisma.foodChatConversation.updateMany({ where: { orderId: id }, data: { orderId: null } }),
+    prisma.deliveryOrderEmergencyRequest.deleteMany({ where: { orderId: id } }),
+    prisma.refund.deleteMany({ where: { orderId: id } }),
+    prisma.payment.deleteMany({ where: { orderId: id } }),
+    prisma.foodTransaction.deleteMany({ where: { orderId: id } }),
+    // items, itemRatings, statusHistory and dispatchOffers cascade.
+    prisma.foodOrder.delete({ where: { id } }),
+  ]);
 }
 
 async function deletePendingPaymentOrder(orderLike) {
-  if (!orderLike?._id) return false;
+  const id = orderLike?.id || orderLike?._id;
+  if (!id) return false;
   if (String(orderLike.orderStatus || "").toLowerCase() !== "pending_payment") return false;
 
-  const payStatus = String(orderLike.payment?.status || "").toLowerCase();
+  const payStatus = String(orderLike.payment?.status || orderLike.paymentStatus || "").toLowerCase();
   if (payStatus === "paid" || payStatus === "refunded") return false;
 
-  await Promise.all([
-    FoodSupportTicket.updateMany(
-      { orderId: orderLike._id },
-      { $set: { orderId: null } },
-    ),
-    FoodTransaction.deleteOne({
-      $or: [
-        { orderId: orderLike._id },
-        { orderReadableId: String(orderLike._id.toString()) },
-      ],
-    }),
-    FoodOrder.deleteOne({ _id: orderLike._id }),
-  ]);
+  await purgeOrder(id);
   return true;
 }
 
@@ -172,33 +156,31 @@ async function expireStalePendingPaymentOrders() {
   lastExpiredCleanupAt = now;
 
   const cutoff = new Date(Date.now() - PENDING_PAYMENT_TTL_MS);
-  const stale = await FoodOrder.find({
-    orderStatus: "pending_payment",
-    // 'failed' covers orders rejected by payment amount verification.
-    "payment.status": { $in: ["created", "pending", "failed"] },
-    createdAt: { $lte: cutoff },
-  })
-    .select("_id orderStatus payment")
-    .lean();
+  const stale = await prisma.foodOrder.findMany({
+    where: {
+      orderStatus: "pending_payment",
+      // 'failed' covers orders rejected by payment amount verification.
+      paymentStatus: { in: ["created", "pending", "failed"] },
+      createdAt: { lte: cutoff },
+    },
+    select: { id: true, orderStatus: true, paymentStatus: true },
+  });
 
   for (const doc of stale) {
     try {
       await deletePendingPaymentOrder(doc);
     } catch (err) {
       logger.warn(
-        `expireStalePendingPaymentOrders cleanup failed for ${doc._id}: ${err?.message || err}`,
+        `expireStalePendingPaymentOrders cleanup failed for ${doc.id}: ${err?.message || err}`,
       );
     }
   }
 }
 
-function buildAcceptanceDeadline(date = new Date(), windowSeconds = ORDER_ACCEPTANCE_WINDOW_SECONDS) {
-  const seconds = Number(windowSeconds);
-  return new Date(date.getTime() + (Number.isFinite(seconds) && seconds > 0 ? seconds : ORDER_ACCEPTANCE_WINDOW_SECONDS) * 1000);
-}
+// ----- Refunds -----
 
 function buildCancellationRefundDescription(order, cancelledBy = 'system') {
-  const orderReadableId = order?.order_id || order?._id;
+  const orderReadableId = order?.order_id || order?.id || order?._id;
   switch (String(cancelledBy || '').toLowerCase()) {
     case 'user':
       return `Refund for cancelled order #${orderReadableId}`;
@@ -215,138 +197,144 @@ function buildCancellationRefundDescription(order, cancelledBy = 'system') {
   }
 }
 
+/**
+ * Decide and perform the refund for a cancelled order.
+ *
+ * Returns a `paymentPatch` of flat columns instead of mutating the order, which
+ * is what the Mongoose version did before the caller ran `order.save()`. Callers
+ * merge the patch into their own update so the status change and the refund land
+ * in one write.
+ */
 async function applyCancellationRefund(order, { cancelledBy = 'system', refundAmount } = {}) {
-  if (!order?.payment) {
-    return { attempted: false, processed: false, reason: 'missing_payment' };
-  }
+  const none = (extra) => ({ attempted: false, processed: false, paymentPatch: {}, ...extra });
+
+  if (!order?.payment) return none({ reason: 'missing_payment' });
 
   const paymentMethod = String(order.payment?.method || 'cash').toLowerCase();
   const paymentStatus = String(order.payment?.status || 'cod_pending').toLowerCase();
   const refundStatus = String(order.payment?.refund?.status || 'none').toLowerCase();
   const amount = Number(refundAmount ?? order?.pricing?.total ?? order?.payment?.amountDue ?? 0);
 
-  if (!Number.isFinite(amount) || amount <= 0) {
-    return { attempted: false, processed: false, reason: 'invalid_amount' };
-  }
-
-  if (paymentMethod === 'cash' || paymentMethod === 'cod') {
-    return { attempted: false, processed: false, reason: 'cash_payment' };
-  }
+  if (!Number.isFinite(amount) || amount <= 0) return none({ reason: 'invalid_amount' });
+  if (paymentMethod === 'cash' || paymentMethod === 'cod') return none({ reason: 'cash_payment' });
 
   if (paymentStatus === 'refunded' || refundStatus === 'processed') {
-    return { attempted: false, processed: true, reason: 'already_refunded', method: paymentMethod };
+    return none({ processed: true, reason: 'already_refunded', method: paymentMethod });
   }
-
   if (paymentStatus !== 'paid') {
-    return { attempted: false, processed: false, reason: `payment_status_${paymentStatus || 'unknown'}`, method: paymentMethod };
+    return none({ reason: `payment_status_${paymentStatus || 'unknown'}`, method: paymentMethod });
   }
 
   if (paymentMethod === 'razorpay') {
     const paymentId = String(order.payment?.razorpay?.paymentId || '').trim();
     if (!paymentId) {
-      order.payment.refund = {
-        status: 'failed',
-        amount,
+      return {
+        attempted: true, processed: false, method: paymentMethod,
+        reason: 'missing_razorpay_payment_id',
+        paymentPatch: { refundStatus: 'failed', refundAmount: amount },
       };
-      return { attempted: true, processed: false, reason: 'missing_razorpay_payment_id', method: paymentMethod };
     }
 
     const refundResult = await initiateRazorpayRefund(paymentId, amount);
     if (refundResult.success) {
-      order.payment.status = 'refunded';
-      order.payment.refund = {
-        status: 'processed',
-        amount,
-        refundId: refundResult.refundId,
-        processedAt: new Date(),
+      return {
+        attempted: true, processed: true, method: paymentMethod, refundId: refundResult.refundId,
+        paymentPatch: {
+          paymentStatus: 'refunded',
+          refundStatus: 'processed',
+          refundAmount: amount,
+          refundId: refundResult.refundId,
+          refundProcessedAt: new Date(),
+        },
       };
-      return { attempted: true, processed: true, method: paymentMethod, refundId: refundResult.refundId };
     }
 
-    order.payment.refund = {
-      status: 'failed',
-      amount,
-    };
     return {
-      attempted: true,
-      processed: false,
+      attempted: true, processed: false, method: paymentMethod,
       reason: refundResult.error || 'razorpay_refund_failed',
-      method: paymentMethod,
+      paymentPatch: { refundStatus: 'failed', refundAmount: amount },
     };
   }
 
   if (paymentMethod === 'wallet') {
     await userWalletService.refundWalletBalance(
-      order.userId,
+      order.userId?.id ?? order.userId,
       amount,
       buildCancellationRefundDescription(order, cancelledBy),
-      { orderId: order._id, cancelledBy }
+      { orderId: order.id ?? order._id, cancelledBy }
     );
-    order.payment.status = 'refunded';
-    order.payment.refund = {
-      status: 'processed',
-      amount,
-      processedAt: new Date(),
+    return {
+      attempted: true, processed: true, method: paymentMethod,
+      paymentPatch: {
+        paymentStatus: 'refunded',
+        refundStatus: 'processed',
+        refundAmount: amount,
+        refundProcessedAt: new Date(),
+      },
     };
-    return { attempted: true, processed: true, method: paymentMethod };
   }
 
-  return { attempted: false, processed: false, reason: `unsupported_method_${paymentMethod}`, method: paymentMethod };
+  return none({ reason: `unsupported_method_${paymentMethod}`, method: paymentMethod });
 }
 
-async function expireUnacceptedOrders(filter = {}) {
+// ----- Acceptance window expiry -----
+
+async function expireUnacceptedOrders(where = {}) {
   const now = new Date();
-  const baseFilter = {
-    orderStatus: { $in: ["created", "confirmed"] },
-    acceptanceDeadlineAt: { $ne: null, $lte: now },
-    ...filter,
+  const baseWhere = {
+    orderStatus: { in: ["created", "confirmed"] },
+    acceptanceDeadlineAt: { not: null, lte: now },
+    ...where,
   };
 
-  const docs = await FoodOrder.find(baseFilter).select("_id orderStatus").lean();
+  const docs = await prisma.foodOrder.findMany({
+    where: baseWhere,
+    select: { id: true, orderStatus: true },
+  });
   if (!docs.length) return 0;
 
   for (const doc of docs) {
     const from = String(doc.orderStatus || "created");
-    const updated = await FoodOrder.findOneAndUpdate(
-      {
-        _id: doc._id,
-        orderStatus: { $in: ["created", "confirmed"] },
-        acceptanceDeadlineAt: { $ne: null, $lte: now },
+
+    // The status guard lives in the WHERE clause so a restaurant accepting in
+    // this same moment wins rather than being overwritten by the sweep.
+    const { count } = await prisma.foodOrder.updateMany({
+      where: {
+        id: doc.id,
+        orderStatus: { in: ["created", "confirmed"] },
+        acceptanceDeadlineAt: { not: null, lte: now },
       },
-      {
-        $set: {
-          orderStatus: "cancelled_by_restaurant",
-          note: "Not accepted by restaurant",
-        },
-        $push: {
-          statusHistory: {
-            at: now,
-            byRole: "SYSTEM",
-            from,
-            to: "cancelled_by_restaurant",
-            note: "Not accepted by restaurant",
-          },
-        },
-      },
-      { new: true },
+      data: { orderStatus: "cancelled_by_restaurant", note: "Not accepted by restaurant" },
+    });
+    if (count === 0) continue;
+
+    await pushStatusHistory(doc.id, {
+      byRole: "SYSTEM",
+      from,
+      to: "cancelled_by_restaurant",
+      note: "Not accepted by restaurant",
+    });
+
+    const updated = toOrder(
+      await prisma.foodOrder.findUnique({ where: { id: doc.id }, include: orderInclude }),
     );
 
-    if (!updated) continue;
-
     try {
-      await applyCancellationRefund(updated, { cancelledBy: 'auto_cancel' });
-      await updated.save();
+      const refund = await applyCancellationRefund(updated, { cancelledBy: 'auto_cancel' });
+      if (Object.keys(refund.paymentPatch).length > 0) {
+        await prisma.foodOrder.update({ where: { id: doc.id }, data: refund.paymentPatch });
+      }
     } catch (err) {
-      logger.warn(`expireUnacceptedOrders refund failed for ${updated._id}: ${err?.message || err}`);
+      logger.warn(`expireUnacceptedOrders refund failed for ${doc.id}: ${err?.message || err}`);
     }
 
     try {
       const io = getIO();
       if (io) {
         const payload = {
-          orderMongoId: updated._id?.toString?.(),
-          orderId: updated._id.toString(),
-          orderStatus: updated.orderStatus,
+          orderMongoId: doc.id,
+          orderId: doc.id,
+          orderStatus: "cancelled_by_restaurant",
           note: "Not accepted by restaurant",
           message: "Order was not accepted by restaurant in time.",
         };
@@ -362,35 +350,9 @@ async function expireUnacceptedOrders(filter = {}) {
 }
 
 export async function expireUnacceptedOrderById(orderMongoId) {
-  if (!orderMongoId || !mongoose.Types.ObjectId.isValid(String(orderMongoId))) {
-    return 0;
-  }
-  return expireUnacceptedOrders({ _id: new mongoose.Types.ObjectId(String(orderMongoId)) });
+  if (!isId(orderMongoId)) return 0;
+  return expireUnacceptedOrders({ id: String(orderMongoId) });
 }
-
-async function getActiveCommissionRules() {
-  const now = Date.now();
-  if (
-    commissionRulesCache &&
-    now - commissionRulesLoadedAt < COMMISSION_CACHE_MS
-  ) {
-    return commissionRulesCache;
-  }
-  const list = await FoodDeliveryCommissionRule.find({
-    status: { $ne: false },
-  }).lean();
-  commissionRulesCache = list || [];
-  commissionRulesLoadedAt = now;
-  return commissionRulesCache;
-}
-
-// 🗑️ Moved to foodTransaction.service.js to centralize finance logic.
-
-
-// Rider earnings use deliveryBoyBasePay / deliveryBoyPerKm from admin fee ranges (see order-pricing.service.js).
-
-/** Append-only food_order_payments row; never blocks main flow on failure */
-// 🗑️ Deprecated in favor of FoodTransaction system.
 
 // ----- Settings -----
 export async function getDispatchSettings() {
@@ -409,20 +371,83 @@ export async function calculateOrder(userId, dto) {
   });
 }
 
-// Helper to safely convert string to ObjectId or throw ValidationError (400)
-function toObjectId(id, fieldName = 'ID') {
-  if (!id) return null;
-  if (id instanceof mongoose.Types.ObjectId) return id;
-  if (typeof id !== 'string' || !/^[0-9a-fA-F]{24}$/.test(id)) {
-    throw new ValidationError(`Invalid ${fieldName} format`);
+// ----- Coupons -----
+
+async function incrementCouponUsageForOrder(order, userId) {
+  const couponCode = order?.pricing?.couponCode
+    ? String(order.pricing.couponCode).trim().toUpperCase()
+    : "";
+  if (!couponCode) return;
+  // A stored code with no applied discount means the coupon was rejected at
+  // pricing time — don't consume the user's/offer's usage allowance for it.
+  if (!(Number(order?.pricing?.discount) > 0)) return;
+
+  try {
+    const offer = await prisma.foodOffer.findUnique({ where: { couponCode } });
+    if (!offer) return;
+
+    // Conditional increment so concurrent orders cannot push usedCount past usageLimit.
+    const { count } = await prisma.foodOffer.updateMany({
+      where: {
+        id: offer.id,
+        OR: [{ usageLimit: null }, { usageLimit: 0 }, { usedCount: { lt: offer.usageLimit ?? 0 } }],
+      },
+      data: { usedCount: { increment: 1 } },
+    });
+    if (count === 0 && Number(offer.usageLimit) > 0) {
+      // Payment is already processed at this point, so honour the discount but flag the overflow.
+      logger.warn(
+        `Coupon ${couponCode} reached usage limit before increment for order ${order?.id}; discount honored.`,
+      );
+    }
+
+    await prisma.foodOfferUsage.upsert({
+      where: { offerId_userId: { offerId: offer.id, userId: String(userId) } },
+      create: { offerId: offer.id, userId: String(userId), count: 1, lastUsedAt: new Date() },
+      update: { count: { increment: 1 }, lastUsedAt: new Date() },
+    });
+  } catch (err) {
+    logger.error(`Coupon usage update failed: ${err.message}`);
   }
-  return new mongoose.Types.ObjectId(id);
 }
 
 // ----- Create order -----
+
+/**
+ * "FOD-" + 6 timestamp digits + 4 random.
+ *
+ * Was a pre('save') hook that probed the collection for collisions; the unique
+ * index does that job here, so a clash just retries. The old 4+3 format collided
+ * after a few thousand orders and made display-id lookups match the wrong order.
+ */
+function buildOrderDisplayId(entropyDigits = 4) {
+  const timestamp = Date.now().toString().slice(-6);
+  const floor = 10 ** (entropyDigits - 1);
+  const random = Math.floor(floor + Math.random() * (floor * 9));
+  return `FOD-${timestamp}${random}`;
+}
+
+async function createOrderRow(data) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    // Widen the random part on later attempts rather than retrying the same odds.
+    const displayId = buildOrderDisplayId(attempt < 3 ? 4 : 8);
+    try {
+      return await prisma.foodOrder.create({
+        data: { ...data, order_id: displayId, orderId: displayId },
+        include: orderInclude,
+      });
+    } catch (err) {
+      // P2002 here can only be the display id — nothing else in `data` is unique.
+      if (err?.code === 'P2002') continue;
+      throw err;
+    }
+  }
+  throw new ValidationError('Could not allocate an order id. Please try again.');
+}
+
 export async function createOrder(userId, dto) {
   try {
-    const restaurantId = toObjectId(dto.restaurantId, 'Restaurant ID');
+    const restaurantId = requireId(dto.restaurantId, 'Restaurant ID');
     const restaurant = await loadRestaurantForOrdering(restaurantId);
 
     const orderAt = dto.scheduledAt ? new Date(dto.scheduledAt) : new Date();
@@ -447,13 +472,10 @@ export async function createOrder(userId, dto) {
       ...(dto.address || {}),
     });
 
-    const paymentMethod =
-      dto.paymentMethod === "card" ? "razorpay" : dto.paymentMethod;
+    const paymentMethod = dto.paymentMethod === "card" ? "razorpay" : dto.paymentMethod;
     // COD was hard-disabled here. It is back on by default and kept behind a switch
     // so it can be turned off again without a deploy — everything downstream already
-    // supports it (payment.status 'cod_pending' is the schema default, the restaurant
-    // order-list filter and canExposeOrderToRestaurant both include 'cash', and rider
-    // cash collection, deposits and cashInHand are all live).
+    // supports it.
     if (paymentMethod === "cash" && String(process.env.COD_ENABLED || "true") !== "true") {
       throw new ValidationError("Cash on Delivery is no longer available. Please pay online.");
     }
@@ -463,7 +485,7 @@ export async function createOrder(userId, dto) {
     const pricingResult = await calculateOrderPricing(
       userId,
       {
-        restaurantId: String(restaurantId),
+        restaurantId,
         items: dto.items || [],
         deliveryAddress,
         couponCode: dto.pricing?.couponCode || undefined,
@@ -491,24 +513,17 @@ export async function createOrder(userId, dto) {
         : null,
       total: Number(pricingResult.pricing?.total) || 0,
       currency: String(pricingResult.pricing?.currency || "INR"),
-      // Same road distance source as cart preview / delivery Rest→User.
       distanceKm: Number.isFinite(Number(pricingResult.pricing?.distanceKm))
         ? Number(pricingResult.pricing.distanceKm)
         : null,
       roadDistanceKm: Number.isFinite(Number(pricingResult.pricing?.roadDistanceKm))
         ? Number(pricingResult.pricing.roadDistanceKm)
         : null,
-      straightLineDistanceKm: Number.isFinite(
-        Number(pricingResult.pricing?.straightLineDistanceKm),
-      )
-        ? Number(pricingResult.pricing.straightLineDistanceKm)
-        : null,
     };
 
     if (!Number.isFinite(normalizedPricing.total) || normalizedPricing.total <= 0) {
       throw new ValidationError("Order total must be greater than zero");
     }
-
     normalizedPricing.total = Math.round(normalizedPricing.total * 100) / 100;
 
     const payment = {
@@ -519,15 +534,11 @@ export async function createOrder(userId, dto) {
       qr: {},
     };
 
-    // Reuse pricing distance (already road-preferred) — do not call Directions again.
+    // Reuse the pricing distance (already road-preferred) — do not call Directions again.
     let distanceKm = Number.isFinite(Number(normalizedPricing.distanceKm))
       ? Number(normalizedPricing.distanceKm)
       : await getDeliveryDistanceKm(restaurant, deliveryAddress);
-    if (Number.isFinite(distanceKm)) {
-      distanceKm = Number(distanceKm.toFixed(2));
-    } else {
-      distanceKm = null;
-    }
+    distanceKm = Number.isFinite(distanceKm) ? Number(distanceKm.toFixed(2)) : null;
     if (Number.isFinite(distanceKm)) {
       normalizedPricing.distanceKm = distanceKm;
       normalizedPricing.roadDistanceKm = distanceKm;
@@ -535,23 +546,21 @@ export async function createOrder(userId, dto) {
 
     const feeSettings = await loadActiveFeeSettings();
     const riderEarning = calculateRiderEarning(feeSettings, distanceKm) || 0;
-    
-    // Calculate restaurant commission from subtotal
+
     let restaurantCommission = 0;
     try {
       const snapshot = await foodTransactionService.getRestaurantCommissionSnapshot({
         pricing: normalizedPricing,
-        restaurantId: restaurantId
+        restaurantId,
       });
       restaurantCommission = Number(snapshot?.commissionAmount) || 0;
     } catch (err) {
       logger.error(`Commission calculation failed for order: ${err.message}`);
     }
-
     normalizedPricing.restaurantCommission = restaurantCommission;
 
-    // Provisional value; synced to the transaction's platformNetProfit (which also
-    // accounts for the admin discount share) once the initial transaction is created.
+    // Provisional; synced to the transaction's platformNetProfit (which also accounts
+    // for the admin discount share) once the initial transaction is created.
     const platformProfit =
       (Number.isFinite(normalizedPricing.deliveryFee) ? normalizedPricing.deliveryFee : 0) +
       (Number.isFinite(normalizedPricing.deliveryFeeGst) ? normalizedPricing.deliveryFeeGst : 0) +
@@ -563,33 +572,18 @@ export async function createOrder(userId, dto) {
     const initialStatus = isAwaitingOnlinePayment ? "pending_payment" : "created";
     const acceptanceWindowSeconds = await getOrderAcceptanceWindowSeconds();
 
-    const order = new FoodOrder({
-      userId: toObjectId(userId, 'User ID'),
-      restaurantId: restaurantId,
-      zoneId: dto.zoneId ? toObjectId(dto.zoneId, 'Zone ID') : toObjectId(restaurant.zoneId, 'Restaurant Zone ID'),
-      items: resolvedItems.map(item => ({
-        ...item,
-        itemId: toObjectId(item.itemId, 'Item ID')
-      })),
-      deliveryAddress,
+    const created = await createOrderRow({
+      ...fromOrder({ pricing: normalizedPricing, payment, deliveryAddress }),
+      userId: requireId(userId, 'User ID'),
+      restaurantId,
+      zoneId: dto.zoneId ? requireId(dto.zoneId, 'Zone ID') : restaurant.zoneId || null,
       customerName: String(dto.customerName || deliveryAddress.fullName || ""),
       customerPhone: String(dto.customerPhone || deliveryAddress.phone || ""),
-      pricing: normalizedPricing,
-      payment,
       orderStatus: initialStatus,
       acceptanceWindowSeconds,
       acceptanceDeadlineAt:
         initialStatus === "created" ? buildAcceptanceDeadline(new Date(), acceptanceWindowSeconds) : null,
-      dispatch: { modeAtCreation: dispatchMode, status: "unassigned" },
-      statusHistory: [
-        {
-          at: new Date(),
-          byRole: "SYSTEM",
-          from: "",
-          to: initialStatus,
-          note: initialStatus === "pending_payment" ? "Order created, awaiting payment" : "Order placed",
-        },
-      ],
+      dispatchStatus: "unassigned",
       note: String(dto.note || ""),
       deliveryInstructions: String(dto.deliveryInstructions || ""),
       sendCutlery: dto.sendCutlery !== false,
@@ -597,46 +591,72 @@ export async function createOrder(userId, dto) {
       scheduledAt: dto.scheduledAt ? new Date(dto.scheduledAt) : null,
       riderEarning: Number(riderEarning) || 0,
       platformProfit: Number(platformProfit) || 0,
+      items: {
+        create: resolvedItems.map((item) => ({
+          itemId: String(item.itemId),
+          name: item.name,
+          variantId: item.variantId || '',
+          variantName: item.variantName || '',
+          variantPrice: Number(item.variantPrice) || 0,
+          price: Number(item.price) || 0,
+          otherPrice: Number(item.otherPrice) || 0,
+          quantity: Number(item.quantity) || 1,
+          isVeg: Boolean(item.isVeg),
+          image: item.image || '',
+          notes: item.notes || '',
+          addons: item.addons || [],
+        })),
+      },
+      statusHistory: {
+        create: [{
+          at: new Date(),
+          byRole: "SYSTEM",
+          from: "",
+          to: initialStatus,
+          note: initialStatus === "pending_payment" ? "Order created, awaiting payment" : "Order placed",
+        }],
+      },
     });
 
+    let order = toOrder(created);
     let razorpayPayload = null;
 
     if (paymentMethod === "razorpay" && isRazorpayConfigured()) {
       const amountPaise = Math.round((normalizedPricing.total || 0) * 100);
-      if (amountPaise < 100)
+      if (amountPaise < 100) {
+        await purgeOrder(order.id);
         throw new ValidationError("Amount too low for online payment");
+      }
       try {
-        const rzOrder = await createRazorpayOrder(amountPaise, "INR", order._id.toString());
+        // The gateway receipt is the order id, so this can only run post-insert.
+        const rzOrder = await createRazorpayOrder(amountPaise, "INR", order.id);
         razorpayPayload = {
           key: getRazorpayKeyId(),
           orderId: rzOrder.id,
           amount: rzOrder.amount,
           currency: rzOrder.currency || "INR",
         };
-        payment.razorpay = { orderId: rzOrder.id, paymentId: "", signature: "" };
-        payment.status = "created";
-        // Update order payment state before saving
-        order.payment = payment;
+        order = toOrder(await prisma.foodOrder.update({
+          where: { id: order.id },
+          data: { razorpayOrderId: rzOrder.id, razorpayPaymentId: '', razorpaySignature: '', paymentStatus: 'created' },
+          include: orderInclude,
+        }));
       } catch (err) {
+        // Mongo threw before saving, so no order existed on gateway failure.
+        await purgeOrder(order.id).catch(() => {});
         logger.error(`Razorpay order creation failed: ${err.message}`);
         throw new ValidationError(err?.message || "Payment gateway error");
       }
     }
 
-    await order.save();
-
     if (!isAwaitingOnlinePayment) {
       void addOrderJob(
-        {
-          action: "ORDER_ACCEPTANCE_TIMEOUT_CHECK",
-          orderMongoId: order._id?.toString?.(),
-          orderId: order._id.toString(),
-        },
+        { action: "ORDER_ACCEPTANCE_TIMEOUT_CHECK", orderMongoId: order.id, orderId: order.id },
         {
           delay: acceptanceWindowSeconds * 1000,
           removeOnComplete: true,
           removeOnFail: true,
-          jobId: `order-accept-timeout-${order._id?.toString?.()}`,
+          jobId: `order-accept-timeout-${order.id}`,
         },
       ).catch((err) => {
         logger.warn(`Failed to enqueue acceptance timeout check: ${err?.message || err}`);
@@ -645,76 +665,66 @@ export async function createOrder(userId, dto) {
 
     if (isWallet) {
       try {
-        await userWalletService.deductWalletBalance(userId, order.pricing.total, `Payment for order #${order.order_id || order._id}`, { orderId: order._id });
+        await userWalletService.deductWalletBalance(
+          userId,
+          order.pricing.total,
+          `Payment for order #${order.order_id || order.id}`,
+          { orderId: order.id },
+        );
       } catch (err) {
-        await FoodOrder.deleteOne({ _id: order._id });
+        await purgeOrder(order.id).catch(() => {});
         throw err;
       }
     }
 
-    // Phase 2: Create initial transaction after payment is confirmed (online) or immediately (cash/wallet).
+    // Create the initial transaction after payment is confirmed (online) or immediately (cash/wallet).
     if (!isAwaitingOnlinePayment) {
       try {
         const transaction = await foodTransactionService.createInitialTransaction(order);
         if (transaction && Number.isFinite(Number(transaction.amounts?.platformNetProfit))) {
+          await prisma.foodOrder.update({
+            where: { id: order.id },
+            data: { platformProfit: Number(transaction.amounts.platformNetProfit) },
+          });
           order.platformProfit = Number(transaction.amounts.platformNetProfit);
-          await FoodOrder.updateOne(
-            { _id: order._id },
-            { $set: { platformProfit: order.platformProfit } },
-          );
         }
       } catch (err) {
-        logger.error(`[CRITICAL] Initial transaction failed for order ${order._id}: ${err.message}`);
+        logger.error(`[CRITICAL] Initial transaction failed for order ${order.id}: ${err.message}`);
       }
     }
 
-    // Realtime + push notifications.
     try {
-      // Nothing is pushed for an order still awaiting online payment.
-      //
-      // That push fired the instant the order record was created — while the
-      // customer was sitting on the Razorpay sheet actually paying. Telling
-      // someone to complete a payment they are in the middle of completing is
-      // pure interruption, and it landed mid-transaction where it is most
-      // likely to make them abandon.
-      //
-      // The customer cannot miss this state either: they are in the app, on the
-      // payment screen, and an abandoned order is already handled by
-      // abandonOnlinePaymentOrder. A push adds nothing a screen they are
-      // looking at does not already say.
+      // Nothing is pushed for an order still awaiting online payment — that push
+      // fired while the customer was sitting on the Razorpay sheet actually paying.
       if (!isAwaitingOnlinePayment) {
         await notifyOwnersSafely([{ ownerType: "USER", ownerId: userId }], {
           title: "Order Confirmed! 🍔",
-          body: `Your order #${order.order_id || order._id} from ${restaurant.restaurantName || "the restaurant"} has been placed successfully.`,
+          body: `Your order #${order.order_id || order.id} from ${restaurant.restaurantName || "the restaurant"} has been placed successfully.`,
           image: "https://i.ibb.co/5GzXz7r/Switcheats-Brand-Image.png",
           data: {
             type: "order_created",
-            orderId: String(order._id),
-            orderMongoId: order._id.toString(),
-            link: `/food/user/orders/${order._id.toString()}`,
+            orderId: order.id,
+            orderMongoId: order.id,
+            link: `/food/user/orders/${order.id}`,
           },
         });
-      }
 
-      if (!isAwaitingOnlinePayment) {
         await notifyRestaurantNewOrder(order);
       }
     } catch (err) {
-      logger.warn(`Notifications failed for order ${order._id}: ${err.message}`);
+      logger.warn(`Notifications failed for order ${order.id}: ${err.message}`);
     }
 
     if (!isAwaitingOnlinePayment) {
       await incrementCouponUsageForOrder(order, userId);
     }
 
-    const saved = normalizeOrderForClient(order);
-    return { order: saved, razorpay: razorpayPayload };
+    return { order: normalizeOrderForClient(order), razorpay: razorpayPayload };
   } catch (err) {
     logger.error(`Order placement error: ${err.message}`, { stack: err.stack, userId, dto });
     if (err instanceof ValidationError || err instanceof ForbiddenError || err instanceof NotFoundError) {
       throw err;
     }
-    // Transform system errors to Generic validation error with 500 logging
     throw new ValidationError(err.message || "Something went wrong while placing your order. Please try again.");
   }
 }
@@ -724,13 +734,16 @@ export async function verifyPayment(userId, dto) {
   const identity = buildOrderIdentityFilter(dto.orderId);
   if (!identity) throw new ValidationError("Order id required");
 
-  const order = await FoodOrder.findOne({
-    ...identity,
-    userId: new mongoose.Types.ObjectId(userId),
+  const row = await prisma.foodOrder.findFirst({
+    where: { ...identity, userId: String(userId) },
+    include: orderInclude,
   });
-  if (!order) throw new NotFoundError("Order not found");
-  if (order.payment.status === "paid")
+  if (!row) throw new NotFoundError("Order not found");
+  const order = toOrder(row);
+
+  if (order.payment.status === "paid") {
     return { order: normalizeOrderForClient(order), payment: order.payment };
+  }
 
   if (String(dto.razorpayOrderId) !== String(order.payment?.razorpay?.orderId || "")) {
     throw new ValidationError("Payment verification failed");
@@ -743,16 +756,17 @@ export async function verifyPayment(userId, dto) {
   );
   if (!valid) throw new ValidationError("Payment verification failed");
 
-  // Cross-check the actual captured payment against the order: correct Razorpay
-  // order linkage, an acceptable status, and the exact amount in paise.
-  // Fail closed — the webhook remains the recovery path for transient errors.
+  // Cross-check the captured payment against the order: correct Razorpay order
+  // linkage, an acceptable status, and the exact amount in paise. Fail closed —
+  // the webhook remains the recovery path for transient errors.
   let rzPayment;
   try {
     rzPayment = await fetchRazorpayPayment(dto.razorpayPaymentId);
   } catch (err) {
-    logger.error(`Razorpay payment fetch failed for order ${order._id}: ${err?.message || err}`);
+    logger.error(`Razorpay payment fetch failed for order ${order.id}: ${err?.message || err}`);
     throw new ValidationError("Payment verification failed. Please retry in a moment.");
   }
+
   const expectedPaise = Math.round((Number(order.pricing?.total) || 0) * 100);
   const paidPaise = Number(rzPayment?.amount);
   const rzStatus = String(rzPayment?.status || "").toLowerCase();
@@ -762,105 +776,95 @@ export async function verifyPayment(userId, dto) {
     !Number.isFinite(paidPaise) ||
     paidPaise !== expectedPaise
   ) {
-    order.payment.status = "failed";
-    pushStatusHistory(order, {
+    await prisma.foodOrder.update({ where: { id: order.id }, data: { paymentStatus: 'failed' } });
+    await pushStatusHistory(order.id, {
       byRole: "SYSTEM",
-      byId: null,
       from: order.orderStatus,
       to: order.orderStatus,
       note: `Payment rejected: amount/order mismatch (paid ${paidPaise} paise, expected ${expectedPaise} paise, status ${rzStatus})`,
     });
-    await order.save();
     logger.error(
-      `Payment amount mismatch for order ${order._id}: paid ${paidPaise} paise, expected ${expectedPaise} paise, rz order ${rzPayment?.order_id}, status ${rzStatus}`,
+      `Payment amount mismatch for order ${order.id}: paid ${paidPaise} paise, expected ${expectedPaise} paise, rz order ${rzPayment?.order_id}, status ${rzStatus}`,
     );
     throw new ValidationError("Payment verification failed");
   }
 
-  order.payment.status = "paid";
-  order.payment.razorpay.paymentId = dto.razorpayPaymentId;
-  order.payment.razorpay.signature = dto.razorpaySignature;
-  
   const from = order.orderStatus;
   const acceptanceWindowSeconds = await getOrderAcceptanceWindowSeconds();
-  order.orderStatus = "created";
-  order.acceptanceWindowSeconds = acceptanceWindowSeconds;
-  order.acceptanceDeadlineAt = buildAcceptanceDeadline(new Date(), acceptanceWindowSeconds);
 
-  pushStatusHistory(order, {
+  const updated = toOrder(await prisma.foodOrder.update({
+    where: { id: order.id },
+    data: {
+      paymentStatus: 'paid',
+      razorpayPaymentId: dto.razorpayPaymentId,
+      razorpaySignature: dto.razorpaySignature,
+      orderStatus: 'created',
+      acceptanceWindowSeconds,
+      acceptanceDeadlineAt: buildAcceptanceDeadline(new Date(), acceptanceWindowSeconds),
+    },
+    include: orderInclude,
+  }));
+
+  await pushStatusHistory(order.id, {
     byRole: "USER",
     byId: userId,
-    from: from,
+    from,
     to: "created",
     note: "Payment verified, order confirmed",
   });
-  await order.save();
+
   void addOrderJob(
-    {
-      action: "ORDER_ACCEPTANCE_TIMEOUT_CHECK",
-      orderMongoId: order._id?.toString?.(),
-      orderId: order._id.toString(),
-    },
+    { action: "ORDER_ACCEPTANCE_TIMEOUT_CHECK", orderMongoId: order.id, orderId: order.id },
     {
       delay: acceptanceWindowSeconds * 1000,
       removeOnComplete: true,
       removeOnFail: true,
-      jobId: `order-accept-timeout-${order._id?.toString?.()}`,
+      jobId: `order-accept-timeout-${order.id}`,
     },
   ).catch((err) => {
     logger.warn(`Failed to enqueue acceptance timeout check: ${err?.message || err}`);
   });
 
   try {
-    const transaction = await foodTransactionService.createInitialTransaction(order);
+    const transaction = await foodTransactionService.createInitialTransaction(updated);
     if (transaction && Number.isFinite(Number(transaction.amounts?.platformNetProfit))) {
-      order.platformProfit = Number(transaction.amounts.platformNetProfit);
-      await FoodOrder.updateOne(
-        { _id: order._id },
-        { $set: { platformProfit: order.platformProfit } },
-      );
+      await prisma.foodOrder.update({
+        where: { id: order.id },
+        data: { platformProfit: Number(transaction.amounts.platformNetProfit) },
+      });
+      updated.platformProfit = Number(transaction.amounts.platformNetProfit);
     }
   } catch (err) {
-    logger.error(`[CRITICAL] Initial transaction failed for order ${order._id}: ${err.message}`);
+    logger.error(`[CRITICAL] Initial transaction failed for order ${order.id}: ${err.message}`);
   }
 
-  await incrementCouponUsageForOrder(order, userId);
+  await incrementCouponUsageForOrder(updated, userId);
 
-  await foodTransactionService.updateTransactionStatus(order._id, 'captured', {
+  await foodTransactionService.updateTransactionStatus(order.id, 'captured', {
     status: 'captured',
     razorpayPaymentId: dto.razorpayPaymentId,
     razorpaySignature: dto.razorpaySignature,
     recordedByRole: "USER",
-    recordedById: new mongoose.Types.ObjectId(userId)
+    recordedById: String(userId),
   });
 
-  // After online payment is verified, now notify restaurant about the new order.
-  await notifyRestaurantNewOrder(order);
+  // Now that payment is verified, tell the restaurant about the new order.
+  await notifyRestaurantNewOrder(updated);
 
-  // No "Payment Successful" push.
-  //
-  // This can only ever fire while the customer is watching the confirmation
-  // screen that says the same thing — verification happens in the same request
-  // that returns them to it. Between this and the pending-payment prompt above,
-  // a single online checkout produced three notifications before the restaurant
-  // had even seen the order.
-  //
-  // The pushes that survive are the ones a customer genuinely cannot see
-  // without them: the restaurant accepting, the rider collecting, and delivery.
-  // Those arrive minutes later, when the app is likely closed.
-
-  return { order: normalizeOrderForClient(order), payment: order.payment };
+  return { order: normalizeOrderForClient(updated), payment: updated.payment };
 }
 
 export async function abandonOnlinePaymentOrder(userId, orderId) {
   const identity = buildOrderIdentityFilter(orderId);
   if (!identity) throw new ValidationError("Order id required");
 
-  const order = await FoodOrder.findOne({
-    ...identity,
-    userId: new mongoose.Types.ObjectId(userId),
+  const row = await prisma.foodOrder.findFirst({
+    where: { ...identity, userId: String(userId) },
+    include: orderInclude,
   });
-  if (!order) throw new NotFoundError("Order not found");
+  if (!row) throw new NotFoundError("Order not found");
+  const order = toOrder(row);
+
   if (String(order.orderStatus || "").toLowerCase() !== "pending_payment") {
     throw new ValidationError("Order is not awaiting payment");
   }
@@ -868,51 +872,39 @@ export async function abandonOnlinePaymentOrder(userId, orderId) {
   const deleted = await deletePendingPaymentOrder(order);
   if (!deleted) throw new ValidationError("Could not abandon payment");
 
-  return { deleted: true, orderId: order._id.toString() };
+  return { deleted: true, orderId: order.id };
 }
 
 // ----- Auto-assign -----
-
-/**
- * Start or continue a smart cascading dispatch.
- * @param {string} orderId - Mongo ID of the order.
- * @param {object} options - Options (retry count, etc)
- */
 export async function tryAutoAssign(orderId, options = {}) {
-    return dispatchService.tryAutoAssign(orderId, options);
+  return dispatchService.tryAutoAssign(orderId, options);
 }
 
-/**
- * Triggered by worker after 60 seconds of zero response.
- */
 export async function processDispatchTimeout(orderId, partnerId, options = {}) {
-    return dispatchService.processDispatchTimeout(orderId, partnerId, options);
+  return dispatchService.processDispatchTimeout(orderId, partnerId, options);
 }
 
 // ----- User: list, get, cancel -----
 export async function listOrdersUser(userId, query) {
   await expireStalePendingPaymentOrders();
   await expireUnacceptedOrders();
+
   const { page, limit, skip } = buildPaginationOptions(query);
-  const filter = { 
-    userId: new mongoose.Types.ObjectId(userId),
-    orderStatus: { $ne: 'pending_payment' }
-  };
-  const [docs, total] = await Promise.all([
-    FoodOrder.find(filter)
-      .populate(
-        "restaurantId",
-        "restaurantName profileImage area city location rating totalRatings",
-      )
-      .populate("dispatch.deliveryPartnerId", "name fullName phone phoneNumber rating totalRatings profilePhoto vehicleType vehicleName vehicleNumber totalDeliveries")
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean(),
-    FoodOrder.countDocuments(filter),
+  const where = { userId: String(userId), orderStatus: { not: 'pending_payment' } };
+
+  const [rows, total] = await Promise.all([
+    prisma.foodOrder.findMany({
+      where,
+      include: withRelations(),
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
+    }),
+    prisma.foodOrder.count({ where }),
   ]);
+
   return buildPaginatedResult({
-    docs: docs.map((doc) => normalizeOrderForClient(doc)),
+    docs: toOrders(rows).map((order) => normalizeOrderForClient(order)),
     total,
     page,
     limit,
@@ -921,36 +913,33 @@ export async function listOrdersUser(userId, query) {
 
 /**
  * Full money split + audit history for the admin order detail view.
- * Sourced from FoodTransaction (queried by orderId — the order backlink is best-effort).
  */
-async function buildAdminTransactionView(orderMongoId) {
+async function buildAdminTransactionView(orderId) {
   try {
-    const tx = await FoodTransaction.findOne({ orderId: orderMongoId }).lean();
+    const tx = await foodTransactionService.getTransactionByOrder(orderId);
     if (!tx) return null;
     return {
       status: tx.status || null,
       paymentMethod: tx.paymentMethod || tx.payment?.method || null,
       amounts: tx.amounts || null,
       settlement: tx.settlement || null,
-      history: Array.isArray(tx.history)
-        ? tx.history.map((entry) => ({
-            kind: entry.kind,
-            amount: entry.amount ?? null,
-            at: entry.at || null,
-            note: entry.note || "",
-            byRole: entry.recordedBy?.role || null,
-          }))
-        : [],
+      history: (tx.history || []).map((entry) => ({
+        kind: entry.kind,
+        amount: entry.amount ?? null,
+        at: entry.at || null,
+        note: entry.note || "",
+        byRole: entry.recordedByRole || null,
+      })),
     };
   } catch (err) {
-    logger.warn(`buildAdminTransactionView failed for order ${orderMongoId}: ${err?.message || err}`);
+    logger.warn(`buildAdminTransactionView failed for order ${orderId}: ${err?.message || err}`);
     return null;
   }
 }
 
 /**
- * Restaurant-safe earnings breakdown for the restaurant order detail view.
- * Never includes platform economics (platformNetProfit, riderShare, adminDiscountShare).
+ * Restaurant-safe earnings breakdown. Never includes platform economics
+ * (platformNetProfit, riderShare, adminDiscountShare).
  */
 function buildRestaurantFinanceViewSync(order, tx = null) {
   const pricing = order?.pricing || {};
@@ -990,10 +979,10 @@ function buildRestaurantFinanceViewSync(order, tx = null) {
 
 async function buildRestaurantFinanceView(order) {
   try {
-    const tx = await FoodTransaction.findOne({ orderId: order._id }).lean();
+    const tx = await foodTransactionService.getTransactionByOrder(order.id);
     return buildRestaurantFinanceViewSync(order, tx);
   } catch (err) {
-    logger.warn(`buildRestaurantFinanceView failed for order ${order?._id}: ${err?.message || err}`);
+    logger.warn(`buildRestaurantFinanceView failed for order ${order?.id}: ${err?.message || err}`);
     return buildRestaurantFinanceViewSync(order, null);
   }
 }
@@ -1005,33 +994,31 @@ export async function getOrderById(
   await expireUnacceptedOrders();
   const identity = buildOrderIdentityFilter(orderId);
   if (!identity) throw new ValidationError("Order id required");
-  const order = await FoodOrder.findOne(identity)
-    .populate(
-      "restaurantId",
-      "restaurantName ownerPhone profileImage area city location rating totalRatings primaryContactNumber",
-    )
-    .populate("dispatch.deliveryPartnerId", "name fullName phone phoneNumber rating totalRatings profilePhoto vehicleType vehicleName vehicleNumber totalDeliveries lastLat lastLng lastLocationAt")
-    .populate("userId", "name fullName phone email")
-    .select("+deliveryOtp")
-    .lean();
-  if (!order) throw new NotFoundError("Order not found");
+
+  const row = await prisma.foodOrder.findFirst({
+    where: identity,
+    include: withRelations(RESTAURANT_DETAIL, PARTNER_WITH_LOCATION),
+  });
+  if (!row) throw new NotFoundError("Order not found");
+  const order = toOrder(row);
 
   if (admin) {
     const out = normalizeOrderForClient(order);
-    out.transaction = await buildAdminTransactionView(order._id);
+    out.transaction = await buildAdminTransactionView(order.id);
     return out;
   }
 
-  const orderUserId = order.userId?._id?.toString() || order.userId?.toString();
-  const orderRestaurantId = order.restaurantId?._id?.toString() || order.restaurantId?.toString();
-  const orderPartnerId = order.dispatch?.deliveryPartnerId?._id?.toString() || order.dispatch?.deliveryPartnerId?.toString();
+  const orderUserId = row.userId;
+  const orderRestaurantId = row.restaurantId;
+  const orderPartnerId = row.dispatchDeliveryPartnerId;
 
-  if (userId && orderUserId !== userId.toString())
-    throw new ForbiddenError("Not your order");
-  if (restaurantId && orderRestaurantId !== restaurantId.toString())
+  if (userId && orderUserId !== String(userId)) throw new ForbiddenError("Not your order");
+  if (restaurantId && orderRestaurantId !== String(restaurantId)) {
     throw new ForbiddenError("Not your restaurant order");
-  if (deliveryPartnerId && orderPartnerId !== deliveryPartnerId.toString())
+  }
+  if (deliveryPartnerId && orderPartnerId !== String(deliveryPartnerId)) {
     throw new ForbiddenError("Not assigned to you");
+  }
 
   if (restaurantId) {
     const out = sanitizeOrderForExternal(order);
@@ -1049,23 +1036,16 @@ export async function getOrderById(
     const out = normalizeOrderForClient(order);
     delete out.deliveryOtp;
     out.deliveryVerification = {
-      ...(order.deliveryVerification || {}),
-      dropOtp: {
-        required: Boolean(drop.required),
-        verified: Boolean(drop.verified),
-      },
+      dropOtp: { required: Boolean(drop.required), verified: Boolean(drop.verified) },
     };
-    if (!drop.verified && secret) {
-      out.handoverOtp = secret;
-    }
+    if (!drop.verified && secret) out.handoverOtp = secret;
 
-    // deliveryState.currentLocation is derived from order.lastRiderLocation, which
-    // is only written once the rider emits a location-update FOR THIS ORDER — so
-    // before pickup it is null and every customer-side screen reading riderLat
-    // silently fell back to the restaurant's coordinates. The assigned partner's
-    // own last ping is a real position, so use it when we have nothing better.
-    const partner = order.dispatch?.deliveryPartnerId;
-    if (!out.deliveryState?.currentLocation && partner?._id) {
+    // deliveryState.currentLocation comes from the order's own rider position,
+    // which is only written once the rider emits an update FOR THIS ORDER — so
+    // before pickup it is null and customer screens fell back to the restaurant's
+    // coordinates. The assigned partner's last ping is a real position.
+    const partner = row.deliveryPartner;
+    if (!out.deliveryState?.currentLocation && partner?.id) {
       const pLat = Number(partner.lastLat);
       const pLng = Number(partner.lastLng);
       if (Number.isFinite(pLat) && Number.isFinite(pLng)) {
@@ -1086,65 +1066,53 @@ export async function getOrderById(
 export async function getDropOtpUser(orderId, userId) {
   const identity = buildOrderIdentityFilter(orderId);
   if (!identity) throw new ValidationError("Order id required");
-  const order = await FoodOrder.findOne({
-    ...identity,
-    userId: new mongoose.Types.ObjectId(userId),
-  }).select("+deliveryOtp");
-  if (!order) throw new NotFoundError("Order not found");
 
-  const phase = order.deliveryState?.currentPhase;
-  const status = order.orderStatus;
+  const row = await prisma.foodOrder.findFirst({
+    where: { ...identity, userId: String(userId) },
+    select: { deliveryOtp: true, deliveryPhase: true, orderStatus: true },
+  });
+  if (!row) throw new NotFoundError("Order not found");
+
   const eligiblePhases = ["at_drop", "en_route_to_delivery"];
-  const isEligible = eligiblePhases.includes(phase) || status === "picked_up";
+  const isEligible = eligiblePhases.includes(row.deliveryPhase) || row.orderStatus === "picked_up";
 
   if (!isEligible) {
     throw new ValidationError(
-      "Rider is still at the restaurant. Wait for them to pick up your order to see the OTP."
+      "Rider is still at the restaurant. Wait for them to pick up your order to see the OTP.",
     );
   }
 
-  return { otp: order.deliveryOtp };
+  return { otp: row.deliveryOtp };
 }
 
 /**
- * Watchdog: Recovers orders stuck in 'assigned' or 'preparing' status for too long.
- * Should be called on server startup.
- */
-/**
  * Closes trips that were picked up but never completed.
  *
- * Riders forget to tap "delivered", or lose the app mid-trip, and the order then
- * sits open forever: it blocks them from taking another job, keeps showing as live
- * to the customer, and never reaches the restaurant's completed list.
- *
  * DELIBERATELY LIMITED TO POST-PICKUP STATES. Marking any four-hour-old order
- * delivered would sweep up ones that were never accepted, never cooked and never
- * paid for, and record them as fulfilled — which feeds restaurant payouts and rider
- * earnings for food that does not exist. Orders still in created/confirmed/preparing
- * were never picked up; those are the acceptance-window expiry's job to cancel, not
- * this one's to complete.
+ * delivered would sweep up ones never accepted, cooked or paid for and record
+ * them as fulfilled — which feeds restaurant payouts and rider earnings for food
+ * that does not exist.
  *
- * Marks the order only. Settlement is left alone on purpose: an auto-closed trip is
- * unverified — nobody confirmed the customer received anything — so paying it out
- * automatically would make a guess irreversible. Each one is logged so it can be
- * reviewed.
+ * Marks the order only. Settlement is left alone: an auto-closed trip is
+ * unverified, so paying it out automatically would make a guess irreversible.
  */
 export async function autoDeliverStaleOrders() {
   const cutoffHours = Number(process.env.AUTO_DELIVER_AFTER_HOURS) || 4;
   const cutoff = new Date(Date.now() - cutoffHours * 60 * 60 * 1000);
 
-  const stale = await FoodOrder.find({
-    orderStatus: { $in: ['picked_up', 'reached_drop'] },
-    // Age from the pickup, not order creation: a trip picked up 10 minutes ago on a
-    // five-hour-old scheduled order is perfectly healthy.
-    $or: [
-      { 'deliveryState.pickedUpAt': { $lte: cutoff } },
-      { 'deliveryState.pickedUpAt': null, updatedAt: { $lte: cutoff } },
-    ],
-  })
-    .select('_id order_id orderStatus deliveryState userId restaurantId dispatch')
-    .limit(200)
-    .lean();
+  const stale = await prisma.foodOrder.findMany({
+    where: {
+      orderStatus: { in: ['picked_up', 'reached_drop'] },
+      // Age from the pickup, not order creation: a trip picked up 10 minutes ago
+      // on a five-hour-old scheduled order is perfectly healthy.
+      OR: [
+        { pickedUpAt: { lte: cutoff } },
+        { pickedUpAt: null, updatedAt: { lte: cutoff } },
+      ],
+    },
+    select: { id: true, order_id: true, orderStatus: true, deliveredAt: true },
+    take: 200,
+  });
 
   if (!stale.length) return 0;
 
@@ -1153,41 +1121,33 @@ export async function autoDeliverStaleOrders() {
     try {
       const now = new Date();
       // Guard on the status inside the update so a rider completing the trip in
-      // this same moment wins, rather than being overwritten by the sweep.
-      const updated = await FoodOrder.findOneAndUpdate(
-        { _id: order._id, orderStatus: { $in: ['picked_up', 'reached_drop'] } },
-        {
-          $set: {
-            orderStatus: 'delivered',
-            'deliveryState.deliveredAt': order.deliveryState?.deliveredAt || now,
-          },
-          $push: {
-            statusHistory: {
-              at: now,
-              byRole: 'ADMIN',
-              from: order.orderStatus,
-              to: 'delivered',
-              note: `Auto-closed after ${cutoffHours}h without completion`,
-            },
-          },
-        },
-        { new: true },
-      ).lean();
+      // this same moment wins rather than being overwritten by the sweep.
+      const { count } = await prisma.foodOrder.updateMany({
+        where: { id: order.id, orderStatus: { in: ['picked_up', 'reached_drop'] } },
+        data: { orderStatus: 'delivered', deliveredAt: order.deliveredAt || now },
+      });
+      if (count === 0) continue;
 
-      if (!updated) continue;
+      await pushStatusHistory(order.id, {
+        byRole: 'ADMIN',
+        from: order.orderStatus,
+        to: 'delivered',
+        note: `Auto-closed after ${cutoffHours}h without completion`,
+      });
+
       closed += 1;
       logger.warn(
-        `[AutoDeliver] Order ${updated.order_id || updated._id} closed automatically ` +
+        `[AutoDeliver] Order ${order.order_id || order.id} closed automatically ` +
           `after ${cutoffHours}h in '${order.orderStatus}'. Settlement NOT run — review manually.`,
       );
 
       enqueueOrderEvent('order_auto_delivered', {
-        orderMongoId: updated._id?.toString?.(),
-        orderId: updated._id.toString(),
+        orderMongoId: order.id,
+        orderId: order.id,
         previousStatus: order.orderStatus,
       });
     } catch (err) {
-      logger.error(`[AutoDeliver] Failed to close order ${order._id}: ${err?.message || err}`);
+      logger.error(`[AutoDeliver] Failed to close order ${order.id}: ${err?.message || err}`);
     }
   }
 
@@ -1196,36 +1156,38 @@ export async function autoDeliverStaleOrders() {
 }
 
 export async function recoverStuckOrders() {
-  const now = new Date();
+  const now = Date.now();
   const FIVE_MIN = 5 * 60 * 1000;
   const TWO_MIN = 2 * 60 * 1000;
 
   try {
     // 1. Stuck in 'assigned' (partner never accepted) for > 2m
-    const stuckAssigned = await FoodOrder.find({
-      'dispatch.status': 'assigned',
-      'dispatch.acceptedAt': { $exists: false },
-      'dispatch.assignedAt': { $lt: new Date(now - TWO_MIN) },
-      orderStatus: { $nin: ['delivered', 'cancelled_by_user', 'cancelled_by_restaurant'] }
+    const stuckAssigned = await prisma.foodOrder.findMany({
+      where: {
+        dispatchStatus: 'assigned',
+        dispatchAcceptedAt: null,
+        dispatchAssignedAt: { lt: new Date(now - TWO_MIN) },
+        orderStatus: { notIn: ['delivered', 'cancelled_by_user', 'cancelled_by_restaurant'] },
+      },
+      select: { id: true },
     });
 
     if (stuckAssigned.length > 0) {
       logger.info(`Watchdog: Healing ${stuckAssigned.length} stuck assigned orders.`);
       for (const order of stuckAssigned) {
-        // Reset status to unassigned and re-trigger auto-assign
-        order.dispatch.status = 'unassigned';
-        order.dispatch.deliveryPartnerId = null;
-        await order.save();
-        await tryAutoAssign(order._id);
+        await prisma.foodOrder.update({
+          where: { id: order.id },
+          data: { dispatchStatus: 'unassigned', dispatchDeliveryPartnerId: null },
+        });
+        await tryAutoAssign(order.id);
       }
     }
 
     // 2. Clear old dispatching locks (cleanup in case of crash)
-    await FoodOrder.updateMany(
-      { 'dispatch.dispatchingAt': { $lt: new Date(now - FIVE_MIN) } },
-      { $unset: { 'dispatch.dispatchingAt': '' } }
-    );
-
+    await prisma.foodOrder.updateMany({
+      where: { dispatchingAt: { lt: new Date(now - FIVE_MIN) } },
+      data: { dispatchingAt: null },
+    });
   } catch (err) {
     logger.error(`Watchdog recovery error: ${err.message}`);
   }
@@ -1233,47 +1195,41 @@ export async function recoverStuckOrders() {
 
 export async function resyncState(userId, role) {
   if (role === "USER") {
-    const order = await FoodOrder.findOne({
-      userId: new mongoose.Types.ObjectId(userId),
-      orderStatus: {
-        $nin: [
-          "delivered",
-          "cancelled_by_user",
-          "cancelled_by_restaurant",
-          "cancelled_by_admin",
-        ],
+    const row = await prisma.foodOrder.findFirst({
+      where: {
+        userId: String(userId),
+        orderStatus: {
+          notIn: ["delivered", "cancelled_by_user", "cancelled_by_restaurant", "cancelled_by_admin"],
+        },
       },
-    })
-      .select("+deliveryOtp")
-      .sort({ createdAt: -1 })
-      .lean();
+      include: withRelations(),
+      orderBy: { createdAt: 'desc' },
+    });
 
-    if (order) {
-      const out = normalizeOrderForClient(order);
-      // Re-add handover OTP if order is picked up
-      if (
-        (order.deliveryState?.currentPhase === "at_drop" || order.orderStatus === "picked_up") &&
-        !order.deliveryVerification?.dropOtp?.verified &&
-        order.deliveryOtp
-      ) {
-        out.handoverOtp = order.deliveryOtp;
-      }
-      return { activeOrder: out };
+    if (!row) return { activeOrder: null };
+
+    const order = toOrder(row);
+    const out = normalizeOrderForClient(order);
+    if (
+      (order.deliveryState?.currentPhase === "at_drop" || order.orderStatus === "picked_up") &&
+      !order.deliveryVerification?.dropOtp?.verified &&
+      order.deliveryOtp
+    ) {
+      out.handoverOtp = order.deliveryOtp;
     }
-    return { activeOrder: null };
+    return { activeOrder: out };
   }
 
   if (role === "DELIVERY_PARTNER") {
-    const order = await FoodOrder.findOne({
-      "dispatch.deliveryPartnerId": new mongoose.Types.ObjectId(userId),
-      "dispatch.status": { $in: ["assigned", "accepted"] },
-      orderStatus: {
-        $nin: ["delivered", "cancelled_by_user", "cancelled_by_restaurant"],
+    const row = await prisma.foodOrder.findFirst({
+      where: {
+        dispatchDeliveryPartnerId: String(userId),
+        dispatchStatus: { in: ["assigned", "accepted"] },
+        orderStatus: { notIn: ["delivered", "cancelled_by_user", "cancelled_by_restaurant"] },
       },
-    })
-      .populate("restaurantId")
-      .lean();
-    return { activeOrder: order ? sanitizeOrderForDeliveryPartner(order) : null };
+      include: { ...orderInclude, restaurant: true },
+    });
+    return { activeOrder: row ? sanitizeOrderForDeliveryPartner(toOrder(row)) : null };
   }
 
   return {};
@@ -1283,19 +1239,37 @@ export async function cancelOrder(orderId, userId, reason) {
   const identity = buildOrderIdentityFilter(orderId);
   if (!identity) throw new ValidationError("Order id required");
 
-  const order = await FoodOrder.findOne({
-    ...identity,
-    userId: new mongoose.Types.ObjectId(userId),
+  const row = await prisma.foodOrder.findFirst({
+    where: { ...identity, userId: String(userId) },
+    include: orderInclude,
   });
-  if (!order) throw new NotFoundError("Order not found");
+  if (!row) throw new NotFoundError("Order not found");
+  const order = toOrder(row);
 
   const allowed = ["created"];
-  if (!allowed.includes(order.orderStatus))
+  if (!allowed.includes(order.orderStatus)) {
     throw new ValidationError("Order cannot be cancelled");
+  }
 
   const from = order.orderStatus;
-  order.orderStatus = "cancelled_by_user";
-  pushStatusHistory(order, {
+  const paymentMethod = String(order.payment?.method || "cash").toLowerCase();
+  const paymentStatus = String(order.payment?.status || "cod_pending").toLowerCase();
+
+  let refund;
+  try {
+    refund = await applyCancellationRefund(order, { cancelledBy: 'user' });
+  } catch (err) {
+    logger.error(`Refund processing error for Order ${orderId}: ${err?.message || err}`);
+    refund = { paymentPatch: { refundStatus: "failed", refundAmount: order.pricing.total } };
+  }
+
+  const updated = toOrder(await prisma.foodOrder.update({
+    where: { id: order.id },
+    data: { orderStatus: "cancelled_by_user", ...refund.paymentPatch },
+    include: orderInclude,
+  }));
+
+  await pushStatusHistory(order.id, {
     byRole: "USER",
     byId: userId,
     from,
@@ -1303,148 +1277,108 @@ export async function cancelOrder(orderId, userId, reason) {
     note: reason || "",
   });
 
-  const paymentMethod = String(order.payment?.method || "cash").toLowerCase();
-  const paymentStatus = String(order.payment?.status || "cod_pending").toLowerCase();
-  try {
-    await applyCancellationRefund(order, { cancelledBy: 'user' });
-  } catch (err) {
-    console.error(`Refund processing error for Order ${orderId}:`, err);
-    order.payment.refund = { status: "failed", amount: order.pricing.total };
-  }
-
-  await order.save();
-
   enqueueOrderEvent("order_cancelled_by_user", {
-    orderMongoId: order._id?.toString?.(),
-    orderId: order._id.toString(),
+    orderMongoId: order.id,
+    orderId: order.id,
     userId,
     reason: reason || "",
   });
 
-  // Sync transaction status
+  const finalPaymentMethod = String(updated.payment?.method || paymentMethod || "cash").toLowerCase();
+  const finalPaymentStatus = String(updated.payment?.status || paymentStatus || "cod_pending").toLowerCase();
+  const isOnlinePaid =
+    finalPaymentMethod === "razorpay" &&
+    (finalPaymentStatus === "paid" || finalPaymentStatus === "refunded");
+
   try {
-    const finalPaymentMethod = String(order.payment?.method || paymentMethod || "cash").toLowerCase();
-    const finalPaymentStatus = String(order.payment?.status || paymentStatus || "cod_pending").toLowerCase();
-    const isOnlinePaid =
-      finalPaymentMethod === "razorpay" &&
-      (finalPaymentStatus === "paid" || finalPaymentStatus === "refunded");
-    await foodTransactionService.updateTransactionStatus(order._id, 'cancelled_by_user', {
-        status: isOnlinePaid ? 'refunded' : 'failed',
-        note: `Order cancelled by user: ${reason || "No reason"}`,
-        recordedByRole: 'USER',
-        recordedById: userId
+    await foodTransactionService.updateTransactionStatus(order.id, 'cancelled_by_user', {
+      status: isOnlinePaid ? 'refunded' : 'failed',
+      note: `Order cancelled by user: ${reason || "No reason"}`,
+      recordedByRole: 'USER',
+      recordedById: userId,
     });
   } catch (err) {
     logger.warn(`cancelOrder transaction sync failed: ${err?.message || err}`);
   }
 
-  // Notify User and Restaurant about the cancellation
-  const finalPaymentMethod = String(order.payment?.method || paymentMethod || "cash").toLowerCase();
-  const finalPaymentStatus = String(order.payment?.status || paymentStatus || "cod_pending").toLowerCase();
-  const isOnlinePaid =
-    finalPaymentMethod === "razorpay" &&
-    (finalPaymentStatus === "paid" || finalPaymentStatus === "refunded");
-  const refundDetail = isOnlinePaid ? ` Your refund of ₹${order.pricing.total} is being processed and will be credited to your original payment method within 5-7 working days.` : "";
-  
+  const refundDetail = isOnlinePaid
+    ? ` Your refund of ₹${updated.pricing.total} is being processed and will be credited to your original payment method within 5-7 working days.`
+    : "";
+
   await notifyOwnersSafely(
     [
       { ownerType: "USER", ownerId: userId },
-      { ownerType: "RESTAURANT", ownerId: order.restaurantId },
+      { ownerType: "RESTAURANT", ownerId: updated.restaurantId },
     ],
     {
       title: "Order Cancelled ❌",
-      body: `Order #${order.order_id || order._id} has been cancelled successfully.${refundDetail}`,
+      body: `Order #${updated.order_id || updated.id} has been cancelled successfully.${refundDetail}`,
       image: "https://i.ibb.co/5GzXz7r/Switcheats-Brand-Image.png",
-      data: {
-        type: "order_cancelled",
-        orderId: String(order._id.toString()),
-        orderMongoId: String(order._id),
-      },
+      data: { type: "order_cancelled", orderId: updated.id, orderMongoId: updated.id },
     },
   );
 
-  // Real-time: status update via socket
   try {
     const io = getIO();
     if (io) {
       const payload = {
-        orderMongoId: order._id?.toString?.(),
-        orderId: order._id.toString(),
-        orderStatus: order.orderStatus,
-        message: `Order #${order.order_id || order._id} has been cancelled successfully.${refundDetail}`
+        orderMongoId: updated.id,
+        orderId: updated.id,
+        orderStatus: updated.orderStatus,
+        message: `Order #${updated.order_id || updated.id} has been cancelled successfully.${refundDetail}`,
       };
       io.to(rooms.user(userId)).emit("order_status_update", payload);
-      io.to(rooms.restaurant(order.restaurantId)).emit("order_status_update", payload);
+      io.to(rooms.restaurant(updated.restaurantId)).emit("order_status_update", payload);
     }
   } catch (err) {
     logger.warn(`cancelOrder socket emit failed: ${err?.message || err}`);
   }
 
-  return normalizeOrderForClient(order);
+  return normalizeOrderForClient(updated);
 }
 
 export async function submitOrderRatings(orderId, userId, dto) {
   const identity = buildOrderIdentityFilter(orderId);
   if (!identity) throw new ValidationError("Order id required");
 
-  const order = await FoodOrder.findOne({
-    ...identity,
-    userId: new mongoose.Types.ObjectId(userId),
+  const row = await prisma.foodOrder.findFirst({
+    where: { ...identity, userId: String(userId) },
+    include: orderInclude,
   });
-  if (!order) throw new NotFoundError("Order not found");
+  if (!row) throw new NotFoundError("Order not found");
+  const order = toOrder(row);
+
   if (String(order.orderStatus) !== "delivered") {
     throw new ValidationError("You can rate only delivered orders");
   }
 
-  const hasDeliveryPartner = !!order.dispatch?.deliveryPartnerId;
+  const partnerId = row.dispatchDeliveryPartnerId;
+  const hasDeliveryPartner = Boolean(partnerId);
   if (hasDeliveryPartner && !dto.deliveryPartnerRating) {
     throw new ValidationError("Delivery partner rating is required");
   }
 
-  const restaurantAlreadyRated = Number.isFinite(
-    Number(order?.ratings?.restaurant?.rating),
-  );
-  const deliveryAlreadyRated = Number.isFinite(
-    Number(order?.ratings?.deliveryPartner?.rating),
-  );
+  const restaurantAlreadyRated = Number.isFinite(Number(order?.ratings?.restaurant?.rating));
+  const deliveryAlreadyRated = Number.isFinite(Number(order?.ratings?.deliveryPartner?.rating));
   if (restaurantAlreadyRated || (hasDeliveryPartner && deliveryAlreadyRated)) {
     throw new ValidationError("Ratings already submitted for this order");
   }
 
   const now = new Date();
-  order.ratings = order.ratings || {};
-  order.ratings.restaurant = {
-    rating: dto.restaurantRating,
-    comment: dto.restaurantComment || "",
-    ratedAt: now,
-  };
-
-  if (hasDeliveryPartner) {
-    order.ratings.deliveryPartner = {
-      rating: dto.deliveryPartnerRating,
-      comment: dto.deliveryPartnerComment || "",
-      ratedAt: now,
-    };
-  }
 
   // Per-dish ratings. Only items actually on this order count — otherwise a
   // customer could rate any dish on the menu, from one cheap order.
-  const orderedItems = new Map(
-    (order.items || []).map((it) => [String(it.itemId), it]),
-  );
+  const orderedItems = new Map((order.items || []).map((it) => [String(it.itemId), it]));
   const itemRatings = Array.isArray(dto.itemRatings) ? dto.itemRatings : [];
   const seenItemIds = new Set();
+  const itemRatingRows = [];
   for (const entry of itemRatings) {
     const itemId = String(entry.itemId || "").trim();
     const ordered = orderedItems.get(itemId);
-    if (!ordered) {
-      throw new ValidationError("You can only rate dishes from this order");
-    }
-    if (seenItemIds.has(itemId)) {
-      throw new ValidationError("Each dish can be rated only once");
-    }
+    if (!ordered) throw new ValidationError("You can only rate dishes from this order");
+    if (seenItemIds.has(itemId)) throw new ValidationError("Each dish can be rated only once");
     seenItemIds.add(itemId);
-    order.ratings.items.push({
+    itemRatingRows.push({
       itemId,
       name: ordered.name || "",
       rating: entry.rating,
@@ -1454,55 +1388,58 @@ export async function submitOrderRatings(orderId, userId, dto) {
   }
 
   await Promise.all([
-    applyAggregateRating(
-      FoodRestaurant,
-      order.restaurantId,
-      dto.restaurantRating,
-    ),
+    applyAggregateRating('restaurant', row.restaurantId, dto.restaurantRating),
     hasDeliveryPartner
-      ? applyAggregateRating(
-          FoodDeliveryPartner,
-          order.dispatch.deliveryPartnerId,
-          dto.deliveryPartnerRating,
-        )
+      ? applyAggregateRating('deliveryPartner', partnerId, dto.deliveryPartnerRating)
       : Promise.resolve(),
-    ...itemRatings.map((entry) =>
-      applyAggregateRating(FoodItem, entry.itemId, entry.rating),
-    ),
+    ...itemRatings.map((entry) => applyAggregateRating('foodItem', entry.itemId, entry.rating)),
   ]);
 
-    await order.save();
-    enqueueOrderEvent('order_ratings_submitted', {
-        orderMongoId: order._id?.toString?.(),
-        orderId: order._id.toString(),
-        userId,
-        restaurantRating: dto.restaurantRating,
-        deliveryPartnerRating: hasDeliveryPartner ? dto.deliveryPartnerRating : null
-    });
+  const updated = toOrder(await prisma.foodOrder.update({
+    where: { id: order.id },
+    data: {
+      restaurantRating: dto.restaurantRating,
+      restaurantRatingComment: dto.restaurantComment || "",
+      restaurantRatedAt: now,
+      ...(hasDeliveryPartner
+        ? {
+            partnerRating: dto.deliveryPartnerRating,
+            partnerRatingComment: dto.deliveryPartnerComment || "",
+            partnerRatedAt: now,
+          }
+        : {}),
+      ...(itemRatingRows.length ? { itemRatings: { create: itemRatingRows } } : {}),
+    },
+    include: orderInclude,
+  }));
 
-    // The controller responds with { order }, so returning nothing shipped
-    // `order: undefined` on every successful rating.
-    return normalizeOrderForClient(order);
+  enqueueOrderEvent('order_ratings_submitted', {
+    orderMongoId: order.id,
+    orderId: order.id,
+    userId,
+    restaurantRating: dto.restaurantRating,
+    deliveryPartnerRating: hasDeliveryPartner ? dto.deliveryPartnerRating : null,
+  });
+
+  return normalizeOrderForClient(updated);
 }
 
 /**
  * Delivery partner rates the customer after handover.
  *
- * Kept separate from submitOrderRatings rather than folded into it: the two are
- * written by different roles at different times, and sharing the one-shot guard
- * would mean whichever side rated first locked the other out.
+ * Kept separate from submitOrderRatings: the two are written by different roles
+ * at different times, and sharing the one-shot guard would mean whichever side
+ * rated first locked the other out.
  */
 export async function submitCustomerRating(orderId, deliveryPartnerId, dto) {
   const identity = buildOrderIdentityFilter(orderId);
   if (!identity) throw new ValidationError("Order id required");
 
-  const order = await FoodOrder.findOne(identity);
-  if (!order) throw new NotFoundError("Order not found");
+  const row = await prisma.foodOrder.findFirst({ where: identity, include: orderInclude });
+  if (!row) throw new NotFoundError("Order not found");
+  const order = toOrder(row);
 
-  if (
-    String(order.dispatch?.deliveryPartnerId || "") !==
-    String(deliveryPartnerId)
-  ) {
+  if (String(row.dispatchDeliveryPartnerId || "") !== String(deliveryPartnerId)) {
     throw new ForbiddenError("Not your order");
   }
   if (String(order.orderStatus) !== "delivered") {
@@ -1512,20 +1449,23 @@ export async function submitCustomerRating(orderId, deliveryPartnerId, dto) {
     throw new ValidationError("You have already rated this customer");
   }
 
-  order.ratings = order.ratings || {};
-  order.ratings.customer = {
-    rating: dto.rating,
-    comment: dto.comment || "",
-    ratedAt: new Date(),
-  };
+  const ratedAt = new Date();
+  await applyAggregateRating('user', row.userId, dto.rating);
 
-  await applyAggregateRating(FoodUser, order.userId, dto.rating);
-  await order.save();
+  const updated = toOrder(await prisma.foodOrder.update({
+    where: { id: order.id },
+    data: {
+      customerRating: dto.rating,
+      customerRatingComment: dto.comment || "",
+      customerRatedAt: ratedAt,
+    },
+    include: orderInclude,
+  }));
 
   return {
-    orderId: order.order_id || order._id.toString(),
-    orderMongoId: order._id.toString(),
-    customerRating: order.ratings.customer,
+    orderId: updated.order_id || updated.id,
+    orderMongoId: updated.id,
+    customerRating: updated.ratings.customer,
   };
 }
 
@@ -1533,34 +1473,40 @@ export async function updateOrderInstructions(orderId, userId, instructions) {
   const identity = buildOrderIdentityFilter(orderId);
   if (!identity) throw new ValidationError("Order id required");
 
-  const order = await FoodOrder.findOne({
-    ...identity,
-    userId: new mongoose.Types.ObjectId(userId),
+  const row = await prisma.foodOrder.findFirst({
+    where: { ...identity, userId: String(userId) },
+    select: { id: true, orderStatus: true },
   });
-  if (!order) throw new NotFoundError("Order not found");
-  
+  if (!row) throw new NotFoundError("Order not found");
+
   const allowedStatuses = ['created', 'confirmed', 'preparing'];
-  if (!allowedStatuses.includes(order.orderStatus)) {
+  if (!allowedStatuses.includes(row.orderStatus)) {
     throw new ValidationError("Instructions can no longer be updated for this order");
   }
 
-  order.deliveryInstructions = String(instructions || "").trim();
-  await order.save();
-  return order;
+  const updated = await prisma.foodOrder.update({
+    where: { id: row.id },
+    data: { deliveryInstructions: String(instructions || "").trim() },
+    include: orderInclude,
+  });
+  return toOrder(updated);
 }
 
 // ----- Restaurant -----
 export async function listOrdersRestaurant(restaurantId, query) {
-  await expireUnacceptedOrders({
-    restaurantId: new mongoose.Types.ObjectId(restaurantId),
-  });
+  await expireUnacceptedOrders({ restaurantId: String(restaurantId) });
+
   const { page, limit, skip } = buildPaginationOptions(query);
-  const filter = {
-    restaurantId: new mongoose.Types.ObjectId(restaurantId),
-    $or: [
-      // razorpay_qr = collected at the door, same as cash — see canExposeOrderToRestaurant.
-      { "payment.method": { $in: ["cash", "wallet", "razorpay_qr"] } },
-      { "payment.status": { $in: ["paid", "authorized", "captured", "settled", "refunded"] } },
+  const AND = [];
+
+  const where = {
+    restaurantId: String(restaurantId),
+    // razorpay_qr = collected at the door, same as cash — see canExposeOrderToRestaurant.
+    // ('captured' and 'settled' were in the old $in but are not valid payment
+    // statuses on an order, so they never matched anything.)
+    OR: [
+      { paymentMethod: { in: ["cash", "wallet", "razorpay_qr"] } },
+      { paymentStatus: { in: ["paid", "authorized", "refunded"] } },
     ],
   };
 
@@ -1572,15 +1518,13 @@ export async function listOrdersRestaurant(restaurantId, query) {
     const end = endDateRaw ? new Date(endDateRaw) : null;
     if (start && !Number.isNaN(start.getTime())) {
       start.setHours(0, 0, 0, 0);
-      createdAt.$gte = start;
+      createdAt.gte = start;
     }
     if (end && !Number.isNaN(end.getTime())) {
       end.setHours(23, 59, 59, 999);
-      createdAt.$lte = end;
+      createdAt.lte = end;
     }
-    if (Object.keys(createdAt).length > 0) {
-      filter.createdAt = createdAt;
-    }
+    if (Object.keys(createdAt).length > 0) where.createdAt = createdAt;
   }
 
   const statusRaw = query?.orderStatus || query?.status;
@@ -1589,48 +1533,59 @@ export async function listOrdersRestaurant(restaurantId, query) {
       .split(",")
       .map((value) => String(value || "").trim().toLowerCase())
       .filter(Boolean);
-    if (statuses.length > 0) {
-      filter.orderStatus = { $in: statuses };
-    }
+    if (statuses.length > 0) where.orderStatus = { in: statuses };
   }
 
   const searchRaw = String(query?.search || query?.orderId || "").trim();
   if (searchRaw) {
-    const escaped = searchRaw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    filter.$and = [
-      ...(Array.isArray(filter.$and) ? filter.$and : []),
-      {
-        $or: [
-          { orderId: { $regex: escaped, $options: "i" } },
-          { order_id: { $regex: escaped, $options: "i" } },
-        ],
-      },
-    ];
+    AND.push({
+      OR: [
+        { orderId: { contains: searchRaw, mode: 'insensitive' } },
+        { order_id: { contains: searchRaw, mode: 'insensitive' } },
+      ],
+    });
   }
+  if (AND.length) where.AND = AND;
 
-  const [docs, total] = await Promise.all([
-    FoodOrder.find(filter)
-      .populate("userId", "name phone email profileImage")
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean(),
-    FoodOrder.countDocuments(filter),
+  const [rows, total] = await Promise.all([
+    prisma.foodOrder.findMany({
+      where,
+      include: { ...orderInclude, user: { select: { ...USER_CARD, profileImage: true } } },
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
+    }),
+    prisma.foodOrder.count({ where }),
   ]);
 
-  const orderIds = docs.map((doc) => doc._id);
-  const transactions = orderIds.length > 0
-    ? await FoodTransaction.find({ orderId: { $in: orderIds } })
-        .select("orderId amounts settlement")
-        .lean()
+  const transactions = rows.length
+    ? await prisma.foodTransaction.findMany({
+        where: { orderId: { in: rows.map((r) => r.id) } },
+      })
     : [];
-  const txByOrderId = new Map(
-    transactions.map((tx) => [String(tx.orderId), tx]),
-  );
+  const txByOrderId = new Map(transactions.map((tx) => [tx.orderId, tx]));
 
-  const normalizedOrders = docs.map((doc) => {
-    const out = normalizeOrderForClient(doc);
-    out.finance = buildRestaurantFinanceViewSync(doc, txByOrderId.get(String(doc._id)) || null);
+  const normalizedOrders = toOrders(rows).map((order) => {
+    const out = normalizeOrderForClient(order);
+    const tx = txByOrderId.get(order.id);
+    out.finance = buildRestaurantFinanceViewSync(
+      order,
+      tx
+        ? {
+            amounts: {
+              restaurantCommission: Number(tx.commissionAmount),
+              restaurantDiscountShare: Number(tx.restaurantDiscountShare),
+              taxAmount: Number(tx.taxAmount),
+              totalCustomerPaid: Number(tx.totalCustomerPaid),
+              restaurantShare: Number(tx.restaurantShare),
+            },
+            settlement: {
+              isRestaurantSettled: tx.isRestaurantSettled,
+              restaurantSettledAt: tx.restaurantSettledAt,
+            },
+          }
+        : null,
+    );
     return out;
   });
 
@@ -1648,26 +1603,21 @@ export async function listOrdersRestaurant(restaurantId, query) {
   };
 }
 
-export async function updateOrderStatusRestaurant(
-  orderId,
-  restaurantId,
-  orderStatus,
-  note = "",
-) {
-  await expireUnacceptedOrders({
-    restaurantId: new mongoose.Types.ObjectId(restaurantId),
-  });
-  const identity = buildOrderIdentityFilter(orderId);
-  let order = await FoodOrder.findOne({
-    ...identity,
-    restaurantId: new mongoose.Types.ObjectId(restaurantId),
-  });
-  if (!order) throw new NotFoundError("Order not found");
+export async function updateOrderStatusRestaurant(orderId, restaurantId, orderStatus, note = "") {
+  await expireUnacceptedOrders({ restaurantId: String(restaurantId) });
 
-  // An unpaid order must never be actionable by the restaurant. pending_payment is absent
-  // from STATUS_PRIORITY, so isStatusAdvance() treats it as 0 and lets ANY target status
-  // through — a restaurant could walk an abandoned, never-paid order all the way to
-  // 'delivered', which then counts toward its payout. Same gate the order list uses.
+  const identity = buildOrderIdentityFilter(orderId);
+  const row = await prisma.foodOrder.findFirst({
+    where: { ...identity, restaurantId: String(restaurantId) },
+    include: orderInclude,
+  });
+  if (!row) throw new NotFoundError("Order not found");
+  const order = toOrder(row);
+
+  // An unpaid order must never be actionable by the restaurant. pending_payment is
+  // absent from STATUS_PRIORITY, so isStatusAdvance() treats it as 0 and lets ANY
+  // target status through — a restaurant could walk an abandoned, never-paid order
+  // all the way to 'delivered', which then counts toward its payout.
   if (!canExposeOrderToRestaurant(order)) {
     throw new ValidationError("This order is not payable yet and cannot be updated");
   }
@@ -1677,47 +1627,50 @@ export async function updateOrderStatusRestaurant(
     const now = new Date();
     const deadline = order.acceptanceDeadlineAt ? new Date(order.acceptanceDeadlineAt) : null;
     if (deadline && deadline.getTime() <= now.getTime()) {
-      await expireUnacceptedOrders({ _id: order._id });
+      await expireUnacceptedOrders({ id: order.id });
       throw new ValidationError("Order acceptance window has expired");
     }
   }
+
   const from = order.orderStatus;
   if (!isStatusAdvance(from, orderStatus)) {
     throw new ValidationError(
-      `Current order status '${from}' is further ahead than '${orderStatus}'. Order cannot be moved backwards.`
+      `Current order status '${from}' is further ahead than '${orderStatus}'. Order cannot be moved backwards.`,
     );
   }
 
-  order.orderStatus = orderStatus;
-  // The acceptance window exists only to auto-cancel orders the restaurant never acted
-  // on. It was never cleared once they did, so expireUnacceptedOrders (which sweeps
-  // 'created' AND 'confirmed') later cancelled confirmed, actively-dispatching orders as
-  // "Not accepted by restaurant". Retire the deadline now that the restaurant has acted.
-  order.acceptanceDeadlineAt = null;
-
   const normalizedPaymentMethod = String(order.payment?.method || "cash").toLowerCase();
   const prevPaymentStatus = String(order.payment?.status || "cod_pending").toLowerCase();
-  if (String(orderStatus) === "delivered" && normalizedPaymentMethod === "cash" && prevPaymentStatus === "cod_pending") {
-    // COD should become paid once delivery is completed, even in restaurant-managed status updates.
-    order.payment.status = "paid";
-  }
+  const codBecomesPaid =
+    String(orderStatus) === "delivered" &&
+    normalizedPaymentMethod === "cash" &&
+    prevPaymentStatus === "cod_pending";
 
-  pushStatusHistory(order, {
+  let updated = toOrder(await prisma.foodOrder.update({
+    where: { id: order.id },
+    data: {
+      orderStatus,
+      // The acceptance window exists only to auto-cancel orders the restaurant
+      // never acted on. It was never cleared once they did, so expireUnacceptedOrders
+      // later cancelled confirmed, actively-dispatching orders as "Not accepted".
+      acceptanceDeadlineAt: null,
+      ...(codBecomesPaid ? { paymentStatus: 'paid' } : {}),
+    },
+    include: orderInclude,
+  }));
+
+  await pushStatusHistory(order.id, {
     byRole: "RESTAURANT",
     byId: restaurantId,
     from,
     to: orderStatus,
     note: note || "",
   });
-  await order.save();
 
   if (String(orderStatus) === "delivered") {
     try {
-      const ledgerKind =
-        normalizedPaymentMethod === "cash" && prevPaymentStatus === "cod_pending"
-          ? "cod_marked_paid_on_delivery"
-          : "payment_snapshot_sync";
-      await foodTransactionService.updateTransactionStatus(order._id, ledgerKind, {
+      const ledgerKind = codBecomesPaid ? "cod_marked_paid_on_delivery" : "payment_snapshot_sync";
+      await foodTransactionService.updateTransactionStatus(order.id, ledgerKind, {
         status: "captured",
         recordedByRole: "RESTAURANT",
         recordedById: restaurantId,
@@ -1728,8 +1681,7 @@ export async function updateOrderStatusRestaurant(
     }
   }
 
-  // Custom messages / titles for status updates
-  let title = `Order ${order._id.toString()} updated`;
+  let title = `Order ${updated.id} updated`;
   let body = `Status changed to ${String(orderStatus).replace(/_/g, " ")}`;
 
   if (orderStatus === "confirmed") {
@@ -1742,209 +1694,174 @@ export async function updateOrderStatusRestaurant(
     title = "Food is ready! 🛍️";
     body = "Your order is ready and waiting to be picked up.";
   } else if (String(orderStatus).includes("cancel")) {
-    const isOnlinePaid = order.payment.method === "razorpay" && (order.payment.status === "paid" || order.payment.status === "refunded");
-    const refundDetail = isOnlinePaid ? ` Your refund of ₹${order.pricing.total} is being processed and will be credited to your original payment method within 5-7 working days.` : "";
-    
+    const isOnlinePaid =
+      updated.payment.method === "razorpay" &&
+      (updated.payment.status === "paid" || updated.payment.status === "refunded");
+    const refundDetail = isOnlinePaid
+      ? ` Your refund of ₹${updated.pricing.total} is being processed and will be credited to your original payment method within 5-7 working days.`
+      : "";
     title = "Order Cancelled ❌";
     body = (note && String(note).trim()) ? note : `Unfortunately, your order has been cancelled by the restaurant.${refundDetail}`;
   }
 
-  // Real-time: status update to restaurant room.
   try {
     const io = getIO();
+    const payload = {
+      orderMongoId: updated.id,
+      orderId: updated.id,
+      orderStatus: updated.orderStatus,
+      note: updated.note || "",
+      statusNote: note || "",
+      title,
+      message: body,
+    };
+
     if (io) {
-      console.log(
-        `[DEBUG] Emitting status update to restaurant ${restaurantId} and user ${order.userId}: ${orderStatus}`,
-      );
-      const payload = {
-        orderMongoId: order._id?.toString?.(),
-        orderId: order._id.toString(),
-        orderStatus: order.orderStatus,
-        note: order.note || "",
-        statusNote: note || "",
-        title,
-        message: body,
-      };
-      
-      const restRoom = rooms.restaurant(restaurantId);
-      const userRoom = rooms.user(order.userId);
-      
-      console.log(`[DEBUG] Emitting order_status_update to rooms: ${restRoom}, ${userRoom}`);
-      io.to(restRoom).emit("order_status_update", payload);
-      io.to(userRoom).emit("order_status_update", payload);
-      
-      // Notify assigned rider via socket if they exist
-      const assignedRiderId = order.dispatch?.deliveryPartnerId;
+      io.to(rooms.restaurant(restaurantId)).emit("order_status_update", payload);
+      io.to(rooms.user(updated.userId)).emit("order_status_update", payload);
+      const assignedRiderId = row.dispatchDeliveryPartnerId;
       if (assignedRiderId) {
-          const riderRoom = rooms.delivery(assignedRiderId);
-          console.log(`[DEBUG] Emitting order_status_update to rider room: ${riderRoom}`);
-          io.to(riderRoom).emit("order_status_update", payload);
+        io.to(rooms.delivery(assignedRiderId)).emit("order_status_update", payload);
       }
     }
 
-    // Who actually needs telling about THIS status.
-    //
-    // Everyone used to be pushed for every transition, which meant a customer
-    // got five notifications between paying and eating, and the restaurant got
-    // pushed about a status it had just set itself on the screen it was looking
-    // at. Volume like that trains people to swipe alerts away, which is how a
+    // Who actually needs telling about THIS status. Everyone used to be pushed for
+    // every transition, which trains people to swipe alerts away — which is how a
     // genuinely important one gets missed.
     const status = String(orderStatus || "");
     const isCancellation = status.includes("cancel");
-
-    // ready_for_pickup and preparing are kitchen states. The customer already
-    // knows the order was accepted and cannot act on either, so they are noise
-    // to them — but they matter to the rider, who is being dispatched on them.
+    // ready_for_pickup and preparing are kitchen states the customer cannot act on.
     const CUSTOMER_RELEVANT = ["confirmed", "picked_up", "delivered"];
     const notifyList = [];
 
     if (isCancellation || CUSTOMER_RELEVANT.includes(status)) {
-      notifyList.push({ ownerType: "USER", ownerId: order.userId });
+      notifyList.push({ ownerType: "USER", ownerId: updated.userId });
     }
-
-    // The restaurant is the one making these changes; a push echoing its own tap
-    // back at it is pure noise. A cancellation may come from support or the
-    // customer, so that one it does need.
+    // The restaurant is making these changes; echoing its own tap back is noise.
+    // A cancellation may come from support or the customer, so that one it needs.
     if (isCancellation) {
       notifyList.push({ ownerType: "RESTAURANT", ownerId: restaurantId });
     }
-
-    const assignedRiderId = order.dispatch?.deliveryPartnerId;
+    const assignedRiderId = row.dispatchDeliveryPartnerId;
     if (assignedRiderId) {
       notifyList.push({ ownerType: "DELIVERY_PARTNER", ownerId: assignedRiderId });
     }
 
-
-    let riderTitle = `Order #${order.order_id || order._id} updated`;
-    let riderBody = `The order status is now ${String(orderStatus).replace(/_/g, " ")}.`;
-
-    if (String(orderStatus).includes("cancel")) {
-      riderTitle = "Order Cancelled ❌";
-      riderBody = `Order #${order.order_id || order._id} has been cancelled. Please stop your current task.`;
-      
-      // Sync transaction status
+    if (isCancellation) {
       try {
-        const isOnlinePaid = order.payment.method === "razorpay" && (order.payment.status === "paid" || order.payment.status === "refunded");
-        await foodTransactionService.updateTransactionStatus(order._id, 'cancelled_by_restaurant', {
-            status: isOnlinePaid ? 'refunded' : 'failed',
-            note: `Order cancelled by restaurant/admin`,
-            recordedByRole: 'RESTAURANT',
-            recordedById: restaurantId
+        const isOnlinePaid =
+          updated.payment.method === "razorpay" &&
+          (updated.payment.status === "paid" || updated.payment.status === "refunded");
+        await foodTransactionService.updateTransactionStatus(order.id, 'cancelled_by_restaurant', {
+          status: isOnlinePaid ? 'refunded' : 'failed',
+          note: `Order cancelled by restaurant/admin`,
+          recordedByRole: 'RESTAURANT',
+          recordedById: restaurantId,
         });
       } catch (err) {
         logger.warn(`updateOrderStatusRestaurant transaction sync failed: ${err?.message || err}`);
       }
     }
 
-    // Fire-and-forget: notifyOwnersSafely swallows its own failures, and a push
-    // fans out to every device of every recipient with retries and backoff.
-    // Awaiting it put Google's latency inside the restaurant's tap for no benefit
-    // -- nothing in the response depends on it.
-    //
-    // Guarded rather than returned early: the delivery dispatch below this block
-    // must still run for a status nobody is pushed about, or riders stop being
-    // offered orders entirely.
-    if (notifyList.length > 0) void notifyOwnersSafely(
-      notifyList,
-      {
-        title: title,
-        body: body,
+    // Fire-and-forget: awaiting a push fan-out put Google's latency inside the
+    // restaurant's tap for no benefit. Guarded rather than returned early, so the
+    // dispatch below still runs for a status nobody is pushed about.
+    if (notifyList.length > 0) {
+      void notifyOwnersSafely(notifyList, {
+        title,
+        body,
         image: "https://i.ibb.co/5GzXz7r/Switcheats-Brand-Image.png",
         data: {
           type: "order_status_update",
-          orderId: order._id.toString(),
-          orderMongoId: order._id?.toString?.() || "",
+          orderId: updated.id,
+          orderMongoId: updated.id,
           orderStatus: String(orderStatus || ""),
-          link: `/food/user/orders/${order._id?.toString?.() || ""}`,
+          link: `/food/user/orders/${updated.id}`,
         },
-      },
-    );
+      });
+    }
   } catch (err) {
-    console.error("[DEBUG] Error emitting status update to restaurant:", err);
+    logger.warn(`updateOrderStatusRestaurant notify failed: ${err?.message || err}`);
   }
 
-  // Real-time: delivery request / ready notifications.
   try {
     const io = getIO();
     if (io) {
-      // On accept (confirmed or preparing) -> request delivery partners via central logic
+      // On accept (confirmed or preparing) -> request delivery partners.
       if (
-        (String(orderStatus) === "preparing" || String(orderStatus) === "confirmed") && 
-        (String(from) !== "preparing" && String(from) !== "confirmed")
+        (String(orderStatus) === "preparing" || String(orderStatus) === "confirmed") &&
+        String(from) !== "preparing" && String(from) !== "confirmed"
       ) {
-        console.log(
-          `[DEBUG] Order ${order._id.toString()} status changed to '${orderStatus}'. Triggering central delivery dispatch.`,
-        );
-        
-        // Dispatch runs in the background, not inside the request.
-        //
-        // tryAutoAssign does a geo query over online riders, a Google Directions
-        // call for the trip distance, and an FCM batch to every eligible rider.
-        // Awaiting all of that is what made accepting an order take up to 2.7s,
-        // which reads as an unresponsive button.
-        //
-        // Nothing in the response needs it: the restaurant is told its own status
-        // changed, and the rider assignment that follows reaches every client over
-        // the order_status_update socket event and the next refetch. The returned
-        // order simply will not carry dispatch details yet, which is accurate --
-        // at that instant no rider has been offered it.
-        void tryAutoAssign(order._id).catch((err) => {
-            console.error(`[DEBUG] Auto-assign in updateOrderStatusRestaurant failed:`, err);
+        // Dispatch runs in the background, not inside the request: tryAutoAssign does
+        // a geo query, a Directions call and an FCM batch. Awaiting all of that made
+        // accepting an order take up to 2.7s, which reads as an unresponsive button.
+        void tryAutoAssign(order.id).catch((err) => {
+          logger.warn(`Auto-assign in updateOrderStatusRestaurant failed: ${err?.message || err}`);
         });
       }
 
-            // When ready for pickup -> ping assigned delivery partner.
-            if (String(orderStatus) === 'ready_for_pickup' && String(from) !== 'ready_for_pickup') {
-                console.log(`[DEBUG] Order ${order._id.toString()} changed to 'ready_for_pickup'.`);
-                const assignedId = order.dispatch?.deliveryPartnerId?.toString?.() || order.dispatch?.deliveryPartnerId;
-                if (assignedId) {
-                    console.log(`[DEBUG] Notifying assigned partner ${assignedId} that order is ready.`);
-                    const restaurant = await FoodRestaurant.findById(order.restaurantId).select('restaurantName location addressLine1 area city state').lean();
-                    const payload = buildDeliverySocketPayload(order, restaurant);
-                    logger.info(
-                      `[DeliveryDispatch] Emitting order_ready to ${rooms.delivery(assignedId)} for order ${order._id.toString()}`,
-                    );
-                    io.to(rooms.delivery(assignedId)).emit('order_ready', payload);
-                } else {
-                    console.log(`[DEBUG] Order ${order._id.toString()} is ready but no partner assigned.`);
-                }
-            }
+      // When ready for pickup -> ping the assigned delivery partner.
+      if (String(orderStatus) === 'ready_for_pickup' && String(from) !== 'ready_for_pickup') {
+        const assignedId = row.dispatchDeliveryPartnerId;
+        if (assignedId) {
+          const restaurant = await prisma.foodRestaurant.findUnique({
+            where: { id: row.restaurantId },
+            select: {
+              id: true, restaurantName: true, latitude: true, longitude: true,
+              addressLine1: true, area: true, city: true, state: true,
+              ownerPhone: true, coverImage: true, coverImages: true,
+              galleryImages: true, landmark: true,
+            },
+          });
+          const payload = buildDeliverySocketPayload(updated, restaurant);
+          logger.info(
+            `[DeliveryDispatch] Emitting order_ready to ${rooms.delivery(assignedId)} for order ${order.id}`,
+          );
+          io.to(rooms.delivery(assignedId)).emit('order_ready', payload);
         }
-    } catch (err) {
-        console.error('[DEBUG] Error in delivery notification logic:', err);
-    }
-
-    enqueueOrderEvent('restaurant_order_status_updated', {
-        orderMongoId: order._id?.toString?.(),
-        orderId: order._id.toString(),
-        restaurantId,
-        from,
-        to: orderStatus
-    });
-
-    if (String(orderStatus).includes("cancel")) {
-      try {
-        await applyCancellationRefund(order, { cancelledBy: 'restaurant' });
-      } catch (err) {
-        console.error(`Automated refund failed for Order ${order._id.toString()} (Restaurant Cancel):`, err);
-        order.payment.refund = { status: "failed", amount: order.pricing.total };
       }
-      await order.save();
     }
+  } catch (err) {
+    logger.warn(`updateOrderStatusRestaurant delivery notification failed: ${err?.message || err}`);
+  }
 
-    return normalizeOrderForClient(order);
+  enqueueOrderEvent('restaurant_order_status_updated', {
+    orderMongoId: order.id,
+    orderId: order.id,
+    restaurantId,
+    from,
+    to: orderStatus,
+  });
+
+  if (String(orderStatus).includes("cancel")) {
+    try {
+      const refund = await applyCancellationRefund(updated, { cancelledBy: 'restaurant' });
+      if (Object.keys(refund.paymentPatch).length > 0) {
+        updated = toOrder(await prisma.foodOrder.update({
+          where: { id: order.id },
+          data: refund.paymentPatch,
+          include: orderInclude,
+        }));
+      }
+    } catch (err) {
+      logger.error(`Automated refund failed for Order ${order.id} (Restaurant Cancel): ${err?.message || err}`);
+      updated = toOrder(await prisma.foodOrder.update({
+        where: { id: order.id },
+        data: { refundStatus: "failed", refundAmount: updated.pricing.total },
+        include: orderInclude,
+      }));
+    }
+  }
+
+  return normalizeOrderForClient(updated);
 }
 
-/**
- * Manually re-trigger delivery partner search for a restaurant order.
- * Only allowed if status is preparing/ready and no partner has accepted yet.
- */
 export async function resendDeliveryNotificationRestaurant(orderId, restaurantId) {
-    return dispatchService.resendDeliveryNotificationRestaurant(orderId, restaurantId);
+  return dispatchService.resendDeliveryNotificationRestaurant(orderId, restaurantId);
 }
 
 export async function resendDeliveryNotificationAdmin(orderId) {
-    return dispatchService.resendDeliveryNotificationAdmin(orderId);
+  return dispatchService.resendDeliveryNotificationAdmin(orderId);
 }
 
 export async function getCurrentTripDelivery(deliveryPartnerId) {
@@ -1976,19 +1893,8 @@ export async function confirmReachedPickupDelivery(orderId, deliveryPartnerId) {
   return deliveryService.confirmReachedPickupDelivery(orderId, deliveryPartnerId);
 }
 
-/**
- * Slide to confirm pickup (Bill uploaded)
- */
-export async function confirmPickupDelivery(
-  orderId,
-  deliveryPartnerId,
-  billImageUrl,
-) {
-  return deliveryService.confirmPickupDelivery(
-    orderId,
-    deliveryPartnerId,
-    billImageUrl,
-  );
+export async function confirmPickupDelivery(orderId, deliveryPartnerId, billImageUrl) {
+  return deliveryService.confirmPickupDelivery(orderId, deliveryPartnerId, billImageUrl);
 }
 
 export async function confirmReachedDropDelivery(orderId, deliveryPartnerId) {
@@ -2003,21 +1909,14 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
   return deliveryService.completeDelivery(orderId, deliveryPartnerId, body);
 }
 
-
-
 export async function updateOrderStatusDelivery(orderId, deliveryPartnerId, orderStatus) {
   return deliveryService.updateOrderStatusDelivery(orderId, deliveryPartnerId, orderStatus);
 }
 
 // ----- COD QR collection -----
-export async function createCollectQr(
-  orderId,
-  deliveryPartnerId,
-  customerInfo = {},
-) {
+export async function createCollectQr(orderId, deliveryPartnerId, customerInfo = {}) {
   return paymentService.createCollectQr(orderId, deliveryPartnerId, customerInfo);
 }
-
 
 export async function getPaymentStatus(orderId, deliveryPartnerId) {
   return paymentService.getPaymentStatus(orderId, deliveryPartnerId);
@@ -2027,69 +1926,42 @@ export async function switchToCash(orderId, deliveryPartnerId) {
   return paymentService.switchToCash(orderId, deliveryPartnerId);
 }
 
-
 // ----- Admin -----
 
-function escapeAdminSearchRegex(value) {
-  return String(value || '').slice(0, 80).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function appendAdminAndCondition(filter, condition) {
-  if (!condition || Object.keys(condition).length === 0) return;
-  if (!filter.$and) filter.$and = [];
-  filter.$and.push(condition);
-}
-
-async function applyAdminOrderSearchFilter(filter, searchRaw) {
-  const search = String(searchRaw || '').trim();
+function applyAdminOrderSearchFilter(AND, searchRaw) {
+  const search = String(searchRaw || '').trim().slice(0, 80);
   if (!search) return;
 
-  const escaped = escapeAdminSearchRegex(search);
   const phoneDigits = search.replace(/\D/g, '');
   const orConditions = [
-    { orderId: { $regex: escaped, $options: 'i' } },
-    { order_id: { $regex: escaped, $options: 'i' } },
-    { customerName: { $regex: escaped, $options: 'i' } },
-    { customerPhone: { $regex: escaped, $options: 'i' } },
+    { orderId: { contains: search, mode: 'insensitive' } },
+    { order_id: { contains: search, mode: 'insensitive' } },
+    { customerName: { contains: search, mode: 'insensitive' } },
+    { customerPhone: { contains: search, mode: 'insensitive' } },
+    // Matched through the relation rather than a separate id lookup.
+    { restaurant: { restaurantName: { contains: search, mode: 'insensitive' } } },
   ];
 
   if (phoneDigits.length >= 4) {
-    orConditions.push({ customerPhone: { $regex: phoneDigits } });
+    orConditions.push({ customerPhone: { contains: phoneDigits } });
   }
 
-  const matchingRestaurants = await FoodRestaurant.find({
-    restaurantName: { $regex: escaped, $options: 'i' },
-  })
-    .select('_id')
-    .lean();
-
-  if (matchingRestaurants.length > 0) {
-    orConditions.push({
-      restaurantId: { $in: matchingRestaurants.map((row) => row._id) },
-    });
-  }
-
-  appendAdminAndCondition(filter, { $or: orConditions });
+  AND.push({ OR: orConditions });
 }
 
-function applyAdminPaymentStatusFilter(filter, paymentStatusRaw) {
+function applyAdminPaymentStatusFilter(AND, paymentStatusRaw) {
   const paymentStatus = String(paymentStatusRaw || '').trim().toLowerCase();
   if (!paymentStatus) return;
 
   if (paymentStatus === 'paid') {
-    appendAdminAndCondition(filter, {
-      $or: [
-        { 'payment.status': { $in: ['paid', 'authorized'] } },
+    AND.push({
+      OR: [
+        { paymentStatus: { in: ['paid', 'authorized'] } },
+        { AND: [{ paymentMethod: 'cash' }, { orderStatus: 'delivered' }] },
         {
-          $and: [
-            { 'payment.method': 'cash' },
-            { orderStatus: 'delivered' },
-          ],
-        },
-        {
-          $and: [
-            { 'payment.method': 'wallet' },
-            { 'payment.status': { $nin: ['failed', 'refunded', 'created', 'cod_pending', 'pending_qr'] } },
+          AND: [
+            { paymentMethod: 'wallet' },
+            { paymentStatus: { notIn: ['failed', 'refunded', 'created', 'cod_pending', 'pending_qr'] } },
           ],
         },
       ],
@@ -2098,44 +1970,27 @@ function applyAdminPaymentStatusFilter(filter, paymentStatusRaw) {
   }
 
   if (paymentStatus === 'pending') {
-    appendAdminAndCondition(filter, {
-      $or: [
-        { 'payment.status': { $in: ['created', 'cod_pending', 'pending_qr'] } },
-        {
-          $and: [
-            { 'payment.method': 'cash' },
-            { orderStatus: { $ne: 'delivered' } },
-          ],
-        },
+    AND.push({
+      OR: [
+        { paymentStatus: { in: ['created', 'cod_pending', 'pending_qr'] } },
+        { AND: [{ paymentMethod: 'cash' }, { orderStatus: { not: 'delivered' } }] },
       ],
     });
     return;
   }
 
-  if (paymentStatus === 'failed') {
-    filter['payment.status'] = 'failed';
-    return;
-  }
-
-  if (paymentStatus === 'refunded') {
-    filter['payment.status'] = 'refunded';
-  }
+  if (paymentStatus === 'failed') AND.push({ paymentStatus: 'failed' });
+  if (paymentStatus === 'refunded') AND.push({ paymentStatus: 'refunded' });
 }
 
-function applyAdminAmountFilter(filter, minAmountRaw, maxAmountRaw) {
+function applyAdminAmountFilter(AND, minAmountRaw, maxAmountRaw) {
   const minAmount = Number(minAmountRaw);
   const maxAmount = Number(maxAmountRaw);
-  const totalFilter = {};
+  const total = {};
 
-  if (Number.isFinite(minAmount) && minAmount >= 0) {
-    totalFilter.$gte = minAmount;
-  }
-  if (Number.isFinite(maxAmount) && maxAmount >= 0) {
-    totalFilter.$lte = maxAmount;
-  }
-  if (Object.keys(totalFilter).length > 0) {
-    filter['pricing.total'] = totalFilter;
-  }
+  if (Number.isFinite(minAmount) && minAmount >= 0) total.gte = minAmount;
+  if (Number.isFinite(maxAmount) && maxAmount >= 0) total.lte = maxAmount;
+  if (Object.keys(total).length > 0) AND.push({ total });
 }
 
 export async function listOrdersAdmin(query) {
@@ -2144,93 +1999,65 @@ export async function listOrdersAdmin(query) {
   const page = Math.max(parseInt(query.page, 10) || 1, 1);
   const limit = Math.min(Math.max(parseInt(query.limit, 10) || 50, 1), 2000);
   const skip = (page - 1) * limit;
-  const filter = {};
 
-  const rawStatus =
-    typeof query.status === "string" ? query.status.trim().toLowerCase() : "";
+  const where = {};
+  const AND = [];
+
+  const rawStatus = typeof query.status === "string" ? query.status.trim().toLowerCase() : "";
   const cancelledBy =
-    typeof query.cancelledBy === "string"
-      ? query.cancelledBy.trim().toLowerCase()
-      : "";
-  const restaurantIdRaw =
-    typeof query.restaurantId === "string" ? query.restaurantId.trim() : "";
-  const zoneIdRaw =
-    typeof query.zoneId === "string" ? query.zoneId.trim() : "";
-  const startDateRaw =
-    typeof query.startDate === "string" ? query.startDate.trim() : "";
-  const endDateRaw =
-    typeof query.endDate === "string" ? query.endDate.trim() : "";
-  const searchRaw =
-    typeof query.search === "string" ? query.search.trim() : "";
+    typeof query.cancelledBy === "string" ? query.cancelledBy.trim().toLowerCase() : "";
+  const restaurantIdRaw = typeof query.restaurantId === "string" ? query.restaurantId.trim() : "";
+  const zoneIdRaw = typeof query.zoneId === "string" ? query.zoneId.trim() : "";
+  const startDateRaw = typeof query.startDate === "string" ? query.startDate.trim() : "";
+  const endDateRaw = typeof query.endDate === "string" ? query.endDate.trim() : "";
+  const searchRaw = typeof query.search === "string" ? query.search.trim() : "";
   const paymentStatusRaw =
     typeof query.paymentStatus === "string" ? query.paymentStatus.trim() : "";
-  const minAmountRaw = query.minAmount;
-  const maxAmountRaw = query.maxAmount;
 
   if (!rawStatus || rawStatus === "all") {
-    filter.orderStatus = { $ne: "pending_payment" };
+    where.orderStatus = { not: "pending_payment" };
   }
 
   if (rawStatus && rawStatus !== "all") {
     const terminalCancelledStatuses = [
-      "cancelled_by_user",
-      "cancelled_by_restaurant",
-      "cancelled_by_admin",
+      "cancelled_by_user", "cancelled_by_restaurant", "cancelled_by_admin",
     ];
 
     switch (rawStatus) {
       case "pending":
         // Placed by customer; restaurant has not accepted yet.
-        filter.orderStatus = "created";
+        where.orderStatus = "created";
         break;
       case "processing":
         // Active orders not delivered/cancelled, delivery partner not accepted yet.
-        filter.orderStatus = {
-          $nin: [
-            "created",
-            "delivered",
-            "pending_payment",
-            ...terminalCancelledStatuses,
-          ],
+        where.orderStatus = {
+          notIn: ["created", "delivered", "pending_payment", ...terminalCancelledStatuses],
         };
-        filter.$or = [
-          { "dispatch.status": { $ne: "accepted" } },
-          { "dispatch.status": { $exists: false } },
-          { dispatch: { $exists: false } },
-        ];
+        AND.push({ dispatchStatus: { not: "accepted" } });
         break;
       case "food-on-the-way":
-        // Delivery partner accepted; not yet delivered.
-        filter["dispatch.status"] = "accepted";
-        filter.orderStatus = {
-          $nin: ["delivered", ...terminalCancelledStatuses],
-        };
+        where.dispatchStatus = "accepted";
+        where.orderStatus = { notIn: ["delivered", ...terminalCancelledStatuses] };
         break;
       case "delivered":
-        filter.orderStatus = "delivered";
+        where.orderStatus = "delivered";
         break;
       case "canceled":
       case "cancelled":
-        filter.orderStatus = {
-          $in: [
-            "cancelled_by_user",
-            "cancelled_by_restaurant",
-            "cancelled_by_admin",
-          ],
-        };
+        where.orderStatus = { in: terminalCancelledStatuses };
         break;
       case "restaurant-cancelled":
-        filter.orderStatus = "cancelled_by_restaurant";
+        where.orderStatus = "cancelled_by_restaurant";
         break;
       case "payment-failed":
-        filter["payment.status"] = "failed";
+        where.paymentStatus = "failed";
         break;
       case "refunded":
-        filter["payment.status"] = "refunded";
+        where.paymentStatus = "refunded";
         break;
       case "offline-payments":
-        filter["payment.method"] = "cash";
-        filter.orderStatus = { $in: ["created", "confirmed", "delivered"] };
+        where.paymentMethod = "cash";
+        where.orderStatus = { in: ["created", "confirmed", "delivered"] };
         break;
       default:
         break;
@@ -2238,148 +2065,133 @@ export async function listOrdersAdmin(query) {
   }
 
   if (cancelledBy) {
-    if (cancelledBy === "restaurant") {
-      filter.orderStatus = "cancelled_by_restaurant";
-    } else if (cancelledBy === "user" || cancelledBy === "customer") {
-      filter.orderStatus = "cancelled_by_user";
+    if (cancelledBy === "restaurant") where.orderStatus = "cancelled_by_restaurant";
+    else if (cancelledBy === "user" || cancelledBy === "customer") {
+      where.orderStatus = "cancelled_by_user";
     }
   }
 
-  if (restaurantIdRaw && mongoose.Types.ObjectId.isValid(restaurantIdRaw)) {
-    filter.restaurantId = new mongoose.Types.ObjectId(restaurantIdRaw);
-  }
+  if (isId(restaurantIdRaw)) where.restaurantId = restaurantIdRaw;
 
-  if (zoneIdRaw && mongoose.Types.ObjectId.isValid(zoneIdRaw)) {
-    const zoneRestaurantIds = await FoodRestaurant.find({
-      zoneId: new mongoose.Types.ObjectId(zoneIdRaw),
-    }).distinct("_id");
-    if (filter.restaurantId instanceof mongoose.Types.ObjectId) {
-      filter.restaurantId = {
-        $in: zoneRestaurantIds.filter(
-          (id) => String(id) === String(filter.restaurantId),
-        ),
-      };
-    } else {
-      filter.restaurantId = { $in: zoneRestaurantIds };
-    }
-  }
+  // Zone is a property of the restaurant, so filter through the relation rather
+  // than pre-resolving every restaurant id in the zone.
+  if (isId(zoneIdRaw)) AND.push({ restaurant: { zoneId: zoneIdRaw } });
 
   if (startDateRaw || endDateRaw) {
     const createdAt = {};
     const start = startDateRaw ? new Date(startDateRaw) : null;
     const end = endDateRaw ? new Date(endDateRaw) : null;
-    if (start && !Number.isNaN(start.getTime())) {
-      createdAt.$gte = start;
-    }
+    if (start && !Number.isNaN(start.getTime())) createdAt.gte = start;
     if (end && !Number.isNaN(end.getTime())) {
       end.setHours(23, 59, 59, 999);
-      createdAt.$lte = end;
+      createdAt.lte = end;
     }
-    if (Object.keys(createdAt).length > 0) {
-      filter.createdAt = createdAt;
-    }
+    if (Object.keys(createdAt).length > 0) where.createdAt = createdAt;
   }
 
-  await applyAdminOrderSearchFilter(filter, searchRaw);
-  applyAdminPaymentStatusFilter(filter, paymentStatusRaw);
-  applyAdminAmountFilter(filter, minAmountRaw, maxAmountRaw);
+  applyAdminOrderSearchFilter(AND, searchRaw);
+  applyAdminPaymentStatusFilter(AND, paymentStatusRaw);
+  applyAdminAmountFilter(AND, query.minAmount, query.maxAmount);
+  if (AND.length) where.AND = AND;
 
-  const [docs, total] = await Promise.all([
-    FoodOrder.find(filter)
-      .select("+deliveryOtp")
-      .populate("userId", "name phone email")
-      .populate("restaurantId", "restaurantName area city ownerPhone zoneId")
-      .populate("dispatch.deliveryPartnerId", "name fullName phone phoneNumber rating totalRatings profilePhoto vehicleType vehicleName vehicleNumber totalDeliveries")
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean(),
-    FoodOrder.countDocuments(filter),
+  const [rows, total] = await Promise.all([
+    prisma.foodOrder.findMany({
+      where,
+      include: withRelations(RESTAURANT_ADMIN, PARTNER_CARD),
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
+    }),
+    prisma.foodOrder.count({ where }),
   ]);
-  const paginated = buildPaginatedResult({ docs: docs.map(d => normalizeOrderForClient(d)), total, page, limit });
+
+  const paginated = buildPaginatedResult({
+    docs: toOrders(rows).map((order) => normalizeOrderForClient(order)),
+    total,
+    page,
+    limit,
+  });
   return { ...paginated, orders: paginated.data };
 }
 
-export async function assignDeliveryPartnerAdmin(
-  orderId,
-  deliveryPartnerId,
-  adminId,
-) {
-  const order = await FoodOrder.findById(orderId);
-  if (!order) throw new NotFoundError("Order not found");
-  if (order.dispatch.status === "accepted")
+export async function assignDeliveryPartnerAdmin(orderId, deliveryPartnerId, adminId) {
+  const row = await prisma.foodOrder.findUnique({
+    where: { id: String(orderId) },
+    include: orderInclude,
+  });
+  if (!row) throw new NotFoundError("Order not found");
+  if (row.dispatchStatus === "accepted") {
     throw new ValidationError("Order already accepted by partner");
+  }
 
-  const partner = await FoodDeliveryPartner.findById(deliveryPartnerId)
-    .select("status")
-    .lean();
-  if (!partner || partner.status !== "approved")
+  const partner = await prisma.foodDeliveryPartner.findUnique({
+    where: { id: String(deliveryPartnerId) },
+    select: { status: true },
+  });
+  if (!partner || partner.status !== "approved") {
     throw new ValidationError("Delivery partner not available");
+  }
 
-    order.dispatch.status = 'assigned';
-    order.dispatch.deliveryPartnerId = new mongoose.Types.ObjectId(deliveryPartnerId);
-    order.dispatch.assignedAt = new Date();
-    pushStatusHistory(order, {
-        byRole: 'ADMIN',
-        byId: adminId,
-        from: order.orderStatus,
-        to: order.orderStatus,
-        note: 'Delivery partner assigned by admin',
-    });
-    await order.save();
-    enqueueOrderEvent('delivery_partner_assigned', {
-        orderMongoId: order._id?.toString?.(),
-        orderId: order._id.toString(),
-        deliveryPartnerId,
-        adminId
-    });
-    return normalizeOrderForClient(order);
+  const updated = toOrder(await prisma.foodOrder.update({
+    where: { id: row.id },
+    data: {
+      dispatchStatus: 'assigned',
+      dispatchDeliveryPartnerId: String(deliveryPartnerId),
+      dispatchAssignedAt: new Date(),
+    },
+    include: orderInclude,
+  }));
+
+  await pushStatusHistory(row.id, {
+    byRole: 'ADMIN',
+    byId: adminId,
+    from: row.orderStatus,
+    to: row.orderStatus,
+    note: 'Delivery partner assigned by admin',
+  });
+
+  enqueueOrderEvent('delivery_partner_assigned', {
+    orderMongoId: row.id,
+    orderId: row.id,
+    deliveryPartnerId,
+    adminId,
+  });
+
+  return normalizeOrderForClient(updated);
 }
 
 export async function deleteOrderAdmin(orderId, adminId) {
   const identity = buildOrderIdentityFilter(orderId);
   if (!identity) throw new ValidationError("Order id required");
 
-  const order = await FoodOrder.findOne(identity).lean();
-  if (!order) throw new NotFoundError("Order not found");
+  const row = await prisma.foodOrder.findFirst({ where: identity, include: orderInclude });
+  if (!row) throw new NotFoundError("Order not found");
+  const order = toOrder(row);
 
-  // Keep support tickets but detach deleted order reference.
-  await Promise.all([
-    FoodSupportTicket.updateMany(
-      { orderId: order._id },
-      { $set: { orderId: null } },
-    ),
-    FoodTransaction.deleteOne({
-      $or: [{ orderId: order._id }, { orderReadableId: String(order._id.toString()) }],
-    }),
-    FoodOrder.deleteOne({ _id: order._id }),
-  ]);
+  await purgeOrder(order.id);
 
-  // Remove realtime tracking node if present.
+  // Remove the realtime tracking node if present.
   try {
     const db = getFirebaseDB();
-    if (db && order?.orderId) {
-      await db.ref(`active_orders/${order._id.toString()}`).remove();
-    }
+    if (db) await db.ref(`active_orders/${order.id}`).remove();
   } catch (err) {
     logger.warn(`Delete order firebase cleanup failed: ${err?.message || err}`);
   }
 
-  // Notify connected apps so stale UI entries can disappear without refresh.
+  // Notify connected apps so stale UI entries disappear without a refresh.
   try {
     const io = getIO();
     if (io) {
       const payload = {
-        orderMongoId: String(order._id),
-        orderId: String(order._id.toString() || ""),
+        orderMongoId: order.id,
+        orderId: order.id,
         deletedBy: "ADMIN",
         adminId: adminId ? String(adminId) : null,
       };
-
-      if (order.userId) io.to(rooms.user(order.userId)).emit("order_deleted", payload);
-      if (order.restaurantId) io.to(rooms.restaurant(order.restaurantId)).emit("order_deleted", payload);
-      if (order.dispatch?.deliveryPartnerId) {
-        io.to(rooms.delivery(order.dispatch.deliveryPartnerId)).emit("order_deleted", payload);
+      if (row.userId) io.to(rooms.user(row.userId)).emit("order_deleted", payload);
+      if (row.restaurantId) io.to(rooms.restaurant(row.restaurantId)).emit("order_deleted", payload);
+      if (row.dispatchDeliveryPartnerId) {
+        io.to(rooms.delivery(row.dispatchDeliveryPartnerId)).emit("order_deleted", payload);
       }
     }
   } catch (err) {
@@ -2387,306 +2199,284 @@ export async function deleteOrderAdmin(orderId, adminId) {
   }
 
   enqueueOrderEvent("order_deleted_by_admin", {
-    orderMongoId: String(order._id),
-    orderId: String(order._id.toString() || ""),
+    orderMongoId: order.id,
+    orderId: order.id,
     adminId: adminId ? String(adminId) : null,
   });
 
-  return {
-    deleted: true,
-    orderId: String(order._id.toString() || ""),
-    orderMongoId: String(order._id),
-  };
+  return { deleted: true, orderId: order.id, orderMongoId: order.id };
 }
 
 export async function updateOrderStatusAdmin(orderId, orderStatus, note = "", adminId) {
-    const identity = buildOrderIdentityFilter(orderId);
-    let order = await FoodOrder.findOne(identity);
-    if (!order) throw new NotFoundError("Order not found");
+  const identity = buildOrderIdentityFilter(orderId);
+  const row = await prisma.foodOrder.findFirst({ where: identity, include: orderInclude });
+  if (!row) throw new NotFoundError("Order not found");
+  const order = toOrder(row);
 
-    if (!Object.prototype.hasOwnProperty.call(STATUS_PRIORITY, String(orderStatus))) {
-        throw new ValidationError(`Invalid order status: ${orderStatus}`);
-    }
-    if (!isStatusAdvance(order.orderStatus, orderStatus)) {
-        throw new ValidationError(
-            `Cannot change order status from '${order.orderStatus}' to '${orderStatus}'`,
-        );
-    }
+  if (!Object.prototype.hasOwnProperty.call(STATUS_PRIORITY, String(orderStatus))) {
+    throw new ValidationError(`Invalid order status: ${orderStatus}`);
+  }
+  if (!isStatusAdvance(order.orderStatus, orderStatus)) {
+    throw new ValidationError(
+      `Cannot change order status from '${order.orderStatus}' to '${orderStatus}'`,
+    );
+  }
 
-    const from = order.orderStatus;
-    order.orderStatus = orderStatus;
+  const from = order.orderStatus;
+  const normalizedPaymentMethod = String(order.payment?.method || "cash").toLowerCase();
+  const prevPaymentStatus = String(order.payment?.status || "cod_pending").toLowerCase();
+  const codBecomesPaid =
+    String(orderStatus) === "delivered" &&
+    normalizedPaymentMethod === "cash" &&
+    prevPaymentStatus === "cod_pending";
 
-    const normalizedPaymentMethod = String(order.payment?.method || "cash").toLowerCase();
-    const prevPaymentStatus = String(order.payment?.status || "cod_pending").toLowerCase();
-    if (String(orderStatus) === "delivered" && normalizedPaymentMethod === "cash" && prevPaymentStatus === "cod_pending") {
-        // Keep payment state consistent for COD if delivery is completed by admin override.
-        order.payment.status = "paid";
-    }
-
-    pushStatusHistory(order, {
-        byRole: "ADMIN",
-        byId: adminId,
-        from,
-        to: orderStatus,
-        note: note || "Status updated by admin",
-    });
-
-    if (String(orderStatus).includes("cancel")) {
-        try {
-            await applyCancellationRefund(order, { cancelledBy: 'admin' });
-        } catch (err) {
-            logger.warn(`Admin cancellation refund failed for order ${order._id}: ${err?.message || err}`);
-            order.payment.refund = { status: "failed", amount: order.pricing?.total || 0 };
-        }
-    }
-
-    await order.save();
-
-    if (String(orderStatus) === "delivered") {
-        try {
-            const ledgerKind =
-                normalizedPaymentMethod === "cash" && prevPaymentStatus === "cod_pending"
-                    ? "cod_marked_paid_on_delivery"
-                    : "payment_snapshot_sync";
-            await foodTransactionService.updateTransactionStatus(order._id, ledgerKind, {
-                status: "captured",
-                recordedByRole: "ADMIN",
-                recordedById: adminId,
-                note: `Delivery completed from admin flow. Prev payment status: ${prevPaymentStatus}`,
-            });
-        } catch (err) {
-            logger.warn(`updateOrderStatusAdmin delivered transaction sync failed: ${err?.message || err}`);
-        }
-    }
-
-    // Notify all relevant parties
-    const notifyList = [
-        { ownerType: "USER", ownerId: order.userId },
-        { ownerType: "RESTAURANT", ownerId: order.restaurantId },
-    ];
-    if (order.dispatch?.deliveryPartnerId) {
-        notifyList.push({ ownerType: "DELIVERY_PARTNER", ownerId: order.dispatch.deliveryPartnerId });
-    }
-
-    let title = `Order Status Updated 📋`;
-    let body = `Order #${order.order_id || order._id} status changed to ${String(orderStatus).replace(/_/g, " ")} by support.`;
-
-    if (orderStatus === "confirmed") {
-        title = "Order Accepted! 🧑‍🍳";
-        body = "The order has been accepted and is starting to be prepared.";
-    } else if (orderStatus === "preparing") {
-        title = "Food is being prepared! 🍳";
-        body = "Your food is currently being prepared by the restaurant.";
-    } else if (orderStatus === "ready_for_pickup") {
-        title = "Food is ready! 🛍️";
-        body = "Your order is ready and waiting to be picked up.";
-    } else if (String(orderStatus).includes("cancel")) {
-        title = "Order Cancelled ❌";
-        body = (note && String(note).trim()) ? note : `Unfortunately, your order has been cancelled by support.`;
-    }
-
-    await notifyOwnersSafely(notifyList, {
-        title,
-        body,
-        data: {
-            type: "order_status_update",
-            orderId: order._id.toString(),
-            orderStatus: String(orderStatus || ""),
-        }
-    });
-
-    // Real-time update
+  let refundPatch = {};
+  if (String(orderStatus).includes("cancel")) {
     try {
-        const io = getIO();
-        if (io) {
-            const payload = {
-                orderMongoId: order._id.toString(),
-                orderId: order._id.toString(),
-                orderStatus: order.orderStatus,
-                message: body,
-                title: title,
-                note: order.note || "",
-        statusNote: note || "",
-            };
-            io.to(rooms.user(order.userId)).emit("order_status_update", payload);
-            io.to(rooms.restaurant(order.restaurantId)).emit("order_status_update", payload);
-            if (order.dispatch?.deliveryPartnerId) {
-                io.to(rooms.delivery(order.dispatch.deliveryPartnerId)).emit("order_status_update", payload);
-            }
-
-            // On accept (confirmed or preparing) -> request delivery partners via central logic
-            if (
-                (String(orderStatus) === "preparing" || String(orderStatus) === "confirmed") && 
-                (String(from) !== "preparing" && String(from) !== "confirmed")
-            ) {
-                console.log(
-                    `[DEBUG] Order ${order._id.toString()} status changed to '${orderStatus}' by Admin. Triggering central delivery dispatch.`,
-                );
-                
-                try {
-                    await tryAutoAssign(order._id);
-                    // Refresh local order state after assignment search
-                    order = await FoodOrder.findById(order._id); 
-                } catch (err) {
-                    console.error(`[DEBUG] Auto-assign in updateOrderStatusAdmin failed:`, err);
-                }
-            }
-        }
+      const refund = await applyCancellationRefund(order, { cancelledBy: 'admin' });
+      refundPatch = refund.paymentPatch;
     } catch (err) {
-        logger.warn(`Admin status update socket emit failed: ${err?.message || err}`);
+      logger.warn(`Admin cancellation refund failed for order ${order.id}: ${err?.message || err}`);
+      refundPatch = { refundStatus: "failed", refundAmount: order.pricing?.total || 0 };
     }
+  }
 
-    return normalizeOrderForClient(order);
+  let updated = toOrder(await prisma.foodOrder.update({
+    where: { id: order.id },
+    data: { orderStatus, ...(codBecomesPaid ? { paymentStatus: 'paid' } : {}), ...refundPatch },
+    include: orderInclude,
+  }));
+
+  await pushStatusHistory(order.id, {
+    byRole: "ADMIN",
+    byId: adminId,
+    from,
+    to: orderStatus,
+    note: note || "Status updated by admin",
+  });
+
+  if (String(orderStatus) === "delivered") {
+    try {
+      const ledgerKind = codBecomesPaid ? "cod_marked_paid_on_delivery" : "payment_snapshot_sync";
+      await foodTransactionService.updateTransactionStatus(order.id, ledgerKind, {
+        status: "captured",
+        recordedByRole: "ADMIN",
+        recordedById: adminId,
+        note: `Delivery completed from admin flow. Prev payment status: ${prevPaymentStatus}`,
+      });
+    } catch (err) {
+      logger.warn(`updateOrderStatusAdmin delivered transaction sync failed: ${err?.message || err}`);
+    }
+  }
+
+  const notifyList = [
+    { ownerType: "USER", ownerId: updated.userId },
+    { ownerType: "RESTAURANT", ownerId: updated.restaurantId },
+  ];
+  if (row.dispatchDeliveryPartnerId) {
+    notifyList.push({ ownerType: "DELIVERY_PARTNER", ownerId: row.dispatchDeliveryPartnerId });
+  }
+
+  let title = `Order Status Updated 📋`;
+  let body = `Order #${updated.order_id || updated.id} status changed to ${String(orderStatus).replace(/_/g, " ")} by support.`;
+
+  if (orderStatus === "confirmed") {
+    title = "Order Accepted! 🧑‍🍳";
+    body = "The order has been accepted and is starting to be prepared.";
+  } else if (orderStatus === "preparing") {
+    title = "Food is being prepared! 🍳";
+    body = "Your food is currently being prepared by the restaurant.";
+  } else if (orderStatus === "ready_for_pickup") {
+    title = "Food is ready! 🛍️";
+    body = "Your order is ready and waiting to be picked up.";
+  } else if (String(orderStatus).includes("cancel")) {
+    title = "Order Cancelled ❌";
+    body = (note && String(note).trim()) ? note : `Unfortunately, your order has been cancelled by support.`;
+  }
+
+  await notifyOwnersSafely(notifyList, {
+    title,
+    body,
+    data: { type: "order_status_update", orderId: updated.id, orderStatus: String(orderStatus || "") },
+  });
+
+  try {
+    const io = getIO();
+    if (io) {
+      const payload = {
+        orderMongoId: updated.id,
+        orderId: updated.id,
+        orderStatus: updated.orderStatus,
+        message: body,
+        title,
+        note: updated.note || "",
+        statusNote: note || "",
+      };
+      io.to(rooms.user(updated.userId)).emit("order_status_update", payload);
+      io.to(rooms.restaurant(updated.restaurantId)).emit("order_status_update", payload);
+      if (row.dispatchDeliveryPartnerId) {
+        io.to(rooms.delivery(row.dispatchDeliveryPartnerId)).emit("order_status_update", payload);
+      }
+
+      if (
+        (String(orderStatus) === "preparing" || String(orderStatus) === "confirmed") &&
+        String(from) !== "preparing" && String(from) !== "confirmed"
+      ) {
+        try {
+          await tryAutoAssign(order.id);
+          updated = toOrder(
+            await prisma.foodOrder.findUnique({ where: { id: order.id }, include: orderInclude }),
+          );
+        } catch (err) {
+          logger.warn(`Auto-assign in updateOrderStatusAdmin failed: ${err?.message || err}`);
+        }
+      }
+    }
+  } catch (err) {
+    logger.warn(`Admin status update socket emit failed: ${err?.message || err}`);
+  }
+
+  return normalizeOrderForClient(updated);
 }
 
 export async function markOrderDeliveredAdmin(orderId, adminId, note = "") {
-    const identity = buildOrderIdentityFilter(orderId);
-    const order = await FoodOrder.findOne(identity);
-    if (!order) throw new NotFoundError("Order not found");
+  const identity = buildOrderIdentityFilter(orderId);
+  const row = await prisma.foodOrder.findFirst({ where: identity, include: orderInclude });
+  if (!row) throw new NotFoundError("Order not found");
+  const order = toOrder(row);
 
-    const from = String(order.orderStatus || "");
-    if (from === "delivered") {
-        throw new ValidationError("Order is already delivered");
-    }
-    if (from.includes("cancel") || from === "pending_payment") {
-        throw new ValidationError(`Cannot mark order as delivered from status '${from}'`);
-    }
+  const from = String(order.orderStatus || "");
+  if (from === "delivered") throw new ValidationError("Order is already delivered");
+  if (from.includes("cancel") || from === "pending_payment") {
+    throw new ValidationError(`Cannot mark order as delivered from status '${from}'`);
+  }
 
-    const normalizedPaymentMethod = String(order.payment?.method || "cash").toLowerCase();
-    const prevPaymentStatus = String(order.payment?.status || "cod_pending").toLowerCase();
+  const normalizedPaymentMethod = String(order.payment?.method || "cash").toLowerCase();
+  const prevPaymentStatus = String(order.payment?.status || "cod_pending").toLowerCase();
+  const codBecomesPaid = normalizedPaymentMethod === "cash" && prevPaymentStatus === "cod_pending";
 
-    order.orderStatus = "delivered";
-    order.deliveryState = {
-        ...(order.deliveryState?.toObject?.() || order.deliveryState || {}),
-        currentPhase: "delivered",
-        status: "delivered",
-        deliveredAt: order.deliveryState?.deliveredAt || new Date(),
-    };
+  const updated = toOrder(await prisma.foodOrder.update({
+    where: { id: order.id },
+    data: {
+      orderStatus: "delivered",
+      deliveryPhase: "delivered",
+      deliveryStatus: "delivered",
+      deliveredAt: row.deliveredAt || new Date(),
+      ...(codBecomesPaid ? { paymentStatus: 'paid' } : {}),
+    },
+    include: orderInclude,
+  }));
 
-    if (normalizedPaymentMethod === "cash" && prevPaymentStatus === "cod_pending") {
-        order.payment.status = "paid";
-    }
+  await pushStatusHistory(order.id, {
+    byRole: "ADMIN",
+    byId: adminId,
+    from,
+    to: "delivered",
+    note: note || "Order marked as delivered by admin",
+  });
 
-    pushStatusHistory(order, {
-        byRole: "ADMIN",
-        byId: adminId,
-        from,
-        to: "delivered",
-        note: note || "Order marked as delivered by admin",
+  try {
+    const ledgerKind = codBecomesPaid ? "cod_marked_paid_on_delivery" : "payment_snapshot_sync";
+    await foodTransactionService.updateTransactionStatus(order.id, ledgerKind, {
+      status: "captured",
+      recordedByRole: "ADMIN",
+      recordedById: adminId,
+      note: `Delivery completed by admin override. Prev payment status: ${prevPaymentStatus}`,
     });
+  } catch (err) {
+    logger.warn(`markOrderDeliveredAdmin transaction sync failed: ${err?.message || err}`);
+  }
 
-    await order.save();
+  const orderLabel = updated.order_id || updated.id;
+  const notifyList = [
+    { ownerType: "USER", ownerId: updated.userId },
+    { ownerType: "RESTAURANT", ownerId: updated.restaurantId },
+  ];
+  if (row.dispatchDeliveryPartnerId) {
+    notifyList.push({ ownerType: "DELIVERY_PARTNER", ownerId: row.dispatchDeliveryPartnerId });
+  }
 
-    try {
-        const ledgerKind =
-            normalizedPaymentMethod === "cash" && prevPaymentStatus === "cod_pending"
-                ? "cod_marked_paid_on_delivery"
-                : "payment_snapshot_sync";
-        await foodTransactionService.updateTransactionStatus(order._id, ledgerKind, {
-            status: "captured",
-            recordedByRole: "ADMIN",
-            recordedById: adminId,
-            note: `Delivery completed by admin override. Prev payment status: ${prevPaymentStatus}`,
-        });
-    } catch (err) {
-        logger.warn(`markOrderDeliveredAdmin transaction sync failed: ${err?.message || err}`);
-    }
+  await notifyOwnersSafely(notifyList, {
+    title: "Order Delivered! 🎉",
+    body: `Order #${orderLabel} has been marked as delivered by support.`,
+    data: { type: "order_status_update", orderId: updated.id, orderStatus: "delivered" },
+  });
 
-    const orderLabel = order.order_id || order._id?.toString?.() || "";
-    const notifyList = [
-        { ownerType: "USER", ownerId: order.userId },
-        { ownerType: "RESTAURANT", ownerId: order.restaurantId },
-    ];
-    if (order.dispatch?.deliveryPartnerId) {
-        notifyList.push({ ownerType: "DELIVERY_PARTNER", ownerId: order.dispatch.deliveryPartnerId });
-    }
-
-    await notifyOwnersSafely(notifyList, {
+  try {
+    const io = getIO();
+    if (io) {
+      const payload = {
+        orderMongoId: updated.id,
+        orderId: updated.id,
+        orderStatus: "delivered",
+        deliveryState: updated.deliveryState,
+        message: `Order #${orderLabel} marked as delivered by admin.`,
         title: "Order Delivered! 🎉",
-        body: `Order #${orderLabel} has been marked as delivered by support.`,
-        data: {
-            type: "order_status_update",
-            orderId: order._id.toString(),
-            orderStatus: "delivered",
-        },
-    });
-
-    try {
-        const io = getIO();
-        if (io) {
-            const payload = {
-                orderMongoId: order._id.toString(),
-                orderId: order._id.toString(),
-                orderStatus: "delivered",
-                deliveryState: order.deliveryState,
-                message: `Order #${orderLabel} marked as delivered by admin.`,
-                title: "Order Delivered! 🎉",
-            };
-            io.to(rooms.user(order.userId)).emit("order_status_update", payload);
-            io.to(rooms.restaurant(order.restaurantId)).emit("order_status_update", payload);
-            if (order.dispatch?.deliveryPartnerId) {
-                io.to(rooms.delivery(order.dispatch.deliveryPartnerId)).emit("order_status_update", payload);
-                io.to(rooms.delivery(order.dispatch.deliveryPartnerId)).emit("order_completed", payload);
-            }
-        }
-    } catch (err) {
-        logger.warn(`markOrderDeliveredAdmin socket emit failed: ${err?.message || err}`);
+      };
+      io.to(rooms.user(updated.userId)).emit("order_status_update", payload);
+      io.to(rooms.restaurant(updated.restaurantId)).emit("order_status_update", payload);
+      if (row.dispatchDeliveryPartnerId) {
+        io.to(rooms.delivery(row.dispatchDeliveryPartnerId)).emit("order_status_update", payload);
+        io.to(rooms.delivery(row.dispatchDeliveryPartnerId)).emit("order_completed", payload);
+      }
     }
+  } catch (err) {
+    logger.warn(`markOrderDeliveredAdmin socket emit failed: ${err?.message || err}`);
+  }
 
-    enqueueOrderEvent("delivery_completed", {
-        orderMongoId: order._id?.toString?.(),
-        orderId: order._id.toString(),
-        adminId: adminId ? String(adminId) : null,
-        payMethod: normalizedPaymentMethod,
-        prevPayStatus: prevPaymentStatus,
-        paymentStatus: order.payment?.status,
-        source: "admin_override",
-    });
+  enqueueOrderEvent("delivery_completed", {
+    orderMongoId: updated.id,
+    orderId: updated.id,
+    adminId: adminId ? String(adminId) : null,
+    payMethod: normalizedPaymentMethod,
+    prevPayStatus: prevPaymentStatus,
+    paymentStatus: updated.payment?.status,
+    source: "admin_override",
+  });
 
-    return normalizeOrderForClient(order);
+  return normalizeOrderForClient(updated);
 }
 
 export async function processRefundAdmin(orderId, amount, adminId) {
-    const identity = buildOrderIdentityFilter(orderId);
-    let order = await FoodOrder.findOne(identity);
-    if (!order) throw new NotFoundError("Order not found");
+  const identity = buildOrderIdentityFilter(orderId);
+  const row = await prisma.foodOrder.findFirst({ where: identity, include: orderInclude });
+  if (!row) throw new NotFoundError("Order not found");
+  const order = toOrder(row);
 
-    const currentPaymentStatus = String(order.payment?.status || "").toLowerCase();
+  const currentPaymentStatus = String(order.payment?.status || "").toLowerCase();
+  if (currentPaymentStatus === "refunded") {
+    throw new ValidationError("Order is already refunded");
+  }
 
-    if (currentPaymentStatus === "refunded") {
-        throw new ValidationError("Order is already refunded");
+  const refundAmount = Number(amount) || order.pricing?.total || 0;
+  if (refundAmount <= 0) throw new ValidationError("Invalid refund amount");
+
+  const refundResult = await applyCancellationRefund(order, { cancelledBy: 'admin', refundAmount });
+
+  if (Object.keys(refundResult.paymentPatch).length > 0) {
+    await prisma.foodOrder.update({ where: { id: order.id }, data: refundResult.paymentPatch });
+  }
+
+  if (!refundResult.processed) {
+    if (refundResult.reason === 'cash_payment') {
+      throw new ValidationError('Cash on Delivery orders do not require a refund');
     }
+    throw new Error('Refund processing failed');
+  }
 
-    const refundAmount = Number(amount) || order.pricing?.total || 0;
-    if (refundAmount <= 0) throw new ValidationError("Invalid refund amount");
-
-    const refundResult = await applyCancellationRefund(order, {
-        cancelledBy: 'admin',
-        refundAmount,
+  try {
+    await foodTransactionService.updateTransactionStatus(order.id, order.orderStatus, {
+      status: 'refunded',
+      note: `Refund of ₹${refundAmount} processed by admin`,
+      recordedByRole: 'ADMIN',
+      recordedById: adminId,
     });
+  } catch (err) {
+    logger.warn(`Admin refund transaction sync failed: ${err?.message || err}`);
+  }
 
-    if (!refundResult.processed) {
-        if (order.isModified()) {
-            await order.save();
-        }
-        if (refundResult.reason === 'cash_payment') {
-            throw new ValidationError('Cash on Delivery orders do not require a refund');
-        }
-        throw new Error('Refund processing failed');
-    }
-
-    await order.save();
-
-    try {
-        await foodTransactionService.updateTransactionStatus(order._id, order.orderStatus, {
-            status: 'refunded',
-            note: `Refund of ₹${refundAmount} processed by admin`,
-            recordedByRole: 'ADMIN',
-            recordedById: adminId
-        });
-    } catch (err) {
-        logger.warn(`Admin refund transaction sync failed: ${err?.message || err}`);
-    }
-
-    return { success: true, order: normalizeOrderForClient(order) };
+  const updated = toOrder(
+    await prisma.foodOrder.findUnique({ where: { id: order.id }, include: orderInclude }),
+  );
+  return { success: true, order: normalizeOrderForClient(updated) };
 }

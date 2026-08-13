@@ -1,39 +1,35 @@
-import mongoose from 'mongoose';
-import { FoodTransaction } from '../models/foodTransaction.model.js';
-import { FoodOrder } from '../models/order.model.js';
+import { prisma } from '../../../../config/prisma.js';
+import { isId } from '../../../../utils/helpers.js';
+import { getTransactionByOrder } from './foodTransaction.service.js';
 import { ForbiddenError, ValidationError } from '../../../../core/auth/errors.js';
 
-function buildOrderIdentityFilter(orderIdOrMongoId) {
-    const raw = String(orderIdOrMongoId || '').trim();
-    if (!raw) return null;
-    if (mongoose.isValidObjectId(raw)) return { _id: new mongoose.Types.ObjectId(raw) };
-    return { orderId: raw };
-}
-
 /**
- * List ledger entries for an order (newest first). User must own the order.
+ * List ledger entries for an order (newest first). The user must own the order.
  * Reads from the consolidated FoodTransaction history.
  */
 export async function listFoodOrderPaymentsForUser(orderIdParam, userId) {
-    const identity = buildOrderIdentityFilter(orderIdParam);
-    if (!identity) throw new ValidationError('Order id required');
+    const raw = String(orderIdParam || '').trim();
+    if (!raw) throw new ValidationError('Order id required');
 
-    const order = await FoodOrder.findOne(identity).select('_id userId orderId').lean();
+    const order = await prisma.foodOrder.findFirst({
+        where: isId(raw) ? { id: raw } : { orderId: raw },
+        select: { id: true, userId: true, orderId: true },
+    });
     if (!order) throw new ValidationError('Order not found');
-    if (order.userId?.toString() !== String(userId)) throw new ForbiddenError('Not your order');
+    if (order.userId !== String(userId)) throw new ForbiddenError('Not your order');
 
-    const transaction = await FoodTransaction.findOne({ orderId: order._id }).lean();
+    const transaction = await getTransactionByOrder(order.id);
     const rows = transaction?.history || [];
 
-    return { 
-        orderId: order.orderId, 
-        orderMongoId: order._id.toString(), 
-        payments: rows.map(r => ({
+    return {
+        orderId: order.orderId,
+        orderMongoId: order.id,
+        payments: rows.map((r) => ({
             ...r,
             method: transaction.paymentMethod,
             status: transaction.status,
             amount: transaction.amounts?.totalCustomerPaid || 0,
-            currency: transaction.currency || 'INR'
-        }))
+            currency: transaction.currency || 'INR',
+        })),
     };
 }
