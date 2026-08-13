@@ -46,7 +46,12 @@ function poolUrl(raw) {
     try {
         const url = new URL(raw);
         if (!url.searchParams.has('connection_limit')) {
-            url.searchParams.set('connection_limit', process.env.DATABASE_POOL_SIZE || '25');
+            // `node --test` runs each file in its own child process, so the pool
+            // is per file, not per suite: 12 files × 25 would ask Postgres for
+            // 300 connections against a max_connections of 100. That surfaced as
+            // one test file failing at random and passing when run alone.
+            const fallback = process.env.NODE_TEST_CONTEXT ? '5' : '25';
+            url.searchParams.set('connection_limit', process.env.DATABASE_POOL_SIZE || fallback);
         }
         if (!url.searchParams.has('pool_timeout')) {
             url.searchParams.set('pool_timeout', process.env.DATABASE_POOL_TIMEOUT || '20');
