@@ -230,6 +230,23 @@ CREATE TRIGGER order_rider_location_sync
   BEFORE INSERT OR UPDATE OF "riderLat", "riderLng" ON "food_orders"
   FOR EACH ROW EXECUTE FUNCTION sync_geography('lastRiderLocation', 'riderLat', 'riderLng');
 
+-- ─── FCM device token lists ──────────────────────────────────────────────────
+-- Mongo's $addToSet with a trailing cap, as one expression.
+--
+-- Appending a device token has to be atomic: the same install registers from
+-- several places at once (login, app resume, token refresh), and a
+-- read-modify-write loses registrations — which shows up as a device that
+-- silently stops receiving pushes. Remove-then-append also moves an existing
+-- token to the end, so the cap always evicts the genuinely oldest device.
+CREATE OR REPLACE FUNCTION array_append_capped(arr text[], val text, cap int)
+RETURNS text[] LANGUAGE sql IMMUTABLE AS $fn$
+  SELECT CASE
+           WHEN cardinality(a) > cap THEN a[cardinality(a) - cap + 1 : cardinality(a)]
+           ELSE a
+         END
+  FROM (SELECT array_append(array_remove(COALESCE(arr, '{}'), val), val) AS a) s;
+$fn$;
+
 -- ─── zone boundaries are derived from the coordinate ring ────────────────────
 -- The admin UI writes `coordinates` ([{latitude, longitude}, …]); this builds the
 -- polygon that ST_Contains actually queries. Same contract as sync_geography():

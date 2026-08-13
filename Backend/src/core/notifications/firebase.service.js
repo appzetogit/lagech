@@ -1,10 +1,7 @@
 import crypto from 'crypto';
 import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
-import { FoodUser } from '../users/user.model.js';
-import { FoodRestaurant } from '../../modules/food/restaurant/models/restaurant.model.js';
-import { FoodDeliveryPartner } from '../../modules/food/delivery/models/deliveryPartner.model.js';
-import { FoodAdmin } from '../admin/admin.model.js';
+import { prisma } from '../../config/prisma.js';
 import { config } from '../../config/env.js';
 import { logger } from '../../utils/logger.js';
 import { isMobilePlatform, normalizePlatform } from '../../utils/platform.js';
@@ -13,11 +10,19 @@ const FIREBASE_MESSAGING_SCOPE = 'https://www.googleapis.com/auth/firebase.messa
 const OAUTH_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const FCM_SEND_URL = (projectId) =>
     `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/messages:send`;
-const OWNER_MODELS = {
-    USER: FoodUser,
-    RESTAURANT: FoodRestaurant,
-    DELIVERY_PARTNER: FoodDeliveryPartner,
-    ADMIN: FoodAdmin
+/**
+ * Owner type -> the table holding its token lists.
+ *
+ * Table names, not Prisma delegates, because the token updates are raw: array
+ * append/remove has no Prisma Client equivalent that is atomic. Every name here
+ * is a literal from this map and never from a caller, so interpolating it into
+ * SQL is safe.
+ */
+const OWNER_TABLES = {
+    USER: 'food_users',
+    RESTAURANT: 'food_restaurants',
+    DELIVERY_PARTNER: 'food_delivery_partners',
+    ADMIN: 'food_admins'
 };
 const OWNER_TOKEN_FIELDS = {
     web: 'fcmTokens',
@@ -318,7 +323,7 @@ const RETRYABLE_HTTP_STATUSES = new Set([429, 500, 502, 503, 504]);
 const MAX_SEND_ATTEMPTS = 3;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const getOwnerModel = (ownerType) => OWNER_MODELS[String(ownerType || '').toUpperCase()] || null;
+const getOwnerTable = (ownerType) => OWNER_TABLES[String(ownerType || '').toUpperCase()] || null;
 
 const getTokenFieldForPlatform = (platform) => OWNER_TOKEN_FIELDS[isMobilePlatform(platform) ? 'mobile' : 'web'];
 
@@ -349,21 +354,31 @@ export const detachFirebaseDeviceTokenEverywhere = async (token) => {
     const normalizedToken = sanitizeString(token);
     if (!normalizedToken) return { success: false };
 
-    const models = Object.values(OWNER_MODELS);
+    // One statement per table rather than per table-and-column: array_remove on a
+    // list that does not contain the token is a no-op, so there is nothing to
+    // pre-filter on.
     await Promise.all(
-        models.flatMap((model) => [
-            model.updateMany({ fcmTokens: normalizedToken }, { $pull: { fcmTokens: normalizedToken } }),
-            model.updateMany({ fcmTokenMobile: normalizedToken }, { $pull: { fcmTokenMobile: normalizedToken } })
-        ])
+        Object.values(OWNER_TABLES).map((table) =>
+            prisma.$executeRawUnsafe(
+                `UPDATE "${table}"
+                    SET "fcmTokens"      = array_remove(COALESCE("fcmTokens", '{}'), $1),
+                        "fcmTokenMobile" = array_remove(COALESCE("fcmTokenMobile", '{}'), $1)
+                  WHERE $1 = ANY("fcmTokens") OR $1 = ANY("fcmTokenMobile")`,
+                normalizedToken,
+            ),
+        ),
     );
     return { success: true };
 };
 
 export const listOwnerTokens = async ({ ownerType, ownerId, platform }) => {
     if (!ownerType || !ownerId) return [];
-    const model = getOwnerModel(ownerType);
-    if (!model) return [];
-    const doc = await model.findById(ownerId).select('fcmTokens fcmTokenMobile').lean();
+    const table = getOwnerTable(ownerType);
+    if (!table) return [];
+    const [doc] = await prisma.$queryRawUnsafe(
+        `SELECT "fcmTokens", "fcmTokenMobile" FROM "${table}" WHERE "id" = $1`,
+        String(ownerId),
+    );
     return readTokensFromDoc(doc, platform);
 };
 
@@ -379,8 +394,8 @@ export const upsertFirebaseDeviceToken = async ({ ownerType, ownerId, token, pla
         throw new Error('ownerType, ownerId, and token are required.');
     }
 
-    const model = getOwnerModel(ownerType);
-    if (!model) {
+    const table = getOwnerTable(ownerType);
+    if (!table) {
         console.error(`[FCM-DEBUG] upsert - Unsupported owner type: ${ownerType}`);
         throw new Error(`Unsupported owner type: ${ownerType}`);
     }
@@ -401,19 +416,22 @@ export const upsertFirebaseDeviceToken = async ({ ownerType, ownerId, token, pla
     // a second. The endpoint then returned 500 and the device never registered,
     // so pushes stopped for that account entirely.
     //
-    // $addToSet / $pull are applied by the server against whatever the document
-    // currently holds, so concurrent writers cannot invalidate each other and no
-    // version is consulted at all.
-    const result = await model.updateOne(
-        { _id: ownerId },
-        {
-            $addToSet: { [field]: normalizedToken },
-            // Never keep the same token in both buckets on this document.
-            $pull: { [otherField]: normalizedToken },
-        },
+    // array_append_capped / array_remove are evaluated by the database against
+    // whatever the row currently holds, so concurrent writers cannot invalidate
+    // each other. The cap is applied in the same expression, so the oldest device
+    // is evicted rather than the list growing without bound.
+    const result = await prisma.$executeRawUnsafe(
+        `UPDATE "${table}"
+            SET "${field}"      = array_append_capped("${field}", $1, ${MAX_TOKENS_PER_PLATFORM}),
+                -- Never keep the same token in both buckets on this row.
+                "${otherField}" = array_remove(COALESCE("${otherField}", '{}'), $1),
+                "updatedAt"     = now()
+          WHERE "id" = $2`,
+        normalizedToken,
+        String(ownerId),
     );
 
-    if (!result.matchedCount) {
+    if (!result) {
         console.error(`[FCM-DEBUG] upsert - Owner profile not found for id ${ownerId}`);
         throw new Error('Owner profile not found.');
     }
@@ -447,12 +465,12 @@ export const replaceFirebaseDeviceToken = async ({ ownerType, ownerId, token, pl
         throw new Error('ownerType, ownerId, and token are required.');
     }
 
-    const model = getOwnerModel(ownerType);
-    if (!model) throw new Error(`Unsupported owner type: ${ownerType}`);
+    const table = getOwnerTable(ownerType);
+    if (!table) throw new Error(`Unsupported owner type: ${ownerType}`);
 
-    await model.updateOne(
-        { _id: ownerId },
-        { $set: { fcmTokens: [], fcmTokenMobile: [] } },
+    await prisma.$executeRawUnsafe(
+        `UPDATE "${table}" SET "fcmTokens" = '{}', "fcmTokenMobile" = '{}', "updatedAt" = now() WHERE "id" = $1`,
+        String(ownerId),
     );
 
     return upsertFirebaseDeviceToken({ ownerType, ownerId, token: normalizedToken, platform });
@@ -472,11 +490,11 @@ export const removeFirebaseDeviceToken = async ({ ownerType, ownerId, token }) =
     // No token means "this authenticated owner is signing out": clear the whole
     // list. Scoped by ownerId, so it can only ever affect the caller's own account.
     if (!normalizedToken) {
-        const model = getOwnerModel(ownerType);
-        if (!model) throw new Error(`Unsupported owner type: ${ownerType}`);
-        await model.updateOne(
-            { _id: ownerId },
-            { $set: { fcmTokens: [], fcmTokenMobile: [] } },
+        const table = getOwnerTable(ownerType);
+        if (!table) throw new Error(`Unsupported owner type: ${ownerType}`);
+        await prisma.$executeRawUnsafe(
+            `UPDATE "${table}" SET "fcmTokens" = '{}', "fcmTokenMobile" = '{}', "updatedAt" = now() WHERE "id" = $1`,
+            String(ownerId),
         );
         return { success: true, cleared: 'all' };
     }
@@ -571,16 +589,22 @@ export const sendNotificationToOwner = async ({ ownerType, ownerId, payload, pla
             .map((item) => item.token)
             .filter(Boolean);
         if (invalidTokens.length > 0) {
-            const model = getOwnerModel(ownerType);
-            const doc = model ? await model.findById(ownerId) : null;
-            if (doc) {
+            const table = getOwnerTable(ownerType);
+            if (table) {
                 const fieldNames = platform
                     ? [getTokenFieldForPlatform(platform)]
                     : [OWNER_TOKEN_FIELDS.web, OWNER_TOKEN_FIELDS.mobile];
-                for (const field of fieldNames) {
-                    doc[field] = normalizeTokenList((Array.isArray(doc[field]) ? doc[field] : []).filter((t) => !invalidTokens.includes(t)));
-                }
-                await doc.save();
+                // Set difference in the database rather than load-mutate-save:
+                // FCM rejects tokens on a live send, so a concurrent registration
+                // for the same owner is entirely likely and must not be clobbered.
+                const sets = fieldNames
+                    .map((field, i) => `"${field}" = array(SELECT unnest(COALESCE("${field}", '{}')) EXCEPT SELECT unnest($${i + 2}::text[]))`)
+                    .join(', ');
+                await prisma.$executeRawUnsafe(
+                    `UPDATE "${table}" SET ${sets}, "updatedAt" = now() WHERE "id" = $1`,
+                    String(ownerId),
+                    ...fieldNames.map(() => invalidTokens),
+                );
             }
         }
         logger.info(
@@ -616,12 +640,15 @@ export const sendNotificationToOwners = async (targets = [], payload = {}) => {
 
 export const notifyAdminsSafely = async (payload = {}) => {
     try {
-        const admins = await FoodAdmin.find({ isActive: true }).select('_id').lean();
+        const admins = await prisma.foodAdmin.findMany({
+            where: { isActive: true, isDeleted: false },
+            select: { id: true },
+        });
         if (!admins.length) return [];
         
         const targets = admins.map(a => ({
             ownerType: 'ADMIN',
-            ownerId: String(a._id)
+            ownerId: a.id
         }));
         
         return await sendNotificationToOwners(targets, payload);

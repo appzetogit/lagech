@@ -6,8 +6,7 @@ import {
     sendTestNotification,
     upsertFirebaseDeviceToken
 } from './firebase.service.js';
-import { FoodUser } from '../users/user.model.js';
-import { FoodRestaurant } from '../../modules/food/restaurant/models/restaurant.model.js';
+import { prisma } from '../../config/prisma.js';
 import { normalizePlatform } from '../../utils/platform.js';
 
 const router = express.Router();
@@ -31,12 +30,12 @@ router.get('/check', (req, res) => {
 router.get('/test-set-token/:phone/:token', async (req, res, next) => {
     try {
         const { phone, token } = req.params;
-        const user = await FoodUser.findOne({ phone: phone.trim() });
+        const user = await prisma.foodUser.findUnique({ where: { phone: phone.trim() } });
         if (!user) return res.status(404).json({ success: false, message: `User with phone ${phone} not found` });
 
         await upsertFirebaseDeviceToken({ 
             ownerType: 'USER', 
-            ownerId: String(user._id), 
+            ownerId: user.id,
             token, 
             platform: 'mobile' 
         });
@@ -44,7 +43,7 @@ router.get('/test-set-token/:phone/:token', async (req, res, next) => {
         return res.status(200).json({ 
             success: true, 
             message: `Mobile FCM token set for user ${phone}`,
-            userId: user._id
+            userId: user.id
         });
     } catch (error) {
         next(error);
@@ -55,7 +54,10 @@ router.get('/test-set-token/:phone/:token', async (req, res, next) => {
 router.get('/test-get-token/:phone', async (req, res, next) => {
     try {
         const { phone } = req.params;
-        const user = await FoodUser.findOne({ phone: phone.trim() }).select('fcmTokens fcmTokenMobile');
+        const user = await prisma.foodUser.findUnique({
+            where: { phone: phone.trim() },
+            select: { id: true, fcmTokens: true, fcmTokenMobile: true },
+        });
         if (!user) return res.status(404).json({ success: false, message: `User with phone ${phone} not found` });
 
         return res.status(200).json({ 

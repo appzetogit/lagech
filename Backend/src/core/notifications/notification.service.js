@@ -1,15 +1,11 @@
-import mongoose from 'mongoose';
+import { prisma } from '../../config/prisma.js';
+import { isId } from '../../utils/helpers.js';
 import { ValidationError, NotFoundError } from '../auth/errors.js';
-import { FoodNotification } from './models/notification.model.js';
 
 const normalizePagination = ({ page = 1, limit = 20 } = {}) => {
     const nextPage = Math.max(1, Number(page) || 1);
     const nextLimit = Math.max(1, Math.min(100, Number(limit) || 20));
-    return {
-        page: nextPage,
-        limit: nextLimit,
-        skip: (nextPage - 1) * nextLimit
-    };
+    return { page: nextPage, limit: nextLimit, skip: (nextPage - 1) * nextLimit };
 };
 
 const normalizeOwnerType = (role) => {
@@ -20,27 +16,33 @@ const normalizeOwnerType = (role) => {
     return null;
 };
 
-const ensureObjectId = (value, fieldName) => {
-    if (!value || !mongoose.Types.ObjectId.isValid(String(value))) {
-        throw new ValidationError(`${fieldName} is invalid`);
-    }
-    return new mongoose.Types.ObjectId(String(value));
+const requireId = (value, fieldName) => {
+    if (!isId(value)) throw new ValidationError(`${fieldName} is invalid`);
+    return String(value);
 };
 
 export const resolveNotificationOwnerFromRequest = (user = {}) => {
     const ownerType = normalizeOwnerType(user?.role);
-    const ownerId = user?.userId || user?._id || null;
+    const ownerId = user?.userId || user?._id || user?.id || null;
 
     if (!ownerType || !ownerId) {
         throw new ValidationError('Authenticated notification owner not found');
     }
 
-    return {
-        ownerType,
-        ownerId: ensureObjectId(ownerId, 'ownerId')
-    };
+    return { ownerType, ownerId: requireId(ownerId, 'ownerId') };
 };
 
+/**
+ * Fan a broadcast out into per-recipient inbox rows.
+ *
+ * Two shapes of "already sent", which is why this is not one upsert:
+ *
+ *  - With a broadcastId, (broadcastId, ownerType, ownerId) is unique, so the
+ *    fan-out is genuinely idempotent — re-running a broadcast cannot double-post.
+ *  - Without one, there is no constraint to upsert on, so a matching row is
+ *    refreshed and only a miss inserts. That mirrors the old bulkWrite filter,
+ *    and it is inherently racy; a broadcastId is the reliable path.
+ */
 export const createInboxNotifications = async ({ notifications = [] } = {}) => {
     const rows = Array.isArray(notifications)
         ? notifications.filter((item) => item?.ownerType && item?.ownerId && item?.title && item?.message)
@@ -48,88 +50,80 @@ export const createInboxNotifications = async ({ notifications = [] } = {}) => {
 
     if (!rows.length) return [];
 
-    const operations = rows.map((item) => {
-        const payload = {
+    const broadcastIds = new Set();
+
+    for (const item of rows) {
+        const data = {
             ownerType: item.ownerType,
-            ownerId: ensureObjectId(item.ownerId, 'ownerId'),
+            ownerId: requireId(item.ownerId, 'ownerId'),
             title: String(item.title).trim(),
             message: String(item.message).trim(),
             link: String(item.link || '').trim(),
             category: String(item.category || 'broadcast').trim(),
             source: 'ADMIN_BROADCAST',
             metadata: item.metadata && typeof item.metadata === 'object' ? item.metadata : {},
+            // Re-sending resurfaces a notification the recipient had dismissed.
+            dismissedAt: null,
         };
 
-        if (item.broadcastId && mongoose.Types.ObjectId.isValid(String(item.broadcastId))) {
-            payload.broadcastId = new mongoose.Types.ObjectId(String(item.broadcastId));
+        const broadcastId = isId(item.broadcastId) ? String(item.broadcastId) : null;
+
+        if (broadcastId) {
+            broadcastIds.add(broadcastId);
+            await prisma.foodNotification.upsert({
+                where: {
+                    broadcastId_ownerType_ownerId: {
+                        broadcastId,
+                        ownerType: data.ownerType,
+                        ownerId: data.ownerId,
+                    },
+                },
+                create: { ...data, broadcastId, isRead: false, readAt: null },
+                update: data,
+            });
+            continue;
         }
 
-        return {
-            updateOne: {
-                filter: payload.broadcastId
-                    ? {
-                        broadcastId: payload.broadcastId,
-                        ownerType: payload.ownerType,
-                        ownerId: payload.ownerId
-                    }
-                    : {
-                        ownerType: payload.ownerType,
-                        ownerId: payload.ownerId,
-                        title: payload.title,
-                        message: payload.message,
-                        source: payload.source
-                    },
-                update: {
-                    $set: {
-                        ...payload,
-                        dismissedAt: null
-                    },
-                    $setOnInsert: {
-                        isRead: false,
-                        readAt: null
-                    }
-                },
-                upsert: true
-            }
-        };
-    });
-
-    await FoodNotification.bulkWrite(operations, { ordered: false });
-
-    const ids = rows
-        .map((item) => item.broadcastId)
-        .filter((value) => value && mongoose.Types.ObjectId.isValid(String(value)))
-        .map((value) => new mongoose.Types.ObjectId(String(value)));
-
-    if (ids.length > 0) {
-        return FoodNotification.find({ broadcastId: { $in: ids } }).sort({ createdAt: -1 }).lean();
+        const { count } = await prisma.foodNotification.updateMany({
+            where: {
+                ownerType: data.ownerType,
+                ownerId: data.ownerId,
+                title: data.title,
+                message: data.message,
+                source: data.source,
+            },
+            data,
+        });
+        if (count === 0) {
+            await prisma.foodNotification.create({ data: { ...data, isRead: false, readAt: null } });
+        }
     }
 
-    return [];
+    if (broadcastIds.size === 0) return [];
+
+    return prisma.foodNotification.findMany({
+        where: { broadcastId: { in: [...broadcastIds] } },
+        orderBy: { createdAt: 'desc' },
+    });
 };
 
 export const getInboxNotifications = async ({ ownerType, ownerId, page = 1, limit = 20 } = {}) => {
-    const normalizedOwnerType = normalizeOwnerType(ownerType);
-    const normalizedOwnerId = ensureObjectId(ownerId, 'ownerId');
+    const where = {
+        ownerType: normalizeOwnerType(ownerType),
+        ownerId: requireId(ownerId, 'ownerId'),
+        dismissedAt: null,
+    };
     const { skip, ...meta } = normalizePagination({ page, limit });
 
-    const filter = {
-        ownerType: normalizedOwnerType,
-        ownerId: normalizedOwnerId,
-        dismissedAt: null
-    };
-
     const [items, total, unreadCount] = await Promise.all([
-        FoodNotification.find(filter)
-            .sort({ createdAt: -1 })
-            .skip(skip)
-            .limit(meta.limit)
-            .lean(),
-        FoodNotification.countDocuments(filter),
-        FoodNotification.countDocuments({
-            ...filter,
-            isRead: false
-        })
+        prisma.foodNotification.findMany({
+            where,
+            orderBy: { createdAt: 'desc' },
+            skip,
+            take: meta.limit,
+        }),
+        prisma.foodNotification.count({ where }),
+        prisma.foodNotification.count({ where: { ...where, isRead: false } }),
     ]);
 
     return {
@@ -138,78 +132,47 @@ export const getInboxNotifications = async ({ ownerType, ownerId, page = 1, limi
             page: meta.page,
             limit: meta.limit,
             total,
-            totalPages: Math.max(1, Math.ceil(total / meta.limit))
+            totalPages: Math.max(1, Math.ceil(total / meta.limit)),
         },
-        unreadCount
+        unreadCount,
     };
 };
 
-export const markNotificationAsRead = async ({ notificationId, ownerType, ownerId } = {}) => {
-    const notification = await FoodNotification.findOneAndUpdate(
-        {
-            _id: ensureObjectId(notificationId, 'notificationId'),
+/**
+ * Ownership is part of the WHERE clause, so another owner's notification reads
+ * as "not found" rather than confirming it exists.
+ */
+const updateOwnedNotification = async ({ notificationId, ownerType, ownerId }, data) => {
+    const { count } = await prisma.foodNotification.updateMany({
+        where: {
+            id: requireId(notificationId, 'notificationId'),
             ownerType: normalizeOwnerType(ownerType),
-            ownerId: ensureObjectId(ownerId, 'ownerId'),
-            dismissedAt: null
+            ownerId: requireId(ownerId, 'ownerId'),
+            dismissedAt: null,
         },
-        {
-            $set: {
-                isRead: true,
-                readAt: new Date()
-            }
-        },
-        { new: true }
-    ).lean();
+        data,
+    });
 
-    if (!notification) {
-        throw new NotFoundError('Notification not found');
-    }
+    if (count === 0) throw new NotFoundError('Notification not found');
 
-    return notification;
+    return prisma.foodNotification.findUnique({ where: { id: String(notificationId) } });
 };
 
-export const dismissNotification = async ({ notificationId, ownerType, ownerId } = {}) => {
-    const notification = await FoodNotification.findOneAndUpdate(
-        {
-            _id: ensureObjectId(notificationId, 'notificationId'),
-            ownerType: normalizeOwnerType(ownerType),
-            ownerId: ensureObjectId(ownerId, 'ownerId'),
-            dismissedAt: null
-        },
-        {
-            $set: {
-                dismissedAt: new Date(),
-                isRead: true,
-                readAt: new Date()
-            }
-        },
-        { new: true }
-    ).lean();
+export const markNotificationAsRead = async (args = {}) =>
+    updateOwnedNotification(args, { isRead: true, readAt: new Date() });
 
-    if (!notification) {
-        throw new NotFoundError('Notification not found');
-    }
-
-    return notification;
-};
+export const dismissNotification = async (args = {}) =>
+    updateOwnedNotification(args, { dismissedAt: new Date(), isRead: true, readAt: new Date() });
 
 export const dismissAllNotifications = async ({ ownerType, ownerId } = {}) => {
-    const result = await FoodNotification.updateMany(
-        {
+    const result = await prisma.foodNotification.updateMany({
+        where: {
             ownerType: normalizeOwnerType(ownerType),
-            ownerId: ensureObjectId(ownerId, 'ownerId'),
-            dismissedAt: null
+            ownerId: requireId(ownerId, 'ownerId'),
+            dismissedAt: null,
         },
-        {
-            $set: {
-                dismissedAt: new Date(),
-                isRead: true,
-                readAt: new Date()
-            }
-        }
-    );
+        data: { dismissedAt: new Date(), isRead: true, readAt: new Date() },
+    });
 
-    return {
-        modifiedCount: Number(result?.modifiedCount || 0)
-    };
+    return { modifiedCount: Number(result?.count || 0) };
 };
