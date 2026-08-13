@@ -1,22 +1,22 @@
-import { FoodItem } from '../../admin/models/food.model.js';
+import { prisma } from '../../../../config/prisma.js';
 
 /**
  * Re-enable foods whose scheduled out-of-stock window has expired.
- * Manual off (no stockResumeAt) is left unchanged until the restaurant turns it back on.
+ * Manual off (no stockResumeAt) is left unchanged until the restaurant turns it
+ * back on.
+ *
+ * @param {object} where a Prisma where fragment, e.g. { restaurantId } or
+ *                       { restaurantId: { in: ids } }
  */
-export async function restoreExpiredFoodAvailability(filter = {}) {
-    const now = new Date();
-    const result = await FoodItem.updateMany(
-        {
-            ...filter,
+export async function restoreExpiredFoodAvailability(where = {}) {
+    const { count } = await prisma.foodItem.updateMany({
+        where: {
+            ...where,
             isAvailable: false,
-            stockResumeAt: { $ne: null, $lte: now }
+            stockResumeAt: { not: null, lte: new Date() },
         },
-        {
-            $set: { isAvailable: true },
-            $unset: { stockResumeAt: 1, stockOffMode: 1 }
-        }
-    );
+        data: { isAvailable: true, stockResumeAt: null, stockOffMode: null },
+    });
 
-    return result.modifiedCount || 0;
+    return count || 0;
 }

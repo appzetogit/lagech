@@ -1,16 +1,16 @@
-import mongoose from 'mongoose';
+import { prisma } from '../../../../config/prisma.js';
+import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
-import { FoodRestaurant } from '../models/restaurant.model.js';
-import { FoodAddon } from '../models/foodAddon.model.js';
+import { findApprovedRestaurant, toAddonGroup } from './restaurantLookup.helper.js';
 
 /**
  * Folds a flat add-on list into the grouped, rule-carrying shape the item sheet
  * renders: a heading, a "Select up to N" subtitle, and radio vs checkbox choice.
  *
- * Rules live on each member (see addonGroupSchema), so members of one group could
- * disagree. The lowest sortOrder wins rather than, say, the max — a restaurant
- * lowering maxSelect from 2 to 1 on the first option should take effect, not be
- * silently overridden by a stale sibling.
+ * Rules live on each member, so members of one group could disagree. The lowest
+ * sortOrder wins rather than, say, the max — a restaurant lowering maxSelect from
+ * 2 to 1 on the first option should take effect, not be silently overridden by a
+ * stale sibling.
  */
 export function buildAddonGroups(addons = []) {
     const byName = new Map();
@@ -54,60 +54,47 @@ export function buildAddonGroups(addons = []) {
 }
 
 export async function getPublicApprovedRestaurantAddons(restaurantIdOrSlug, { foodId } = {}) {
-    const value = String(restaurantIdOrSlug || '').trim();
-    if (!value) throw new ValidationError('Restaurant id is required');
-
-    let restaurant = null;
-    if (/^[0-9a-fA-F]{24}$/.test(value)) {
-        restaurant = await FoodRestaurant.findOne({ _id: value, status: 'approved' })
-            .select('_id status')
-            .lean();
-    } else {
-        const normalized = value.trim().toLowerCase().replace(/-/g, ' ').replace(/\s+/g, ' ');
-        restaurant = await FoodRestaurant.findOne({ restaurantNameNormalized: normalized, status: 'approved' })
-            .select('_id status')
-            .lean();
+    if (!String(restaurantIdOrSlug || '').trim()) {
+        throw new ValidationError('Restaurant id is required');
     }
 
-    if (!restaurant?._id) {
-        return null;
-    }
+    const restaurant = await findApprovedRestaurant(restaurantIdOrSlug);
+    if (!restaurant?.id) return null;
 
-    const filter = {
-        restaurantId: new mongoose.Types.ObjectId(String(restaurant._id)),
-        isDeleted: { $ne: true },
+    const where = {
+        restaurantId: restaurant.id,
+        isDeleted: false,
         approvalStatus: 'approved',
         isAvailable: true,
-        published: { $ne: null }
     };
 
-    // Per-item lookup. An add-on with an empty foodIds applies to the whole menu
+    // Per-item lookup. An add-on with empty foodIds applies to the whole menu
     // (the only behaviour that existed before item linking), so it must still be
-    // offered alongside the item-specific ones rather than being filtered out.
+    // offered alongside the item-specific ones rather than filtered out.
     const wanted = String(foodId || '').trim();
     if (wanted) {
-        if (!/^[0-9a-fA-F]{24}$/.test(wanted)) {
-            throw new ValidationError('Invalid menu item id');
-        }
-        filter.$or = [
-            { foodIds: new mongoose.Types.ObjectId(wanted) },
-            { foodIds: { $size: 0 } },
-            { foodIds: { $exists: false } }
-        ];
+        if (!isId(wanted)) throw new ValidationError('Invalid menu item id');
+        where.OR = [{ foodIds: { has: wanted } }, { foodIds: { isEmpty: true } }];
     }
 
-    const addons = await FoodAddon.find(filter)
-        .sort({ approvedAt: -1, updatedAt: -1 })
-        .select('_id published foodIds group')
-        .lean();
+    const addons = await prisma.foodAddon.findMany({
+        where,
+        orderBy: [{ approvedAt: 'desc' }, { updatedAt: 'desc' }],
+        select: {
+            id: true, published: true, foodIds: true,
+            groupName: true, groupMinSelect: true, groupMaxSelect: true, groupSortOrder: true,
+        },
+    });
 
     const flat = (addons || [])
+        // `published` is Json, so "has been published" is a plain JS check rather
+        // than a null comparison Prisma spells three different ways.
         .filter((a) => a && a.published)
         .map((a) => {
             const p = a.published;
             return {
-                id: a._id,
-                _id: a._id,
+                id: a.id,
+                _id: a.id,
                 name: p.name || '',
                 description: p.description || '',
                 foodType: p.foodType === 'non-veg' ? 'non-veg' : 'veg',
@@ -116,14 +103,9 @@ export async function getPublicApprovedRestaurantAddons(restaurantIdOrSlug, { fo
                 image: p.image || '',
                 images: Array.isArray(p.images) ? p.images : [],
                 // Lets the app group add-ons per item from one unfiltered fetch.
-                foodIds: (Array.isArray(a.foodIds) ? a.foodIds : []).map((v) => String(v)),
+                foodIds: (a.foodIds || []).map(String),
                 appliesToWholeMenu: !Array.isArray(a.foodIds) || a.foodIds.length === 0,
-                group: {
-                    name: a.group?.name || '',
-                    minSelect: Number(a.group?.minSelect) || 0,
-                    maxSelect: Number(a.group?.maxSelect) || 1,
-                    sortOrder: Number(a.group?.sortOrder) || 0
-                }
+                group: toAddonGroup(a),
             };
         });
 
