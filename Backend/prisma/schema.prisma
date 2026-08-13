@@ -1265,6 +1265,10 @@ model FoodOrder {
   reachedDropAt   DateTime?
   pickedUpAt      DateTime?
   deliveredAt     DateTime?
+  /// Photo of the restaurant bill, uploaded by the rider at pickup. The Mongoose
+  /// deliveryState sub-schema had no such field, so strict mode dropped it on
+  /// every save and the upload was never actually stored.
+  billImageUrl    String?
 
   // ── ratings given on this order ──
   restaurantRating        Int?

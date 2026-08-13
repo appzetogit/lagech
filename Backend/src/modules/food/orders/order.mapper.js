@@ -141,7 +141,8 @@ export function toOrder(row) {
             reachedPickupAt: row.reachedPickupAt,
             reachedDropAt: row.reachedDropAt,
             pickedUpAt: row.pickedUpAt,
-            deliveredAt: row.deliveredAt
+            deliveredAt: row.deliveredAt,
+            billImageUrl: row.billImageUrl
         },
 
         statusHistory: row.statusHistory || [],
@@ -329,6 +330,7 @@ export function fromOrder(input = {}) {
         set('reachedDropAt', deliveryState.reachedDropAt);
         set('pickedUpAt', deliveryState.pickedUpAt);
         set('deliveredAt', deliveryState.deliveredAt);
+        set('billImageUrl', deliveryState.billImageUrl);
     }
 
     if (ratings) {

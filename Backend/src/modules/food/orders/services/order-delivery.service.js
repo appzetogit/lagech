@@ -1,10 +1,5 @@
-import mongoose from 'mongoose';
-import { FoodOrder } from '../models/order.model.js';
-import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
-import { FoodTransaction } from '../models/foodTransaction.model.js';
-import { FoodDeliveryPartner } from '../../delivery/models/deliveryPartner.model.js';
-import { FoodDeliveryWallet } from '../../delivery/models/deliveryWallet.model.js';
-import { FoodDeliveryCashLimit } from '../../admin/models/deliveryCashLimit.model.js';
+import { prisma } from '../../../../config/prisma.js';
+import { toOrder, toOrders, orderInclude } from '../order.mapper.js';
 import {
   ValidationError,
   ForbiddenError,
@@ -34,98 +29,74 @@ import {
   TERMINAL_ORDER_STATUSES,
   isStatusAdvance,
 } from './order.helpers.js';
-const DELIVERY_ORDER_BASE_SELECT = [
-  '_id',
-  'order_id',
-  'orderId',
-  'userId',
-  'restaurantId',
-  'deliveryAddress',
-  'customerName',
-  'customerPhone',
-  'items',
-  'pricing',
-  'payment',
-  'orderStatus',
-  'dispatch',
-  'deliveryState',
-  'note',
-  'deliveryInstructions',
-  'createdAt',
-  'updatedAt',
-  'riderEarning',
-  'tripDistanceKm',
-  'tripDurationMins',
-  'lastRiderLocation',
-  'deliveryFleet',
-  'ratings'
-].join(' ');
 
-const DELIVERY_USER_POPULATE = {
-  path: 'userId',
-  select: 'name phone email',
+/**
+ * The restaurant fields the rider app needs.
+ *
+ * All four image fields are included because the model carries two separate pairs
+ * and onboarding does not consistently fill the same one: coverImage is the single
+ * hero (falling back to coverImages[0]), and galleryImages/menuImages are distinct
+ * arrays. Selecting one pair returns empty for restaurants that filled the other.
+ * ownerPhone backs the tap-to-call button; lat/lng give the exact pin.
+ */
+const DELIVERY_RESTAURANT_SELECT = {
+  id: true, restaurantName: true, ownerPhone: true, primaryContactNumber: true,
+  latitude: true, longitude: true, addressLine1: true, area: true, city: true,
+  state: true, pincode: true, landmark: true, profileImage: true,
+  coverImage: true, coverImages: true, galleryImages: true, menuImages: true,
 };
 
-const DELIVERY_RESTAURANT_POPULATE = {
-  path: 'restaurantId',
-  // The image fields let the rider visually identify the premises at pickup. All four
-  // are included because the restaurant model carries two separate pairs and onboarding
-  // does not consistently fill the same one: coverImage is the single hero (documented
-  // as falling back to coverImages[0]), and galleryImages/menuImages are distinct
-  // arrays. Selecting only one pair returns empty for restaurants that filled the other.
-  // phone/ownerPhone back the tap-to-call button; location gives the exact pin.
-  select:
-    'restaurantName name phone ownerPhone location addressLine1 area city state pincode landmark profileImage coverImage coverImages galleryImages menuImages',
+const deliveryInclude = {
+  ...orderInclude,
+  restaurant: { select: DELIVERY_RESTAURANT_SELECT },
+  user: { select: { id: true, name: true, phone: true, email: true } },
 };
 
-const DELIVERY_TRANSACTION_SELECT = 'orderId payment paymentMethod pricing amounts status';
-
-function mergeTransactionIntoOrder(orderDoc, txDoc) {
-  if (!txDoc) return orderDoc;
+function mergeTransactionIntoOrder(order, tx) {
+  if (!tx) return order;
   return {
-    ...orderDoc,
-    paymentMethod: txDoc.payment?.method || txDoc.paymentMethod || orderDoc.paymentMethod,
-    payment: txDoc.payment || orderDoc.payment,
-    pricing: txDoc.pricing || orderDoc.pricing,
-    amounts: txDoc.amounts || orderDoc.amounts,
-    transactionStatus: txDoc.status || orderDoc.transactionStatus,
+    ...order,
+    paymentMethod: tx.payment?.method || tx.paymentMethod || order.paymentMethod,
+    payment: tx.payment || order.payment,
+    pricing: tx.pricing || order.pricing,
+    amounts: tx.amounts || order.amounts,
+    transactionStatus: tx.status || order.transactionStatus,
   };
+}
+
+/** Load the per-order splits for a batch of orders, keyed by order id. */
+async function loadTransactionsByOrder(orderIds) {
+  if (!orderIds.length) return new Map();
+  const rows = await prisma.foodTransaction.findMany({ where: { orderId: { in: orderIds } } });
+  const { toFoodTransaction } = await import('../order.mapper.js');
+  return new Map(rows.map((tx) => [tx.orderId, toFoodTransaction(tx)]));
 }
 
 function emitOrderUpdate(order, deliveryPartnerId) {
   try {
     const io = getIO();
     if (io) {
-      const dv =
-        order.deliveryVerification?.toObject?.() || order.deliveryVerification;
       const payload = {
-        orderMongoId: order._id?.toString?.(),
-        orderId: order._id.toString(),
+        orderMongoId: order.id,
+        orderId: order.id,
         orderStatus: order.orderStatus,
         deliveryState: order.deliveryState,
-        deliveryVerification: dv,
+        deliveryVerification: order.deliveryVerification,
       };
-      io.to(rooms.delivery(deliveryPartnerId)).emit(
-        'order_status_update',
-        payload,
-      );
-      io.to(rooms.restaurant(order.restaurantId)).emit(
-        'order_status_update',
-        payload,
-      );
-      io.to(rooms.user(order.userId)).emit('order_status_update', payload);
+      io.to(rooms.delivery(deliveryPartnerId)).emit('order_status_update', payload);
+      io.to(rooms.restaurant(order.restaurantId?.id ?? order.restaurantId)).emit('order_status_update', payload);
+      io.to(rooms.user(order.userId?.id ?? order.userId)).emit('order_status_update', payload);
     }
 
-    // Only send push notifications for key delivery milestones
+    // Push only for the key delivery milestones.
     const status = order.orderStatus;
     if (!['picked_up', 'reached_drop', 'delivered'].includes(status)) return;
 
+    const orderId = order.id;
     let userTitle = '';
     let userBody = '';
     let riderTitle = '';
     let riderBody = '';
-
-    const orderId = order._id.toString();
 
     if (status === 'picked_up') {
       userTitle = 'Order on the way!';
@@ -139,7 +110,7 @@ function emitOrderUpdate(order, deliveryPartnerId) {
       riderBody = `You have reached the customer location for order #${orderId}.`;
     } else if (status === 'delivered') {
       userTitle = `Order #${orderId} delivered!`;
-      userBody = 'Hope you enjoyed your meal! Don\'t forget to rate your experience.';
+      userBody = "Hope you enjoyed your meal! Don't forget to rate your experience.";
       riderTitle = 'Delivery successful!';
       riderBody = `Order #${orderId} has been successfully delivered.`;
 
@@ -153,20 +124,15 @@ function emitOrderUpdate(order, deliveryPartnerId) {
     if (userTitle) {
       void notifyOwnersSafely(
         [
-          { ownerType: 'RESTAURANT', ownerId: order.restaurantId },
-          { ownerType: 'USER', ownerId: order.userId },
+          { ownerType: 'RESTAURANT', ownerId: order.restaurantId?.id ?? order.restaurantId },
+          { ownerType: 'USER', ownerId: order.userId?.id ?? order.userId },
         ],
         {
           title: userTitle,
           body: userBody,
-          // Visible banner (notification block) + data for deep-linking. Without the
-          // notification block these key milestones stay silent when the app is backgrounded.
-          data: {
-            type: 'order_status_update',
-            orderId,
-            orderMongoId: order._id?.toString?.() || '',
-            orderStatus: status,
-          },
+          // Visible banner + data for deep-linking. Without the notification block
+          // these milestones stay silent when the app is backgrounded.
+          data: { type: 'order_status_update', orderId, orderMongoId: orderId, orderStatus: status },
         },
       );
     }
@@ -180,7 +146,7 @@ function emitOrderUpdate(order, deliveryPartnerId) {
           data: {
             type: status === 'delivered' ? 'order_completed' : 'order_status_update',
             orderId,
-            orderMongoId: order._id?.toString?.() || '',
+            orderMongoId: orderId,
             paymentMethod: order.payment?.method || order.paymentMethod,
             amountCollected: String(order.pricing?.total || order.amounts?.totalCustomerPaid || 0),
           },
@@ -192,73 +158,71 @@ function emitOrderUpdate(order, deliveryPartnerId) {
   }
 }
 
-
-
-// Lazy wrapper to avoid circular ESM init race condition
+/** Lazy wrapper to avoid a circular ESM init race. */
 async function syncRazorpayQrPayment(orderDoc) {
   return paymentService.syncRazorpayQrPayment(orderDoc);
 }
 
+/** Fetch one order by identity, mapped, or throw. */
+async function loadOrder(orderId, include = orderInclude) {
+  const identity = buildOrderIdentityFilter(orderId);
+  if (!identity) throw new ValidationError('Order id required');
+  const row = await prisma.foodOrder.findFirst({ where: identity, include });
+  if (!row) throw new NotFoundError('Order not found');
+  return { row, order: toOrder(row) };
+}
 
-
+function assertOwnedBy(row, deliveryPartnerId) {
+  if (String(row.dispatchDeliveryPartnerId || '') !== String(deliveryPartnerId)) {
+    throw new ForbiddenError('Not your order');
+  }
+}
 
 export async function getCurrentTripDelivery(deliveryPartnerId) {
-  if (!deliveryPartnerId) {
-    throw new ValidationError('Delivery partner ID required');
-  }
+  if (!deliveryPartnerId) throw new ValidationError('Delivery partner ID required');
 
-  const partnerId = new mongoose.Types.ObjectId(deliveryPartnerId);
-  const order = await FoodOrder.findOne({
-    'dispatch.deliveryPartnerId': partnerId,
-    'dispatch.status': 'accepted',
-    orderStatus: {
-      $in: ['confirmed', 'preparing', 'ready_for_pickup', 'picked_up'],
+  const row = await prisma.foodOrder.findFirst({
+    where: {
+      dispatchDeliveryPartnerId: String(deliveryPartnerId),
+      dispatchStatus: 'accepted',
+      orderStatus: { in: ['confirmed', 'preparing', 'ready_for_pickup', 'picked_up'] },
     },
-  })
-    .select(DELIVERY_ORDER_BASE_SELECT)
-    .populate(DELIVERY_RESTAURANT_POPULATE)
-    .populate({ path: 'userId', select: 'name phone' })
-    .sort({ updatedAt: -1 })
-    .lean();
+    include: deliveryInclude,
+    orderBy: { updatedAt: 'desc' },
+  });
 
-  if (!order) return null;
+  if (!row) return null;
 
-  const tx = await FoodTransaction.findOne({ orderId: order._id })
-    .select(DELIVERY_TRANSACTION_SELECT)
-    .lean();
-
-  return sanitizeOrderForDeliveryPartner(mergeTransactionIntoOrder(order, tx));
+  const txByOrder = await loadTransactionsByOrder([row.id]);
+  return sanitizeOrderForDeliveryPartner(
+    mergeTransactionIntoOrder(toOrder(row), txByOrder.get(row.id) || null),
+  );
 }
 
 export async function listOrdersAvailableDelivery(deliveryPartnerId, query) {
   const { page, limit, skip } = buildPaginationOptions(query);
-  const partnerId = new mongoose.Types.ObjectId(deliveryPartnerId);
-  const hasActiveDelivery = await partnerHasActiveDelivery(deliveryPartnerId);
+  const partnerId = String(deliveryPartnerId);
+  const hasActiveDelivery = await partnerHasActiveDelivery(partnerId);
 
-  const filter = hasActiveDelivery
+  const where = hasActiveDelivery
     ? {
-        'dispatch.deliveryPartnerId': partnerId,
-        'dispatch.status': 'accepted',
-        orderStatus: { $nin: TERMINAL_ORDER_STATUSES },
+        dispatchDeliveryPartnerId: partnerId,
+        dispatchStatus: 'accepted',
+        orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
       }
     : {
-        $or: [
+        OR: [
           {
-            'dispatch.status': 'unassigned',
-            'dispatch.offeredTo': {
-              $not: {
-                $elemMatch: {
-                  partnerId,
-                  action: 'deassigned',
-                },
-              },
-            },
-            orderStatus: { $in: ['confirmed', 'preparing', 'ready_for_pickup'] },
+            dispatchStatus: 'unassigned',
+            // The $not/$elemMatch guard becomes a relation filter: no deassign
+            // record for this rider on this order.
+            dispatchOffers: { none: { partnerId, action: 'deassigned' } },
+            orderStatus: { in: ['confirmed', 'preparing', 'ready_for_pickup'] },
           },
           {
-            'dispatch.deliveryPartnerId': partnerId,
-            'dispatch.status': { $in: ['assigned', 'accepted'] },
-            orderStatus: { $nin: TERMINAL_ORDER_STATUSES },
+            dispatchDeliveryPartnerId: partnerId,
+            dispatchStatus: { in: ['assigned', 'accepted'] },
+            orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
           },
         ],
       };
@@ -267,63 +231,50 @@ export async function listOrdersAvailableDelivery(deliveryPartnerId, query) {
   // Avoids returning another city's orders that the poll hydrate could lock into the modal.
   const queryLimit = hasActiveDelivery ? limit : Math.max(limit * 5, 50);
 
-  const docs = await FoodOrder.find(filter)
-    .select(DELIVERY_ORDER_BASE_SELECT)
-    .sort({ createdAt: -1 })
-    .limit(queryLimit)
-    .populate(DELIVERY_USER_POPULATE)
-    .populate(DELIVERY_RESTAURANT_POPULATE)
-    .lean();
+  const rows = await prisma.foodOrder.findMany({
+    where,
+    include: deliveryInclude,
+    orderBy: { createdAt: 'desc' },
+    take: queryLimit,
+  });
 
-  const orderIds = docs.map((doc) => doc?._id).filter(Boolean);
-  const txRows = orderIds.length
-    ? await FoodTransaction.find({ orderId: { $in: orderIds } })
-        .select(DELIVERY_TRANSACTION_SELECT)
-        .lean()
-    : [];
-  const txByOrderId = new Map(txRows.map((tx) => [String(tx.orderId), tx]));
+  const txByOrder = await loadTransactionsByOrder(rows.map((r) => r.id));
 
-  let enriched = docs.map((doc) =>
+  let enriched = toOrders(rows).map((order) =>
     sanitizeOrderForDeliveryPartner(
-      mergeTransactionIntoOrder(doc, txByOrderId.get(String(doc._id)) || null),
+      mergeTransactionIntoOrder(order, txByOrder.get(order.id) || null),
     ),
   );
 
   if (!hasActiveDelivery) {
-    const partner = await FoodDeliveryPartner.findById(partnerId)
-      .select('lastLat lastLng lastLocationAt')
-      .lean();
+    const partner = await prisma.foodDeliveryPartner.findUnique({
+      where: { id: partnerId },
+      select: { lastLat: true, lastLng: true, lastLocationAt: true },
+    });
 
-    const MAX_OFFER_KM = 20; // slightly wider than dispatch radius (15km)
+    const MAX_OFFER_KM = 20; // slightly wider than the dispatch radius (15km)
     const partnerLat = partner?.lastLat;
     const partnerLng = partner?.lastLng;
     const hasPartnerGps =
-      partnerLat != null &&
-      partnerLng != null &&
-      Number.isFinite(Number(partnerLat)) &&
-      Number.isFinite(Number(partnerLng));
+      partnerLat != null && partnerLng != null &&
+      Number.isFinite(Number(partnerLat)) && Number.isFinite(Number(partnerLng));
 
     const withMeta = enriched.map((order) => {
+      const assignedTo = order?.dispatch?.deliveryPartnerId;
       const assignedToMe = Boolean(
-        order?.dispatch?.deliveryPartnerId &&
-          String(order.dispatch.deliveryPartnerId) === String(partnerId),
+        assignedTo && String(assignedTo?.id ?? assignedTo) === partnerId,
       );
 
       const offeredToMe = Array.isArray(order?.dispatch?.offeredTo)
-        ? order.dispatch.offeredTo.some(
-            (entry) => String(entry?.partnerId) === String(partnerId),
-          )
+        ? order.dispatch.offeredTo.some((entry) => String(entry?.partnerId) === partnerId)
         : false;
 
       let distanceKm = null;
-      const coords = order?.restaurantId?.location?.coordinates;
-      if (hasPartnerGps && Array.isArray(coords) && coords.length >= 2) {
-        const [rLng, rLat] = coords;
+      const restaurant = order?.restaurantId;
+      if (hasPartnerGps && restaurant?.latitude != null && restaurant?.longitude != null) {
         const d = haversineKm(
-          Number(partnerLat),
-          Number(partnerLng),
-          Number(rLat),
-          Number(rLng),
+          Number(partnerLat), Number(partnerLng),
+          Number(restaurant.latitude), Number(restaurant.longitude),
         );
         if (Number.isFinite(d)) distanceKm = d;
       }
@@ -333,23 +284,18 @@ export async function listOrdersAvailableDelivery(deliveryPartnerId, query) {
 
     const kept = withMeta.filter(({ assignedToMe, offeredToMe, distanceKm }) => {
       if (assignedToMe) return true;
-
-      // No partner GPS: only show orders already offered to this rider (safe vs global leak).
+      // No partner GPS: only show orders already offered to this rider (safe vs a global leak).
       if (!hasPartnerGps) return offeredToMe;
-
       // Missing/unresolvable restaurant coords: same offered-only rule.
       if (distanceKm == null) return offeredToMe;
-
       if (distanceKm <= MAX_OFFER_KM) return true;
-
       // Already offered to this rider: allow a small GPS-drift buffer, else drop.
       return offeredToMe && distanceKm <= MAX_OFFER_KM * 1.5;
     });
 
-    // Rank the list so consumers that take its head (reconnect recovery, poll
-    // hydrate in the rider app) surface the order this rider was actually
-    // offered — not just the newest order in range, which could sit at a
-    // different location than the offer the rider is expecting.
+    // Rank so consumers that take the head (reconnect recovery, poll hydrate)
+    // surface the order this rider was actually offered — not just the newest in
+    // range, which could sit somewhere else entirely.
     kept.sort((a, b) => {
       if (a.assignedToMe !== b.assignedToMe) return a.assignedToMe ? -1 : 1;
       if (a.offeredToMe !== b.offeredToMe) return a.offeredToMe ? -1 : 1;
@@ -358,20 +304,17 @@ export async function listOrdersAvailableDelivery(deliveryPartnerId, query) {
       return da - db;
     });
 
-    // Surface the rider → restaurant distance already computed for filtering. The socket
-    // offer (new_order_available) carries pickupDistanceKm, so REST must too — otherwise a
-    // rider polling (or opening the app fresh) sees the earning without the travel distance.
+    // Surface the rider → restaurant distance already computed for filtering. The
+    // socket offer carries pickupDistanceKm, so REST must too — otherwise a rider
+    // polling sees the earning without the travel distance.
     enriched = kept.map(({ order, distanceKm }) => ({
       ...order,
-      pickupDistanceKm:
-        distanceKm == null ? null : Number(Number(distanceKm).toFixed(2)),
+      pickupDistanceKm: distanceKm == null ? null : Number(Number(distanceKm).toFixed(2)),
     }));
   }
 
   const total = enriched.length;
-  const paged = hasActiveDelivery
-    ? enriched.slice(0, limit)
-    : enriched.slice(skip, skip + limit);
+  const paged = hasActiveDelivery ? enriched.slice(0, limit) : enriched.slice(skip, skip + limit);
 
   return buildPaginatedResult({ docs: paged, total, page, limit });
 }
@@ -383,18 +326,21 @@ export async function listOrdersAvailableDelivery(deliveryPartnerId, query) {
  * the line is still sitting on their phone — and a client-side block would be
  * trivially bypassed anyway. This is the authoritative check.
  *
- * Prepaid orders are unaffected: they add nothing to the rider's float.
- *
- * A limit of 0 means no limit, matching the schema default, so installs that never
- * configured this are untouched.
+ * Prepaid orders are unaffected. A limit of 0 means no limit, matching the default.
  */
 async function assertCashLimitAllows(deliveryPartnerId, order) {
   const method = String(order?.payment?.method || order?.paymentMethod || '').toLowerCase();
   if (method !== 'cash' && method !== 'razorpay_qr') return;
 
   const [settings, wallet] = await Promise.all([
-    FoodDeliveryCashLimit.findOne({ isActive: true }).select('deliveryCashLimit').lean(),
-    FoodDeliveryWallet.findOne({ deliveryPartnerId }).select('cashInHand').lean(),
+    prisma.foodDeliveryCashLimit.findFirst({
+      where: { isActive: true },
+      select: { deliveryCashLimit: true },
+    }),
+    prisma.wallet.findUnique({
+      where: { entityType_entityId: { entityType: 'deliveryBoy', entityId: String(deliveryPartnerId) } },
+      select: { cashInHand: true },
+    }),
   ]);
 
   const limit = Number(settings?.deliveryCashLimit) || 0;
@@ -413,32 +359,34 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
   const identity = buildOrderIdentityFilter(orderId);
   if (!identity) throw new ValidationError('Order id required');
 
-  const partnerId = new mongoose.Types.ObjectId(deliveryPartnerId);
+  const partnerId = String(deliveryPartnerId);
   const now = new Date();
   const acceptedStatuses = ['created', 'confirmed', 'preparing', 'ready_for_pickup', 'picked_up'];
   const cancellableStatuses = [
-    'cancelled_by_user',
-    'cancelled_by_restaurant',
-    'cancelled_by_admin',
+    'cancelled_by_user', 'cancelled_by_restaurant', 'cancelled_by_admin',
   ];
 
-  const alreadyOnTrip = await partnerHasActiveDelivery(deliveryPartnerId);
+  const requested = await prisma.foodOrder.findFirst({
+    where: identity,
+    select: { id: true, paymentMethod: true, paymentStatus: true },
+  });
+  if (!requested) throw new NotFoundError('Order not found');
+  const id = requested.id;
+
+  const alreadyOnTrip = await partnerHasActiveDelivery(partnerId);
   if (alreadyOnTrip) {
-    const existingActive = await FoodOrder.findOne({
-      'dispatch.deliveryPartnerId': partnerId,
-      'dispatch.status': 'accepted',
-      orderStatus: { $nin: TERMINAL_ORDER_STATUSES },
-    })
-      .select('_id order_id orderId')
-      .lean();
+    const existingActive = await prisma.foodOrder.findFirst({
+      where: {
+        dispatchDeliveryPartnerId: partnerId,
+        dispatchStatus: 'accepted',
+        orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
+      },
+      select: { id: true },
+    });
 
-    const activeOrderKey = String(existingActive?._id || '');
-    const requestedOrder = await FoodOrder.findOne(identity).select('_id').lean();
-    const requestedOrderKey = String(requestedOrder?._id || '');
-
-    if (activeOrderKey && requestedOrderKey && activeOrderKey === requestedOrderKey) {
-      const acceptedOrder = await FoodOrder.findOne(identity).populate('restaurantId userId');
-      return acceptedOrder ? sanitizeOrderForDeliveryPartner(acceptedOrder) : null;
+    if (existingActive?.id && existingActive.id === id) {
+      const { order } = await loadOrder(id, deliveryInclude);
+      return sanitizeOrderForDeliveryPartner(order);
     }
 
     throw new ValidationError(
@@ -446,522 +394,427 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
     );
   }
 
-  const statusHistoryEntry = {
-    byRole: 'DELIVERY_PARTNER',
-    byId: partnerId,
-    from: 'dispatchable',
-    to: 'accepted',
-    note: 'Delivery partner accepted order',
-    at: now,
-  };
+  // Refuse before claiming the order, not after: a rider already at their cash
+  // ceiling must not end up holding a cash trip they cannot be given.
+  await assertCashLimitAllows(partnerId, { paymentMethod: requested.paymentMethod });
 
-  // Refuse before claiming the order, not after: a rider who is already at their
-  // cash ceiling must not end up holding a cash trip they cannot be given.
-  {
-    const pending = await FoodOrder.findOne(identity)
-      .select('payment paymentMethod')
-      .lean();
-    if (pending) await assertCashLimitAllows(partnerId, pending);
-  }
-
-  const order = await FoodOrder.findOneAndUpdate(
-    {
-      ...identity,
-      orderStatus: { $in: acceptedStatuses },
-      $or: [
+  // Atomic claim. The guard replaces findOneAndUpdate's filter — only one rider
+  // can flip the order to accepted.
+  const { count } = await prisma.foodOrder.updateMany({
+    where: {
+      id,
+      orderStatus: { in: acceptedStatuses },
+      OR: [
         {
-          'dispatch.status': 'unassigned',
-          'dispatch.offeredTo': {
-            $not: {
-              $elemMatch: {
-                partnerId,
-                action: 'deassigned',
-              },
-            },
-          },
+          dispatchStatus: 'unassigned',
+          dispatchOffers: { none: { partnerId, action: 'deassigned' } },
         },
-        {
-          'dispatch.status': 'assigned',
-          'dispatch.deliveryPartnerId': partnerId,
-        },
+        { dispatchStatus: 'assigned', dispatchDeliveryPartnerId: partnerId },
       ],
     },
-    {
-      $set: {
-        'dispatch.deliveryPartnerId': partnerId,
-        'dispatch.status': 'accepted',
-        'dispatch.assignedAt': now,
-        'dispatch.acceptedAt': now,
-      },
-      $push: {
-        statusHistory: statusHistoryEntry,
-      },
+    data: {
+      dispatchDeliveryPartnerId: partnerId,
+      dispatchStatus: 'accepted',
+      dispatchAssignedAt: now,
+      dispatchAcceptedAt: now,
     },
-    { new: true },
-  ).populate('restaurantId userId');
+  });
 
-  if (!order) {
-    const existing = await FoodOrder.findOne(identity)
-      .select('orderStatus dispatch')
-      .lean();
+  if (count === 0) {
+    const existing = await prisma.foodOrder.findUnique({
+      where: { id },
+      select: { orderStatus: true, dispatchStatus: true, dispatchDeliveryPartnerId: true },
+    });
 
     if (!existing) throw new NotFoundError('Order not found');
     if (cancellableStatuses.includes(existing.orderStatus)) {
       throw new ValidationError('Order was cancelled');
     }
-    if (existing.orderStatus === 'delivered') {
-      throw new ValidationError('Order already delivered');
-    }
+    if (existing.orderStatus === 'delivered') throw new ValidationError('Order already delivered');
     if (!acceptedStatuses.includes(existing.orderStatus)) {
       throw new ValidationError('Order not ready for delivery assignment');
     }
-    if (
-      existing.dispatch?.status === 'accepted' &&
-      String(existing.dispatch?.deliveryPartnerId || '') === String(deliveryPartnerId)
-    ) {
-      const acceptedOrder = await FoodOrder.findOne(identity)
-        .populate('restaurantId userId');
-      return acceptedOrder
-        ? sanitizeOrderForDeliveryPartner(acceptedOrder)
-        : null;
-    }
-    if (
-      existing.dispatch?.status === 'accepted' &&
-      String(existing.dispatch?.deliveryPartnerId || '') !== String(deliveryPartnerId)
-    ) {
+    if (existing.dispatchStatus === 'accepted') {
+      if (String(existing.dispatchDeliveryPartnerId || '') === partnerId) {
+        const { order } = await loadOrder(id, deliveryInclude);
+        return sanitizeOrderForDeliveryPartner(order);
+      }
       throw new ForbiddenError('Order already accepted by another partner');
     }
 
     throw new ValidationError('Order is no longer available to accept');
   }
 
+  await pushStatusHistory(id, {
+    byRole: 'DELIVERY_PARTNER',
+    byId: partnerId,
+    from: 'dispatchable',
+    to: 'accepted',
+    note: 'Delivery partner accepted order',
+  });
+
+  const { row, order } = await loadOrder(id, deliveryInclude);
   const responseOrder = sanitizeOrderForDeliveryPartner(order);
 
   void (async () => {
     try {
-      const rest = order.restaurantId;
-      const userLoc = order.deliveryAddress?.location?.coordinates;
-      const restLoc = rest?.location?.coordinates;
+      const rest = row.restaurant;
+      const custLat = row.addrLat;
+      const custLng = row.addrLng;
 
-      if (restLoc?.[0] && userLoc?.[0]) {
+      if (rest?.latitude != null && rest?.longitude != null && custLat != null && custLng != null) {
         const route = await fetchDrivingRoute(
-          { lat: restLoc[1], lng: restLoc[0] },
-          { lat: userLoc[1], lng: userLoc[0] },
+          { lat: Number(rest.latitude), lng: Number(rest.longitude) },
+          { lat: Number(custLat), lng: Number(custLng) },
         );
         const polyline = route.polyline || '';
 
         if (route.distanceKm != null) {
           const tripDurationMins =
-            route.durationSeconds != null
-              ? Math.ceil(route.durationSeconds / 60)
-              : null;
-          FoodOrder.updateOne(
-            { _id: order._id },
-            {
-              $set: {
+            route.durationSeconds != null ? Math.ceil(route.durationSeconds / 60) : null;
+          prisma.foodOrder
+            .update({
+              where: { id },
+              data: {
                 tripDistanceKm: route.distanceKm,
                 tripDurationMins,
-                'pricing.roadDistanceKm': route.distanceKm,
-                'pricing.roadDurationMins': tripDurationMins,
+                roadDistanceKm: route.distanceKm,
+                roadDurationMins: tripDurationMins,
               },
-            },
-          ).catch(() => {});
+            })
+            .catch(() => {});
         }
 
         const db = getFirebaseDB();
         if (db) {
-          const orderRef = db.ref(`active_orders/${order._id.toString()}`);
-          await orderRef
+          await db
+            .ref(`active_orders/${id}`)
             .set({
               polyline,
-              lat: restLoc[1],
-              lng: restLoc[0],
-              boy_lat: restLoc[1],
-              boy_lng: restLoc[0],
-              restaurant_lat: restLoc[1],
-              restaurant_lng: restLoc[0],
-              customer_lat: userLoc[1],
-              customer_lng: userLoc[0],
+              lat: Number(rest.latitude),
+              lng: Number(rest.longitude),
+              boy_lat: Number(rest.latitude),
+              boy_lng: Number(rest.longitude),
+              restaurant_lat: Number(rest.latitude),
+              restaurant_lng: Number(rest.longitude),
+              customer_lat: Number(custLat),
+              customer_lng: Number(custLng),
               status: 'accepted',
               last_updated: Date.now(),
             })
-            .catch((error) =>
-              logger.error(`Firebase orderRef set error: ${error.message}`),
-            );
+            .catch((error) => logger.error(`Firebase orderRef set error: ${error.message}`));
         }
       }
     } catch (error) {
-      logger.error(
-        `Error initializing Firebase order tracking: ${error?.message || error}`,
-      );
+      logger.error(`Error initializing Firebase order tracking: ${error?.message || error}`);
     }
 
     try {
-      await foodTransactionService.updateTransactionRider(order._id, deliveryPartnerId);
+      await foodTransactionService.updateTransactionRider(id, partnerId);
     } catch (error) {
-      logger.error(
-        `Error updating delivery rider transaction for ${order._id}: ${
-          error?.message || error
-        }`,
-      );
+      logger.error(`Error updating delivery rider transaction for ${id}: ${error?.message || error}`);
     }
 
-    // Everyone who was offered this order and did not win it. Deduped: a partner
-    // can appear once per re-offer round, and pushing the same withdrawal three
-    // times is just noise.
-    const winner = deliveryPartnerId.toString();
+    // Everyone offered this order who did not win it. Deduped: a partner can
+    // appear once per re-offer round, and pushing the same withdrawal three times
+    // is just noise.
     const losingPartnerIds = [
       ...new Set(
-        (order.dispatch?.offeredTo || [])
-          .map((offer) => offer.partnerId?.toString?.())
-          .filter((pid) => pid && pid !== winner),
+        (row.dispatchOffers || [])
+          .map((offer) => String(offer.partnerId))
+          .filter((pid) => pid && pid !== partnerId),
       ),
     ];
-
-    const claimedPayload = {
-      orderId: order._id.toString(),
-      orderMongoId: order._id?.toString?.(),
-      claimedBy: winner,
-    };
 
     try {
       const io = getIO();
       if (io) {
         const payload = {
-          orderMongoId: order._id?.toString?.(),
-          orderId: order._id.toString(),
-          orderStatus: order.orderStatus,
-          dispatchStatus: order.dispatch?.status,
+          orderMongoId: id,
+          orderId: id,
+          orderStatus: row.orderStatus,
+          dispatchStatus: 'accepted',
         };
-        io.to(rooms.delivery(deliveryPartnerId)).emit('order_status_update', payload);
-        io.to(rooms.restaurant(order.restaurantId)).emit('order_status_update', payload);
-        io.to(rooms.user(order.userId)).emit('order_status_update', payload);
+        io.to(rooms.delivery(partnerId)).emit('order_status_update', payload);
+        io.to(rooms.restaurant(row.restaurantId)).emit('order_status_update', payload);
+        io.to(rooms.user(row.userId)).emit('order_status_update', payload);
 
+        const claimedPayload = { orderId: id, orderMongoId: id, claimedBy: partnerId };
         for (const pid of losingPartnerIds) {
           io.to(rooms.delivery(pid)).emit('order_claimed', claimedPayload);
         }
         logger.info(
-          `[DeliveryDispatch] Broadcast order_claimed to ${losingPartnerIds.length} other partners for order ${order._id.toString()}`,
+          `[DeliveryDispatch] Broadcast order_claimed to ${losingPartnerIds.length} other partners for order ${id}`,
         );
       }
 
-      // The socket emit above only reaches riders whose app is open and connected.
-      // The offer itself is delivered by a data-only push that the app raises as a
-      // full-screen alert from its background isolate, so the rider most likely to
-      // still be staring at a dead offer is exactly the one the socket cannot reach.
-      // Withdraw over the same transport the offer arrived on.
+      // The socket emit only reaches riders whose app is open. The offer itself is
+      // delivered by a data-only push the app raises from its background isolate,
+      // so the rider most likely still staring at a dead offer is exactly the one
+      // the socket cannot reach. Withdraw over the same transport it arrived on.
       if (losingPartnerIds.length > 0) {
         try {
           await notifyOwnersSafely(
-            losingPartnerIds.map((pid) => ({
-              ownerType: 'DELIVERY_PARTNER',
-              ownerId: pid,
-            })),
+            losingPartnerIds.map((pid) => ({ ownerType: 'DELIVERY_PARTNER', ownerId: pid })),
             {
               title: 'Order taken',
               body: 'Another partner accepted this order.',
               // Data-only, like the offer: this must dismiss a UI, never add one.
               dataOnly: true,
-              data: {
-                type: 'order_taken',
-                orderId: order._id.toString(),
-                orderMongoId: order._id?.toString?.() || '',
-              },
+              data: { type: 'order_taken', orderId: id, orderMongoId: id },
             },
           );
         } catch (err) {
-          logger.warn(
-            `order_taken push failed for order ${order._id}: ${err.message}`,
-          );
+          logger.warn(`order_taken push failed for order ${id}: ${err.message}`);
         }
       }
 
       await notifyOwnersSafely(
         [
-          { ownerType: 'USER', ownerId: order.userId },
-          { ownerType: 'RESTAURANT', ownerId: order.restaurantId },
-          { ownerType: 'DELIVERY_PARTNER', ownerId: deliveryPartnerId },
+          { ownerType: 'USER', ownerId: row.userId },
+          { ownerType: 'RESTAURANT', ownerId: row.restaurantId },
+          { ownerType: 'DELIVERY_PARTNER', ownerId: partnerId },
         ],
         {
-          title: `Order ${order._id.toString()} accepted`,
+          title: `Order ${id} accepted`,
           body: 'A delivery partner has accepted your order.',
           data: {
             type: 'delivery_accepted',
-            orderId: order._id.toString(),
-            orderMongoId: order._id?.toString?.() || '',
-            dispatchStatus: order.dispatch?.status,
+            orderId: id,
+            orderMongoId: id,
+            dispatchStatus: 'accepted',
             link: '/food/user/orders',
           },
         },
       );
     } catch (error) {
-      logger.error(
-        `Error notifying delivery acceptance for ${order._id}: ${
-          error?.message || error
-        }`,
-      );
+      logger.error(`Error notifying delivery acceptance for ${id}: ${error?.message || error}`);
     }
   })();
 
   enqueueOrderEvent('delivery_accepted', {
-    orderMongoId: order._id?.toString?.(),
-    orderId: order._id.toString(),
-    deliveryPartnerId,
-    dispatchStatus: order.dispatch?.status,
-    orderStatus: order.orderStatus,
+    orderMongoId: id,
+    orderId: id,
+    deliveryPartnerId: partnerId,
+    dispatchStatus: 'accepted',
+    orderStatus: row.orderStatus,
   });
 
   return responseOrder;
 }
 
 export async function rejectOrderDelivery(orderId, deliveryPartnerId) {
-  const identity = buildOrderIdentityFilter(orderId);
-  if (!identity) throw new ValidationError('Order id required');
+  const { row, order } = await loadOrder(orderId);
+  assertOwnedBy(row, deliveryPartnerId);
 
-  const order = await FoodOrder.findOne(identity).select('+deliveryOtp');
-  if (!order) throw new NotFoundError('Order not found');
-  if (order.dispatch.deliveryPartnerId?.toString() !== deliveryPartnerId.toString()) {
-    throw new ForbiddenError('Not your order');
-  }
-
-  // Only an order that hasn't been collected may be rejected. Without this a rider could
-  // pick the food up and then reject: the order was re-dispatched to someone else while
-  // rider #1 still held it, and every earnings/cash aggregation keyed on
-  // dispatch.deliveryPartnerId lost the order — including the COD cash he was carrying.
-  if (Boolean(order.deliveryState?.pickedUpAt) ||
-      ['picked_up', 'reached_drop', 'delivered'].includes(String(order.orderStatus || ''))) {
+  // Only an order that hasn't been collected may be rejected. Without this a rider
+  // could pick the food up and then reject: the order was re-dispatched while rider
+  // #1 still held it, and every earnings/cash aggregation keyed on the partner id
+  // lost the order — including the COD cash they were carrying.
+  if (
+    Boolean(row.pickedUpAt) ||
+    ['picked_up', 'reached_drop', 'delivered'].includes(String(row.orderStatus || ''))
+  ) {
     throw new ValidationError(
-      'This order has already been picked up and cannot be rejected. Use emergency reassignment instead.'
+      'This order has already been picked up and cannot be rejected. Use emergency reassignment instead.',
     );
   }
-  if (TERMINAL_ORDER_STATUSES.includes(String(order.orderStatus || ''))) {
+  if (TERMINAL_ORDER_STATUSES.includes(String(row.orderStatus || ''))) {
     throw new ValidationError('This order is already closed');
   }
 
-  const offer = order.dispatch.offeredTo.find(
-    (item) =>
-      String(item.partnerId) === String(deliveryPartnerId) &&
-      item.action === 'offered',
+  const offer = (row.dispatchOffers || []).find(
+    (item) => String(item.partnerId) === String(deliveryPartnerId) && item.action === 'offered',
   );
-  if (offer) offer.action = 'rejected';
 
-  order.dispatch.status = 'unassigned';
-  order.dispatch.deliveryPartnerId = undefined;
-  order.dispatch.assignedAt = undefined;
-  order.dispatch.acceptedAt = undefined;
-  pushStatusHistory(order, {
+  await prisma.$transaction([
+    ...(offer
+      ? [prisma.orderDispatchOffer.update({ where: { id: offer.id }, data: { action: 'rejected' } })]
+      : []),
+    prisma.foodOrder.update({
+      where: { id: row.id },
+      data: {
+        dispatchStatus: 'unassigned',
+        dispatchDeliveryPartnerId: null,
+        dispatchAssignedAt: null,
+        dispatchAcceptedAt: null,
+      },
+    }),
+  ]);
+
+  await pushStatusHistory(row.id, {
     byRole: 'DELIVERY_PARTNER',
     byId: deliveryPartnerId,
     from: 'assigned',
     to: 'unassigned',
     note: 'Rejected',
   });
-  await order.save();
 
   enqueueOrderEvent('delivery_rejected', {
-    orderMongoId: order._id?.toString?.(),
-    orderId: order._id.toString(),
+    orderMongoId: row.id,
+    orderId: row.id,
     deliveryPartnerId,
   });
 
   void dispatchService
-    .tryAutoAssign(order._id)
-    .catch((error) =>
-      logger.error(`SmartDispatch: Auto-assign after reject failed: ${error.message}`),
-    );
+    .tryAutoAssign(row.id)
+    .catch((error) => logger.error(`SmartDispatch: Auto-assign after reject failed: ${error.message}`));
 
-  return order.toObject();
+  return order;
 }
 
 export async function confirmReachedPickupDelivery(orderId, deliveryPartnerId) {
-  const identity = buildOrderIdentityFilter(orderId);
-  if (!identity) throw new ValidationError('Order id required');
+  const { row, order } = await loadOrder(orderId);
+  assertOwnedBy(row, deliveryPartnerId);
 
-  const order = await FoodOrder.findOne(identity).select('+deliveryOtp');
-  if (!order) throw new NotFoundError('Order not found');
-  if (
-    order.dispatch?.deliveryPartnerId?.toString() !== deliveryPartnerId.toString()
-  ) {
-    throw new ForbiddenError('Not your order');
-  }
-  if (order.orderStatus === 'delivered') {
-    throw new ValidationError('Order already delivered');
-  }
+  if (row.orderStatus === 'delivered') throw new ValidationError('Order already delivered');
 
-  const currentPhase = order.deliveryState?.currentPhase || '';
-  const currentStatus = order.deliveryState?.status || '';
-  if (currentPhase === 'at_pickup' || currentStatus === 'reached_pickup') {
-    return order.toObject();
-  }
+  const currentPhase = row.deliveryPhase || '';
+  const currentStatus = row.deliveryStatus || '';
+  if (currentPhase === 'at_pickup' || currentStatus === 'reached_pickup') return order;
 
-  const from = currentStatus || currentPhase || order.orderStatus;
-  order.deliveryState = {
-    ...(order.deliveryState?.toObject?.() || order.deliveryState || {}),
-    currentPhase: 'at_pickup',
-    status: 'reached_pickup',
-    reachedPickupAt: order.deliveryState?.reachedPickupAt || new Date(),
-  };
-  pushStatusHistory(order, {
+  const from = currentStatus || currentPhase || row.orderStatus;
+
+  const updated = toOrder(await prisma.foodOrder.update({
+    where: { id: row.id },
+    data: {
+      deliveryPhase: 'at_pickup',
+      deliveryStatus: 'reached_pickup',
+      reachedPickupAt: row.reachedPickupAt || new Date(),
+    },
+    include: orderInclude,
+  }));
+
+  await pushStatusHistory(row.id, {
     byRole: 'DELIVERY_PARTNER',
     byId: deliveryPartnerId,
     from,
     to: 'reached_pickup',
     note: 'Reached pickup location',
   });
-  await order.save();
 
-  emitOrderUpdate(order, deliveryPartnerId);
+  emitOrderUpdate(updated, deliveryPartnerId);
 
   try {
-    const restaurant = await FoodRestaurant.findById(order.restaurantId)
-      .select('restaurantName')
-      .lean();
-    const partner = await FoodDeliveryPartner.findById(deliveryPartnerId)
-      .select('name')
-      .lean();
+    const [restaurant, partner] = await Promise.all([
+      prisma.foodRestaurant.findUnique({
+        where: { id: row.restaurantId },
+        select: { restaurantName: true },
+      }),
+      prisma.foodDeliveryPartner.findUnique({
+        where: { id: String(deliveryPartnerId) },
+        select: { name: true },
+      }),
+    ]);
 
-    await notifyOwnersSafely(
-      [{ ownerType: 'RESTAURANT', ownerId: order.restaurantId }],
-      {
-        title: 'Rider arrived!',
-        body: `${partner?.name || 'The delivery partner'} has arrived at ${
-          restaurant?.restaurantName || 'your restaurant'
-        } to pick up Order .`,
-        // #${order._id.toString()}
-        data: {
-          type: 'rider_arrived',
-          // orderId: String(order._id.toString()),
-          orderMongoId: String(order._id),
-          partnerName: partner?.name || '',
-        },
-      },
-    );
+    await notifyOwnersSafely([{ ownerType: 'RESTAURANT', ownerId: row.restaurantId }], {
+      title: 'Rider arrived!',
+      body: `${partner?.name || 'The delivery partner'} has arrived at ${
+        restaurant?.restaurantName || 'your restaurant'
+      } to pick up Order .`,
+      data: { type: 'rider_arrived', orderMongoId: row.id, partnerName: partner?.name || '' },
+    });
   } catch (error) {
     logger.error(
-      `Error notifying restaurant about rider arrival for ${order._id}: ${
-        error?.message || error
-      }`,
+      `Error notifying restaurant about rider arrival for ${row.id}: ${error?.message || error}`,
     );
   }
 
   enqueueOrderEvent('reached_pickup', {
-    orderMongoId: order._id?.toString?.(),
-    orderId: order._id.toString(),
+    orderMongoId: row.id,
+    orderId: row.id,
     deliveryPartnerId,
-    orderStatus: order.orderStatus,
-    deliveryPhase: order.deliveryState?.currentPhase,
-    deliveryStatus: order.deliveryState?.status,
+    orderStatus: updated.orderStatus,
+    deliveryPhase: updated.deliveryState?.currentPhase,
+    deliveryStatus: updated.deliveryState?.status,
   });
-  return order.toObject();
+
+  return updated;
 }
 
 export async function confirmPickupDelivery(orderId, deliveryPartnerId, billImageUrl) {
-  const identity = buildOrderIdentityFilter(orderId);
-  const order = await FoodOrder.findOne(identity).select('+deliveryOtp');
-  if (!order) throw new NotFoundError('Order not found');
-  if (
-    order.dispatch?.deliveryPartnerId?.toString() !== deliveryPartnerId.toString()
-  ) {
-    throw new ForbiddenError('Not your order');
-  }
+  const { row } = await loadOrder(orderId);
+  assertOwnedBy(row, deliveryPartnerId);
 
-  const from = order.orderStatus;
+  const from = row.orderStatus;
   const nextStatus = 'picked_up';
   if (!isStatusAdvance(from, nextStatus)) {
-      throw new ValidationError(`Order is already at status '${from}'. Cannot re-mark as '${nextStatus}'.`);
-  }
-  order.orderStatus = nextStatus;
-  order.deliveryState = {
-    ...(order.deliveryState?.toObject?.() || order.deliveryState || {}),
-    currentPhase: 'en_route_to_delivery',
-    status: 'picked_up',
-    pickedUpAt: new Date(),
-    billImageUrl,
-  };
-
-  // Pre-generate handover OTP so user can see it as soon as food is on the way
-  const existingOtp = String(order.deliveryOtp || '').trim();
-  if (!existingOtp) {
-    order.deliveryOtp = generateFourDigitDeliveryOtp();
-    order.deliveryVerification = {
-      ...(order.deliveryVerification?.toObject?.() ||
-        order.deliveryVerification ||
-        {}),
-      dropOtp: { required: true, verified: false },
-    };
+    throw new ValidationError(`Order is already at status '${from}'. Cannot re-mark as '${nextStatus}'.`);
   }
 
-  emitDeliveryDropOtpToUser(order, String(order.deliveryOtp || "").trim());
+  // Pre-generate the handover OTP so the customer sees it as soon as food is on the way.
+  const existingOtp = String(row.deliveryOtp || '').trim();
+  const otpPatch = existingOtp
+    ? {}
+    : { deliveryOtp: generateFourDigitDeliveryOtp(), dropOtpRequired: true, dropOtpVerified: false };
 
-  pushStatusHistory(order, {
+  const updated = toOrder(await prisma.foodOrder.update({
+    where: { id: row.id },
+    data: {
+      orderStatus: nextStatus,
+      deliveryPhase: 'en_route_to_delivery',
+      deliveryStatus: 'picked_up',
+      pickedUpAt: new Date(),
+      billImageUrl: billImageUrl || null,
+      ...otpPatch,
+    },
+    include: orderInclude,
+  }));
+
+  emitDeliveryDropOtpToUser(updated, String(updated.deliveryOtp || '').trim());
+
+  await pushStatusHistory(row.id, {
     byRole: 'DELIVERY_PARTNER',
     byId: deliveryPartnerId,
     from,
     to: 'picked_up',
     note: 'Order picked up',
   });
-  await order.save();
 
-  emitOrderUpdate(order, deliveryPartnerId);
+  emitOrderUpdate(updated, deliveryPartnerId);
   enqueueOrderEvent('picked_up', {
-    orderMongoId: order._id?.toString?.(),
-    orderId: order._id.toString(),
+    orderMongoId: row.id,
+    orderId: row.id,
     deliveryPartnerId,
     billImageUrl: billImageUrl || null,
   });
-  return order.toObject();
+
+  return updated;
 }
 
 export async function confirmReachedDropDelivery(orderId, deliveryPartnerId) {
-  const identity = buildOrderIdentityFilter(orderId);
-  if (!identity) throw new ValidationError('Order id required');
+  const { row, order } = await loadOrder(orderId);
+  assertOwnedBy(row, deliveryPartnerId);
 
-  const order = await FoodOrder.findOne(identity).select('+deliveryOtp');
-  if (!order) throw new NotFoundError('Order not found');
-  if (
-    order.dispatch?.deliveryPartnerId?.toString() !== deliveryPartnerId.toString()
-  ) {
-    throw new ForbiddenError('Not your order');
-  }
-
-  if (order.deliveryVerification?.dropOtp?.verified) {
+  if (row.dropOtpVerified) {
     emitOrderUpdate(order, deliveryPartnerId);
     return sanitizeOrderForDeliveryPartner(order);
   }
 
-  const alreadyAtDrop =
-    order.deliveryState?.currentPhase === 'at_drop' ||
-    order.deliveryState?.status === 'reached_drop';
-  const fromPhase =
-    order.deliveryState?.status ||
-    order.deliveryState?.currentPhase ||
-    order.orderStatus ||
-    '';
+  const alreadyAtDrop = row.deliveryPhase === 'at_drop' || row.deliveryStatus === 'reached_drop';
+  const fromPhase = row.deliveryStatus || row.deliveryPhase || row.orderStatus || '';
 
   // Never regenerate an OTP the customer may already be displaying. It is issued at
-  // pickup (getDropOtpUser exposes it from 'picked_up' onwards), so re-rolling it here
-  // invalidated the code the customer reads out — the rider then got "Invalid OTP".
-  const existingOtp = String(order.deliveryOtp || '').trim();
-  if (!existingOtp) {
-    order.deliveryOtp = generateFourDigitDeliveryOtp();
-  }
-  // Arm the OTP gate at drop regardless (early-return above covers already-verified).
-  order.deliveryVerification = {
-    ...(order.deliveryVerification?.toObject?.() ||
-      order.deliveryVerification ||
-      {}),
-    dropOtp: { required: true, verified: false },
-  };
+  // pickup (getDropOtpUser exposes it from 'picked_up' onwards), so re-rolling it
+  // here invalidated the code the customer reads out — the rider then got "Invalid OTP".
+  const existingOtp = String(row.deliveryOtp || '').trim();
 
-  order.deliveryState = {
-    ...(order.deliveryState?.toObject?.() || order.deliveryState || {}),
-    currentPhase: 'at_drop',
-    status: 'reached_drop',
-    reachedDropAt: order.deliveryState?.reachedDropAt || new Date(),
-  };
+  const updated = toOrder(await prisma.foodOrder.update({
+    where: { id: row.id },
+    data: {
+      ...(existingOtp ? {} : { deliveryOtp: generateFourDigitDeliveryOtp() }),
+      // Arm the OTP gate at drop regardless (the early return above covers verified).
+      dropOtpRequired: true,
+      dropOtpVerified: false,
+      deliveryPhase: 'at_drop',
+      deliveryStatus: 'reached_drop',
+      reachedDropAt: row.reachedDropAt || new Date(),
+    },
+    include: orderInclude,
+  }));
 
   if (!alreadyAtDrop) {
-    pushStatusHistory(order, {
+    await pushStatusHistory(row.id, {
       byRole: 'DELIVERY_PARTNER',
       byId: deliveryPartnerId,
       from: fromPhase,
@@ -970,125 +823,105 @@ export async function confirmReachedDropDelivery(orderId, deliveryPartnerId) {
     });
   }
 
-  await order.save();
-
-  emitDeliveryDropOtpToUser(order, String(order.deliveryOtp || '').trim());
-  emitOrderUpdate(order, deliveryPartnerId);
+  emitDeliveryDropOtpToUser(updated, String(updated.deliveryOtp || '').trim());
+  emitOrderUpdate(updated, deliveryPartnerId);
   enqueueOrderEvent('reached_drop', {
-    orderMongoId: order._id?.toString?.(),
-    orderId: order._id.toString(),
+    orderMongoId: row.id,
+    orderId: row.id,
     deliveryPartnerId,
-    dropOtpRequired: order.deliveryVerification?.dropOtp?.required ?? true,
-    dropOtpVerified: order.deliveryVerification?.dropOtp?.verified ?? false,
+    dropOtpRequired: true,
+    dropOtpVerified: false,
   });
-  return sanitizeOrderForDeliveryPartner(order);
+
+  return sanitizeOrderForDeliveryPartner(updated);
 }
 
 export async function verifyDropOtpDelivery(orderId, deliveryPartnerId, otp) {
-  const identity = buildOrderIdentityFilter(orderId);
-  const order = await FoodOrder.findOne(identity).select('+deliveryOtp');
-  if (!order) throw new NotFoundError('Order not found');
-  if (
-    order.dispatch?.deliveryPartnerId?.toString() !== deliveryPartnerId.toString()
-  ) {
-    throw new ForbiddenError('Not your order');
-  }
+  const { row, order } = await loadOrder(orderId);
+  assertOwnedBy(row, deliveryPartnerId);
 
-  if (order.deliveryVerification?.dropOtp?.verified) {
-    return { order: sanitizeOrderForDeliveryPartner(order) };
-  }
+  if (row.dropOtpVerified) return { order: sanitizeOrderForDeliveryPartner(order) };
 
   const otpStr = String(otp || '').trim();
   if (!otpStr) throw new ValidationError('OTP is required');
 
-  if (!order.deliveryVerification?.dropOtp?.required) {
+  if (!row.dropOtpRequired) {
     throw new ValidationError(
       'OTP verification is not active for this order. Confirm reached drop first.',
     );
   }
 
-  const expected = String(order.deliveryOtp || '').trim();
+  const expected = String(row.deliveryOtp || '').trim();
   if (!expected || expected !== otpStr) {
-    throw new ValidationError(
-      'Invalid OTP. Ask the customer for the code shown in their app.',
-    );
+    throw new ValidationError('Invalid OTP. Ask the customer for the code shown in their app.');
   }
 
-  if (!order.deliveryVerification) order.deliveryVerification = { dropOtp: {} };
-  order.deliveryVerification.dropOtp.verified = true;
-  order.markModified('deliveryVerification.dropOtp.verified');
-  await order.save();
+  const updated = toOrder(await prisma.foodOrder.update({
+    where: { id: row.id },
+    data: { dropOtpVerified: true },
+    include: orderInclude,
+  }));
 
-  emitOrderUpdate(order, deliveryPartnerId);
+  emitOrderUpdate(updated, deliveryPartnerId);
   enqueueOrderEvent('drop_otp_verified', {
-    orderMongoId: order._id?.toString?.(),
-    orderId: order._id.toString(),
+    orderMongoId: row.id,
+    orderId: row.id,
     deliveryPartnerId,
   });
-  return { order: sanitizeOrderForDeliveryPartner(order) };
+
+  return { order: sanitizeOrderForDeliveryPartner(updated) };
 }
 
 export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
-  const identity = buildOrderIdentityFilter(orderId);
-  const order = await FoodOrder.findOne(identity).select('+deliveryOtp');
-  if (!order) throw new NotFoundError('Order not found');
-  if (
-    order.dispatch?.deliveryPartnerId?.toString() !== deliveryPartnerId.toString()
-  ) {
-    throw new ForbiddenError('Not your order');
-  }
+  const { row, order } = await loadOrder(orderId);
+  assertOwnedBy(row, deliveryPartnerId);
 
   const { otp, ratings } = body;
-  logger.info(`[DeliveryComplete] Attempting to complete order ${order._id} for partner ${deliveryPartnerId}. Status: ${order.orderStatus}`);
+  logger.info(
+    `[DeliveryComplete] Attempting to complete order ${row.id} for partner ${deliveryPartnerId}. Status: ${row.orderStatus}`,
+  );
 
-  // Pickup must have happened. dropOtp.required is only set at pickup/reached-drop, so
-  // completing straight after accept skipped BOTH OTP guards below and still paid the
-  // rider, credited totalDeliveries and marked COD collected — for food never collected.
+  // Pickup must have happened. dropOtpRequired is only set at pickup/reached-drop,
+  // so completing straight after accept skipped BOTH OTP guards below and still
+  // paid the rider, credited totalDeliveries and marked COD collected — for food
+  // never collected.
   const hasPickedUp =
-    Boolean(order.deliveryState?.pickedUpAt) ||
-    ['picked_up', 'reached_drop'].includes(String(order.orderStatus || ''));
-  if (!hasPickedUp) {
-    throw new ValidationError('Confirm pickup before completing this delivery.');
-  }
+    Boolean(row.pickedUpAt) || ['picked_up', 'reached_drop'].includes(String(row.orderStatus || ''));
+  if (!hasPickedUp) throw new ValidationError('Confirm pickup before completing this delivery.');
 
-  if (
-    otp &&
-    order.deliveryVerification?.dropOtp?.required &&
-    !order.deliveryVerification?.dropOtp?.verified
-  ) {
-    const orderWithSecret = await FoodOrder.findById(order._id).select('+deliveryOtp');
-    const expected = String(orderWithSecret?.deliveryOtp || '').trim();
+  let otpVerifiedNow = false;
+  if (otp && row.dropOtpRequired && !row.dropOtpVerified) {
+    const expected = String(row.deliveryOtp || '').trim();
     if (expected && expected === String(otp).trim()) {
-      order.deliveryVerification.dropOtp.verified = true;
-      order.markModified('deliveryVerification.dropOtp.verified');
-      logger.info(`[DeliveryComplete] OTP verified during completion call for ${order._id}`);
+      otpVerifiedNow = true;
+      logger.info(`[DeliveryComplete] OTP verified during completion call for ${row.id}`);
     } else {
       throw new ValidationError('Invalid handover OTP provided.');
     }
   }
 
-  if (
-    order.deliveryVerification?.dropOtp?.required &&
-    !order.deliveryVerification?.dropOtp?.verified &&
-    !otp
-  ) {
+  if (row.dropOtpRequired && !row.dropOtpVerified && !otp) {
     throw new ValidationError(
       'Customer handover OTP is required. Verify the OTP from the customer before completing delivery.',
     );
   }
 
-  const from = order.orderStatus;
+  const from = row.orderStatus;
   const nextStatus = 'delivered';
   if (!isStatusAdvance(from, nextStatus)) {
-      logger.warn(`[DeliveryComplete] Status advance check failed for ${order._id}. Current: ${from}`);
-      throw new ValidationError(`Order is already at status '${from}'. Cannot re-mark as '${nextStatus}'.`);
+    logger.warn(`[DeliveryComplete] Status advance check failed for ${row.id}. Current: ${from}`);
+    throw new ValidationError(`Order is already at status '${from}'. Cannot re-mark as '${nextStatus}'.`);
   }
-  
-  const tx = await FoodTransaction.findOne({ orderId: order._id }).lean();
-  const prevPayStatus = String(tx?.payment?.status || order?.payment?.status || 'unpaid').toLowerCase();
-  const payMethod = String(tx?.payment?.method || order?.payment?.method || order?.paymentMethod || 'cash').toLowerCase();
 
-  logger.info(`[DeliveryComplete] Order ${order._id} payment: ${payMethod}, status: ${prevPayStatus}`);
+  const tx = await foodTransactionService.getTransactionByOrder(row.id);
+  const prevPayStatus = String(
+    tx?.payment?.status || order?.payment?.status || 'unpaid',
+  ).toLowerCase();
+  const payMethod = String(
+    tx?.payment?.method || order?.payment?.method || 'cash',
+  ).toLowerCase();
+
+  logger.info(`[DeliveryComplete] Order ${row.id} payment: ${payMethod}, status: ${prevPayStatus}`);
 
   if (payMethod === 'razorpay_qr') {
     const syncedPayment = await syncRazorpayQrPayment(order);
@@ -1097,22 +930,32 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
     }
   }
 
-  order.orderStatus = 'delivered';
-  order.deliveryState = {
-    ...(order.deliveryState?.toObject?.() || order.deliveryState || {}),
-    currentPhase: 'delivered',
-    status: 'delivered',
-    deliveredAt: new Date(),
-  };
-
-  if (ratings) {
-    order.ratings = {
-      ...(order.ratings?.toObject?.() || order.ratings || {}),
-      ...ratings,
-    };
+  const codBecomesPaid = payMethod === 'cash' && row.paymentStatus === 'cod_pending';
+  if (codBecomesPaid) {
+    logger.info(`[DeliveryComplete] COD order ${row.id} marked as paid upon delivery.`);
   }
 
-  pushStatusHistory(order, {
+  const updated = toOrder(await prisma.foodOrder.update({
+    where: { id: row.id },
+    data: {
+      orderStatus: 'delivered',
+      deliveryPhase: 'delivered',
+      deliveryStatus: 'delivered',
+      deliveredAt: new Date(),
+      ...(otpVerifiedNow ? { dropOtpVerified: true } : {}),
+      ...(codBecomesPaid ? { paymentStatus: 'paid' } : {}),
+      ...(ratings?.customer
+        ? {
+            customerRating: ratings.customer.rating,
+            customerRatingComment: ratings.customer.comment || '',
+            customerRatedAt: new Date(),
+          }
+        : {}),
+    },
+    include: orderInclude,
+  }));
+
+  await pushStatusHistory(row.id, {
     byRole: 'DELIVERY_PARTNER',
     byId: deliveryPartnerId,
     from,
@@ -1120,22 +963,16 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
     note: 'Delivery completed successfully',
   });
 
-  // Mark payment as paid for COD orders upon delivery
-  if (payMethod === 'cash' && order.payment && order.payment.status === 'cod_pending') {
-    order.payment.status = 'paid';
-    logger.info(`[DeliveryComplete] COD order ${order._id} marked as paid upon delivery.`);
-  }
+  // Lifetime completed-delivery counter (best-effort).
+  prisma.foodDeliveryPartner
+    .update({
+      where: { id: String(deliveryPartnerId) },
+      data: { totalDeliveries: { increment: 1 } },
+    })
+    .catch((e) => logger.warn(`totalDeliveries increment failed: ${e?.message || e}`));
 
-  await order.save();
-
-  // Increment the rider's lifetime completed-delivery counter (best-effort).
-  FoodDeliveryPartner.updateOne(
-    { _id: deliveryPartnerId },
-    { $inc: { totalDeliveries: 1 } }
-  ).catch((e) => logger.warn(`totalDeliveries increment failed: ${e?.message || e}`));
-
-  // Referral reward: pays the rider who referred THIS rider, once they complete their
-  // first delivery. Idempotent (unique index on referral log), never throws.
+  // Referral reward: pays the rider who referred THIS rider, once they complete
+  // their first delivery. Idempotent, never throws.
   import('../../delivery/services/deliveryReferral.service.js')
     .then(({ creditDeliveryReferralOnFirstDelivery }) =>
       creditDeliveryReferralOnFirstDelivery(String(deliveryPartnerId)),
@@ -1144,7 +981,7 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
 
   // Customer cashback on the delivered order. Idempotent per order, never throws.
   import('../../user/services/cashback.service.js')
-    .then(({ awardOrderCashback }) => awardOrderCashback(String(order._id)))
+    .then(({ awardOrderCashback }) => awardOrderCashback(row.id))
     .catch((e) => logger.warn(`cashback award hook failed: ${e?.message || e}`));
 
   const ledgerKind =
@@ -1152,168 +989,161 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
       ? 'cod_marked_paid_on_delivery'
       : 'payment_snapshot_sync';
 
-  await foodTransactionService.updateTransactionStatus(order._id, ledgerKind, {
+  await foodTransactionService.updateTransactionStatus(row.id, ledgerKind, {
     status: 'captured',
     recordedByRole: 'DELIVERY_PARTNER',
     recordedById: deliveryPartnerId,
     note: `Delivery completed. Prev status: ${prevPayStatus}`,
   });
 
-  emitOrderUpdate(order, deliveryPartnerId);
+  emitOrderUpdate(updated, deliveryPartnerId);
   enqueueOrderEvent('delivery_completed', {
-    orderMongoId: order._id?.toString?.(),
-    orderId: order._id.toString(),
+    orderMongoId: row.id,
+    orderId: row.id,
     deliveryPartnerId,
     payMethod,
     prevPayStatus,
-    paymentStatus: order.payment?.status,
+    paymentStatus: updated.payment?.status,
   });
-  return sanitizeOrderForDeliveryPartner(order);
+
+  return sanitizeOrderForDeliveryPartner(updated);
 }
 
 export async function updateOrderStatusDelivery(orderId, deliveryPartnerId, orderStatus) {
-  const identity = buildOrderIdentityFilter(orderId);
-  if (!identity) throw new ValidationError('Order id required');
+  const { row } = await loadOrder(orderId);
+  assertOwnedBy(row, deliveryPartnerId);
 
-  const order = await FoodOrder.findOne(identity).select('+deliveryOtp');
-  if (!order) throw new NotFoundError('Order not found');
-  if (order.dispatch.deliveryPartnerId?.toString() !== deliveryPartnerId.toString()) {
-    throw new ForbiddenError('Not your order');
-  }
-
-  const from = order.orderStatus;
+  const from = row.orderStatus;
   if (!isStatusAdvance(from, orderStatus)) {
-      throw new ValidationError(`Current order status '${from}' is further ahead than '${orderStatus}'. Order cannot be moved backwards.`);
+    throw new ValidationError(
+      `Current order status '${from}' is further ahead than '${orderStatus}'. Order cannot be moved backwards.`,
+    );
   }
-  order.orderStatus = orderStatus;
-  pushStatusHistory(order, {
+
+  const updated = toOrder(await prisma.foodOrder.update({
+    where: { id: row.id },
+    data: { orderStatus },
+    include: orderInclude,
+  }));
+
+  await pushStatusHistory(row.id, {
     byRole: 'DELIVERY_PARTNER',
     byId: deliveryPartnerId,
     from,
     to: orderStatus,
   });
-  await order.save();
 
   enqueueOrderEvent('delivery_status_updated', {
-    orderMongoId: order._id?.toString?.(),
-    orderId: order._id.toString(),
+    orderMongoId: row.id,
+    orderId: row.id,
     deliveryPartnerId,
     from,
     to: orderStatus,
   });
-  return order.toObject();
+
+  return updated;
 }
 
-
 /**
- * Driving route from the rider's current position to the next stop, for the active-trip map.
+ * Driving route from the rider's current position to the next stop, for the
+ * active-trip map.
  *
- * `target` picks the destination; when omitted it is inferred from the trip phase — the
- * restaurant before pickup, the customer after. `orderId` accepts either the display id or
- * the Mongo _id. Returns empty-but-valid fields rather than throwing when Directions has
- * nothing to give, so the client can degrade instead of erroring.
+ * `target` picks the destination; when omitted it is inferred from the trip phase —
+ * the restaurant before pickup, the customer after. Returns empty-but-valid fields
+ * rather than throwing when Directions has nothing to give, so the client can
+ * degrade instead of erroring.
  */
 async function loadOrderForRoute(orderId) {
   const identity = buildOrderIdentityFilter(orderId);
   if (!identity) throw new ValidationError('Order id required');
 
-  const order = await FoodOrder.findOne(identity)
-    .select('userId dispatch deliveryState deliveryAddress restaurantId lastRiderLocation orderStatus')
-    .populate('restaurantId', 'location addressLine1 restaurantName')
-    // Deliberately NOT populating dispatch.deliveryPartnerId: the rider ownership
-    // check below compares it with String(), which a populated document would turn
-    // into "[object Object]" and reject every rider. computeOrderRoute looks the
-    // partner up separately, and only when it needs a fallback origin.
-    .lean();
-  if (!order) throw new NotFoundError('Order not found');
-  return order;
+  const row = await prisma.foodOrder.findFirst({
+    where: identity,
+    include: {
+      restaurant: {
+        select: { id: true, latitude: true, longitude: true, addressLine1: true, restaurantName: true },
+      },
+    },
+  });
+  if (!row) throw new NotFoundError('Order not found');
+  return row;
 }
 
 export async function getOrderRouteForDelivery(orderId, deliveryPartnerId, query = {}) {
-  const order = await loadOrderForRoute(orderId);
+  const row = await loadOrderForRoute(orderId);
 
-  if (String(order.dispatch?.deliveryPartnerId || '') !== String(deliveryPartnerId)) {
+  if (String(row.dispatchDeliveryPartnerId || '') !== String(deliveryPartnerId)) {
     throw new ForbiddenError('Not your order');
   }
 
-  return computeOrderRoute(order, query);
+  return computeOrderRoute(row, query);
 }
 
 /**
  * Customer-facing twin of the rider's route endpoint.
  *
- * The tracking map previously drew the RTDB polyline, which is computed ONCE at
- * accept time as restaurant→customer and never re-cut. So before pickup it drew a
- * route the rider isn't on, and after pickup it never followed them. The rider app
- * looks correct precisely because it calls the route endpoint with a live origin,
- * so this gives the customer the same thing.
+ * The tracking map previously drew the RTDB polyline, computed ONCE at accept time
+ * as restaurant→customer and never re-cut. Before pickup it drew a route the rider
+ * isn't on, and after pickup it never followed them.
  *
  * Unlike the rider's version this ignores any client lat/lng and always uses the
  * rider's server-side last known position. Letting the customer pass arbitrary
- * coordinates would make this an open Directions proxy billed to us, and would
- * leak nothing useful anyway — they want the rider's route, not their own.
+ * coordinates would make this an open Directions proxy billed to us.
  */
 export async function getOrderRouteForUser(orderId, userId, query = {}) {
-  const order = await loadOrderForRoute(orderId);
+  const row = await loadOrderForRoute(orderId);
 
-  if (String(order.userId || '') !== String(userId)) {
-    throw new ForbiddenError('Not your order');
-  }
+  if (String(row.userId || '') !== String(userId)) throw new ForbiddenError('Not your order');
 
-  return computeOrderRoute(order, { target: query?.target });
+  return computeOrderRoute(row, { target: query?.target });
 }
 
-async function computeOrderRoute(order, query = {}) {
+async function computeOrderRoute(row, query = {}) {
   // Origin: the rider's live position from the query, else their last known ping.
   const qLat = Number(query.lat);
   const qLng = Number(query.lng);
   const hasQueryOrigin = Number.isFinite(qLat) && Number.isFinite(qLng);
-  const lastCoords = order.lastRiderLocation?.coordinates;
+
   let origin = hasQueryOrigin
     ? { lat: qLat, lng: qLng }
-    : Array.isArray(lastCoords) && lastCoords.length >= 2
-      ? { lat: Number(lastCoords[1]), lng: Number(lastCoords[0]) }
+    : row.riderLat != null && row.riderLng != null
+      ? { lat: Number(row.riderLat), lng: Number(row.riderLng) }
       : null;
 
   // Fall back to the partner's own last known position.
   //
-  // order.lastRiderLocation is only written when the rider emits a socket
-  // location-update FOR THIS ORDER, which before pickup has usually not happened
-  // yet. The rider app never noticed because it passes its live coordinates in the
-  // query; the customer app cannot, so every pre-pickup call returned an empty
-  // polyline in ~15ms without ever reaching Directions — no line on the map.
-  // The partner's lastLat/lastLng is refreshed by the availability ping regardless
-  // of any order, so it is the right fallback.
-  if (!origin) {
-    const partnerId = order.dispatch?.deliveryPartnerId;
-    if (partnerId) {
-      const partner = await FoodDeliveryPartner.findById(partnerId)
-        .select('lastLat lastLng')
-        .lean();
-      const pLat = Number(partner?.lastLat);
-      const pLng = Number(partner?.lastLng);
-      if (Number.isFinite(pLat) && Number.isFinite(pLng)) {
-        origin = { lat: pLat, lng: pLng };
-      }
-    }
+  // The order's rider position is only written when the rider emits a location
+  // update FOR THIS ORDER, which before pickup has usually not happened. The rider
+  // app never noticed because it passes live coordinates in the query; the customer
+  // app cannot, so every pre-pickup call returned an empty polyline without ever
+  // reaching Directions. The partner's lastLat/lastLng is refreshed by the
+  // availability ping regardless of any order, so it is the right fallback.
+  if (!origin && row.dispatchDeliveryPartnerId) {
+    const partner = await prisma.foodDeliveryPartner.findUnique({
+      where: { id: row.dispatchDeliveryPartnerId },
+      select: { lastLat: true, lastLng: true },
+    });
+    const pLat = Number(partner?.lastLat);
+    const pLng = Number(partner?.lastLng);
+    if (Number.isFinite(pLat) && Number.isFinite(pLng)) origin = { lat: pLat, lng: pLng };
   }
 
   const pickedUp =
-    Boolean(order.deliveryState?.pickedUpAt) ||
-    ['picked_up', 'reached_drop'].includes(String(order.orderStatus || ''));
+    Boolean(row.pickedUpAt) || ['picked_up', 'reached_drop'].includes(String(row.orderStatus || ''));
   const target = ['restaurant', 'customer'].includes(String(query.target || ''))
     ? String(query.target)
     : pickedUp
       ? 'customer'
       : 'restaurant';
 
-  const restCoords = order.restaurantId?.location?.coordinates;
-  const custCoords = order.deliveryAddress?.location?.coordinates;
-  const pick = target === 'customer' ? custCoords : restCoords;
   const destination =
-    Array.isArray(pick) && pick.length >= 2
-      ? { lat: Number(pick[1]), lng: Number(pick[0]) }
-      : null;
+    target === 'customer'
+      ? row.addrLat != null && row.addrLng != null
+        ? { lat: Number(row.addrLat), lng: Number(row.addrLng) }
+        : null
+      : row.restaurant?.latitude != null && row.restaurant?.longitude != null
+        ? { lat: Number(row.restaurant.latitude), lng: Number(row.restaurant.longitude) }
+        : null;
 
   const empty = {
     polyline: '',
