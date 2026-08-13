@@ -25,15 +25,30 @@ const walletKey = (entityType, entityId) => ({
 const toNumber = (value) => Number(value ?? 0);
 
 /**
+ * Create the wallet row if it is missing. Safe to call concurrently.
+ *
+ * NOT prisma.upsert(): that compiles to a SELECT followed by an INSERT, so N
+ * concurrent first-time writes all observe "no wallet", all insert, and every
+ * one but the winner dies on the unique constraint. A real ON CONFLICT pushes
+ * the race into the database, where it belongs.
+ *
+ * @param {object} client prisma, or a transaction client to enlist in
+ */
+async function insertWalletIfMissing(entityType, entityId, client = prisma) {
+    await client.$executeRaw`
+        INSERT INTO "wallets" ("entityType", "entityId", "balance", "lockedAmount", "createdAt", "updatedAt")
+        VALUES (${entityType}::"EntityType", ${entityId}, 0, 0, now(), now())
+        ON CONFLICT ("entityType", "entityId") DO NOTHING
+    `;
+}
+
+/**
  * Ensure a wallet row exists, creating it at zero if not. Returns the wallet.
  */
 export async function ensureWallet(entityType, entityId) {
     const id = resolveEntityId(entityType, entityId);
-    return prisma.wallet.upsert({
-        where: walletKey(entityType, entityId),
-        create: { entityType, entityId: id, balance: 0 },
-        update: {}
-    });
+    await insertWalletIfMissing(entityType, id);
+    return prisma.wallet.findUniqueOrThrow({ where: walletKey(entityType, id) });
 }
 
 /**
@@ -103,11 +118,7 @@ export async function recordTransaction(payload) {
     }
 
     const result = await prisma.$transaction(async (tx) => {
-        await tx.wallet.upsert({
-            where: walletKey(entityType, entityId),
-            create: { entityType, entityId: id, balance: 0 },
-            update: {}
-        });
+        await insertWalletIfMissing(entityType, id, tx);
 
         // The overdraw guard lives in the WHERE clause, not in a preceding read.
         // Mongo did findOne -> compute -> updateOne, so two concurrent debits could

@@ -14,8 +14,16 @@ ALTER TABLE "wallets" ADD CONSTRAINT "wallet_balance_non_negative"
   CHECK ("entityType" = 'admin' OR "balance" >= 0);
 
 -- Locked funds can never exceed the balance.
+--
+-- The admin exemption has to be repeated here. Without it this constraint
+-- silently overrides the one above: an admin wallet at -500 fails
+-- `lockedAmount (0) <= balance (-500)`, so the platform wallet could never go
+-- negative at all, whatever wallet_balance_non_negative permitted.
 ALTER TABLE "wallets" ADD CONSTRAINT "wallet_locked_within_balance"
-  CHECK ("lockedAmount" >= 0 AND "lockedAmount" <= "balance");
+  CHECK (
+    "lockedAmount" >= 0
+    AND ("entityType" = 'admin' OR "lockedAmount" <= "balance")
+  );
 
 -- Amounts are always positive; direction lives in Transaction.type.
 ALTER TABLE "transactions" ADD CONSTRAINT "txn_amount_positive"
