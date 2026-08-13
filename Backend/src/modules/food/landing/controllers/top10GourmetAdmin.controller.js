@@ -1,77 +1,95 @@
-import { FoodGourmetRestaurant } from '../models/gourmetRestaurant.model.js';
-import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
+import { prisma } from '../../../../config/prisma.js';
+import { isId } from '../../../../utils/helpers.js';
 import { getPublicGourmetRestaurants } from '../services/gourmet.service.js';
 
-/** GET /hero-banners/gourmet - list Gourmet (admin, all entries). Returns { success, data: { restaurants } } */
+/** The shape the admin grid renders each row from. */
+const toAdminRow = (entry, restaurant) => ({
+    _id: entry.id,
+    restaurantId: entry.restaurantId,
+    priority: entry.priority,
+    order: entry.priority,
+    isActive: entry.isActive,
+    restaurant: restaurant
+        ? {
+            _id: restaurant.id || restaurant._id,
+            name: restaurant.name || restaurant.restaurantName,
+            rating: restaurant.rating || 0,
+            profileImage: restaurant.profileImage?.url
+                ? restaurant.profileImage
+                : restaurant.profileImage ? { url: restaurant.profileImage } : null,
+            area: restaurant.area,
+            city: restaurant.city,
+        }
+        : null,
+});
+
+/** GET /hero-banners/gourmet — every entry, including inactive ones. */
 export const listGourmetAdmin = async (req, res, next) => {
     try {
-        const docs = await FoodGourmetRestaurant.find({}).sort({ priority: 1, createdAt: -1 }).lean();
-        const restaurantIds = [...new Set(docs.map((d) => d.restaurantId))];
-        const restaurants = await FoodRestaurant.find({ _id: { $in: restaurantIds } })
-            .select('restaurantName area city profileImage rating')
-            .lean();
-        const restaurantMap = new Map(restaurants.map((r) => [r._id.toString(), r]));
-        const list = docs.map((d) => {
-            const r = restaurantMap.get(d.restaurantId?.toString());
-            return {
-                _id: d._id,
-                restaurantId: d.restaurantId,
-                priority: d.priority,
-                order: d.priority,
-                isActive: d.isActive,
-                restaurant: r ? {
-                    _id: r._id,
-                    name: r.restaurantName,
-                    rating: r.rating || 0,
-                    profileImage: r.profileImage ? { url: r.profileImage } : null,
-                    area: r.area,
-                    city: r.city
-                } : null
-            };
+        // restaurantId is a foreign key now, so the hydration the Mongo version
+        // did with a second query and a Map is just an include.
+        const entries = await prisma.foodGourmetRestaurant.findMany({
+            orderBy: [{ priority: 'asc' }, { createdAt: 'desc' }],
+            include: {
+                restaurant: {
+                    select: {
+                        id: true, restaurantName: true, area: true,
+                        city: true, profileImage: true, rating: true,
+                    },
+                },
+            },
         });
+
         res.status(200).json({
             success: true,
             message: 'Gourmet restaurants fetched',
-            data: { restaurants: list }
+            data: { restaurants: entries.map((e) => toAdminRow(e, e.restaurant)) },
         });
     } catch (error) {
         next(error);
     }
 };
 
-/** POST /hero-banners/gourmet - add restaurant. Body: { restaurantId } */
+/** POST /hero-banners/gourmet — body: { restaurantId } */
 export const createGourmetAdmin = async (req, res, next) => {
     try {
         const { restaurantId } = req.body || {};
-        if (!restaurantId) {
+        if (!isId(restaurantId)) {
             return res.status(400).json({ success: false, message: 'restaurantId is required' });
         }
-        const existing = await FoodGourmetRestaurant.findOne({ restaurantId });
-        if (existing) {
+
+        // The foreign key makes an unknown restaurant a 500 otherwise; check for
+        // it and answer properly.
+        const exists = await prisma.foodRestaurant.count({ where: { id: String(restaurantId) } });
+        if (!exists) {
+            return res.status(404).json({ success: false, message: 'Restaurant not found' });
+        }
+
+        const already = await prisma.foodGourmetRestaurant.count({
+            where: { restaurantId: String(restaurantId) },
+        });
+        if (already) {
             return res.status(400).json({ success: false, message: 'Restaurant already in Gourmet' });
         }
-        const count = await FoodGourmetRestaurant.countDocuments();
-        const doc = await FoodGourmetRestaurant.create({ restaurantId, priority: count });
+        // ponytail: check-then-insert, so two admins adding the same restaurant
+        // at once get two rows. A @@unique on restaurantId is the real fix, and
+        // needs a migration.
+
+        const item = await prisma.foodGourmetRestaurant.create({
+            data: {
+                restaurantId: String(restaurantId),
+                priority: await prisma.foodGourmetRestaurant.count(),
+            },
+        });
+
         const list = await getPublicGourmetRestaurants();
-        const restaurants = (list || []).map((d) => ({
-            _id: d._id,
-            restaurantId: d.restaurantId,
-            priority: d.priority,
-            order: d.priority,
-            isActive: d.isActive,
-            restaurant: d.restaurant ? {
-                _id: d.restaurant._id,
-                name: d.restaurant.name,
-                rating: d.restaurant.rating || 0,
-                profileImage: d.restaurant.profileImage,
-                area: d.restaurant.area,
-                city: d.restaurant.city
-            } : null
-        })).filter((r) => r && r._id);
         res.status(201).json({
             success: true,
             message: 'Restaurant added to Gourmet',
-            data: { restaurants, item: doc.toObject() }
+            data: {
+                restaurants: list.map((entry) => toAdminRow(entry, entry.restaurant)),
+                item,
+            },
         });
     } catch (error) {
         next(error);
@@ -82,8 +100,8 @@ export const createGourmetAdmin = async (req, res, next) => {
 export const deleteGourmetAdmin = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const doc = await FoodGourmetRestaurant.findByIdAndDelete(id);
-        if (!doc) {
+        const { count } = await prisma.foodGourmetRestaurant.deleteMany({ where: { id } });
+        if (!count) {
             return res.status(404).json({ success: false, message: 'Gourmet entry not found' });
         }
         res.status(200).json({ success: true, message: 'Restaurant removed from Gourmet', data: { id } });
@@ -92,7 +110,7 @@ export const deleteGourmetAdmin = async (req, res, next) => {
     }
 };
 
-/** PATCH /hero-banners/gourmet/:id/order - body: { order } */
+/** PATCH /hero-banners/gourmet/:id/order — body: { order } */
 export const updateGourmetOrderAdmin = async (req, res, next) => {
     try {
         const { id } = req.params;
@@ -100,27 +118,43 @@ export const updateGourmetOrderAdmin = async (req, res, next) => {
         if (Number.isNaN(order)) {
             return res.status(400).json({ success: false, message: 'order must be a number' });
         }
-        const doc = await FoodGourmetRestaurant.findByIdAndUpdate(id, { priority: order }, { new: true });
-        if (!doc) {
+
+        const { count } = await prisma.foodGourmetRestaurant.updateMany({
+            where: { id },
+            data: { priority: order },
+        });
+        if (!count) {
             return res.status(404).json({ success: false, message: 'Gourmet entry not found' });
         }
-        res.status(200).json({ success: true, message: 'Order updated', data: doc.toObject() });
+
+        const doc = await prisma.foodGourmetRestaurant.findUnique({ where: { id } });
+        res.status(200).json({ success: true, message: 'Order updated', data: doc });
     } catch (error) {
         next(error);
     }
 };
 
-/** PATCH /hero-banners/gourmet/:id/status - toggle isActive */
+/** PATCH /hero-banners/gourmet/:id/status — toggle isActive */
 export const toggleGourmetStatusAdmin = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const doc = await FoodGourmetRestaurant.findById(id);
-        if (!doc) {
+        const current = await prisma.foodGourmetRestaurant.findUnique({
+            where: { id },
+            select: { isActive: true },
+        });
+        if (!current) {
             return res.status(404).json({ success: false, message: 'Gourmet entry not found' });
         }
-        doc.isActive = !doc.isActive;
-        await doc.save();
-        res.status(200).json({ success: true, message: doc.isActive ? 'Activated' : 'Deactivated', data: doc.toObject() });
+
+        const doc = await prisma.foodGourmetRestaurant.update({
+            where: { id },
+            data: { isActive: !current.isActive },
+        });
+        res.status(200).json({
+            success: true,
+            message: doc.isActive ? 'Activated' : 'Deactivated',
+            data: doc,
+        });
     } catch (error) {
         next(error);
     }
