@@ -1,6 +1,7 @@
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { toRestaurant } from '../../restaurant/restaurant.mapper.js';
+import { restaurantIdsMatchingCuisine } from '../../shared/restaurantQuery.util.js';
 
 /** Columns the search cards need, plus the address columns toRestaurant() rebuilds `location` from. */
 const RESTAURANT_SEARCH_SELECT = {
@@ -42,27 +43,6 @@ const addDistanceScore = (restaurant, userLat, userLng) => {
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
     return { ...restaurant, distanceScore: 6371 * c };
-};
-
-/**
- * Restaurants whose cuisine list contains the term.
- *
- * Prisma can only ask exact questions of a String[] (has/hasSome), and the Mongo
- * version matched a substring case-insensitively, so this stays raw.
- *
- * ponytail: ILIKE over unnest cannot use the GIN index on cuisines, so it is a
- * scan. Fine at this catalogue size; a pg_trgm index on
- * array_to_string(cuisines,' ') is the fix if it ever shows up in a slow log.
- */
-const restaurantIdsMatchingCuisine = async (term, limit) => {
-    const rows = await prisma.$queryRaw`
-        SELECT "id" FROM "food_restaurants"
-        WHERE EXISTS (
-            SELECT 1 FROM unnest("cuisines") AS c WHERE c ILIKE ${`%${term}%`}
-        )
-        LIMIT ${limit}
-    `;
-    return rows.map((row) => row.id);
 };
 
 /**

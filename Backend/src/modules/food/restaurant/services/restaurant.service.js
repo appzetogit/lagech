@@ -1,15 +1,14 @@
-import { FoodRestaurant } from '../models/restaurant.model.js';
+import { prisma } from '../../../../config/prisma.js';
+import { isId } from '../../../../utils/helpers.js';
 import { uploadImageBuffer } from '../../../../services/cloudinary.service.js';
 import { normalizeMediaUrlForStorage } from '../../../../services/storage.service.js';
 import { ValidationError, NotFoundError } from '../../../../core/auth/errors.js';
-import mongoose from 'mongoose';
 import { findZoneForPoint } from '../../shared/zone.service.js';
-import { FoodOffer } from '../../admin/models/offer.model.js';
-import { FoodOfferUsage } from '../../admin/models/offerUsage.model.js';
-import { FoodRestaurantMenu } from '../models/restaurantMenu.model.js';
-import { FoodItem } from '../../admin/models/food.model.js';
-import { FoodOrder } from '../../orders/models/order.model.js';
-import { FoodRestaurantOutletTimings } from '../models/outletTimings.model.js';
+import {
+    restaurantIdsMatchingCuisine,
+    restaurantsNearPoint,
+} from '../../shared/restaurantQuery.util.js';
+import { fromRestaurantLocation, toRestaurant } from '../restaurant.mapper.js';
 import { attachOutletTimingsToRestaurants } from './outletTimings.service.js';
 import { getRestaurantOperationalStatus } from '../helpers/restaurantAvailability.helper.js';
 import {
@@ -168,24 +167,29 @@ const parseEstimatedDeliveryMinutes = (value) => {
 };
 
 const buildActivePublicOfferFilter = (now = new Date()) => {
+    // An offer ending "today" stays claimable all day, so the end bound is
+    // compared against midnight rather than the current time.
     const startOfToday = new Date(now);
     startOfToday.setHours(0, 0, 0, 0);
 
     return {
         status: 'active',
-        showInCart: { $ne: false },
-        $and: [
-            { $or: [{ startDate: { $exists: false } }, { startDate: null }, { startDate: { $lte: now } }] },
-            { $or: [{ endDate: { $exists: false } }, { endDate: null }, { endDate: { $gte: startOfToday } }] },
+        showInCart: true,
+        AND: [
+            { OR: [{ startDate: null }, { startDate: { lte: now } }] },
+            { OR: [{ endDate: null }, { endDate: { gte: startOfToday } }] },
             {
-                $or: [
-                    { usageLimit: { $exists: false } },
+                OR: [
                     { usageLimit: null },
+                    // 0 means unlimited, not "exhausted".
                     { usageLimit: 0 },
-                    { $expr: { $lt: ['$usedCount', '$usageLimit'] } }
-                ]
-            }
-        ]
+                    // Was a Mongo $expr comparing two fields. Prisma expresses
+                    // it as a field reference, so it still resolves in the
+                    // database rather than by fetching every offer.
+                    { usedCount: { lt: prisma.foodOffer.fields.usageLimit } },
+                ],
+            },
+        ],
     };
 };
 
@@ -217,36 +221,43 @@ const formatRestaurantOfferSummary = (offer) => {
 const attachPublicOffersToRestaurants = async (restaurants = []) => {
     if (!Array.isArray(restaurants) || restaurants.length === 0) return restaurants;
 
-    const restaurantIds = restaurants
-        .map((restaurant) => String(restaurant?._id || restaurant?.id || restaurant?.restaurantId || ''))
-        .filter((id) => mongoose.Types.ObjectId.isValid(id));
+    const idOf = (restaurant) =>
+        String(restaurant?.id || restaurant?._id || restaurant?.restaurantId || '');
+
+    const restaurantIds = restaurants.map(idOf).filter(isId);
 
     if (!restaurantIds.length) {
         return restaurants.map((restaurant) => ({
             ...restaurant,
             activeOffers: [],
-            offerCount: 0
+            offerCount: 0,
         }));
     }
 
-    const objectRestaurantIds = restaurantIds.map((id) => new mongoose.Types.ObjectId(id));
     const activeOfferFilter = buildActivePublicOfferFilter();
-    const offers = await FoodOffer.find({
-        ...activeOfferFilter,
-        $and: [
-            ...(activeOfferFilter.$and || []),
-            {
-                $or: [
-                    { restaurantScope: 'all' },
-                    { restaurantId: { $in: objectRestaurantIds } },
-                    { restaurantIds: { $in: objectRestaurantIds } }
-                ]
-            }
-        ]
-    })
-        .select('couponCode discountType discountValue minOrderValue maxDiscount restaurantScope restaurantId restaurantIds')
-        .sort({ createdAt: -1 })
-        .lean();
+    const offers = await prisma.foodOffer.findMany({
+        where: {
+            ...activeOfferFilter,
+            AND: [
+                ...activeOfferFilter.AND,
+                {
+                    OR: [
+                        { restaurantScope: 'all' },
+                        { restaurantId: { in: restaurantIds } },
+                        // hasSome, not `in`: restaurantIds is an array column,
+                        // and the question is whether it overlaps this page.
+                        { restaurantIds: { hasSome: restaurantIds } },
+                    ],
+                },
+            ],
+        },
+        select: {
+            id: true, couponCode: true, discountType: true, discountValue: true,
+            minOrderValue: true, maxDiscount: true,
+            restaurantScope: true, restaurantId: true, restaurantIds: true,
+        },
+        orderBy: { createdAt: 'desc' },
+    });
 
     const globalOfferSummaries = [];
     const selectedOfferMap = new Map();
@@ -256,14 +267,16 @@ const attachPublicOffersToRestaurants = async (restaurants = []) => {
         if (!summary) continue;
 
         const payload = {
-            id: String(offer._id),
+            id: offer.id,
             couponCode: offer.couponCode || '',
             summary,
             discountType: offer.discountType,
+            // Decimal columns, so each is converted rather than handed to the
+            // client as a string.
             discountValue: Number(offer.discountValue) || 0,
             minOrderValue: Number(offer.minOrderValue) || 0,
             maxDiscount: Number.isFinite(Number(offer.maxDiscount)) ? Number(offer.maxDiscount) : null,
-            restaurantScope: offer.restaurantScope
+            restaurantScope: offer.restaurantScope,
         };
 
         if (offer.restaurantScope === 'all') {
@@ -271,31 +284,29 @@ const attachPublicOffersToRestaurants = async (restaurants = []) => {
             continue;
         }
 
-        const eligibleIds = new Set([
-            ...(Array.isArray(offer.restaurantIds) ? offer.restaurantIds : []),
-            offer.restaurantId
-        ].map((id) => String(id || '')).filter(Boolean));
+        const eligibleIds = new Set(
+            [...(offer.restaurantIds || []), offer.restaurantId]
+                .map((id) => String(id || ''))
+                .filter(Boolean)
+        );
 
         for (const restaurantId of eligibleIds) {
-            if (!selectedOfferMap.has(restaurantId)) {
-                selectedOfferMap.set(restaurantId, []);
-            }
+            if (!selectedOfferMap.has(restaurantId)) selectedOfferMap.set(restaurantId, []);
             selectedOfferMap.get(restaurantId).push(payload);
         }
     }
 
     return restaurants.map((restaurant) => {
-        const restaurantId = String(restaurant?._id || restaurant?.id || restaurant?.restaurantId || '');
-        const combinedOffers = [...globalOfferSummaries, ...(selectedOfferMap.get(restaurantId) || [])];
-        const dedupedOffers = Array.from(
-            new Map(combinedOffers.map((offer) => [offer.id, offer])).values()
-        );
+        const restaurantId = idOf(restaurant);
+        const combinedOffers = [
+            ...globalOfferSummaries,
+            ...(selectedOfferMap.get(restaurantId) || []),
+        ];
+        // A restaurant can be named both directly and by an all-restaurants
+        // offer; the card must not show the same coupon twice.
+        const dedupedOffers = [...new Map(combinedOffers.map((o) => [o.id, o])).values()];
 
-        return {
-            ...restaurant,
-            activeOffers: dedupedOffers,
-            offerCount: dedupedOffers.length
-        };
+        return { ...restaurant, activeOffers: dedupedOffers, offerCount: dedupedOffers.length };
     });
 };
 
@@ -433,14 +444,39 @@ const parseSortBy = (value) => {
 };
 
 /**
- * Which service zone a point falls in.
+ * The restaurant's own profile.
  *
- * Was a ray-casting scan in JS: load every active zone, walk each ring edge by
- * edge. It ran on every restaurant address save and grew with the zone count.
- * findZoneForPoint is one GIST-indexed ST_Contains against the trigger-derived
- * polygon, and resolves overlaps deterministically (tightest zone wins) instead
- * of returning whichever row the scan reached first.
+ * Spelled out rather than left to Prisma's default of every column: the table
+ * also holds fcmTokens and the auth token version, which have no business in a
+ * profile response.
  */
+const PROFILE_SELECT = {
+    accountHolderName: true, accountNumber: true, accountType: true,
+    addressLine1: true, addressLine2: true, area: true, city: true,
+    closingTime: true, coverImages: true, createdAt: true, cuisines: true,
+    diningEnabled: true, diningMaxGuests: true, diningType: true,
+    estimatedDeliveryTime: true, estimatedDeliveryTimeMinutes: true,
+    formattedAddress: true, fssaiExpiry: true, fssaiImage: true, fssaiNumber: true,
+    gstAddress: true, gstImage: true, gstLegalName: true, gstNumber: true,
+    gstRegistered: true, id: true, ifscCode: true, isAcceptingOrders: true,
+    landmark: true, latitude: true, longitude: true, menuImages: true,
+    nameOnPan: true, onboardingFeePaid: true, onboardingFeePaidAt: true,
+    onboardingFeePaymentId: true, onboardingFeePaymentMethod: true,
+    onboardingFeePaymentOrderId: true, onboardingFeePaymentSignature: true,
+    openDays: true, openingTime: true, outsideHoursOverride: true,
+    ownerEmail: true, ownerName: true, ownerPhone: true, panImage: true,
+    panNumber: true, pincode: true, primaryContactNumber: true,
+    profileImage: true, pureVegRestaurant: true, restaurantName: true,
+    state: true, status: true, subscriptionAmount: true, subscriptionDueAmount: true,
+    subscriptionPaidAmount: true, subscriptionPlan: true, subscriptionStatus: true,
+    subscriptionValidTill: true, updatedAt: true, upiId: true, upiQrImage: true,
+    zoneId: true,
+    // The location-change approval flow reads these.
+    pendingLatitude: true, pendingLongitude: true, pendingZoneId: true,
+    locationUpdateStatus: true, locationUpdateRequestedAt: true,
+    locationUpdateReviewedAt: true, locationRejectionReason: true,
+};
+
 const findMatchedZoneForCoordinates = async (lat, lng) => {
     if (lat === null || lng === null) return null;
     const zone = await findZoneForPoint(lat, lng);
@@ -449,10 +485,11 @@ const findMatchedZoneForCoordinates = async (lat, lng) => {
 };
 
 const hasPublishedRestaurantLocation = (restaurant = {}) => {
-    const loc = restaurant?.location;
-    if (!loc || typeof loc !== 'object') return false;
-    const lat = toFiniteNumber(loc.latitude ?? loc?.coordinates?.[1]);
-    const lng = toFiniteNumber(loc.longitude ?? loc?.coordinates?.[0]);
+    // Reads the flat columns, falling back to a nested `location` for callers
+    // that hand over an already-mapped restaurant.
+    const loc = restaurant?.location && typeof restaurant.location === 'object' ? restaurant.location : {};
+    const lat = toFiniteNumber(restaurant?.latitude ?? loc.latitude ?? loc?.coordinates?.[1]);
+    const lng = toFiniteNumber(restaurant?.longitude ?? loc.longitude ?? loc?.coordinates?.[0]);
     return lat !== null && lng !== null;
 };
 
@@ -850,70 +887,71 @@ export const registerRestaurant = async (payload, files) => {
     }
 
     try {
-        const latNum = toFiniteNumber(latitude);
-        const lngNum = toFiniteNumber(longitude);
-        const restaurant = await FoodRestaurant.create({
-            restaurantName,
-            restaurantNameNormalized,
-            ownerName,
-            ownerEmail,
-            // Store phone in a consistent digits-only format to match OTP login flow.
-            ownerPhone: ownerPhoneDigits,
-            ownerPhoneDigits,
-            ownerPhoneLast10,
-            primaryContactNumber,
-            pureVegRestaurant: pureVegRestaurant === true,
-            zoneId: zoneId && mongoose.Types.ObjectId.isValid(String(zoneId).trim())
-                ? new mongoose.Types.ObjectId(String(zoneId).trim())
-                : undefined,
-            // Store unified location object (geo + address).
-            location: {
-                type: 'Point',
-                coordinates: latNum !== null && lngNum !== null ? [lngNum, latNum] : undefined,
-                latitude: latNum ?? undefined,
-                longitude: lngNum ?? undefined,
-                formattedAddress: typeof formattedAddress === 'string' ? formattedAddress.trim() : '',
-                address: typeof formattedAddress === 'string' ? formattedAddress.trim() : '',
-                addressLine1: addressLine1 || '',
-                addressLine2: addressLine2 || '',
-                area: area || '',
-                city: city || '',
-                state: state || '',
-                pincode: pincode || '',
-                landmark: landmark || ''
-            },
-            cuisines: cuisines || [],
-            openingTime: normalizedOpeningTime || undefined,
-            closingTime: normalizedClosingTime || undefined,
-            openDays: openDays || [],
-            estimatedDeliveryTime: estimatedDeliveryTimeText || undefined,
-            estimatedDeliveryTimeMinutes: estimatedDeliveryTimeMinutes ?? undefined,
-            panNumber,
-            nameOnPan,
-            gstRegistered,
-            gstNumber,
-            gstLegalName,
-            gstAddress,
-            fssaiNumber,
-            fssaiExpiry,
-            accountNumber,
-            ifscCode,
-            accountHolderName,
-            accountType,
-            menuImages,
-            coverImage,
-            galleryImages,
-            // Keep coverImages (the public page banner array) seeded from onboarding so the
-            // restaurant page isn't blank before they manage banners themselves.
-            coverImages: coverImage ? [coverImage, ...galleryImages] : galleryImages,
-            // Postpaid subscription model: monthly invoices from GMV at month end.
-            ...onboardingFeeFields,
-            ...images
-        });
+        const restaurant = await prisma.$transaction(async (tx) => {
+            const created = await tx.foodRestaurant.create({
+                data: {
+                    restaurantName,
+                    restaurantNameNormalized,
+                    ownerName,
+                    ownerEmail,
+                    // Digits-only, to match the format the OTP login flow stores.
+                    ownerPhone: ownerPhoneDigits,
+                    ownerPhoneDigits,
+                    ownerPhoneLast10,
+                    primaryContactNumber,
+                    pureVegRestaurant: pureVegRestaurant === true,
+                    zoneId: isId(String(zoneId || '').trim()) ? String(zoneId).trim() : null,
+                    // The nested location subdocument is flat columns now, and
+                    // the PostGIS point beside them is derived by a trigger, so
+                    // the mapper is the one place that knows the translation.
+                    ...fromRestaurantLocation({
+                        latitude,
+                        longitude,
+                        formattedAddress:
+                            typeof formattedAddress === 'string' ? formattedAddress.trim() : '',
+                        addressLine1: addressLine1 || '',
+                        addressLine2: addressLine2 || '',
+                        area: area || '',
+                        city: city || '',
+                        state: state || '',
+                        pincode: pincode || '',
+                        landmark: landmark || '',
+                    }),
+                    cuisines: cuisines || [],
+                    openingTime: normalizedOpeningTime || undefined,
+                    closingTime: normalizedClosingTime || undefined,
+                    openDays: openDays || [],
+                    estimatedDeliveryTime: estimatedDeliveryTimeText || undefined,
+                    estimatedDeliveryTimeMinutes: estimatedDeliveryTimeMinutes ?? undefined,
+                    panNumber,
+                    nameOnPan,
+                    gstRegistered,
+                    gstNumber,
+                    gstLegalName,
+                    gstAddress,
+                    fssaiNumber,
+                    fssaiExpiry,
+                    accountNumber,
+                    ifscCode,
+                    accountHolderName,
+                    accountType,
+                    menuImages,
+                    coverImage,
+                    galleryImages,
+                    // coverImages (the public banner strip) is seeded from
+                    // onboarding so the restaurant page is not blank before they
+                    // manage banners themselves.
+                    coverImages: coverImage ? [coverImage, ...galleryImages] : galleryImages,
+                    // Postpaid subscription: monthly invoices from GMV at month end.
+                    ...onboardingFeeFields,
+                    ...images,
+                },
+            });
 
-        // Seed day-wise outlet timings at onboarding from the initial opening/closing fields.
-        // Later manual changes by restaurant are preserved (we only insert if missing).
-        try {
+            // Seed day-wise outlet timings from the onboarding opening/closing
+            // fields. In the same transaction as the restaurant: a restaurant
+            // with no timings row reads as closed every day, so a failure here
+            // used to leave an approved outlet that could never take an order.
             const normalizedOpenDays = Array.isArray(openDays)
                 ? [...new Set(openDays.map(normalizeDayName).filter(Boolean))]
                 : [];
@@ -921,44 +959,43 @@ export const registerRestaurant = async (payload, files) => {
             const seedOpeningTime = normalizedOpeningTime || '09:00';
             const seedClosingTime = normalizedClosingTime || '22:00';
 
-            const seededTimings = DAY_NAMES.map((day) => {
-                const isOpen = openDaysSet.has(day);
-                return {
-                    day,
-                    isOpen,
-                    openingTime: isOpen ? seedOpeningTime : '',
-                    closingTime: isOpen ? seedClosingTime : '',
-                };
+            await tx.foodRestaurantOutletTimings.create({
+                data: {
+                    restaurantId: created.id,
+                    timings: DAY_NAMES.map((day) => {
+                        const isOpen = openDaysSet.has(day);
+                        return {
+                            day,
+                            isOpen,
+                            openingTime: isOpen ? seedOpeningTime : '',
+                            closingTime: isOpen ? seedClosingTime : '',
+                        };
+                    }),
+                },
             });
 
-            await FoodRestaurantOutletTimings.updateOne(
-                { restaurantId: restaurant._id },
-                { $setOnInsert: { restaurantId: restaurant._id, timings: seededTimings } },
-                { upsert: true }
-            );
-        } catch (seedErr) {
-            console.error('Failed to seed outlet timings during onboarding:', seedErr);
-        }
+            return created;
+        });
 
         try {
             const { notifyAdminsSafely } = await import('../../../../core/notifications/firebase.service.js');
             void notifyAdminsSafely({
-                title: 'New Restaurant Registration 🏪',
+                title: 'New Restaurant Registration',
                 body: `A new restaurant "${restaurant.restaurantName}" has registered and is pending approval.`,
                 data: {
                     type: 'new_registration',
                     subType: 'restaurant',
-                    id: String(restaurant._id)
-                }
+                    id: restaurant.id,
+                },
             });
         } catch (e) {
             console.error('Failed to notify admins of new restaurant registration:', e);
         }
 
-        return restaurant.toObject();
+        return toRestaurant(restaurant);
     } catch (err) {
-        // Handle uniqueness conflicts deterministically (race-safe).
-        if (err && (err.code === 11000 || err?.name === 'MongoServerError')) {
+        // A unique index decides the race rather than a prior lookup.
+        if (err?.code === 'P2002') {
             throw new ValidationError('Restaurant with this name and owner phone already exists');
         }
         throw err;
@@ -966,72 +1003,15 @@ export const registerRestaurant = async (payload, files) => {
 };
 
 export const getCurrentRestaurantProfile = async (restaurantId) => {
-    if (!restaurantId) return null;
-    const doc = await FoodRestaurant.findById(restaurantId)
-        .select(
-            [
-                'restaurantName',
-                'cuisines',
-                'location',
-                'addressLine1',
-                'addressLine2',
-                'area',
-                'city',
-                'state',
-                'pincode',
-                'landmark',
-                'ownerName',
-                'ownerEmail',
-                'ownerPhone',
-                'primaryContactNumber',
-                'panNumber',
-                'nameOnPan',
-                'panImage',
-                'gstRegistered',
-                'gstNumber',
-                'gstLegalName',
-                'gstAddress',
-                'gstImage',
-                'fssaiNumber',
-                'fssaiExpiry',
-                'fssaiImage',
-                'accountNumber',
-                'ifscCode',
-                'accountHolderName',
-                'accountType',
-                'upiId',
-                'upiQrImage',
-                'pureVegRestaurant',
-                'profileImage',
-                'coverImages',
-                'menuImages',
-                'openingTime',
-                'closingTime',
-                'openDays',
-                'estimatedDeliveryTime',
-                'estimatedDeliveryTimeMinutes',
-                'diningSettings',
-                'isAcceptingOrders',
-                'outsideHoursOverride',
-                'subscriptionPlan',
-                'subscriptionAmount',
-                'subscriptionPaidAmount',
-                'subscriptionDueAmount',
-                'subscriptionStatus',
-                'subscriptionValidTill',
-                'onboardingFeePaid',
-                'onboardingFeePaidAt',
-                'onboardingFeePaymentMethod',
-                'onboardingFeePaymentOrderId',
-                'onboardingFeePaymentId',
-                'onboardingFeePaymentSignature',
-                'status',
-                'createdAt',
-                'updatedAt'
-            ].join(' ')
-        )
-        .lean();
-    const profile = toRestaurantProfile(doc);
+    if (!isId(restaurantId)) return null;
+
+    const doc = await prisma.foodRestaurant.findUnique({
+        where: { id: String(restaurantId) },
+        select: PROFILE_SELECT,
+    });
+    if (!doc) return null;
+
+    const profile = toRestaurantProfile(toRestaurant(doc));
     if (!profile) return null;
     return enrichRestaurantProfileWithAvailability(profile, doc);
 };
@@ -1055,199 +1035,82 @@ const enrichRestaurantProfileWithAvailability = async (profile, doc) => {
 };
 
 export const updateRestaurantAcceptingOrders = async (restaurantId, isAcceptingOrders) => {
-    if (!restaurantId) {
-        throw new ValidationError('Invalid restaurant id');
-    }
-    const value = Boolean(isAcceptingOrders);
-    // Offline = manual force-offline. Online = clear override and follow outlet timings.
-    const doc = await FoodRestaurant.findByIdAndUpdate(
-        restaurantId,
-        {
-            $set: {
-                isAcceptingOrders: value,
-                outsideHoursOverride: false,
-            },
-        },
-        {
-            new: true,
-            runValidators: true,
-            projection: [
-                'restaurantName',
-                'cuisines',
-                'location',
-                'addressLine1',
-                'addressLine2',
-                'area',
-                'city',
-                'state',
-                'pincode',
-                'landmark',
-                'ownerName',
-                'ownerEmail',
-                'ownerPhone',
-                'primaryContactNumber',
-                'accountNumber',
-                'ifscCode',
-                'accountHolderName',
-                'accountType',
-                'upiId',
-                'upiQrImage',
-                'pureVegRestaurant',
-                'profileImage',
-                'coverImages',
-                'menuImages',
-                'openingTime',
-                'closingTime',
-                'openDays',
-                'diningSettings',
-                'isAcceptingOrders',
-                'outsideHoursOverride',
-                'status',
-                'createdAt',
-                'updatedAt'
-            ].join(' ')
-        }
-    ).lean();
-    const profile = toRestaurantProfile(doc);
+    if (!isId(restaurantId)) throw new ValidationError('Invalid restaurant id');
+
+    // Offline = a manual force-offline. Online = clear the override and go back
+    // to following the outlet timings.
+    const { count } = await prisma.foodRestaurant.updateMany({
+        where: { id: String(restaurantId) },
+        data: { isAcceptingOrders: Boolean(isAcceptingOrders), outsideHoursOverride: false },
+    });
+    if (!count) return null;
+
+    const doc = await prisma.foodRestaurant.findUnique({
+        where: { id: String(restaurantId) },
+        select: PROFILE_SELECT,
+    });
+    const profile = toRestaurantProfile(toRestaurant(doc));
+    if (!profile) return null;
     return enrichRestaurantProfileWithAvailability(profile, doc);
 };
 
 export const updateCurrentRestaurantDiningSettings = async (restaurantId, body = {}) => {
-    if (!restaurantId) {
-        throw new ValidationError('Invalid restaurant id');
-    }
+    if (!isId(restaurantId)) throw new ValidationError('Invalid restaurant id');
+    const id = String(restaurantId);
 
-    const currentRestaurant = await FoodRestaurant.findById(restaurantId)
-        .select('diningSettings status')
-        .lean();
+    const current = await prisma.foodRestaurant.findUnique({
+        where: { id },
+        select: { diningEnabled: true, diningMaxGuests: true, diningType: true },
+    });
+    if (!current) throw new ValidationError('Restaurant not found');
 
-    if (!currentRestaurant) {
-        throw new ValidationError('Restaurant not found');
-    }
-
-    const currentDiningSettings =
-        currentRestaurant.diningSettings && typeof currentRestaurant.diningSettings === 'object'
-            ? currentRestaurant.diningSettings
-            : {};
-
+    /** Accepts a real boolean or the strings a multipart form sends. */
     const parseBoolean = (value, fallback = false) => {
         if (value === undefined || value === null) return Boolean(fallback);
         if (typeof value === 'boolean') return value;
         const normalized = String(value).trim().toLowerCase();
-        if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true;
-        if (normalized === 'false' || normalized === '0' || normalized === 'no') return false;
+        if (['true', '1', 'yes'].includes(normalized)) return true;
+        if (['false', '0', 'no'].includes(normalized)) return false;
         return Boolean(fallback);
     };
 
-    const maxGuests = Math.max(
-        1,
-        parseInt(body.maxGuests ?? currentDiningSettings.maxGuests ?? 6, 10) || 6
-    );
-    const diningType =
-        String(body.diningType ?? currentDiningSettings.diningType ?? 'family-dining').trim() ||
-        'family-dining';
-
-    const doc = await FoodRestaurant.findByIdAndUpdate(
-        restaurantId,
-        {
-            $set: {
-                diningSettings: {
-                    isEnabled: parseBoolean(body.isEnabled, currentDiningSettings.isEnabled),
-                    maxGuests,
-                    diningType
-                }
-            }
+    // The nested diningSettings subdocument is three columns now, so a partial
+    // edit no longer has to rebuild the whole object — which is what made the
+    // Mongo version read the current values first just to avoid erasing them.
+    await prisma.foodRestaurant.update({
+        where: { id },
+        data: {
+            diningEnabled: parseBoolean(body.isEnabled, current.diningEnabled),
+            diningMaxGuests: Math.max(
+                1,
+                parseInt(body.maxGuests ?? current.diningMaxGuests ?? 6, 10) || 6
+            ),
+            diningType:
+                String(body.diningType ?? current.diningType ?? 'family-dining').trim() ||
+                'family-dining',
         },
-        {
-            new: true,
-            runValidators: true,
-            projection: [
-                'restaurantName',
-                'cuisines',
-                'location',
-                'addressLine1',
-                'addressLine2',
-                'area',
-                'city',
-                'state',
-                'pincode',
-                'landmark',
-                'ownerName',
-                'ownerEmail',
-                'ownerPhone',
-                'primaryContactNumber',
-                'accountNumber',
-                'ifscCode',
-                'accountHolderName',
-                'accountType',
-                'upiId',
-                'upiQrImage',
-                'pureVegRestaurant',
-                'profileImage',
-                'coverImages',
-                'menuImages',
-                'openingTime',
-                'closingTime',
-                'openDays',
-                'estimatedDeliveryTime',
-                'estimatedDeliveryTimeMinutes',
-                'diningSettings',
-                'isAcceptingOrders',
-                'outsideHoursOverride',
-                'status',
-                'createdAt',
-                'updatedAt'
-            ].join(' ')
-        }
-    ).lean();
+    });
 
-    // Sync with FoodDiningRestaurant for public visibility (Dining Section)
-    try {
-        const { FoodDiningRestaurant } = await import('../../dining/models/diningRestaurant.model.js');
-        const { FoodDiningCategory } = await import('../../dining/models/diningCategory.model.js');
-
-        const isEnabled = parseBoolean(body.isEnabled, currentDiningSettings.isEnabled);
-
-        let primaryCategoryId = null;
-        if (diningType) {
-            // Find category by slug (diningType) to link correctly
-            const category = await FoodDiningCategory.findOne({ slug: diningType }).select('_id').lean();
-            if (category) {
-                primaryCategoryId = category._id;
-            }
-        }
-
-        await FoodDiningRestaurant.findOneAndUpdate(
-            { restaurantId },
-            {
-                $set: {
-                    isEnabled,
-                    maxGuests,
-                    primaryCategoryId,
-                    categoryIds: primaryCategoryId ? [primaryCategoryId] : [],
-                    pureVegRestaurant: doc.pureVegRestaurant === true
-                }
-            },
-            { upsert: true }
-        );
-    } catch (syncError) {
-        console.error('[DINING_SYNC_ERROR] Failed to sync with FoodDiningRestaurant:', syncError);
-    }
-
-    return toRestaurantProfile(doc);
-
+    const doc = await prisma.foodRestaurant.findUnique({ where: { id }, select: PROFILE_SELECT });
+    const profile = toRestaurantProfile(toRestaurant(doc));
+    if (!profile) return null;
+    return enrichRestaurantProfileWithAvailability(profile, doc);
 };
 
 export const updateRestaurantProfile = async (restaurantId, body = {}) => {
-    if (!restaurantId) {
+    if (!isId(restaurantId)) {
         throw new ValidationError('Invalid restaurant id');
     }
 
-    const currentRestaurant = await FoodRestaurant.findById(restaurantId)
-        .select(
-            'restaurantName restaurantNameNormalized ownerPhone ownerPhoneDigits ownerPhoneLast10 primaryContactNumber status location'
-        )
-        .lean();
+    const currentRestaurant = await prisma.foodRestaurant.findUnique({
+        where: { id: String(restaurantId) },
+        select: {
+            id: true, restaurantName: true, restaurantNameNormalized: true,
+            ownerPhone: true, ownerPhoneDigits: true, ownerPhoneLast10: true,
+            primaryContactNumber: true, status: true,
+            latitude: true, longitude: true,
+        },
+    });
 
     if (!currentRestaurant) {
         throw new ValidationError('Restaurant not found');
@@ -1344,9 +1207,7 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
 
     if (body.zoneId !== undefined && body.location === undefined) {
         const zoneId = String(body.zoneId || '').trim();
-        update.zoneId = zoneId && mongoose.Types.ObjectId.isValid(zoneId)
-            ? new mongoose.Types.ObjectId(zoneId)
-            : undefined;
+        update.zoneId = isId(zoneId) ? zoneId : null;
     }
 
     // Bank + UPI fields (Explore -> Update Bank Details page)
@@ -1416,26 +1277,23 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
             throw new ValidationError('Selected location is outside the service zone. Please pin inside an active zone.');
         }
 
-        const pendingZoneId = new mongoose.Types.ObjectId(String(matchedZone._id));
-        const isLocationChangeRequest = hasPublishedRestaurantLocation(currentRestaurant);
+        const pendingZoneId = String(matchedZone.id);
 
-        if (isLocationChangeRequest) {
-            update.pendingLocation = nextLocation;
+        // Moving an already-published restaurant is a request, not an edit: the
+        // live location keeps serving orders until an admin approves the new one.
+        if (hasPublishedRestaurantLocation(currentRestaurant)) {
+            Object.assign(update, fromRestaurantLocation(nextLocation, { pending: true }));
             update.pendingZoneId = pendingZoneId;
             update.locationUpdateStatus = 'pending';
             update.locationUpdateRequestedAt = new Date();
             update.locationRejectionReason = '';
             update.locationUpdateReviewedAt = null;
         } else {
-            update.location = nextLocation;
+            // First time setting a location — nothing to protect, so it goes live.
+            // fromRestaurantLocation writes the address columns too, which the
+            // Mongo version had to copy across one field at a time.
+            Object.assign(update, fromRestaurantLocation(nextLocation));
             update.zoneId = pendingZoneId;
-            update.addressLine1 = nextLocation.addressLine1;
-            update.addressLine2 = nextLocation.addressLine2;
-            update.area = nextLocation.area;
-            update.city = nextLocation.city;
-            update.state = nextLocation.state;
-            update.pincode = nextLocation.pincode;
-            update.landmark = nextLocation.landmark;
             update.locationUpdateStatus = 'none';
         }
     }
@@ -1592,139 +1450,83 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
     ]);
 
     const requiresReview = Object.keys(update).some((field) => reviewRequiredFields.has(field));
-    const isLocationChangeRequest = update.locationUpdateStatus === 'pending' && Boolean(update.pendingLocation);
-
-    if (requiresReview) {
-        update.status = 'pending';
-    }
-
-    const updateOps = requiresReview
-        ? {
-            $set: update,
-            $unset: {
-                approvedAt: 1,
-                rejectedAt: 1,
-                rejectionReason: 1
-            }
-        }
-        : {
-            $set: update
-        };
+    const isLocationChangeRequest =
+        update.locationUpdateStatus === 'pending' && update.pendingLatitude !== undefined;
 
     try {
-        const doc = await FoodRestaurant.findByIdAndUpdate(
-            restaurantId,
-            updateOps,
-            {
-                new: true,
-                runValidators: true,
-                projection: [
-                    'restaurantName',
-                    'cuisines',
-                    'location',
-                    'addressLine1',
-                    'addressLine2',
-                    'area',
-                    'city',
-                    'state',
-                    'pincode',
-                    'landmark',
-                    'ownerName',
-                    'ownerEmail',
-                    'ownerPhone',
-                    'primaryContactNumber',
-                    'pureVegRestaurant',
-                    'profileImage',
-                    'coverImages',
-                    'menuImages',
-                    'openingTime',
-                    'closingTime',
-                    'openDays',
-                    'status',
-                    'createdAt',
-                    'updatedAt',
-                    'panNumber',
-                    'nameOnPan',
-                    'panImage',
-                    'gstRegistered',
-                    'gstNumber',
-                    'gstLegalName',
-                    'gstAddress',
-                    'gstImage',
-                    'fssaiNumber',
-                    'fssaiExpiry',
-                    'fssaiImage',
-                    'accountNumber',
-                    'ifscCode',
-                    'accountHolderName',
-                    'accountType',
-                    'upiId',
-                    'upiQrImage',
-                    'estimatedDeliveryTime',
-                    'estimatedDeliveryTimeMinutes',
-                    'zoneId',
-                    'pendingLocation',
-                    'pendingZoneId',
-                    'locationUpdateStatus',
-                    'locationUpdateRequestedAt',
-                    'locationUpdateReviewedAt',
-                    'locationRejectionReason'
-                ].join(' ')
-            }
-        ).lean();
+        const doc = await prisma.foodRestaurant.update({
+            where: { id: String(restaurantId) },
+            // A review-triggering edit clears the previous decision in the same
+            // statement, so the restaurant can never sit in `pending` still
+            // carrying the approvedAt from its last approval.
+            data: requiresReview ? { ...update, ...BACK_TO_REVIEW } : update,
+            select: PROFILE_SELECT,
+        });
 
         if (requiresReview && currentRestaurant.status !== 'pending') {
-            const restaurantNameForNotification =
-                update.restaurantName || currentRestaurant.restaurantName || doc?.restaurantName;
-            void notifyAdminsAboutRestaurantProfileReview(restaurantId, restaurantNameForNotification);
+            void notifyAdminsAboutRestaurantProfileReview(
+                restaurantId,
+                update.restaurantName || currentRestaurant.restaurantName || doc?.restaurantName,
+            );
         }
 
         if (isLocationChangeRequest) {
             void notifyAdminsAboutRestaurantLocationUpdate(
                 restaurantId,
-                currentRestaurant.restaurantName || doc?.restaurantName
+                currentRestaurant.restaurantName || doc?.restaurantName,
             );
         }
 
-        return toRestaurantProfile(doc);
+        return toRestaurantProfile(toRestaurant(doc));
     } catch (err) {
-        if (err && err.code === 11000) {
+        if (err?.code === 'P2002') {
             throw new ValidationError('A restaurant with this name and phone already exists');
         }
         throw err;
     }
 };
 
-export const uploadRestaurantProfileImage = async (restaurantId, file) => {
-    if (!restaurantId) throw new ValidationError('Invalid restaurant id');
-    if (!file?.buffer) throw new ValidationError('Image file is required');
+/**
+ * Editing a photo puts the restaurant back in the admin review queue, and the
+ * previous decision has to go with it — otherwise it sits in `pending` still
+ * carrying an approvedAt, and the admin screen shows it as both.
+ */
+const BACK_TO_REVIEW = {
+    status: 'pending',
+    approvedAt: null,
+    rejectedAt: null,
+    rejectionReason: '',
+};
 
-    const currentRestaurant = await FoodRestaurant.findById(restaurantId)
-        .select('restaurantName status')
-        .lean();
-    if (!currentRestaurant) throw new ValidationError('Restaurant not found');
+/** Merge new urls into an existing list, keeping order and dropping repeats. */
+const mergeImageUrls = (existing = [], added = [], cap = 20) => {
+    const urls = (existing || []).map((image) => toUrl(image)).filter(Boolean);
+    for (const url of added) {
+        if (!urls.includes(url)) urls.push(url);
+    }
+    return urls.slice(0, cap);
+};
+
+export const uploadRestaurantProfileImage = async (restaurantId, file) => {
+    if (!isId(restaurantId)) throw new ValidationError('Invalid restaurant id');
+    if (!file?.buffer) throw new ValidationError('Image file is required');
+    const id = String(restaurantId);
+
+    const current = await prisma.foodRestaurant.findUnique({
+        where: { id },
+        select: { restaurantName: true, status: true },
+    });
+    if (!current) throw new ValidationError('Restaurant not found');
 
     const url = await uploadImageBuffer(file.buffer, 'food/restaurants/profile');
-    const doc = await FoodRestaurant.findByIdAndUpdate(
-        restaurantId,
-        {
-            $set: {
-                profileImage: url,
-                status: 'pending'
-            },
-            $unset: {
-                approvedAt: 1,
-                rejectedAt: 1,
-                rejectionReason: 1
-            }
-        },
-        { new: true, projection: 'profileImage coverImages restaurantName cuisines location menuImages addressLine1 addressLine2 area city state pincode landmark ownerName ownerEmail ownerPhone primaryContactNumber pureVegRestaurant openingTime closingTime openDays status createdAt updatedAt' }
-    ).lean();
+    await prisma.foodRestaurant.update({
+        where: { id },
+        data: { profileImage: url, ...BACK_TO_REVIEW },
+    });
 
-    if (!doc) throw new ValidationError('Restaurant not found');
-
-    if (currentRestaurant.status !== 'pending') {
-        void notifyAdminsAboutRestaurantProfileReview(restaurantId, currentRestaurant.restaurantName || doc.restaurantName);
+    // Only tell the admins if this actually re-opened a settled decision.
+    if (current.status !== 'pending') {
+        void notifyAdminsAboutRestaurantProfileReview(id, current.restaurantName || '');
     }
 
     return { profileImage: { url } };
@@ -1737,461 +1539,330 @@ export const uploadRestaurantMenuImage = async (file) => {
 };
 
 export const uploadRestaurantCoverImages = async (restaurantId, files = []) => {
-    if (!restaurantId) throw new ValidationError('Invalid restaurant id');
-    if (!Array.isArray(files) || files.length === 0) {
-        throw new ValidationError('At least one image file is required');
-    }
+    if (!isId(restaurantId)) throw new ValidationError('Invalid restaurant id');
+    const id = String(restaurantId);
 
-    const validFiles = files.filter((file) => file?.buffer);
+    const validFiles = (Array.isArray(files) ? files : []).filter((file) => file?.buffer);
     if (validFiles.length === 0) {
         throw new ValidationError('At least one valid image file is required');
     }
 
-    const currentRestaurant = await FoodRestaurant.findById(restaurantId)
-        .select('restaurantName status profileImage coverImages')
-        .lean();
-    if (!currentRestaurant) throw new ValidationError('Restaurant not found');
+    const current = await prisma.foodRestaurant.findUnique({
+        where: { id },
+        select: { restaurantName: true, status: true, profileImage: true, coverImages: true },
+    });
+    if (!current) throw new ValidationError('Restaurant not found');
 
     const uploadedUrls = await Promise.all(
         validFiles.slice(0, 20).map((file) => uploadImageBuffer(file.buffer, 'food/restaurants/cover'))
     );
-    const existingCoverImages = Array.isArray(currentRestaurant.coverImages)
-        ? currentRestaurant.coverImages.map((image) => toUrl(image)).filter(Boolean)
-        : [];
-    const nextCoverImages = [...existingCoverImages];
 
-    uploadedUrls.forEach((url) => {
-        if (!nextCoverImages.includes(url)) nextCoverImages.push(url);
-    });
-
-    const update = {
-        coverImages: nextCoverImages.slice(0, 20),
-        status: 'pending'
+    const data = {
+        coverImages: mergeImageUrls(current.coverImages, uploadedUrls),
+        ...BACK_TO_REVIEW,
     };
-
-    if (!toUrl(currentRestaurant.profileImage) && uploadedUrls[0]) {
-        update.profileImage = uploadedUrls[0];
+    // A restaurant with no profile picture gets its first cover as one, so the
+    // listing card is never blank.
+    if (!toUrl(current.profileImage) && uploadedUrls[0]) {
+        data.profileImage = uploadedUrls[0];
     }
 
-    await FoodRestaurant.findByIdAndUpdate(
-        restaurantId,
-        {
-            $set: update,
-            $unset: {
-                approvedAt: 1,
-                rejectedAt: 1,
-                rejectionReason: 1
-            }
-        },
-        { new: true }
-    ).lean();
+    await prisma.foodRestaurant.update({ where: { id }, data });
 
-    if (currentRestaurant.status !== 'pending') {
-        void notifyAdminsAboutRestaurantProfileReview(restaurantId, currentRestaurant.restaurantName || '');
+    if (current.status !== 'pending') {
+        void notifyAdminsAboutRestaurantProfileReview(id, current.restaurantName || '');
     }
 
     return {
         coverImages: uploadedUrls.map((url) => ({ url, publicId: null })),
-        profileImage: update.profileImage ? { url: update.profileImage } : undefined
+        profileImage: data.profileImage ? { url: data.profileImage } : undefined,
     };
 };
 
 export const uploadRestaurantMenuImages = async (restaurantId, files = []) => {
-    if (!restaurantId) throw new ValidationError('Invalid restaurant id');
-    if (!Array.isArray(files) || files.length === 0) {
-        throw new ValidationError('At least one image file is required');
-    }
+    if (!isId(restaurantId)) throw new ValidationError('Invalid restaurant id');
+    const id = String(restaurantId);
 
-    const validFiles = files.filter((file) => file?.buffer);
+    const validFiles = (Array.isArray(files) ? files : []).filter((file) => file?.buffer);
     if (validFiles.length === 0) {
         throw new ValidationError('At least one valid image file is required');
     }
 
-    const currentRestaurant = await FoodRestaurant.findById(restaurantId)
-        .select('restaurantName status menuImages')
-        .lean();
-    if (!currentRestaurant) throw new ValidationError('Restaurant not found');
+    const current = await prisma.foodRestaurant.findUnique({
+        where: { id },
+        select: { restaurantName: true, status: true, menuImages: true },
+    });
+    if (!current) throw new ValidationError('Restaurant not found');
 
     const uploadedUrls = await Promise.all(
         validFiles.slice(0, 20).map((file) => uploadImageBuffer(file.buffer, 'food/restaurants/menu'))
     );
-    const existingMenuImages = Array.isArray(currentRestaurant.menuImages)
-        ? currentRestaurant.menuImages.map((image) => toUrl(image)).filter(Boolean)
-        : [];
-    const nextMenuImages = [...existingMenuImages];
 
-    uploadedUrls.forEach((url) => {
-        if (!nextMenuImages.includes(url)) nextMenuImages.push(url);
+    await prisma.foodRestaurant.update({
+        where: { id },
+        data: { menuImages: mergeImageUrls(current.menuImages, uploadedUrls), ...BACK_TO_REVIEW },
     });
 
-    await FoodRestaurant.findByIdAndUpdate(
-        restaurantId,
-        {
-            $set: {
-                menuImages: nextMenuImages.slice(0, 20),
-                status: 'pending'
-            },
-            $unset: {
-                approvedAt: 1,
-                rejectedAt: 1,
-                rejectionReason: 1
-            }
-        },
-        { new: true }
-    ).lean();
-
-    if (currentRestaurant.status !== 'pending') {
-        void notifyAdminsAboutRestaurantProfileReview(restaurantId, currentRestaurant.restaurantName || '');
+    if (current.status !== 'pending') {
+        void notifyAdminsAboutRestaurantProfileReview(id, current.restaurantName || '');
     }
 
-    return {
-        menuImages: uploadedUrls.map((url) => ({ url, publicId: null }))
-    };
+    return { menuImages: uploadedUrls.map((url) => ({ url, publicId: null })) };
 };
+
+/** Restaurant columns the public listing card renders. */
+const PUBLIC_CARD_SELECT = {
+    id: true, restaurantName: true, area: true, city: true, cuisines: true,
+    profileImage: true, coverImages: true, menuImages: true,
+    estimatedDeliveryTime: true, estimatedDeliveryTimeMinutes: true,
+    offer: true, featuredDish: true, featuredPrice: true,
+    rating: true, totalRatings: true, isAcceptingOrders: true, status: true,
+    pureVegRestaurant: true, createdAt: true,
+    openingTime: true, closingTime: true, openDays: true,
+    latitude: true, longitude: true, formattedAddress: true,
+    addressLine1: true, addressLine2: true, state: true, pincode: true, landmark: true,
+};
+
+/** Up to ten recommended dishes per restaurant, in one query for the whole page. */
+const attachRecommendedItems = async (restaurants) => {
+    const ids = restaurants.map((r) => r.id).filter(Boolean);
+    if (!ids.length) return restaurants.map((r) => ({ ...r, recommendedItems: [] }));
+
+    const items = await prisma.foodItem.findMany({
+        where: { restaurantId: { in: ids }, isRecommended: true, approvalStatus: 'approved' },
+        select: { id: true, restaurantId: true, name: true, price: true, image: true },
+        orderBy: { createdAt: 'desc' },
+    });
+
+    const byRestaurant = new Map();
+    for (const item of items) {
+        const list = byRestaurant.get(item.restaurantId) || [];
+        if (list.length < 10) {
+            // price is Decimal, so it would otherwise reach the client as a string.
+            list.push({ id: item.id, name: item.name, price: Number(item.price), image: item.image });
+            byRestaurant.set(item.restaurantId, list);
+        }
+    }
+
+    return restaurants.map((r) => ({ ...r, recommendedItems: byRestaurant.get(r.id) || [] }));
+};
+
+/** The card shape the user app reads. */
+const toPublicCard = (r) => ({
+    ...toRestaurant(r),
+    restaurantId: r.id,
+    id: r.id,
+    // The app reads `name`, and checks `profileImage.url`.
+    name: r.restaurantName || '',
+    rating: normalizeRatingValue(r.rating),
+    totalRatings: normalizeTotalRatingsValue(r.totalRatings),
+    profileImage: r.profileImage ? { url: r.profileImage } : null,
+    coverImages: Array.isArray(r.coverImages) ? r.coverImages : [],
+    menuImages: Array.isArray(r.menuImages) ? r.menuImages : [],
+    openingTime: r.openingTime || null,
+    closingTime: r.closingTime || null,
+    openDays: Array.isArray(r.openDays) ? r.openDays : [],
+});
 
 export const listApprovedRestaurants = async (query = {}) => {
     const limit = Math.min(Math.max(parseInt(query.limit, 10) || 100, 1), 1000);
     const page = Math.max(parseInt(query.page, 10) || 1, 1);
     const skip = (page - 1) * limit;
 
-    const filter = { status: 'approved' };
+    const AND = [];
+    const contains = (value) => ({
+        contains: String(value).trim().slice(0, 80),
+        mode: 'insensitive',
+    });
 
-    if (query.city && String(query.city).trim()) {
-        const city = String(query.city).trim().slice(0, 80);
-        const rx = { $regex: escapeRegex(city), $options: 'i' };
-        filter.$and = [...(filter.$and || []), { $or: [{ 'location.city': rx }, { city: rx }] }];
-    }
-    if (query.area && String(query.area).trim()) {
-        const area = String(query.area).trim().slice(0, 80);
-        const rx = { $regex: escapeRegex(area), $options: 'i' };
-        filter.$and = [...(filter.$and || []), { $or: [{ 'location.area': rx }, { area: rx }] }];
-    }
+    if (query.city && String(query.city).trim()) AND.push({ city: contains(query.city) });
+    if (query.area && String(query.area).trim()) AND.push({ area: contains(query.area) });
+
     if (query.cuisine && String(query.cuisine).trim()) {
-        const cuisine = normalizeCuisine(query.cuisine);
-        // cuisines is an array of strings.
-        filter.cuisines = { $in: [new RegExp(escapeRegex(cuisine), 'i')] };
+        const cuisineIds = await restaurantIdsMatchingCuisine(normalizeCuisine(query.cuisine));
+        // No match means no results, not "ignore the filter".
+        if (!cuisineIds.length) return { restaurants: [], total: 0, page, limit };
+        AND.push({ id: { in: cuisineIds } });
     }
+
     if (query.hasOffers === 'true') {
         const activeOfferFilter = buildActivePublicOfferFilter();
-        const [hasGlobalOffers, selectedOffers] = await Promise.all([
-            FoodOffer.exists({
-                ...activeOfferFilter,
-                restaurantScope: 'all'
+        const [globalOffer, selectedOffers] = await Promise.all([
+            prisma.foodOffer.findFirst({
+                where: { ...activeOfferFilter, restaurantScope: 'all' },
+                select: { id: true },
             }),
-            FoodOffer.find({
-                ...activeOfferFilter,
-                restaurantScope: 'selected'
-            })
-                .select('restaurantId restaurantIds')
-                .lean()
+            prisma.foodOffer.findMany({
+                where: { ...activeOfferFilter, restaurantScope: 'selected' },
+                select: { restaurantId: true, restaurantIds: true },
+            }),
         ]);
 
-        if (!hasGlobalOffers) {
-            const eligibleRestaurantIds = Array.from(
-                new Set(
-                    selectedOffers.flatMap((offer) => [
-                        ...(Array.isArray(offer.restaurantIds) ? offer.restaurantIds : []),
-                        offer.restaurantId
-                    ].map((id) => String(id || '')).filter((id) => mongoose.Types.ObjectId.isValid(id)))
-                )
-            ).map((id) => new mongoose.Types.ObjectId(id));
-
-            const hasOfferCondition = [
-                { offer: { $exists: true, $nin: [null, ''] } }
+        // A live all-restaurants offer means everyone qualifies, so the filter
+        // adds nothing and is skipped entirely.
+        if (!globalOffer) {
+            const eligibleIds = [
+                ...new Set(
+                    selectedOffers
+                        .flatMap((offer) => [...(offer.restaurantIds || []), offer.restaurantId])
+                        .map((id) => String(id || ''))
+                        .filter(isId)
+                ),
             ];
 
-            if (eligibleRestaurantIds.length) {
-                hasOfferCondition.push({ _id: { $in: eligibleRestaurantIds } });
-            }
-
-            if (Array.isArray(filter.$or) && filter.$or.length) {
-                filter.$and = [...(filter.$and || []), { $or: filter.$or }];
-                delete filter.$or;
-            }
-
-            filter.$and = [...(filter.$and || []), { $or: hasOfferCondition }];
+            AND.push({
+                OR: [
+                    // A restaurant's own banner text counts as an offer, as before.
+                    { offer: { not: null, notIn: [''] } },
+                    ...(eligibleIds.length ? [{ id: { in: eligibleIds } }] : []),
+                ],
+            });
         }
     }
+
     const minRating = toFiniteNumber(query.minRating);
-    if (minRating !== null) {
-        filter.rating = { $gte: Math.max(0, Math.min(5, minRating)) };
-    }
+    if (minRating !== null) AND.push({ rating: { gte: Math.max(0, Math.min(5, minRating)) } });
+
     const maxDeliveryTime = toFiniteNumber(query.maxDeliveryTime);
     if (maxDeliveryTime !== null) {
-        filter.estimatedDeliveryTimeMinutes = { $lte: Math.max(0, Math.round(maxDeliveryTime)) };
+        AND.push({ estimatedDeliveryTimeMinutes: { lte: Math.max(0, Math.round(maxDeliveryTime)) } });
     }
+
     const maxPrice = toFiniteNumber(query.maxPrice);
-    if (maxPrice !== null) {
-        filter.featuredPrice = { $lte: Math.max(0, maxPrice) };
-    }
-    if (query.topRated === 'true') {
-        filter.rating = { ...(filter.rating || {}), $gte: 4.5 };
-    }
-    if (query.trusted === 'true') {
-        filter.totalRatings = { ...(filter.totalRatings || {}), $gte: 100 };
-    }
+    if (maxPrice !== null) AND.push({ featuredPrice: { lte: Math.max(0, maxPrice) } });
+
+    if (query.topRated === 'true') AND.push({ rating: { gte: 4.5 } });
+    if (query.trusted === 'true') AND.push({ totalRatings: { gte: 100 } });
+
     if (query.search && String(query.search).trim()) {
         const raw = String(query.search).trim().slice(0, 80);
-        const term = escapeRegex(raw);
-        if (term.length >= 2) {
-            filter.$or = [
-                { restaurantName: { $regex: term, $options: 'i' } },
-                { area: { $regex: term, $options: 'i' } },
-                { city: { $regex: term, $options: 'i' } },
-                { 'location.area': { $regex: term, $options: 'i' } },
-                { 'location.city': { $regex: term, $options: 'i' } },
-                { cuisines: { $in: [new RegExp(term, 'i')] } }
-            ];
+        if (raw.length >= 2) {
+            const cuisineIds = await restaurantIdsMatchingCuisine(raw);
+            AND.push({
+                OR: [
+                    { restaurantName: contains(raw) },
+                    { area: contains(raw) },
+                    { city: contains(raw) },
+                    ...(cuisineIds.length ? [{ id: { in: cuisineIds } }] : []),
+                ],
+            });
         }
     }
 
-    // Strict zone filter for user listing:
-    // if zoneId is provided, return only restaurants mapped to that zone.
+    // A zone filter is strict: only restaurants mapped to that zone.
     const zoneIdRaw = String(query.zoneId || '').trim();
-    if (zoneIdRaw && mongoose.Types.ObjectId.isValid(zoneIdRaw)) {
-        filter.zoneId = new mongoose.Types.ObjectId(zoneIdRaw);
-    }
+    if (isId(zoneIdRaw)) AND.push({ zoneId: zoneIdRaw });
+
+    const where = { status: 'approved', ...(AND.length ? { AND } : {}) };
 
     const lat = toFiniteNumber(query.lat);
     const lng = toFiniteNumber(query.lng);
-    // Accept both radiusKm (preferred) and maxDistance (legacy frontend param).
+    // radiusKm is preferred; maxDistance is the legacy frontend param.
     const radiusKm = toFiniteNumber(query.radiusKm) ?? toFiniteNumber(query.maxDistance);
     const sortBy = parseSortBy(query.sortBy);
 
-    const projection = {
-        restaurantName: 1,
-        area: 1,
-        city: 1,
-        cuisines: 1,
-        profileImage: 1,
-        coverImages: 1,
-        menuImages: 1,
-        estimatedDeliveryTime: 1,
-        estimatedDeliveryTimeMinutes: 1,
-        offer: 1,
-        featuredDish: 1,
-        featuredPrice: 1,
-        rating: 1,
-        totalRatings: 1,
-        isAcceptingOrders: 1,
-        status: 1,
-        pureVegRestaurant: 1,
-        createdAt: 1,
-        location: 1,
-        openingTime: 1,
-        closingTime: 1,
-        openDays: 1
-    };
+    // Geo is used only when actually asked for, so a restaurant with no
+    // coordinates yet is not silently dropped from the default listing.
+    const wantsGeo = radiusKm !== null || sortBy === 'nearest';
 
-    // Use $geoNear only when geo is explicitly needed (radius filter or nearest sorting).
-    // This avoids accidentally hiding restaurants that do not have coordinates yet.
-    const wantsGeo = (radiusKm !== null) || sortBy === 'nearest';
-    if (lat !== null && lng !== null && wantsGeo) {
-        const geoNear = {
-            $geoNear: {
-                near: { type: 'Point', coordinates: [lng, lat] },
-                distanceField: 'distanceMeters',
-                spherical: true,
-                query: filter
-            }
-        };
-        if (radiusKm !== null) {
-            geoNear.$geoNear.maxDistance = Math.max(0.1, radiusKm) * 1000;
-        }
-
-        const sortStage = (() => {
-            if (sortBy === 'rating' || sortBy === 'rating-high') return { $sort: { rating: -1, distanceMeters: 1 } };
-            if (sortBy === 'rating-low') return { $sort: { rating: 1, distanceMeters: 1 } };
-            if (sortBy === 'price-low') return { $sort: { featuredPrice: 1, distanceMeters: 1 } };
-            if (sortBy === 'price-high') return { $sort: { featuredPrice: -1, distanceMeters: 1 } };
-            if (sortBy === 'newest') return { $sort: { createdAt: -1 } };
-            if (sortBy === 'deliveryTime') return { $sort: { estimatedDeliveryTimeMinutes: 1, distanceMeters: 1 } };
-            // nearest (default)
-            return { $sort: { distanceMeters: 1 } };
-        })();
-
-        const basePipeline = [
-            geoNear,
-            {
-                $addFields: {
-                    distanceInKm: { $round: [{ $divide: ['$distanceMeters', 1000] }, 2] }
-                }
-            },
-            sortStage
-        ];
-
-        const [pageDocs, totalDocs] = await Promise.all([
-            FoodRestaurant.aggregate([
-                ...basePipeline,
-                { $project: projection },
-                { $skip: skip },
-                { $limit: limit }
-            ]),
-            FoodRestaurant.aggregate([...basePipeline, { $count: 'count' }])
-        ]);
-
-        const total = totalDocs?.[0]?.count || 0;
-        const restaurants = pageDocs || [];
-        const restaurantIds = restaurants.map(r => r._id);
-        const recommendedItemsRaw = restaurantIds.length
-            ? await FoodItem.find({
-                restaurantId: { $in: restaurantIds },
-                isRecommended: true,
-                approvalStatus: 'approved'
-            })
-                .select('restaurantId name price image')
-                .sort({ createdAt: -1 })
-                .lean()
-            : [];
-
-        const recommendedMap = recommendedItemsRaw.reduce((acc, item) => {
-            const rId = String(item.restaurantId);
-            if (!acc[rId]) acc[rId] = [];
-            if (acc[rId].length < 10) {
-                acc[rId].push({
-                    id: String(item._id),
-                    name: item.name,
-                    price: item.price,
-                    image: item.image
-                });
-            }
-            return acc;
-        }, {});
-
-        const restaurantsWithRecommended = restaurants.map(r => {
-            return {
-                ...r,
-                recommendedItems: recommendedMap[String(r._id)] || []
-            };
-        });
-        const restaurantsWithOffers = await attachPublicOffersToRestaurants(restaurantsWithRecommended);
-        const restaurantsWithTimings = await attachOutletTimingsToRestaurants(restaurantsWithOffers);
-
+    const finish = async (rows, total) => {
+        const withRecommended = await attachRecommendedItems(rows);
+        const withOffers = await attachPublicOffersToRestaurants(withRecommended);
+        const withTimings = await attachOutletTimingsToRestaurants(withOffers);
         return {
-            restaurants: restaurantsWithTimings.map((r) =>
-                normalizePublicRestaurantGeo(r, lat, lng),
-            ),
+            restaurants: withTimings.map((r) => normalizePublicRestaurantGeo(r, lat, lng)),
             total,
             page,
             limit,
         };
+    };
+
+    if (lat !== null && lng !== null && wantsGeo) {
+        // $geoNear became an indexed ST_DWithin. Postgres cannot order by a
+        // distance this query did not compute, so the neighbourhood is resolved
+        // first and the remaining filters applied to it.
+        const near = await restaurantsNearPoint(lat, lng, radiusKm);
+        if (!near.length) return { restaurants: [], total: 0, page, limit };
+
+        const distanceById = new Map(near.map((row) => [row.id, row.distanceInKm]));
+
+        // ponytail: the radius set is fetched whole and paginated in memory,
+        // because ordering by distance and by rating together cannot be pushed
+        // down. Bounded by the radius and a 2,000-row cap; if one radius ever
+        // holds more than that, this wants a materialised distance column.
+        const rows = await prisma.foodRestaurant.findMany({
+            where: { ...where, id: { in: [...distanceById.keys()] } },
+            select: PUBLIC_CARD_SELECT,
+        });
+
+        const byDistance = (a, b) =>
+            (distanceById.get(a.id) ?? Infinity) - (distanceById.get(b.id) ?? Infinity);
+
+        const sorters = {
+            rating: (a, b) => b.rating - a.rating || byDistance(a, b),
+            'rating-high': (a, b) => b.rating - a.rating || byDistance(a, b),
+            'rating-low': (a, b) => a.rating - b.rating || byDistance(a, b),
+            'price-low': (a, b) =>
+                Number(a.featuredPrice) - Number(b.featuredPrice) || byDistance(a, b),
+            'price-high': (a, b) =>
+                Number(b.featuredPrice) - Number(a.featuredPrice) || byDistance(a, b),
+            newest: (a, b) => new Date(b.createdAt) - new Date(a.createdAt),
+            deliveryTime: (a, b) =>
+                (a.estimatedDeliveryTimeMinutes ?? Infinity) -
+                    (b.estimatedDeliveryTimeMinutes ?? Infinity) || byDistance(a, b),
+        };
+
+        const sorted = rows
+            .map((r) => ({ ...toPublicCard(r), distanceInKm: distanceById.get(r.id) ?? null }))
+            .sort(sorters[sortBy] || byDistance);
+
+        return finish(sorted.slice(skip, skip + limit), sorted.length);
     }
 
-    // Non-geo path: normal query + sort.
-    const sort = (() => {
-        if (sortBy === 'rating' || sortBy === 'rating-high') return { rating: -1, createdAt: -1 };
-        if (sortBy === 'rating-low') return { rating: 1, createdAt: -1 };
-        if (sortBy === 'price-low') return { featuredPrice: 1, createdAt: -1 };
-        if (sortBy === 'price-high') return { featuredPrice: -1, createdAt: -1 };
-        if (sortBy === 'deliveryTime') return { estimatedDeliveryTimeMinutes: 1, createdAt: -1 };
-        return { createdAt: -1 };
-    })();
+    // Non-geo path: the database sorts and paginates.
+    const orderBy =
+        {
+            rating: [{ rating: 'desc' }, { createdAt: 'desc' }],
+            'rating-high': [{ rating: 'desc' }, { createdAt: 'desc' }],
+            'rating-low': [{ rating: 'asc' }, { createdAt: 'desc' }],
+            'price-low': [{ featuredPrice: 'asc' }, { createdAt: 'desc' }],
+            'price-high': [{ featuredPrice: 'desc' }, { createdAt: 'desc' }],
+            deliveryTime: [{ estimatedDeliveryTimeMinutes: 'asc' }, { createdAt: 'desc' }],
+        }[sortBy] || [{ createdAt: 'desc' }];
 
-    const [restaurantsRaw, total] = await Promise.all([
-        FoodRestaurant.find(filter)
-            .select(Object.keys(projection).join(' '))
-            .sort(sort)
-            .skip(skip)
-            .limit(limit)
-            .lean(),
-        FoodRestaurant.countDocuments(filter)
+    const [rows, total] = await Promise.all([
+        prisma.foodRestaurant.findMany({
+            where,
+            select: PUBLIC_CARD_SELECT,
+            orderBy,
+            skip,
+            take: limit,
+        }),
+        prisma.foodRestaurant.count({ where }),
     ]);
 
-    const restaurants = (restaurantsRaw || []).map((r) => ({
-        ...r,
-        // Frontend user app expects `name` and often checks `profileImage.url`
-        restaurantId: r._id,
-        id: r._id,
-        name: r.restaurantName || '',
-        rating: normalizeRatingValue(r.rating),
-        totalRatings: normalizeTotalRatingsValue(r.totalRatings),
-        profileImage: r.profileImage ? { url: r.profileImage } : null,
-        coverImages: Array.isArray(r.coverImages) ? r.coverImages : [],
-        openingTime: r.openingTime || null,
-        closingTime: r.closingTime || null,
-        openDays: Array.isArray(r.openDays) ? r.openDays : [],
-        // Keep menuImages as an array for fallbacks; allow both string and {url} on client.
-        menuImages: Array.isArray(r.menuImages) ? r.menuImages : []
-    }));
-
-    const restaurantIds = restaurants.map(r => r._id);
-    const recommendedItemsRaw = restaurantIds.length
-        ? await FoodItem.find({
-            restaurantId: { $in: restaurantIds },
-            isRecommended: true,
-            approvalStatus: 'approved'
-        })
-            .select('restaurantId name price image')
-            .sort({ createdAt: -1 })
-            .lean()
-        : [];
-
-    const recommendedMap = recommendedItemsRaw.reduce((acc, item) => {
-        const rId = String(item.restaurantId);
-        if (!acc[rId]) acc[rId] = [];
-        if (acc[rId].length < 10) {
-            acc[rId].push({
-                id: String(item._id),
-                name: item.name,
-                price: item.price,
-                image: item.image
-            });
-        }
-        return acc;
-    }, {});
-
-    const restaurantsWithRecommended = restaurants.map(r => {
-        return {
-            ...r,
-            recommendedItems: recommendedMap[String(r._id)] || []
-        };
-    });
-    const restaurantsWithOffers = await attachPublicOffersToRestaurants(restaurantsWithRecommended);
-    const restaurantsWithTimings = await attachOutletTimingsToRestaurants(restaurantsWithOffers);
-
-    return {
-        restaurants: restaurantsWithTimings.map((r) =>
-            normalizePublicRestaurantGeo(r, lat, lng),
-        ),
-        total,
-        page,
-        limit,
-    };
+    return finish(rows.map(toPublicCard), total);
 };
 
 export const getApprovedRestaurantByIdOrSlug = async (idOrSlug) => {
     const value = String(idOrSlug || '').trim();
     if (!value) return null;
 
-    // ObjectId path
-    if (/^[0-9a-fA-F]{24}$/.test(value)) {
-        const doc = await FoodRestaurant.findOne({ _id: value, status: 'approved' }).lean();
-        if (!doc) return null;
-        const [withTimings] = await attachOutletTimingsToRestaurants([
-            normalizePublicRestaurantGeo(
-                stripPendingLocationFromPublicRestaurant({
-                    ...doc,
-                    rating: normalizeRatingValue(doc.rating),
-                    totalRatings: normalizeTotalRatingsValue(doc.totalRatings),
-                }),
-            ),
-        ]);
-        return withTimings;
-    }
+    // Either an id or a slug; the slug matches on the normalised name column,
+    // which is indexed, rather than lowercasing the name at query time.
+    const where = isId(value)
+        ? { id: value, status: 'approved' }
+        : { restaurantNameNormalized: normalizeName(value), status: 'approved' };
 
-    // Slug path: use normalized field for index-friendly exact match.
-    const restaurantNameNormalized = normalizeName(value);
-    if (!restaurantNameNormalized) return null;
+    if (!isId(value) && !where.restaurantNameNormalized) return null;
 
-    const doc = await FoodRestaurant.findOne({
-        status: 'approved',
-        restaurantNameNormalized
-    }).lean();
+    const doc = await prisma.foodRestaurant.findFirst({ where });
     if (!doc) return null;
+
     const [withTimings] = await attachOutletTimingsToRestaurants([
         normalizePublicRestaurantGeo(
             stripPendingLocationFromPublicRestaurant({
-                ...doc,
+                ...toRestaurant(doc),
                 rating: normalizeRatingValue(doc.rating),
                 totalRatings: normalizeTotalRatingsValue(doc.totalRatings),
             }),
@@ -2205,126 +1876,131 @@ export const listPublicOffers = async (query = {}) => {
     const now = new Date();
     const filter = buildActivePublicOfferFilter(now);
 
-    // If restaurantId is provided, filter for global (all) or specific restaurant coupons
-    if (restaurantId && mongoose.Types.ObjectId.isValid(restaurantId)) {
-        filter.$and.push({
-            $or: [
+    // Global coupons, or ones naming this restaurant.
+    if (isId(restaurantId)) {
+        filter.AND.push({
+            OR: [
                 { restaurantScope: 'all' },
-                { 
-                    $and: [
-                        { restaurantScope: 'selected' },
-                        {
-                            $or: [
-                                { restaurantIds: new mongoose.Types.ObjectId(restaurantId) },
-                                { restaurantId: new mongoose.Types.ObjectId(restaurantId) }
-                            ]
-                        }
-                    ]
-                }
-            ]
+                {
+                    restaurantScope: 'selected',
+                    OR: [
+                        { restaurantIds: { has: String(restaurantId) } },
+                        { restaurantId: String(restaurantId) },
+                    ],
+                },
+            ],
         });
     }
 
-    // If userId is provided, filter out first-time only coupons if user already has orders
-    if (userId && mongoose.Types.ObjectId.isValid(userId)) {
-        const orderCount = await FoodOrder.countDocuments({ userId: new mongoose.Types.ObjectId(userId) });
+    // A returning customer does not see first-order-only coupons.
+    if (isId(userId)) {
+        const orderCount = await prisma.foodOrder.count({ where: { userId: String(userId) } });
         if (orderCount > 0) {
-            filter.$and.push({
-                customerScope: { $ne: 'first-time' },
-                isFirstOrderOnly: { $ne: true }
-            });
+            // The enum's Prisma name is first_time; 'first-time' is its @map.
+            filter.AND.push({ customerScope: { not: 'first_time' }, isFirstOrderOnly: false });
         }
     }
 
-    // If subtotal is provided, filter by minOrderValue
     if (subtotal !== undefined && subtotal !== null && subtotal !== '' && !isNaN(Number(subtotal))) {
         const numericSubtotal = Number(subtotal);
         if (numericSubtotal > 0) {
-            filter.$and.push({
-                $or: [
-                    { minOrderValue: { $exists: false } },
-                    { minOrderValue: null },
-                    { minOrderValue: { $lte: numericSubtotal } }
-                ]
-            });
+            filter.AND.push({ OR: [{ minOrderValue: null }, { minOrderValue: { lte: numericSubtotal } }] });
         }
     }
 
-    const list = await FoodOffer.find(filter)
-        .sort({ createdAt: -1 })
-        .populate({ path: 'restaurantId', select: 'restaurantName restaurantNameNormalized profileImage estimatedDeliveryTime rating' })
-        .populate({ path: 'restaurantIds', select: 'restaurantName restaurantNameNormalized profileImage estimatedDeliveryTime rating' })
-        .lean();
+    const list = await prisma.foodOffer.findMany({
+        where: filter,
+        orderBy: { createdAt: 'desc' },
+    });
+
+    // restaurantIds is a plain array column, so the second .populate() has no
+    // relation to walk. Every named restaurant across every offer is fetched
+    // once here instead.
+    const namedIds = [
+        ...new Set(
+            list
+                .flatMap((offer) => [...(offer.restaurantIds || []), offer.restaurantId])
+                .map((id) => String(id || ''))
+                .filter(isId)
+        ),
+    ];
+    const namedRestaurants = namedIds.length
+        ? await prisma.foodRestaurant.findMany({
+            where: { id: { in: namedIds } },
+            select: {
+                id: true, restaurantName: true, restaurantNameNormalized: true,
+                profileImage: true, estimatedDeliveryTime: true, rating: true,
+            },
+        })
+        : [];
+    const restaurantById = new Map(namedRestaurants.map((r) => [r.id, r]));
 
     let allOffers = list.map((o) => {
-        const selectedRestaurants = Array.isArray(o.restaurantIds) && o.restaurantIds.length > 0
-            ? o.restaurantIds
-            : (o.restaurantId ? [o.restaurantId] : []);
-        const restaurant = selectedRestaurants.find((item) => String(item?._id || item) === String(restaurantId || ''))
-            || selectedRestaurants[0]
-            || null;
-        const restaurantIds = selectedRestaurants.map((item) => String(item?._id || item)).filter(Boolean);
-        const restaurantSlug = restaurant?.restaurantNameNormalized || undefined;
+        const selectedIds = (o.restaurantIds || []).length
+            ? o.restaurantIds.map(String)
+            : o.restaurantId ? [String(o.restaurantId)] : [];
+        const selectedRestaurants = selectedIds.map((id) => restaurantById.get(id)).filter(Boolean);
+
+        // Prefer the restaurant the caller asked about, so its own name and
+        // rating appear on the card rather than an arbitrary other outlet's.
+        const restaurant =
+            selectedRestaurants.find((item) => item.id === String(restaurantId || '')) ||
+            selectedRestaurants[0] ||
+            null;
+
         const restaurantName =
             o.restaurantScope === 'selected'
-                ? (restaurant?.restaurantName || 'Selected Restaurants')
+                ? restaurant?.restaurantName || 'Selected Restaurants'
                 : 'All Restaurants';
 
+        const discountValue = Number(o.discountValue) || 0;
         const title =
-            o.discountType === 'percentage'
-                ? `${Number(o.discountValue) || 0}% OFF`
-                : `Flat ₹${Number(o.discountValue) || 0} OFF`;
+            o.discountType === 'percentage' ? `${discountValue}% OFF` : `Flat ₹${discountValue} OFF`;
 
         return {
-            id: String(o._id),
-            offerId: String(o._id),
+            id: o.id,
+            offerId: o.id,
             couponCode: o.couponCode,
             title,
             discountType: o.discountType,
-            discountValue: o.discountValue,
-            maxDiscount: o.maxDiscount ?? null,
+            discountValue,
+            maxDiscount: o.maxDiscount === null ? null : Number(o.maxDiscount),
             perUserLimit: o.perUserLimit ?? null,
             customerScope: o.customerScope,
             isFirstOrderOnly: !!o.isFirstOrderOnly,
             restaurantScope: o.restaurantScope,
-            restaurantId: restaurant?._id ? String(restaurant._id) : (o.restaurantScope === 'selected' ? String(o.restaurantId) : null),
-            restaurantIds,
+            restaurantId:
+                restaurant?.id || (o.restaurantScope === 'selected' ? o.restaurantId : null),
+            restaurantIds: selectedIds,
             restaurantName,
-            restaurantSlug,
+            restaurantSlug: restaurant?.restaurantNameNormalized || undefined,
             restaurantImage: restaurant?.profileImage || null,
             deliveryTime: restaurant?.estimatedDeliveryTime || null,
-            restaurantRating: typeof restaurant?.rating === 'number' ? restaurant.rating : 0,
+            restaurantRating: Number(restaurant?.rating) || 0,
             endDate: o.endDate || null,
             showInCart: o.showInCart !== false,
-            minOrderValue: o.minOrderValue ?? 0
+            minOrderValue: Number(o.minOrderValue) || 0,
         };
     });
 
-    // If userId is provided, filter out coupons that have reached their per-user limit
-    if (userId && mongoose.Types.ObjectId.isValid(userId)) {
-        const usages = await FoodOfferUsage.find({ userId: new mongoose.Types.ObjectId(userId) }).lean();
-        const usageMap = usages.reduce((map, u) => {
-            map[String(u.offerId)] = Number(u.count || 0);
-            return map;
-        }, {});
+    // Drop coupons this user has already used up.
+    if (isId(userId)) {
+        const usages = await prisma.foodOfferUsage.findMany({
+            where: { userId: String(userId) },
+            select: { offerId: true, count: true },
+        });
+        const usageMap = new Map(usages.map((u) => [u.offerId, Number(u.count || 0)]));
 
         allOffers = allOffers.filter((o) => {
             const perUserLimit = Number(o.perUserLimit || 0);
-            if (perUserLimit > 0) {
-                const used = usageMap[String(o.id)] || 0;
-                return used < perUserLimit;
-            }
-            return true;
+            if (perUserLimit <= 0) return true;
+            return (usageMap.get(o.id) || 0) < perUserLimit;
         });
     }
 
     return { allOffers, groupedByOffer: {} };
 };
 
-/**
- * List complaints for a restaurant.
- * Calls adminService.getRestaurantComplaints with fixed restaurantId.
- */
 export const getRestaurantComplaints = async (restaurantId, query = {}) => {
     const { getRestaurantComplaints: getComplaintsInternal } = await import('../../admin/services/admin.service.js');
     return getComplaintsInternal({ ...query, restaurantId });
@@ -2335,63 +2011,71 @@ export const getRestaurantComplaints = async (restaurantId, query = {}) => {
  * Create a new offer for a restaurant.
  */
 export async function createRestaurantOffer(restaurantId, body) {
-    const existing = await FoodOffer.findOne({ couponCode: body.couponCode }).lean();
-    if (existing) {
-        throw new ValidationError('Coupon code already exists');
+    try {
+        return await prisma.foodOffer.create({
+            data: {
+                couponCode: body.couponCode,
+                discountType: body.discountType,
+                discountValue: body.discountValue,
+                customerScope: body.customerScope || 'all',
+                restaurantScope: 'selected',
+                restaurantId: String(restaurantId),
+                minOrderValue: body.minOrderValue ?? 0,
+                maxDiscount: body.maxDiscount ?? null,
+                usageLimit: body.usageLimit ?? null,
+                perUserLimit: body.perUserLimit ?? null,
+                startDate: body.startDate ? new Date(body.startDate) : null,
+                endDate: body.endDate ? new Date(body.endDate) : null,
+                isFirstOrderOnly: body.isFirstOrderOnly ?? false,
+                // An offer created already expired starts inactive rather than
+                // appearing live for the instant before a job catches it.
+                status:
+                    body.endDate && new Date(body.endDate).getTime() <= Date.now()
+                        ? 'inactive'
+                        : 'active',
+                showInCart: true,
+                createdByRole: 'RESTAURANT',
+                // A restaurant-funded offer: the platform contributes nothing.
+                adminBearPercentage: 0,
+                restaurantBearPercentage: 100,
+            },
+        });
+    } catch (error) {
+        // couponCode is unique in the database. Checking first and then
+        // inserting let two restaurants claim the same code concurrently.
+        if (error?.code === 'P2002') throw new ValidationError('Coupon code already exists');
+        throw error;
     }
-
-    const doc = await FoodOffer.create({
-        couponCode: body.couponCode,
-        discountType: body.discountType,
-        discountValue: body.discountValue,
-        customerScope: body.customerScope || 'all',
-        restaurantScope: 'selected',
-        restaurantId: new mongoose.Types.ObjectId(restaurantId),
-        minOrderValue: body.minOrderValue ?? 0,
-        maxDiscount: body.maxDiscount ?? null,
-        usageLimit: body.usageLimit ?? null,
-        perUserLimit: body.perUserLimit ?? null,
-        startDate: body.startDate,
-        isFirstOrderOnly: body.isFirstOrderOnly ?? false,
-        endDate: body.endDate,
-        status: body.endDate && new Date(body.endDate).getTime() <= Date.now() ? 'inactive' : 'active',
-        showInCart: true,
-        createdByRole: 'RESTAURANT',
-        adminBearPercentage: 0,
-        restaurantBearPercentage: 100
-    });
-
-    return doc;
 }
 
 /**
  * List offers for a specific restaurant.
  */
 export async function listRestaurantOffers(restaurantId) {
-    const list = await FoodOffer.find({
-        restaurantId: new mongoose.Types.ObjectId(restaurantId),
-        restaurantScope: 'selected'
-    }).sort({ createdAt: -1 }).lean();
+    const list = await prisma.foodOffer.findMany({
+        where: { restaurantId: String(restaurantId), restaurantScope: 'selected' },
+        orderBy: { createdAt: 'desc' },
+    });
 
-    return list.map(o => ({
-        ...o,
-        id: String(o._id),
-        offerId: String(o._id)
-    }));
+    return list.map((offer) => ({ ...offer, id: offer.id, offerId: offer.id }));
 }
 
 /**
  * Delete a restaurant offer.
  */
 export async function deleteRestaurantOffer(restaurantId, offerId) {
-    const res = await FoodOffer.deleteOne({
-        _id: new mongoose.Types.ObjectId(offerId),
-        restaurantId: new mongoose.Types.ObjectId(restaurantId),
-        createdByRole: 'RESTAURANT'
+    if (!isId(offerId)) throw new NotFoundError('Offer not found or not owned by you');
+
+    // The ownership clause is part of the delete, not a lookup before it, so a
+    // restaurant cannot delete another's offer by racing the check.
+    const { count } = await prisma.foodOffer.deleteMany({
+        where: {
+            id: String(offerId),
+            restaurantId: String(restaurantId),
+            createdByRole: 'RESTAURANT',
+        },
     });
-    if (res.deletedCount === 0) {
-        throw new NotFoundError('Offer not found or not owned by you');
-    }
+    if (count === 0) throw new NotFoundError('Offer not found or not owned by you');
     return true;
 }
 
@@ -2400,50 +2084,71 @@ export async function deleteRestaurantOffer(restaurantId, offerId) {
  */
 export async function updateRestaurantOfferStatus(restaurantId, offerId, status) {
     const allowedStatus = ['active', 'paused', 'inactive'];
-    if (!allowedStatus.includes(status)) {
-        throw new ValidationError('Invalid status');
-    }
+    if (!allowedStatus.includes(status)) throw new ValidationError('Invalid status');
+    if (!isId(offerId)) throw new NotFoundError('Offer not found or not owned by you');
 
-    const doc = await FoodOffer.findOneAndUpdate(
-        {
-            _id: new mongoose.Types.ObjectId(offerId),
-            restaurantId: new mongoose.Types.ObjectId(restaurantId),
-            createdByRole: 'RESTAURANT'
-        },
-        { $set: { status } },
-        { new: true }
-    );
+    const where = {
+        id: String(offerId),
+        restaurantId: String(restaurantId),
+        createdByRole: 'RESTAURANT',
+    };
 
-    if (!doc) {
-        throw new NotFoundError('Offer not found or not owned by you');
-    }
+    const { count } = await prisma.foodOffer.updateMany({ where, data: { status } });
+    if (count === 0) throw new NotFoundError('Offer not found or not owned by you');
 
-    return doc;
+    return prisma.foodOffer.findUnique({ where: { id: String(offerId) } });
 }
 
 /**
- * Delete a restaurant and all associated data (menu, wallet, items, timings) permanently.
+ * Permanently delete a restaurant and everything it owns.
+ *
+ * Mongo deleted the restaurant and left its orders, transactions, invoices and
+ * support tickets pointing at an id that no longer existed. Those are the
+ * platform's books, not the restaurant's, so they are checked for rather than
+ * destroyed: a restaurant that has ever traded cannot be erased.
+ *
+ * What the restaurant genuinely owns — its dishes, addons, timings, banners —
+ * goes with it, most of it through ON DELETE CASCADE.
  */
 export const deleteCurrentRestaurantAccount = async (restaurantId) => {
-    // Dynamic imports to avoid issues
-    const { FoodRestaurantMenu } = await import('../models/restaurantMenu.model.js');
-    const { FoodRestaurantWallet } = await import('../models/restaurantWallet.model.js');
-    const { FoodRestaurantOutletTimings } = await import('../models/outletTimings.model.js');
-    const { FoodItem } = await import('../../admin/models/food.model.js');
-    const { FoodAddon } = await import('../models/foodAddon.model.js');
+    if (!isId(restaurantId)) throw new ValidationError('Invalid restaurant id');
+    const id = String(restaurantId);
 
-    const restaurant = await FoodRestaurant.findById(restaurantId);
+    const restaurant = await prisma.foodRestaurant.findUnique({ where: { id } });
     if (!restaurant) throw new NotFoundError('Restaurant not found');
 
-    // Remove all associated documents
-    await FoodRestaurantMenu.findOneAndDelete({ restaurantId });
-    await FoodRestaurantWallet.findOneAndDelete({ restaurantId });
-    await FoodRestaurantOutletTimings.findOneAndDelete({ restaurantId });
-    await FoodItem.deleteMany({ restaurantId });
-    await FoodAddon.deleteMany({ restaurantId });
+    const [orders, transactions, invoices] = await Promise.all([
+        prisma.foodOrder.count({ where: { restaurantId: id } }),
+        prisma.foodTransaction.count({ where: { restaurantId: id } }),
+        prisma.foodSubscriptionInvoice.count({ where: { restaurantId: id } }),
+    ]);
 
-    // Remove Restaurant
-    await FoodRestaurant.findByIdAndDelete(restaurantId);
+    if (orders || transactions || invoices) {
+        throw new ValidationError(
+            'This restaurant has order or billing history and cannot be deleted. Contact support to close the account instead.',
+        );
+    }
+
+    await prisma.$transaction(async (tx) => {
+        // Categories the restaurant created are its own; the FK is RESTRICT
+        // because a global category must never vanish with one restaurant.
+        await tx.foodCategory.deleteMany({ where: { restaurantId: id } });
+        await tx.foodCategory.updateMany({
+            where: { createdByRestaurantId: id },
+            data: { createdByRestaurantId: null },
+        });
+        await tx.foodOffer.deleteMany({ where: { restaurantId: id } });
+        await tx.foodSupportTicket.deleteMany({ where: { restaurantId: id } });
+        await tx.foodRestaurantSupportTicket.deleteMany({ where: { restaurantId: id } });
+        await tx.feedbackExperience.deleteMany({ where: { restaurantId: id } });
+        await tx.foodRestaurantWithdrawal.deleteMany({ where: { restaurantId: id } });
+        await tx.foodSubscriptionTransaction.deleteMany({ where: { restaurantId: id } });
+        await tx.foodRestaurantSubscriptionHistory.deleteMany({ where: { restaurantId: id } });
+
+        // Dishes, addons, outlet timings, banners, dining and gourmet entries
+        // all cascade from this.
+        await tx.foodRestaurant.delete({ where: { id } });
+    });
 
     return { success: true };
 };
