@@ -60,6 +60,7 @@ export * from './adminEarningAddon.service.js';
 export * from './adminDeliveryPartner.service.js';
 export * from './adminDeliveryWallet.service.js';
 export * from './adminCategory.service.js';
+export * from './adminOffer.service.js';
 
 import {
     getCategoryStats,
@@ -3139,140 +3140,7 @@ export async function rejectRestaurant(id, reason) {
 }
 
 // ----- Offers & Coupons -----
-export async function getAllOffers(_query = {}) {
-    const list = await FoodOffer.find({})
-        .sort({ createdAt: -1 })
-        .populate({ path: 'restaurantId', select: 'restaurantName' })
-        .populate({ path: 'restaurantIds', select: 'restaurantName' })
-        .lean();
 
-    const offers = list.map((o, index) => {
-        const now = Date.now();
-        const endTs = o.endDate ? new Date(o.endDate).getTime() : null;
-        const isExpired = Boolean(endTs && now >= endTs);
-        const selectedRestaurants = Array.isArray(o.restaurantIds) && o.restaurantIds.length > 0
-            ? o.restaurantIds
-            : (o.restaurantId ? [o.restaurantId] : []);
-        const restaurantName = o.restaurantScope === 'selected'
-            ? (selectedRestaurants.map((restaurant) => restaurant?.restaurantName).filter(Boolean).join(', ') || 'Selected Restaurants')
-            : 'All Restaurants';
-
-        const discountPercentage = o.discountType === 'percentage' ? Number(o.discountValue) : 0;
-
-        const originalPrice = o.discountType === 'flat-price' ? Number(o.discountValue) : 0;
-        const discountedPrice = 0;
-
-        return {
-            sl: index + 1,
-            offerId: String(o._id),
-            dishId: 'all',
-            restaurantName,
-            dishName: 'All Items',
-            couponCode: o.couponCode,
-            customerGroup: o.customerScope === 'first-time' ? 'new' : 'all',
-            discountType: o.discountType,
-            discountPercentage,
-            originalPrice,
-            discountedPrice,
-            status: isExpired ? 'inactive' : (o.status || 'active'),
-            showInCart: o.showInCart !== false,
-            endDate: o.endDate || null,
-            // Additional info for admin UI (backward compatible)
-            minOrderValue: o.minOrderValue ?? 0,
-            maxDiscount: o.maxDiscount ?? null,
-            usageLimit: o.usageLimit ?? null,
-            usedCount: o.usedCount ?? 0,
-            restaurantScope: o.restaurantScope,
-            createdByRole: o.createdByRole || 'ADMIN',
-            adminBearPercentage: Number(o.adminBearPercentage ?? (o.createdByRole === 'RESTAURANT' ? 0 : 100)),
-            restaurantBearPercentage: Number(o.restaurantBearPercentage ?? (o.createdByRole === 'RESTAURANT' ? 100 : 0))
-        };
-    });
-
-    return { offers };
-}
-
-export async function createAdminOffer(body) {
-    const existing = await FoodOffer.findOne({ couponCode: body.couponCode }).lean();
-    if (existing) {
-        throw new ValidationError('Coupon code already exists');
-    }
-
-    const doc = await FoodOffer.create({
-        couponCode: body.couponCode,
-        discountType: body.discountType,
-        discountValue: body.discountValue,
-        customerScope: body.customerScope,
-        restaurantScope: body.restaurantScope,
-        restaurantId: body.restaurantScope === 'selected' ? body.restaurantId : undefined,
-        restaurantIds: body.restaurantScope === 'selected' ? body.restaurantIds : [],
-        minOrderValue: body.minOrderValue ?? 0,
-        maxDiscount: body.maxDiscount ?? null,
-        usageLimit: body.usageLimit ?? null,
-        perUserLimit: body.perUserLimit ?? null,
-        startDate: body.startDate,
-        isFirstOrderOnly: body.isFirstOrderOnly ?? false,
-        endDate: body.endDate,
-        status: body.endDate && new Date(body.endDate).getTime() <= Date.now() ? 'inactive' : 'active',
-        showInCart: true,
-        createdByRole: 'ADMIN',
-        adminBearPercentage: body.adminBearPercentage ?? 100,
-        restaurantBearPercentage: body.restaurantBearPercentage ?? 0
-    });
-
-    const selectedRestaurantIds = doc.restaurantScope === 'selected'
-        ? (doc.restaurantIds?.length ? doc.restaurantIds : [doc.restaurantId]).filter(Boolean)
-        : [];
-    if (selectedRestaurantIds.length > 0) {
-        try {
-            const { notifyOwnersSafely } = await import('../../../../core/notifications/firebase.service.js');
-            await notifyOwnersSafely(
-                selectedRestaurantIds.map((ownerId) => ({ ownerType: 'RESTAURANT', ownerId })),
-                {
-                    title: 'New Campaign Invitation! ðŸ“¢',
-                    body: `You have been invited to join a new campaign: "${doc.couponCode}". Check it out now!`,
-                    image: 'https://i.ibb.co/5GzXz7r/Switcheats-Brand-Image.png',
-                    data: {
-                        type: 'campaign_invitation',
-                        offerId: String(doc._id),
-                        couponCode: doc.couponCode
-                    }
-                }
-            );
-        } catch (e) {
-            console.error('Failed to send campaign invitation notification:', e);
-        }
-    }
-
-    return doc.toObject();
-}
-
-export async function updateAdminOfferCartVisibility(offerId, itemId, showInCart) {
-    if (!offerId || !mongoose.Types.ObjectId.isValid(offerId)) return null;
-    if (!itemId) return null;
-    const updated = await FoodOffer.findByIdAndUpdate(
-        offerId,
-        { $set: { showInCart: Boolean(showInCart) } },
-        { new: true }
-    ).lean();
-    return updated;
-}
-
-export async function deleteAdminOffer(id) {
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
-    const deleted = await FoodOffer.findByIdAndDelete(id).lean();
-    if (!deleted) return null;
-    await FoodOfferUsage.deleteMany({ offerId: new mongoose.Types.ObjectId(id) });
-    return { id };
-}
-
-export async function expireExpiredOffers() {
-    const now = new Date();
-    await FoodOffer.updateMany(
-        { status: 'active', endDate: { $lte: now } },
-        { $set: { status: 'inactive' } }
-    );
-}
 // ----- Delivery join requests -----
 
 
