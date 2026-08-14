@@ -109,3 +109,36 @@ export const getFoodDisplayOtherPrice = (value = {}) => {
 
     return 0;
 };
+
+/**
+ * Reconcile a dish's variant rows against what the client sent.
+ *
+ * An entry carrying an id updates that row; one without is new; a row whose id
+ * is absent from the payload is removed. Replacing the whole set wholesale
+ * would reissue every id, and a cart already holding one would fail checkout
+ * with "that size no longer exists".
+ *
+ * Takes a transaction client, because the variant write and the dish's own
+ * reprice have to land together.
+ */
+export const syncFoodVariants = async (tx, foodItemId, variants = []) => {
+    const keepIds = variants.map((variant) => variant.id).filter(Boolean);
+
+    await tx.foodItemVariant.deleteMany({
+        where: { foodItemId, ...(keepIds.length ? { id: { notIn: keepIds } } : {}) },
+    });
+
+    for (const [index, variant] of variants.entries()) {
+        const data = {
+            name: variant.name,
+            price: variant.price,
+            otherPrice: variant.otherPrice,
+            sortOrder: index,
+        };
+        if (variant.id) {
+            await tx.foodItemVariant.update({ where: { id: variant.id }, data });
+        } else {
+            await tx.foodItemVariant.create({ data: { foodItemId, ...data } });
+        }
+    }
+};

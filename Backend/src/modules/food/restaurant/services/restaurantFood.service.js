@@ -8,6 +8,7 @@ import {
     getFoodDisplayPrice,
     hasFoodVariants,
     normalizeFoodVariantsInput,
+    syncFoodVariants,
 } from '../../admin/services/foodVariant.service.js';
 import {
     APPROVED_CATEGORY_FILTER,
@@ -294,36 +295,6 @@ export async function createRestaurantFood(restaurantId, body = {}) {
     return doc;
 }
 
-/**
- * Reconcile the variant rows against what the client sent.
- *
- * An entry carrying an id updates that row; one without is new; a row whose id
- * is absent from the payload is removed. Replacing the whole set wholesale
- * would hand every variant a new id, and a cart already holding one would fail
- * checkout with "that size no longer exists".
- */
-const syncVariants = async (tx, foodItemId, variants) => {
-    const keepIds = variants.map((variant) => variant.id).filter(Boolean);
-
-    await tx.foodItemVariant.deleteMany({
-        where: { foodItemId, ...(keepIds.length ? { id: { notIn: keepIds } } : {}) },
-    });
-
-    for (const [index, variant] of variants.entries()) {
-        const data = {
-            name: variant.name,
-            price: variant.price,
-            otherPrice: variant.otherPrice,
-            sortOrder: index,
-        };
-        if (variant.id) {
-            await tx.foodItemVariant.update({ where: { id: variant.id }, data });
-        } else {
-            await tx.foodItemVariant.create({ data: { foodItemId, ...data } });
-        }
-    }
-};
-
 export async function updateRestaurantFood(restaurantId, foodId, body = {}) {
     const context = await getRestaurantContext(restaurantId);
     if (!isId(foodId)) throw new ValidationError('Invalid food id');
@@ -404,7 +375,7 @@ export async function updateRestaurantFood(restaurantId, foodId, body = {}) {
     // failed to save, or resubmitted for approval without its new sizes.
     const updated = await prisma.$transaction(async (tx) => {
         if (nextVariants !== undefined) {
-            await syncVariants(tx, existing.id, nextVariants);
+            await syncFoodVariants(tx, existing.id, nextVariants);
         }
         return tx.foodItem.update({
             where: { id: existing.id },
