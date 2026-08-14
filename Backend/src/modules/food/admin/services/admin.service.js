@@ -46,6 +46,12 @@ import { FoodAdmin } from '../../../../core/admin/admin.model.js';
 import { getAdminRestaurantSubscriptionHistory as getAdminRestaurantSubscriptionHistoryFromRestaurant } from '../../restaurant/services/subscriptionHistory.service.js';
 import { FoodRestaurantSubscriptionHistory } from '../../restaurant/models/subscriptionHistory.model.js';
 import { ADMIN_FULL_PERMISSIONS, isValidPermissionPayload, sanitizeAdminPermissions } from '../../../../constants/permissions.js';
+
+// Extracted into their own files. Re-exported here so the twelve modules
+// that import from admin.service.js do not each need their paths changed.
+export * from './adminZone.service.js';
+export * from './adminSubAdmin.service.js';
+
 import {
     getCategoryStats,
     categoryAllowsFoodType,
@@ -5516,90 +5522,7 @@ export async function rejectDeliveryPartner(id, reason) {
 }
 
 // ----- Zones CRUD -----
-export async function getZones(query) {
-    const limit = Math.min(Math.max(parseInt(query.limit, 10) || 100, 1), 1000);
-    const page = Math.max(parseInt(query.page, 10) || 1, 1);
-    const skip = (page - 1) * limit;
-    const isActive = query.isActive;
-    const search = typeof query.search === 'string' ? query.search.trim() : '';
 
-    const filter = {};
-    if (isActive !== undefined && isActive !== '') {
-        filter.isActive = isActive === 'true' || isActive === '1';
-    }
-    if (search) {
-        filter.$or = [
-            { name: { $regex: search, $options: 'i' } },
-            { zoneName: { $regex: search, $options: 'i' } },
-            { serviceLocation: { $regex: search, $options: 'i' } },
-            { country: { $regex: search, $options: 'i' } }
-        ];
-    }
-
-    const [zones, total] = await Promise.all([
-        FoodZone.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
-        FoodZone.countDocuments(filter)
-    ]);
-    return { zones, total, page, limit };
-}
-
-export async function getZoneById(id) {
-    return FoodZone.findById(id).lean();
-}
-
-export async function createZone(body) {
-    const name = typeof body.name === 'string' ? body.name.trim() : (body.zoneName && body.zoneName.trim()) || '';
-    if (!name) return { error: 'Zone name is required' };
-    const coordinates = Array.isArray(body.coordinates) ? body.coordinates : [];
-    if (coordinates.length < 3) return { error: 'At least 3 coordinates (polygon points) are required' };
-
-    const normalized = coordinates.map((c) => ({
-        latitude: Number(c.latitude) || 0,
-        longitude: Number(c.longitude) || 0
-    }));
-
-    const zone = new FoodZone({
-        name,
-        zoneName: body.zoneName && body.zoneName.trim() ? body.zoneName.trim() : name,
-        country: (body.country && body.country.trim()) || 'India',
-        serviceLocation: (body.serviceLocation && body.serviceLocation.trim()) || name,
-        unit: body.unit === 'miles' ? 'miles' : 'kilometer',
-        coordinates: normalized,
-        isActive: body.isActive !== false
-    });
-    await zone.save();
-    void invalidateActiveZonesCache();
-    return { zone: zone.toObject() };
-}
-
-export async function updateZone(id, body) {
-    const zone = await FoodZone.findById(id);
-    if (!zone) return null;
-
-    if (body.name !== undefined) zone.name = String(body.name).trim();
-    if (body.zoneName !== undefined) zone.zoneName = String(body.zoneName).trim();
-    if (body.country !== undefined) zone.country = String(body.country).trim();
-    if (body.serviceLocation !== undefined) zone.serviceLocation = String(body.serviceLocation).trim();
-    if (body.unit !== undefined) zone.unit = body.unit === 'miles' ? 'miles' : 'kilometer';
-    if (body.isActive !== undefined) zone.isActive = body.isActive !== false;
-    if (Array.isArray(body.coordinates) && body.coordinates.length >= 3) {
-        zone.coordinates = body.coordinates.map((c) => ({
-            latitude: Number(c.latitude) || 0,
-            longitude: Number(c.longitude) || 0
-        }));
-    }
-    if (zone.name) zone.serviceLocation = zone.serviceLocation || zone.name;
-
-    await zone.save();
-    void invalidateActiveZonesCache();
-    return { zone: zone.toObject() };
-}
-
-export async function deleteZone(id) {
-    const zone = await FoodZone.findByIdAndDelete(id);
-    if (zone) void invalidateActiveZonesCache();
-    return zone ? { id } : null;
-}
 
 // ----- Withdrawals (admin) -----
 export async function getWithdrawals(query = {}) {
@@ -6120,139 +6043,4 @@ export async function deleteRestaurant(id) {
     return restaurant;
 }
 
-const toEmail = (value) => String(value || '').trim().toLowerCase();
 
-export async function createSubAdmin(payload = {}, actorId) {
-    const email = toEmail(payload.email);
-    const password = String(payload.password || '').trim();
-    const name = String(payload.name || '').trim();
-
-    if (!email || !password) {
-        throw new ValidationError('Email and password are required');
-    }
-
-    const existing = await FoodAdmin.findOne({ email }).lean();
-    if (existing) {
-        throw new ValidationError('Admin with this email already exists');
-    }
-
-    const subAdmin = await FoodAdmin.create({
-        email,
-        password,
-        name,
-        phone: String(payload.phone || '').trim(),
-        role: 'ADMIN',
-        adminType: 'sub_admin',
-        permissions: {},
-        isActive: true,
-        isDeleted: false,
-        createdBy: actorId || null,
-        updatedBy: actorId || null,
-    });
-
-    return FoodAdmin.findById(subAdmin._id).select('-password').lean();
-}
-
-export async function getSubAdmins(query = {}) {
-    const filter = { adminType: 'sub_admin' };
-    if (query.includeDeleted !== 'true') {
-        filter.isDeleted = false;
-    }
-    if (query.status === 'active') filter.isActive = true;
-    if (query.status === 'inactive') filter.isActive = false;
-
-    const search = String(query.search || '').trim();
-    if (search) {
-        filter.$or = [
-            { name: { $regex: search, $options: 'i' } },
-            { email: { $regex: search, $options: 'i' } },
-            { phone: { $regex: search, $options: 'i' } },
-        ];
-    }
-
-    const items = await FoodAdmin.find(filter)
-        .select('-password')
-        .sort({ createdAt: -1 })
-        .lean();
-    return { items };
-}
-
-export async function getSubAdminById(id) {
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
-        throw new ValidationError('Invalid sub-admin id');
-    }
-    const item = await FoodAdmin.findOne({ _id: id, adminType: 'sub_admin' }).select('-password').lean();
-    if (!item) throw new ValidationError('Sub-admin not found');
-    return item;
-}
-
-export async function updateSubAdminProfile(id, payload = {}, actorId) {
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
-        throw new ValidationError('Invalid sub-admin id');
-    }
-    const update = { updatedBy: actorId || null };
-    if (payload.name !== undefined) update.name = String(payload.name || '').trim();
-    if (payload.phone !== undefined) update.phone = String(payload.phone || '').trim();
-    if (payload.email !== undefined) update.email = toEmail(payload.email);
-
-    const updated = await FoodAdmin.findOneAndUpdate(
-        { _id: id, adminType: 'sub_admin', isDeleted: false },
-        { $set: update },
-        { new: true }
-    ).select('-password').lean();
-    if (!updated) throw new ValidationError('Sub-admin not found');
-    return updated;
-}
-
-export async function updateSubAdminPermissions(id, rawPermissions = {}, actorId) {
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
-        throw new ValidationError('Invalid sub-admin id');
-    }
-    if (!isValidPermissionPayload(rawPermissions)) {
-        throw new ValidationError('Invalid permissions payload');
-    }
-    const permissions = sanitizeAdminPermissions(rawPermissions);
-    const updated = await FoodAdmin.findOneAndUpdate(
-        { _id: id, adminType: 'sub_admin', isDeleted: false },
-        { $set: { permissions, updatedBy: actorId || null } },
-        { new: true }
-    ).select('-password').lean();
-    if (!updated) throw new ValidationError('Sub-admin not found');
-    return updated;
-}
-
-export async function updateSubAdminStatus(id, isActive, actorId) {
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
-        throw new ValidationError('Invalid sub-admin id');
-    }
-    const updated = await FoodAdmin.findOneAndUpdate(
-        { _id: id, adminType: 'sub_admin', isDeleted: false },
-        { $set: { isActive: Boolean(isActive), updatedBy: actorId || null } },
-        { new: true }
-    ).select('-password').lean();
-    if (!updated) throw new ValidationError('Sub-admin not found');
-    return updated;
-}
-
-export async function deleteSubAdmin(id, actorId) {
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
-        throw new ValidationError('Invalid sub-admin id');
-    }
-    const updated = await FoodAdmin.findOneAndUpdate(
-        { _id: id, adminType: 'sub_admin', isDeleted: false },
-        { $set: { isDeleted: true, isActive: false, updatedBy: actorId || null } },
-        { new: true }
-    ).select('-password').lean();
-    if (!updated) throw new ValidationError('Sub-admin not found');
-    return updated;
-}
-
-export function getAdminPermissionCatalog() {
-    return {
-        actions: ['view', 'create', 'edit', 'delete', 'export'],
-        sections: Object.keys(ADMIN_FULL_PERMISSIONS).map((section) => ({
-            key: section,
-            actions: ADMIN_FULL_PERMISSIONS[section],
-        })),
-    };
-}
