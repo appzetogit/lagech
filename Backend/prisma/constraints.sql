@@ -111,6 +111,19 @@ ALTER TABLE "food_delivery_commission_rules"
     numrange("minDistance", "maxDistance", '[)') WITH &&
   ) WHERE ("status");
 
+-- ─── one live incentive grant per partner, per offer ─────────────────────────
+-- checkEarningAddonCompletions looked for an existing pending/credited row and
+-- inserted if it found none. Two runs of the sweep (or a manual run racing the
+-- scheduled one) both looked, both found nothing, and both granted — paying the
+-- same incentive twice.
+--
+-- Cancelled grants are excluded so an admin can reject one and let the partner
+-- earn it again.
+DROP INDEX IF EXISTS "earning_addon_one_grant_per_partner";
+CREATE UNIQUE INDEX "earning_addon_one_grant_per_partner"
+  ON "food_earning_addon_history" ("offerId", "deliveryPartnerId")
+  WHERE ("status" <> 'cancelled');
+
 -- ─── one default address per customer ────────────────────────────────────────
 -- A partial unique index: many non-default addresses, at most one default. This
 -- was previously "whatever the last save happened to leave true" across an

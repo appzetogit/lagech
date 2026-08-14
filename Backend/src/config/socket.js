@@ -209,7 +209,7 @@ export const initSocket = async (server) => {
                 if (!identity) return;
                 const order = await prisma.foodOrder.findFirst({
                     where: identity,
-                    select: { userId: true, restaurantId: true, deliveryPartnerId: true },
+                    select: { userId: true, restaurantId: true, dispatchDeliveryPartnerId: true },
                 });
                 if (!order) return;
 
@@ -218,7 +218,7 @@ export const initSocket = async (server) => {
                     (role === 'USER' && String(order.userId || '') === me) ||
                     (role === 'RESTAURANT' && String(order.restaurantId || '') === me) ||
                     (role === 'DELIVERY_PARTNER' &&
-                        String(order.deliveryPartnerId || '') === me);
+                        String(order.dispatchDeliveryPartnerId || '') === me);
 
                 if (!isParticipant) {
                     logger.warn(

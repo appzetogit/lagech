@@ -10,7 +10,7 @@ import { logger } from '../../../../utils/logger.js';
 const ROLES = ['USER', 'RESTAURANT', 'DELIVERY_PARTNER', 'ADMIN'];
 
 /** The order columns that decide who may talk to whom. */
-const ORDER_PARTIES = { userId: true, restaurantId: true, deliveryPartnerId: true };
+const ORDER_PARTIES = { userId: true, restaurantId: true, dispatchDeliveryPartnerId: true };
 
 /** Stable identifier for a participant. ADMIN carries no id (shared inbox). */
 export const partyToken = (role, id) => (role === 'ADMIN' ? 'ADMIN' : `${role}:${String(id)}`);
@@ -48,7 +48,8 @@ async function assertOrderParticipants(orderId, tokens) {
         [
             order.userId && partyToken('USER', order.userId),
             order.restaurantId && partyToken('RESTAURANT', order.restaurantId),
-            order.deliveryPartnerId && partyToken('DELIVERY_PARTNER', order.deliveryPartnerId),
+            order.dispatchDeliveryPartnerId &&
+                partyToken('DELIVERY_PARTNER', order.dispatchDeliveryPartnerId),
         ].filter(Boolean)
     );
 
@@ -71,7 +72,9 @@ async function assertOrderParticipants(orderId, tokens) {
 function resolveOrderRecipient(sender, order, requestedPeerRole = '') {
     const parties = {
         USER: order?.userId ? String(order.userId) : '',
-        DELIVERY_PARTNER: order?.deliveryPartnerId ? String(order.deliveryPartnerId) : '',
+        DELIVERY_PARTNER: order?.dispatchDeliveryPartnerId
+            ? String(order.dispatchDeliveryPartnerId)
+            : '',
         RESTAURANT: order?.restaurantId ? String(order.restaurantId) : '',
     };
 
