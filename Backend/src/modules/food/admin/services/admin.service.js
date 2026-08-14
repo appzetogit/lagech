@@ -63,6 +63,7 @@ export * from './adminCategory.service.js';
 export * from './adminOffer.service.js';
 export * from './adminAddon.service.js';
 export * from './adminFood.service.js';
+export * from './adminRestaurantLifecycle.service.js';
 
 import {
     getCategoryStats,
@@ -2038,40 +2039,7 @@ export async function updateRestaurantMenuById(id, menu) {
     return doc.menu || { sections: [] };
 }
 
-export async function getPendingRestaurants() {
-    const restaurants = await FoodRestaurant.find({
-        $or: [
-            { status: { $in: ['pending', 'rejected'] } },
-            { locationUpdateStatus: 'pending' }
-        ]
-    })
-        .populate('zoneId', 'name zoneName')
-        .populate('pendingZoneId', 'name zoneName')
-        .sort({ createdAt: -1 })
-        .lean();
-    return restaurants.map((r, i) => ({
-        ...r,
-        sl: i + 1,
-        zone: r.zoneId?.zoneName || r.zoneId?.name || null,
-        pendingZone: r.pendingZoneId?.zoneName || r.pendingZoneId?.name || null,
-    }));
-}
 
-export async function getUnregisteredRestaurants() {
-    const list = await FoodUnregisteredRestaurant.find()
-        .sort({ createdAt: -1 })
-        .lean();
-    return list.map((item, index) => ({
-        ...item,
-        sl: index + 1
-    }));
-}
-
-export async function deleteUnregisteredRestaurant(id) {
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) throw new ValidationError('Invalid unregistered restaurant id');
-    const deleted = await FoodUnregisteredRestaurant.findByIdAndDelete(id).lean();
-    return deleted;
-}
 
 export async function updateRestaurantById(id, body = {}) {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
@@ -2208,106 +2176,7 @@ export async function updateRestaurantById(id, body = {}) {
     return FoodRestaurant.findById(id).select('-__v').populate('zoneId', 'name zoneName serviceLocation isActive').lean();
 }
 
-export async function updateRestaurantStatus(id, body = {}) {
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
-    const raw = body.status !== undefined ? body.status : body.isActive;
-    let status = null;
 
-    if (typeof raw === 'string') {
-        const normalized = raw.trim().toLowerCase();
-        if (['approved', 'pending', 'rejected'].includes(normalized)) {
-            status = normalized;
-        }
-    }
-
-    if (!status) {
-        const isActive = parseBooleanLike(raw, 'status');
-        status = isActive ? 'approved' : 'rejected';
-    }
-
-    const approvedAt = status === 'approved' ? new Date() : undefined;
-    const rejectedAt = status === 'rejected' ? new Date() : undefined;
-    const rejectionReason = status === 'rejected' ? 'Disabled by admin' : undefined;
-
-    return FoodRestaurant.findByIdAndUpdate(
-        id,
-        {
-            $set: {
-                status,
-                approvedAt,
-                rejectedAt,
-                rejectionReason
-            }
-        },
-        { new: true, runValidators: false }
-    ).lean();
-}
-
-export async function updateRestaurantLocation(id, body = {}) {
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
-    const doc = await FoodRestaurant.findById(id);
-    if (!doc) return null;
-
-    const source = (body.location && typeof body.location === 'object') ? body.location : body;
-    const toStr = (v) => (v != null ? String(v).trim() : '');
-
-    const coordinates = Array.isArray(source.coordinates) ? source.coordinates : [];
-    const lngFromCoordinates = toFiniteNumber(coordinates[0]);
-    const latFromCoordinates = toFiniteNumber(coordinates[1]);
-    const latitude = toFiniteNumber(source.latitude ?? latFromCoordinates);
-    const longitude = toFiniteNumber(source.longitude ?? lngFromCoordinates);
-
-    const addressLine1 = toStr(source.addressLine1 || source.formattedAddress || source.address);
-    const addressLine2 = toStr(source.addressLine2);
-    const area = toStr(source.area);
-    const city = toStr(source.city);
-    const state = toStr(source.state);
-    const pincode = toStr(source.pincode || source.zipCode || source.postalCode);
-    const landmark = toStr(source.landmark);
-    const formattedAddress = toStr(source.formattedAddress || source.address || addressLine1);
-
-    if (!doc.location || typeof doc.location !== 'object') {
-        doc.location = { type: 'Point' };
-    }
-    doc.location.type = 'Point';
-    if (latitude !== null && longitude !== null) {
-        doc.location.latitude = latitude;
-        doc.location.longitude = longitude;
-        doc.location.coordinates = [longitude, latitude];
-    }
-    doc.location.formattedAddress = formattedAddress;
-    doc.location.address = toStr(source.address || formattedAddress);
-    doc.location.addressLine1 = addressLine1;
-    doc.location.addressLine2 = addressLine2;
-    doc.location.area = area;
-    doc.location.city = city;
-    doc.location.state = state;
-    doc.location.pincode = pincode;
-    doc.location.landmark = landmark;
-
-    // Keep flat fields in sync for legacy readers.
-    doc.addressLine1 = addressLine1;
-    doc.addressLine2 = addressLine2;
-    doc.area = area;
-    doc.city = city;
-    doc.state = state;
-    doc.pincode = pincode;
-    doc.landmark = landmark;
-
-    if (body.zoneId !== undefined) {
-        const zoneId = String(body.zoneId || '').trim();
-        if (!zoneId) {
-            doc.zoneId = undefined;
-        } else if (!mongoose.Types.ObjectId.isValid(zoneId)) {
-            throw new ValidationError('Invalid zoneId');
-        } else {
-            doc.zoneId = new mongoose.Types.ObjectId(zoneId);
-        }
-    }
-
-    await doc.save();
-    return FoodRestaurant.findById(id).select('-__v').populate('zoneId', 'name zoneName serviceLocation isActive').lean();
-}
 
 // ----- Categories -----
 
@@ -2467,133 +2336,7 @@ export async function createRestaurantByAdmin(body) {
     return restaurant.toObject();
 }
 
-export async function approveRestaurant(id) {
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
 
-    const existing = await FoodRestaurant.findById(id).lean();
-    if (!existing) return null;
-
-    const $set = {
-        status: 'approved',
-        approvedAt: new Date()
-    };
-    const $unset = {
-        rejectedAt: 1,
-        rejectionReason: 1
-    };
-
-    if (existing.locationUpdateStatus === 'pending' && existing.pendingLocation) {
-        const pending = existing.pendingLocation;
-        $set.location = pending;
-        $set.addressLine1 = pending.addressLine1 || existing.addressLine1 || '';
-        $set.addressLine2 = pending.addressLine2 || existing.addressLine2 || '';
-        $set.area = pending.area || existing.area || '';
-        $set.city = pending.city || existing.city || '';
-        $set.state = pending.state || existing.state || '';
-        $set.pincode = pending.pincode || existing.pincode || '';
-        $set.landmark = pending.landmark || existing.landmark || '';
-        if (existing.pendingZoneId) {
-            $set.zoneId = existing.pendingZoneId;
-        }
-        $set.locationUpdateStatus = 'approved';
-        $set.locationUpdateReviewedAt = new Date();
-        $unset.pendingLocation = 1;
-        $unset.pendingZoneId = 1;
-        $unset.locationUpdateRequestedAt = 1;
-        $unset.locationRejectionReason = 1;
-    }
-
-    const updated = await FoodRestaurant.findByIdAndUpdate(
-        id,
-        { $set, $unset },
-        { new: true, runValidators: false }
-    ).lean();
-
-    if (updated) {
-        try {
-            const { notifyOwnersSafely } = await import('../../../../core/notifications/firebase.service.js');
-            await notifyOwnersSafely(
-                [{ ownerType: 'RESTAURANT', ownerId: updated._id }],
-                {
-                    title: 'Congratulations! ',
-                    body: `Your restaurant "${updated.restaurantName}" has been approved.`,
-                    image: updated.profileImage || 'https://i.ibb.co/5GzXz7r/Switcheats-Brand-Image.png',
-                    data: {
-                        type: 'restaurant_approved',
-                        restaurantId: String(updated._id)
-                    }
-                }
-            );
-        } catch (e) {
-            console.error('Failed to send restaurant approval notification:', e);
-        }
-    }
-    return updated;
-}
-
-export async function rejectRestaurant(id, reason) {
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
-
-    const existing = await FoodRestaurant.findById(id).lean();
-    if (!existing) return null;
-
-    if (existing.status === 'approved' && existing.locationUpdateStatus === 'pending') {
-        const updated = await FoodRestaurant.findByIdAndUpdate(
-            id,
-            {
-                $set: {
-                    locationUpdateStatus: 'rejected',
-                    locationUpdateReviewedAt: new Date(),
-                    locationRejectionReason: typeof reason === 'string' ? reason.trim() : ''
-                },
-                $unset: {
-                    pendingLocation: 1,
-                    pendingZoneId: 1,
-                    locationUpdateRequestedAt: 1
-                }
-            },
-            { new: true, runValidators: false }
-        ).lean();
-        return updated;
-    }
-
-    const updated = await FoodRestaurant.findByIdAndUpdate(
-        id,
-        {
-            $set: {
-                status: 'rejected',
-                rejectedAt: new Date(),
-                rejectionReason: typeof reason === 'string' ? reason.trim() : undefined,
-                approvedAt: null
-            }
-        },
-        { new: true, runValidators: false }
-    ).lean();
-
-    if (updated) {
-        try {
-            const { notifyOwnersSafely } = await import('../../../../core/notifications/firebase.service.js');
-            await notifyOwnersSafely(
-                [{ ownerType: 'RESTAURANT', ownerId: updated._id }],
-                {
-                    title: 'Update on Registration ðŸ“‹',
-                    body: `Your restaurant registration for "${updated.restaurantName}" has been rejected. Reason: ${reason || 'Incomplete documents'}.`,
-                    image: 'https://i.ibb.co/5GzXz7r/Switcheats-Brand-Image.png',
-                    data: {
-                        type: 'restaurant_rejected',
-                        restaurantId: String(updated._id),
-                        reason: reason || ''
-                    }
-                }
-            );
-        } catch (e) {
-            console.error('Failed to send restaurant rejection notification:', e);
-        }
-    }
-    return updated;
-}
-
-// ----- Offers & Coupons -----
 
 // ----- Delivery join requests -----
 
@@ -3166,35 +2909,6 @@ export async function getSidebarBadges() {
 }
 
 
-export async function deleteRestaurant(id) {
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
-        throw new ValidationError('Invalid restaurant ID');
-    }
 
-    const restaurant = await FoodRestaurant.findById(id).lean();
-    if (!restaurant) {
-        return null;
-    }
-
-    // Delete the restaurant
-    await FoodRestaurant.findByIdAndDelete(id);
-
-    // Delete associated food items
-    await FoodItem.deleteMany({ restaurantId: id });
-
-    // Delete associated addons
-    await FoodAddon.deleteMany({ restaurantId: id });
-
-    // Delete associated categories if they are restaurant-specific
-    // Assuming categories are global unless they have a restaurantId field (need to check FoodCategory model)
-    await FoodCategory.deleteMany({ restaurantId: id });
-
-    // Delete associated user/owner account if it's a restaurant role
-    if (restaurant.ownerPhone) {
-        await FoodUser.deleteOne({ phone: restaurant.ownerPhone, role: 'RESTAURANT' });
-    }
-
-    return restaurant;
-}
 
 
