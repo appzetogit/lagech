@@ -12,7 +12,10 @@ const ACTIVE_BY_ORDER = {
 
 /** The card fields every restaurant rail on the landing page renders. */
 const RESTAURANT_CARD = {
-    id: true, restaurantName: true, slug: true, area: true, city: true,
+    id: true, restaurantName: true, area: true, city: true,
+    // The slug is the normalised name — there is no separate column, and
+    // getApprovedRestaurantByIdOrSlug resolves a slug against this one.
+    restaurantNameNormalized: true,
     rating: true, cuisines: true, profileImage: true, pureVegRestaurant: true,
 };
 

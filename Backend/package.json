@@ -18,7 +18,7 @@
     "migrate:order-payments": "node scripts/migrate-orders-to-transactions.js",
     "migrate:outlet-timings-from-opening-closing": "node scripts/sync-outlet-timings-from-opening-closing.js",
     "cleanup:legacy-collections": "node scripts/cleanup-legacy-collections.js",
-    "test": "node --test --test-concurrency=3 \"src/**/*.test.js\"",
+    "test": "node scripts/check-prisma-fields.mjs && node --test --test-concurrency=3 \"src/**/*.test.js\"",
     "db:migrate": "prisma migrate deploy && node prisma/apply-constraints.mjs && prisma generate",
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
@@ -26,7 +26,8 @@
     "start:socket": "node socket-server.js",
     "db:constraints": "node prisma/apply-constraints.mjs",
     "db:reset": "prisma migrate reset --force && node prisma/apply-constraints.mjs",
-    "db:migration:new": "node prisma/new-migration.mjs"
+    "db:migration:new": "node prisma/new-migration.mjs",
+    "check:fields": "node scripts/check-prisma-fields.mjs"
   },
   "keywords": [],
   "author": "",

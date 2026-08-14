@@ -21,7 +21,8 @@ export const getPublicGourmetRestaurants = async (zoneId) => {
             restaurant: {
                 select: {
                     id: true, restaurantName: true, area: true, city: true,
-                    profileImage: true, rating: true, cuisines: true, slug: true,
+                    profileImage: true, rating: true, cuisines: true,
+                    restaurantNameNormalized: true,
                     pureVegRestaurant: true, estimatedDeliveryTime: true, zoneId: true,
                     status: true,
                     // toRestaurantLocation rebuilds the nested `location` the
@@ -52,7 +53,8 @@ export const getPublicGourmetRestaurants = async (zoneId) => {
                     area: r.area,
                     city: r.city,
                     cuisines: r.cuisines || [],
-                    slug: r.slug,
+                    // The normalised name is the slug; there is no separate column.
+                    slug: r.restaurantNameNormalized,
                     pureVegRestaurant: r.pureVegRestaurant,
                     location: toRestaurantLocation(r),
                     estimatedDeliveryTime: r.estimatedDeliveryTime,

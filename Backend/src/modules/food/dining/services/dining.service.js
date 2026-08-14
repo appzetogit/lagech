@@ -429,11 +429,11 @@ export async function listDiningRestaurantsPublic(query = {}) {
         where,
         select: {
             ...RESTAURANT_FIELDS,
-            restaurantNameNormalized: true, cuisines: true, slug: true,
+            restaurantNameNormalized: true, cuisines: true,
             estimatedDeliveryTime: true, estimatedDeliveryTimeMinutes: true,
             featuredDish: true, featuredPrice: true, offer: true,
             openingTime: true, closingTime: true, openDays: true,
-            isAcceptingOrders: true, costForTwo: true,
+            isAcceptingOrders: true,
         },
     });
     if (!restaurants.length) return [];
