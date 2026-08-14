@@ -3,8 +3,6 @@ import assert from 'node:assert/strict';
 
 import { prisma } from '../../../../config/prisma.js';
 import {
-    getFeeSettings,
-    upsertFeeSettings,
     getReferralSettings,
     upsertReferralSettings,
     getSafetyEmergencyReports,
@@ -12,37 +10,23 @@ import {
     updateSafetyEmergencyPriority,
     deleteSafetyEmergencyReport,
 } from './adminPlatformSettings.service.js';
-import { loadActiveFeeSettings } from '../../orders/services/order-pricing.service.js';
-
 /**
- * Fee, referral and safety settings.
+ * Referral settings and the safety/emergency inbox.
  *
- * The fee bands carry the weight here: they were a Json array and are a table
- * with an EXCLUDE constraint now, so saving them is a replace of child rows.
- * Pricing reads them through loadActiveFeeSettings, so one test goes end to end
- * to prove the two agree.
+ * The fee-settings half of this service is tested in
+ * orders/services/delivery-fee-bands.test.js instead: fee settings are a
+ * singleton and the bands are a shared table, and node runs test files in
+ * parallel, so the two suites have to live in the file that owns those rows.
  */
 const live = Boolean(process.env.DATABASE_URL);
 
 const created = { users: [], reports: [] };
 const stamp = () => `${Date.now()}${Math.floor(performance.now() * 1000) % 1000}`;
 
-// Fee and referral settings are singletons, so tests share and restore them.
-let feeSnapshot = null;
-
-test.before(async () => {
-    if (!live) return;
-    feeSnapshot = await prisma.foodFeeSettings.findFirst({ orderBy: { createdAt: 'desc' } });
-});
-
 test.after(async () => {
     if (!live) return;
     await prisma.foodSafetyEmergencyReport.deleteMany({ where: { id: { in: created.reports } } });
     await prisma.foodUser.deleteMany({ where: { id: { in: created.users } } });
-    if (!feeSnapshot) {
-        await prisma.deliveryFeeBand.deleteMany({});
-        await prisma.foodFeeSettings.deleteMany({});
-    }
     await prisma.$disconnect();
 });
 
@@ -64,93 +48,6 @@ const makeReport = async (data = {}) => {
     created.reports.push(report.id);
     return report;
 };
-
-test('fee settings read back as null until configured', { skip: !live }, async () => {
-    await prisma.deliveryFeeBand.deleteMany({});
-    await prisma.foodFeeSettings.deleteMany({});
-
-    const { feeSettings } = await getFeeSettings();
-    // Null, not defaults: the screen must not imply a fee is set when none is.
-    assert.equal(feeSettings, null);
-});
-
-test('saving fees stores bands as rows and reads them back nested', { skip: !live }, async () => {
-    const saved = await upsertFeeSettings({
-        platformFee: 5,
-        gstRate: 18,
-        deliveryFeeRanges: [
-            { min: 0, max: 3, fee: 20, deliveryBoyBasePay: 30, deliveryBoyPerKm: 0 },
-            { min: 3, max: 8, fee: 40, deliveryBoyBasePay: 0, deliveryBoyPerKm: 6 },
-        ],
-    });
-
-    assert.equal(saved.platformFee, 5, 'Decimal converted for the client');
-    assert.equal(saved.deliveryFeeRanges.length, 2);
-    assert.equal(saved.deliveryFeeRanges[0].fee, 20);
-
-    // They really are rows now, not a column.
-    const bands = await prisma.deliveryFeeBand.findMany();
-    assert.equal(bands.length, 2);
-
-    // And pricing sees exactly the same ladder.
-    const forPricing = await loadActiveFeeSettings();
-    assert.equal(forPricing.deliveryFeeRanges.length, 2);
-    assert.equal(forPricing.deliveryFeeRanges[1].deliveryBoyPerKm, 6);
-});
-
-test('an unrelated edit leaves the bands alone', { skip: !live }, async () => {
-    const before = (await getFeeSettings()).feeSettings.deliveryFeeRanges.length;
-    assert.ok(before > 0);
-
-    // deliveryFeeRanges is absent, which means "do not touch", not "clear".
-    const saved = await upsertFeeSettings({ platformFee: 7 });
-    assert.equal(saved.platformFee, 7);
-    assert.equal(saved.deliveryFeeRanges.length, before);
-});
-
-test('null clears a fee, absent leaves it', { skip: !live }, async () => {
-    await upsertFeeSettings({ quickDeliveryFee: 15, gstRate: 18 });
-    assert.equal((await getFeeSettings()).feeSettings.quickDeliveryFee, 15);
-
-    // Explicit null means the fee is not charged at all — different from a
-    // request that simply did not mention it.
-    const cleared = await upsertFeeSettings({ quickDeliveryFee: null });
-    assert.equal(cleared.quickDeliveryFee, null);
-    assert.equal(cleared.gstRate, 18, 'an unmentioned fee is untouched');
-});
-
-test('overlapping bands are refused by the database', { skip: !live }, async () => {
-    await assert.rejects(
-        () => upsertFeeSettings({
-            deliveryFeeRanges: [
-                { min: 0, max: 5, fee: 20, deliveryBoyBasePay: 30 },
-                { min: 3, max: 9, fee: 40, deliveryBoyPerKm: 6 },
-            ],
-        }),
-        /must not overlap/,
-        'two bands covering 4km would price the same trip two ways',
-    );
-
-    // The failed save is rolled back whole, so the previous ladder survives.
-    const { feeSettings } = await getFeeSettings();
-    assert.ok(feeSettings.deliveryFeeRanges.length > 0);
-    assert.ok(
-        !feeSettings.deliveryFeeRanges.some((r) => r.min === 3 && r.max === 9),
-        'no half-applied band from the rejected save',
-    );
-});
-
-test('a band cannot set both a base pay and a per-km rate', { skip: !live }, async () => {
-    await assert.rejects(
-        () => upsertFeeSettings({
-            deliveryFeeRanges: [
-                { min: 0, max: 5, fee: 20, deliveryBoyBasePay: 30, deliveryBoyPerKm: 6 },
-            ],
-        }),
-        /base pay or a per-km rate, not both/,
-        'the two are mutually exclusive; the CHECK says so, not just the UI',
-    );
-});
 
 test('referral settings create then update one row', { skip: !live }, async () => {
     const first = await upsertReferralSettings({ referralRewardUser: 50, referralLimitUser: 5 });
