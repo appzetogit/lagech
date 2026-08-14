@@ -57,6 +57,7 @@ export * from './adminCustomer.service.js';
 export * from './adminSupportTicket.service.js';
 export * from './adminWithdrawal.service.js';
 export * from './adminEarningAddon.service.js';
+export * from './adminDeliveryPartner.service.js';
 
 import {
     getCategoryStats,
@@ -3518,64 +3519,7 @@ export async function expireExpiredOffers() {
     );
 }
 // ----- Delivery join requests -----
-export async function getDeliveryJoinRequests(query) {
-    const { status = 'pending', page = 1, limit = 1000, search, zone, vehicleType } = query;
-    const filter = {};
-    if (status === 'pending') filter.status = 'pending';
-    else if (status === 'denied' || status === 'rejected') filter.status = 'rejected';
-    else filter.status = status;
 
-    const andParts = [];
-    if (search && typeof search === 'string' && search.trim()) {
-        const term = search.trim();
-        andParts.push({
-            $or: [
-                { name: { $regex: term, $options: 'i' } },
-                { phone: { $regex: term, $options: 'i' } }
-            ]
-        });
-    }
-    if (zone && zone.trim()) {
-        const z = zone.trim();
-        andParts.push({
-            $or: [
-                { city: { $regex: z, $options: 'i' } },
-                { state: { $regex: z, $options: 'i' } },
-                { address: { $regex: z, $options: 'i' } }
-            ]
-        });
-    }
-    if (andParts.length) filter.$and = andParts;
-    if (vehicleType && vehicleType.trim()) {
-        filter.vehicleType = { $regex: vehicleType.trim(), $options: 'i' };
-    }
-
-    const skip = Math.max(0, (Number(page) || 1) - 1) * Math.max(1, Math.min(1000, Number(limit) || 100));
-    const limitNum = Math.max(1, Math.min(1000, Number(limit) || 100));
-
-    const list = await FoodDeliveryPartner.find(filter)
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limitNum)
-        .lean();
-
-    const requests = list.map((doc, index) => ({
-        _id: doc._id,
-        sl: skip + index + 1,
-        name: doc.name || '',
-        email: doc.email || '',
-        phone: doc.phone || '',
-        zone: doc.city || doc.state || doc.address || '',
-        jobType: doc.jobType || '',
-        vehicleType: doc.vehicleType || '',
-        status: doc.status === 'rejected' ? 'denied' : doc.status,
-        rejectionReason: doc.rejectionReason || undefined,
-        profilePhoto: doc.profilePhoto || null,
-        profileImage: doc.profilePhoto ? { url: doc.profilePhoto } : null
-    }));
-
-    return { requests };
-}
 
 export function getDeliveryWalletsStub() {
     return {
@@ -3748,177 +3692,9 @@ export const getAdminRestaurantSubscriptionHistory = async (query = {}) => {
 /**
  * Private helper to get financial stats for multiple delivery partners in bulk.
  */
-async function getBulkDeliveryPartnerStats(partnerIds) {
-    if (!partnerIds || partnerIds.length === 0) return new Map();
 
-    const [earnings, cash, deposits, bonuses, withdrawals, ordersCount] = await Promise.all([
-        // Total Earnings
-        FoodOrder.aggregate([
-            { $match: { 'dispatch.deliveryPartnerId': { $in: partnerIds }, orderStatus: 'delivered' } },
-            { $group: { _id: '$dispatch.deliveryPartnerId', total: { $sum: { $ifNull: ['$riderEarning', 0] } } } }
-        ]),
-        // Cash Collected (COD)
-        FoodOrder.aggregate([
-            { $match: { 
-                'dispatch.deliveryPartnerId': { $in: partnerIds }, 
-                orderStatus: 'delivered', 
-                $or: [ { paymentMethod: 'cash' }, { 'payment.method': 'cash' } ] 
-            } },
-            { $group: { _id: '$dispatch.deliveryPartnerId', total: { $sum: { $ifNull: ['$pricing.total', 0] } } } }
-        ]),
-        // Cash Deposits
-        FoodDeliveryCashDeposit.aggregate([
-            { $match: { deliveryPartnerId: { $in: partnerIds }, status: 'Completed' } },
-            { $group: { _id: '$deliveryPartnerId', total: { $sum: '$amount' } } }
-        ]),
-        // Bonuses
-        DeliveryBonusTransaction.aggregate([
-            { $match: { deliveryPartnerId: { $in: partnerIds } } },
-            { $group: { _id: '$deliveryPartnerId', total: { $sum: '$amount' } } }
-        ]),
-        // Withdrawals
-        FoodDeliveryWithdrawal.aggregate([
-            { $match: { deliveryPartnerId: { $in: partnerIds }, status: { $in: ['approved', 'pending'] } } },
-            { $group: { 
-                _id: '$deliveryPartnerId', 
-                approved: { $sum: { $cond: [{ $eq: ['$status', 'approved'] }, '$amount', 0] } },
-                pending: { $sum: { $cond: [{ $eq: ['$status', 'pending'] }, '$amount', 0] } }
-            } }
-        ]),
-        // Total Delivered Orders
-        FoodOrder.aggregate([
-            { $match: { 'dispatch.deliveryPartnerId': { $in: partnerIds }, orderStatus: 'delivered' } },
-            { $group: { _id: '$dispatch.deliveryPartnerId', count: { $sum: 1 } } }
-        ])
-    ]);
 
-    const statsMap = new Map();
-    partnerIds.forEach(id => {
-        const idStr = id.toString();
-        statsMap.set(idStr, {
-            totalEarning: 0,
-            cashCollected: 0,
-            totalDeposited: 0,
-            bonus: 0,
-            totalWithdrawn: 0,
-            pendingWithdrawal: 0,
-            totalOrders: 0
-        });
-    });
 
-    earnings.forEach(row => { if (row._id) statsMap.get(row._id.toString()).totalEarning = row.total; });
-    cash.forEach(row => { if (row._id) statsMap.get(row._id.toString()).cashCollected = row.total; });
-    deposits.forEach(row => { if (row._id) statsMap.get(row._id.toString()).totalDeposited = row.total; });
-    bonuses.forEach(row => { if (row._id) statsMap.get(row._id.toString()).bonus = row.total; });
-    withdrawals.forEach(row => { 
-        if (row._id) {
-            statsMap.get(row._id.toString()).totalWithdrawn = row.approved;
-            statsMap.get(row._id.toString()).pendingWithdrawal = row.pending;
-        }
-    });
-    ordersCount.forEach(row => { if (row._id) statsMap.get(row._id.toString()).totalOrders = row.count; });
-
-    // Calculate final pocket balance and other fields
-    for (const [id, stats] of statsMap) {
-        stats.pocketBalance = stats.totalEarning + stats.bonus - stats.totalWithdrawn - stats.pendingWithdrawal;
-        stats.cashInHand = stats.cashCollected - stats.totalDeposited;
-    }
-
-    return statsMap;
-}
-
-// ----- Delivery partners (approved list) -----
-export async function getDeliveryPartners(query) {
-    const { page = 1, limit = 1000, search } = query;
-    const filter = { status: 'approved' };
-    if (search && typeof search === 'string' && search.trim()) {
-        const term = search.trim();
-        filter.$or = [
-            { name: { $regex: term, $options: 'i' } },
-            { phone: { $regex: term, $options: 'i' } },
-            { email: { $regex: term, $options: 'i' } },
-            { city: { $regex: term, $options: 'i' } },
-            { state: { $regex: term, $options: 'i' } }
-        ];
-    }
-
-    const skip = Math.max(0, (Number(page) || 1) - 1) * Math.max(1, Math.min(1000, Number(limit) || 100));
-    const limitNum = Math.max(1, Math.min(1000, Number(limit) || 100));
-
-    const [list, total] = await Promise.all([
-        FoodDeliveryPartner.find(filter)
-            .sort({ createdAt: -1 })
-            .skip(skip)
-            .limit(limitNum)
-            .lean(),
-        FoodDeliveryPartner.countDocuments(filter)
-    ]);
-
-    const partnerIds = list.map(p => p._id);
-    const statsMap = await getBulkDeliveryPartnerStats(partnerIds);
-
-    const deliveryPartners = list.map((doc, index) => {
-        const stats = statsMap.get(doc._id.toString()) || {};
-        const lastLat = toFiniteNumber(doc.lastLat ?? doc.lastLocation?.coordinates?.[1]);
-        const lastLng = toFiniteNumber(doc.lastLng ?? doc.lastLocation?.coordinates?.[0]);
-        const lastLocation = lastLat !== null && lastLng !== null
-            ? {
-                lat: lastLat,
-                lng: lastLng,
-                latitude: lastLat,
-                longitude: lastLng,
-                timestamp: doc.lastLocationAt ? new Date(doc.lastLocationAt).getTime() : null
-            }
-            : null;
-        return {
-            _id: doc._id,
-            sl: skip + index + 1,
-            name: doc.name || '',
-            email: doc.email || '',
-            phone: doc.phone || '',
-            deliveryId: doc._id ? `DP-${doc._id.toString().slice(-8).toUpperCase()}` : null,
-            zone: doc.city || doc.state || doc.address || '',
-            vehicleType: doc.vehicleType || '',
-            status: doc.status,
-            availabilityStatus: doc.availabilityStatus || 'offline',
-            isOnline: doc.availabilityStatus === 'online',
-            lastLocation,
-            lastLat,
-            lastLng,
-            lastLocationAt: doc.lastLocationAt || null,
-            // Whether this rider can actually be sent an order offer.
-            //
-            // A rider with no push token is invisible to dispatch no matter how
-            // online they look, and nothing surfaced that: five of six online
-            // riders sat unreachable for hours while the list showed them green.
-            // Exposed as a field so the panel can say so instead of it being
-            // discoverable only from server logs.
-            hasPushToken:
-                (Array.isArray(doc.fcmTokenMobile) && doc.fcmTokenMobile.length > 0) ||
-                (Array.isArray(doc.fcmTokens) && doc.fcmTokens.length > 0),
-            profilePhoto: doc.profilePhoto || null,
-            profileImage: doc.profilePhoto ? { url: doc.profilePhoto } : null,
-            // Stats fields
-            totalOrders: stats.totalOrders || 0,
-            pocketBalance: stats.pocketBalance || 0,
-            cashInHand: stats.cashInHand || 0,
-            totalEarning: stats.totalEarning || 0,
-            bonus: stats.bonus || 0,
-            totalWithdrawn: stats.totalWithdrawn || 0,
-            pendingWithdrawal: stats.pendingWithdrawal || 0
-        };
-    });
-
-    return {
-        deliveryPartners,
-        pagination: {
-            page: Number(page) || 1,
-            limit: limitNum,
-            total,
-            pages: Math.ceil(total / limitNum) || 1
-        }
-    };
-}
 
 // ----- Delivery partner bonus (admin) -----
 export async function getDeliveryPartnerBonusTransactions(query = {}) {
@@ -4149,47 +3925,6 @@ export async function getDeliveryEarnings(query = {}) {
 // ----- Earning Addon Offers (admin) -----
 
 
-export async function getDeliveryPartnerById(id) {
-    const partner = await FoodDeliveryPartner.findById(id).lean();
-    if (!partner) return null;
-    const deliveryId = partner._id ? `DP-${partner._id.toString().slice(-8).toUpperCase()}` : null;
-    return {
-        ...partner,
-        email: partner.email || null,
-        deliveryId,
-        status: partner.status === 'rejected' ? 'blocked' : partner.status,
-        profileImage: partner.profilePhoto ? { url: partner.profilePhoto } : null,
-        documents: {
-            aadhar: (partner.aadharPhoto || partner.aadharNumber)
-                ? { number: partner.aadharNumber || null, document: partner.aadharPhoto || null }
-                : null,
-            pan: (partner.panPhoto || partner.panNumber)
-                ? { number: partner.panNumber || null, document: partner.panPhoto || null }
-                : null,
-            drivingLicense: partner.drivingLicensePhoto ? { document: partner.drivingLicensePhoto } : null,
-            bankDetails:
-                partner.bankAccountHolderName || partner.bankAccountNumber || partner.bankIfscCode || partner.bankName
-                    ? {
-                        accountHolderName: partner.bankAccountHolderName || null,
-                        accountNumber: partner.bankAccountNumber || null,
-                        ifscCode: partner.bankIfscCode || null,
-                        bankName: partner.bankName || null
-                    }
-                    : null
-        },
-        location: (partner.address || partner.city || partner.state)
-            ? { addressLine1: partner.address, city: partner.city, state: partner.state }
-            : null,
-        vehicle: (partner.vehicleType || partner.vehicleName || partner.vehicleNumber)
-            ? {
-                type: partner.vehicleType,
-                brand: partner.vehicleName,
-                model: partner.vehicleName,
-                number: partner.vehicleNumber
-            }
-            : null
-    };
-}
 
 export async function getDeliverymanReviews(query = {}) {
     const limit = Math.min(Math.max(parseInt(query.limit, 10) || 50, 1), 1000);
@@ -4258,79 +3993,9 @@ export async function getDeliverymanReviews(query = {}) {
     return { reviews, total, page, limit };
 }
 
-export async function approveDeliveryPartner(id) {
-    const partner = await FoodDeliveryPartner.findById(id);
-    if (!partner) return null;
-    partner.status = 'approved';
-    partner.approvedAt = new Date();
-    partner.rejectedAt = undefined;
-    partner.rejectionReason = undefined;
-    await partner.save();
 
-    try {
-        const { notifyOwnerSafely } = await import('../../../../core/notifications/firebase.service.js');
-        await notifyOwnerSafely(
-            { ownerType: 'DELIVERY_PARTNER', ownerId: partner._id },
-            {
-                title: 'Welcome Aboard!',
-                body: `Your delivery partner application has been approved. You can now go online and start earning!`,
-                image: 'https://i.ibb.co/5GzXz7r/Switcheats-Brand-Image.png',
-                data: {
-                    type: 'delivery_partner_approved',
-                    eventType: 'delivery_partner_approved',
-                    partnerId: String(partner._id),
-                    targetUrl: '/delivery'
-                }
-            }
-        );
-    } catch (e) {
-        console.error('Failed to send delivery partner approval notification:', e);
-    }
 
-    // Referral crediting deliberately does NOT happen here. Approval alone is not enough
-    // to earn the bonus — the referred rider must also complete one delivery. The reward is
-    // credited by creditDeliveryReferralOnFirstDelivery(), invoked from completeDelivery in
-    // modules/food/orders/services/order-delivery.service.js.
-    return partner.toObject();
-}
 
-export async function rejectDeliveryPartner(id, reason) {
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
-    const updated = await FoodDeliveryPartner.findByIdAndUpdate(
-        id,
-        {
-            $set: {
-                status: 'rejected',
-                rejectedAt: new Date(),
-                rejectionReason: typeof reason === 'string' ? reason.trim() : undefined,
-                approvedAt: null
-            }
-        },
-        { new: true }
-    ).lean();
-
-    if (updated) {
-        try {
-            const { notifyOwnerSafely } = await import('../../../../core/notifications/firebase.service.js');
-            await notifyOwnerSafely(
-                { ownerType: 'DELIVERY_PARTNER', ownerId: updated._id },
-                {
-                    title: 'Onboarding Update ðŸ“‹',
-                    body: `Your application to join as a delivery partner was rejected. Reason: ${reason || 'Incomplete documents'}.`,
-                    image: 'https://i.ibb.co/5GzXz7r/Switcheats-Brand-Image.png',
-                    data: {
-                        type: 'onboarding_rejected',
-                        partnerId: String(updated._id),
-                        reason: reason || ''
-                    }
-                }
-            );
-        } catch (e) {
-            console.error('Failed to send delivery partner rejection notification:', e);
-        }
-    }
-    return updated;
-}
 
 // ----- Zones CRUD -----
 
@@ -4437,51 +4102,6 @@ export async function updateDeliveryBoyWallet(data) {
  *  - Changing the number changes who can sign in. The rider's existing sessions are
  *    invalidated so the old handset cannot keep acting on an identity that has moved.
  */
-export async function updateDeliveryPartnerProfile(id, { name, phone } = {}) {
-    const partner = await FoodDeliveryPartner.findById(id);
-    if (!partner) throw new NotFoundError('Delivery partner not found');
-
-    const nextName = typeof name === 'string' ? name.trim() : undefined;
-    const nextPhone = typeof phone === 'string' ? phone.trim() : undefined;
-
-    if (nextName !== undefined) {
-        if (!nextName) throw new ValidationError('Name cannot be empty');
-        partner.name = nextName;
-    }
-
-    let phoneChanged = false;
-    if (nextPhone !== undefined && nextPhone !== partner.phone) {
-        if (!/^\d{10}$/.test(nextPhone)) {
-            throw new ValidationError('Phone must be a 10 digit number');
-        }
-
-        const clash = await FoodDeliveryPartner.findOne({
-            phone: nextPhone,
-            _id: { $ne: partner._id },
-        })
-            .select('_id name status')
-            .lean();
-
-        if (clash) {
-            throw new ValidationError(
-                `That number already belongs to ${clash.name || 'another delivery partner'}` +
-                    (clash.status === 'deactivated' ? ' (a deactivated account)' : ''),
-            );
-        }
-
-        partner.phone = nextPhone;
-        phoneChanged = true;
-    }
-
-    // Moving the number moves the login. Bump the token version so sessions issued
-    // against the old identity stop being accepted on their next request.
-    if (phoneChanged) {
-        partner.tokenVersion = (Number(partner.tokenVersion) || 0) + 1;
-    }
-
-    await partner.save();
-    return partner.toObject();
-}
 
 export async function deleteDeliveryPartner(id) {
     const partner = await FoodDeliveryPartner.findById(id);
