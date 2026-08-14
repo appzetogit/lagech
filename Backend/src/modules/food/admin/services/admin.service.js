@@ -47,7 +47,7 @@ import { getAdminRestaurantSubscriptionHistory as getAdminRestaurantSubscription
 import { FoodRestaurantSubscriptionHistory } from '../../restaurant/models/subscriptionHistory.model.js';
 import { ADMIN_FULL_PERMISSIONS, isValidPermissionPayload, sanitizeAdminPermissions } from '../../../../constants/permissions.js';
 import {
-    backfillLegacyCategoryWorkflow,
+    getCategoryStats,
     categoryAllowsFoodType,
     normalizeCategoryFoodTypeScope,
     serializeCategoryForResponse
@@ -3261,7 +3261,7 @@ export async function getCategories(query) {
         FoodCategory.countDocuments(filter)
     ]);
 
-    const statsById = await backfillLegacyCategoryWorkflow(list);
+    const statsById = await getCategoryStats(list.map((category) => category?.id || category?._id));
     const restaurantIds = Array.from(
         new Set(
             list

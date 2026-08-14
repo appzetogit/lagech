@@ -1,11 +1,30 @@
-import mongoose from 'mongoose';
-import { FoodItem } from '../admin/models/food.model.js';
+import { prisma } from '../../../config/prisma.js';
+import { isId } from '../../../utils/helpers.js';
 
 export const CATEGORY_APPROVAL_STATUSES = ['pending', 'approved', 'rejected'];
 export const CATEGORY_FOOD_TYPE_SCOPES = ['Veg', 'Non-Veg', 'Both'];
-export const GLOBAL_CATEGORY_FILTER = [{ restaurantId: { $exists: false } }, { restaurantId: null }];
 
-export const toObjectId = (value) => new mongoose.Types.ObjectId(String(value));
+/**
+ * A category with no restaurant is an admin/global one.
+ *
+ * Was `[{ restaurantId: { $exists: false } }, { restaurantId: null }]` — two
+ * clauses because a Mongo document could omit the field entirely. A column
+ * cannot, so it is one condition.
+ */
+export const GLOBAL_CATEGORY_FILTER = { restaurantId: null };
+
+/**
+ * Same story: the Mongo filter had to allow for `approvalStatus` being absent
+ * and fall back to `isApproved !== false`. The column is NOT NULL with a
+ * default, so the status alone is the answer.
+ */
+export const APPROVED_CATEGORY_FILTER = { approvalStatus: 'approved' };
+
+/** zoneId set = that zone only; null = everywhere. */
+export const zoneVisibilityFilter = (zoneIdRaw) =>
+    isId(zoneIdRaw)
+        ? { OR: [{ zoneId: String(zoneIdRaw) }, { zoneId: null }] }
+        : { zoneId: null };
 
 export const normalizeCategoryApprovalStatus = (value, fallback = 'pending') => {
     const normalized = String(value || '').trim();
@@ -17,158 +36,104 @@ export const normalizeCategoryFoodTypeScope = (value, fallback = 'Both') => {
     return CATEGORY_FOOD_TYPE_SCOPES.includes(normalized) ? normalized : fallback;
 };
 
-export const normalizeFoodTypeForCategory = (value) => {
-    const normalized = String(value || '').trim();
-    if (normalized === 'Veg') return 'Veg';
-    return 'Non-Veg';
-};
+export const normalizeFoodTypeForCategory = (value) =>
+    String(value || '').trim() === 'Veg' ? 'Veg' : 'Non-Veg';
 
 export const categoryAllowsFoodType = (scope, foodType) => {
     const normalizedScope = normalizeCategoryFoodTypeScope(scope, 'Both');
-    const normalizedFoodType = normalizeFoodTypeForCategory(foodType);
     if (normalizedScope === 'Both') return true;
-    return normalizedScope === normalizedFoodType;
+    return normalizedScope === normalizeFoodTypeForCategory(foodType);
 };
 
-export const isGlobalCategory = (category = {}) => {
-    const restaurantId = category?.restaurantId;
-    return !restaurantId;
-};
+export const isGlobalCategory = (category = {}) => !category?.restaurantId;
 
 export const getCategoryApprovalStatus = (category = {}) => {
-    if (CATEGORY_APPROVAL_STATUSES.includes(String(category?.approvalStatus || '').trim())) {
-        return String(category.approvalStatus).trim();
-    }
+    const status = String(category?.approvalStatus || '').trim();
+    if (CATEGORY_APPROVAL_STATUSES.includes(status)) return status;
     return category?.isApproved === false ? 'pending' : 'approved';
 };
 
-const buildCategoryStatsMap = async (categoryIds = []) => {
-    const validIds = Array.from(
-        new Set(
-            (categoryIds || [])
-                .map((value) => {
-                    if (!value) return '';
-                    const raw = String(value);
-                    return mongoose.Types.ObjectId.isValid(raw) ? raw : '';
-                })
-                .filter(Boolean)
-        )
-    ).map((value) => new mongoose.Types.ObjectId(value));
-
+/**
+ * Per-category dish counts: total, veg, and approved.
+ *
+ * Was a Mongo $group aggregation. Postgres does conditional counts with
+ * COUNT(*) FILTER, which Prisma's groupBy cannot express — it only offers a
+ * plain _count — so this stays raw rather than becoming three round trips.
+ *
+ * @returns {Promise<Map<string, {totalFoods: number, vegFoods: number, approvedFoods: number}>>}
+ */
+export const getCategoryStats = async (categoryIds = []) => {
+    const validIds = [...new Set((categoryIds || []).map((v) => (v ? String(v) : '')).filter(isId))];
     if (!validIds.length) return new Map();
 
-    const stats = await FoodItem.aggregate([
-        { $match: { categoryId: { $in: validIds } } },
-        {
-            $group: {
-                _id: '$categoryId',
-                totalFoods: { $sum: 1 },
-                vegFoods: {
-                    $sum: {
-                        $cond: [{ $eq: ['$foodType', 'Veg'] }, 1, 0]
-                    }
-                },
-                approvedFoods: {
-                    $sum: {
-                        $cond: [{ $eq: ['$approvalStatus', 'approved'] }, 1, 0]
-                    }
-                }
-            }
-        }
-    ]);
+    const rows = await prisma.$queryRaw`
+        SELECT "categoryId",
+               COUNT(*)                                            AS "totalFoods",
+               COUNT(*) FILTER (WHERE "foodType" = 'Veg')          AS "vegFoods",
+               COUNT(*) FILTER (WHERE "approvalStatus" = 'approved') AS "approvedFoods"
+        FROM "food_items"
+        WHERE "categoryId" = ANY(${validIds})
+        GROUP BY "categoryId"
+    `;
 
-    return new Map(stats.map((item) => [String(item._id), item]));
+    // COUNT is int8, which the driver returns as BigInt.
+    return new Map(
+        rows.map((row) => [
+            String(row.categoryId),
+            {
+                totalFoods: Number(row.totalFoods),
+                vegFoods: Number(row.vegFoods),
+                approvedFoods: Number(row.approvedFoods),
+            },
+        ])
+    );
 };
 
-export const backfillLegacyCategoryWorkflow = async (categories = []) => {
-    const list = Array.isArray(categories) ? categories.filter(Boolean) : [];
-    if (!list.length) return new Map();
-
-    const statsById = await buildCategoryStatsMap(list.map((category) => category?._id || category?.id));
-    const writes = [];
-
-    for (const category of list) {
-        const categoryId = String(category?._id || category?.id || '');
-        if (!categoryId) continue;
-
-        const stats = statsById.get(categoryId) || null;
-        const next = {};
-        const hasRestaurantOwner = Boolean(category?.restaurantId);
-        const currentApprovalStatus = String(category?.approvalStatus || '').trim();
-        const currentFoodTypeScope = String(category?.foodTypeScope || '').trim();
-
-        if (!category?.createdByRestaurantId && hasRestaurantOwner) {
-            next.createdByRestaurantId = category.restaurantId;
-        }
-
-        if (!CATEGORY_APPROVAL_STATUSES.includes(currentApprovalStatus)) {
-            let approvalStatus = 'approved';
-            if (hasRestaurantOwner) {
-                if (Number(stats?.totalFoods || 0) > 0) {
-                    approvalStatus = 'approved';
-                } else if (category?.isApproved === false) {
-                    approvalStatus = 'pending';
-                }
-            } else if (category?.isApproved === false) {
-                approvalStatus = 'pending';
-            }
-
-            next.approvalStatus = approvalStatus;
-            next.isApproved = approvalStatus === 'approved';
-            if (approvalStatus === 'approved' && !category?.approvedAt) {
-                next.approvedAt = category?.updatedAt || category?.createdAt || new Date();
-            }
-            if (approvalStatus === 'pending' && !category?.requestedAt) {
-                next.requestedAt = category?.updatedAt || category?.createdAt || new Date();
-            }
-        }
-
-        if (!CATEGORY_FOOD_TYPE_SCOPES.includes(currentFoodTypeScope)) {
-            let foodTypeScope = 'Both';
-            if (Number(stats?.totalFoods || 0) > 0) {
-                foodTypeScope = Number(stats?.vegFoods || 0) === Number(stats?.totalFoods || 0) ? 'Veg' : 'Non-Veg';
-            }
-            next.foodTypeScope = foodTypeScope;
-        }
-
-        if (Object.keys(next).length > 0) {
-            writes.push({
-                updateOne: {
-                    filter: { _id: category._id || category.id },
-                    update: { $set: next }
-                }
-            });
-            Object.assign(category, next);
-        }
-    }
-
-    if (writes.length) {
-        const { FoodCategory } = await import('../admin/models/category.model.js');
-        await FoodCategory.bulkWrite(writes, { ordered: false });
-    }
-
-    return statsById;
-};
-
+/**
+ * The shape the category screens render.
+ *
+ * `restaurantId` may arrive as a bare id or as a hydrated restaurant, depending
+ * on whether the caller asked for the relation, so both are handled.
+ */
 export const serializeCategoryForResponse = (category = {}, options = {}) => {
     const statsById = options.statsById instanceof Map ? options.statsById : new Map();
-    const categoryId = String(category?._id || category?.id || '');
+    const categoryId = String(category?.id || category?._id || '');
     const stats = statsById.get(categoryId) || null;
     const approvalStatus = getCategoryApprovalStatus(category);
-    const restaurantId = category?.restaurantId?._id
-        ? String(category.restaurantId._id)
-        : (category?.restaurantId ? String(category.restaurantId) : null);
-    const createdByRestaurantId = category?.createdByRestaurantId?._id
-        ? String(category.createdByRestaurantId._id)
-        : (category?.createdByRestaurantId ? String(category.createdByRestaurantId) : null);
-    const isGlobal = !restaurantId;
+
+    const idOf = (value) => {
+        if (!value) return null;
+        if (typeof value === 'object') return String(value.id || value._id || '') || null;
+        return String(value);
+    };
+    const objectOf = (value) => (value && typeof value === 'object' ? value : null);
+
+    const restaurantId = idOf(category?.restaurantId ?? category?.restaurant);
+    const createdByRestaurantId = idOf(
+        category?.createdByRestaurantId ?? category?.createdByRestaurant
+    );
+
+    const owner = objectOf(category?.restaurant ?? category?.restaurantId);
+    const creator = objectOf(category?.createdByRestaurant ?? category?.createdByRestaurantId);
+
     const isOwnedByRestaurant = options.currentRestaurantId
-        ? createdByRestaurantId === String(options.currentRestaurantId) || restaurantId === String(options.currentRestaurantId)
+        ? createdByRestaurantId === String(options.currentRestaurantId) ||
+          restaurantId === String(options.currentRestaurantId)
         : false;
 
+    const toParty = (restaurant) =>
+        restaurant
+            ? {
+                _id: restaurant.id || restaurant._id,
+                name: restaurant.restaurantName || '',
+                ownerName: restaurant.ownerName || '',
+                ownerPhone: restaurant.ownerPhone || '',
+            }
+            : null;
+
     return {
-        id: category._id || category.id,
-        _id: category._id || category.id,
+        id: categoryId,
+        _id: categoryId,
         name: category.name,
         image: category.image || '',
         type: category.type || '',
@@ -180,7 +145,7 @@ export const serializeCategoryForResponse = (category = {}, options = {}) => {
         rejectionReason: category.rejectionReason || '',
         restaurantId,
         createdByRestaurantId,
-        isGlobal,
+        isGlobal: !restaurantId,
         globalizedAt: category.globalizedAt || null,
         requestedAt: category.requestedAt || null,
         approvedAt: category.approvedAt || null,
@@ -190,29 +155,19 @@ export const serializeCategoryForResponse = (category = {}, options = {}) => {
             ? Boolean(restaurantId && restaurantId === String(options.currentRestaurantId))
             : true,
         canDelete: options.currentRestaurantId
-            ? Boolean(restaurantId && restaurantId === String(options.currentRestaurantId) && Number(stats?.totalFoods || 0) === 0)
+            ? Boolean(
+                restaurantId &&
+                restaurantId === String(options.currentRestaurantId) &&
+                Number(stats?.totalFoods || 0) === 0
+            )
             : Number(stats?.totalFoods || 0) === 0,
-        restaurant: category?.restaurantId?._id
-            ? {
-                _id: category.restaurantId._id,
-                name: category.restaurantId.restaurantName || '',
-                ownerName: category.restaurantId.ownerName || '',
-                ownerPhone: category.restaurantId.ownerPhone || ''
-            }
-            : null,
-        createdByRestaurant: category?.createdByRestaurantId?._id
-            ? {
-                _id: category.createdByRestaurantId._id,
-                name: category.createdByRestaurantId.restaurantName || '',
-                ownerName: category.createdByRestaurantId.ownerName || '',
-                ownerPhone: category.createdByRestaurantId.ownerPhone || ''
-            }
-            : null,
+        restaurant: toParty(owner),
+        createdByRestaurant: toParty(creator),
         zoneId: category.zoneId || null,
         sortOrder: category.sortOrder || 0,
         itemCount: options.includeCounts ? Number(stats?.totalFoods || 0) : undefined,
         approvedFoodCount: options.includeCounts ? Number(stats?.approvedFoods || 0) : undefined,
         createdAt: category.createdAt,
-        updatedAt: category.updatedAt
+        updatedAt: category.updatedAt,
     };
 };

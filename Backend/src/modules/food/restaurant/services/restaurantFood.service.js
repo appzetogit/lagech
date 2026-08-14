@@ -1,35 +1,42 @@
-import mongoose from 'mongoose';
+import { prisma } from '../../../../config/prisma.js';
+import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
-import { FoodItem } from '../../admin/models/food.model.js';
-import { FoodCategory } from '../../admin/models/category.model.js';
 import { normalizeFoodImages } from '../../admin/services/foodImages.util.js';
-import { FoodRestaurant } from '../models/restaurant.model.js';
 import {
     extractRawFoodVariants,
     getFoodDisplayOtherPrice,
     getFoodDisplayPrice,
     hasFoodVariants,
-    normalizeFoodVariantsInput
+    normalizeFoodVariantsInput,
 } from '../../admin/services/foodVariant.service.js';
 import {
-    backfillLegacyCategoryWorkflow,
+    APPROVED_CATEGORY_FILTER,
     categoryAllowsFoodType,
-    GLOBAL_CATEGORY_FILTER
+    GLOBAL_CATEGORY_FILTER,
 } from '../../shared/categoryWorkflow.js';
 
 const toStr = (v) => (v != null ? String(v).trim() : '');
-const APPROVED_CATEGORY_FILTER = [
-    { approvalStatus: 'approved' },
-    { approvalStatus: { $exists: false }, isApproved: { $ne: false } }
-];
 
+/** The dish plus its variant rows — hasFoodVariants() needs them loaded. */
+const WITH_VARIANTS = { variants: { orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] } };
+
+/**
+ * FoodType's Prisma name for 'Non-Veg' is NonVeg (the hyphen is a @map), so the
+ * client value and the wire value differ and have to be translated both ways.
+ */
+const toFoodTypeColumn = (v) => (String(v || '').trim() === 'Veg' ? 'Veg' : 'NonVeg');
 const normalizeFoodType = (v) => {
     const t = String(v || '').trim();
-    if (!t) return 'Non-Veg';
-    if (t === 'Veg') return 'Veg';
-    if (t === 'Non-Veg') return 'Non-Veg';
-    if (t === 'Egg') return 'Non-Veg';
-    return 'Non-Veg';
+    // 'Egg' and anything unrecognised have always counted as non-veg.
+    return t === 'Veg' ? 'Veg' : 'Non-Veg';
+};
+
+/** Same story for the hyphenated stock modes. */
+const STOCK_OFF_MODES = {
+    'manual': 'manual',
+    'specific-time': 'specific_time',
+    'next-business-day': 'next_business_day',
+    'custom-date-time': 'custom_date_time',
 };
 
 const getCreateFoodPricing = (body = {}) => {
@@ -38,7 +45,7 @@ const getCreateFoodPricing = (body = {}) => {
         return {
             price: getFoodDisplayPrice({ variants }),
             otherPrice: getFoodDisplayOtherPrice({ variants }),
-            variants
+            variants,
         };
     }
 
@@ -48,7 +55,7 @@ const getCreateFoodPricing = (body = {}) => {
     return {
         price,
         otherPrice: Number.isFinite(otherPrice) && otherPrice > 0 ? otherPrice : 0,
-        variants: []
+        variants: [],
     };
 };
 
@@ -67,11 +74,15 @@ const getUpdatedFoodPricing = (existing = {}, body = {}) => {
             return update;
         }
 
-        const nextBasePrice = body.price !== undefined ? Number(body.price) : Number(existingHasVariants ? NaN : existing.price);
+        const nextBasePrice =
+            body.price !== undefined
+                ? Number(body.price)
+                : Number(existingHasVariants ? NaN : existing.price);
         if (!Number.isFinite(nextBasePrice) || nextBasePrice < 0) {
             throw new ValidationError('Base price is required when variants are removed');
         }
         update.price = nextBasePrice;
+
         if (body.otherPrice !== undefined) {
             const otherPrice = Number(body.otherPrice);
             update.otherPrice = Number.isFinite(otherPrice) && otherPrice > 0 ? otherPrice : 0;
@@ -92,7 +103,9 @@ const getUpdatedFoodPricing = (existing = {}, body = {}) => {
 
     if (body.otherPrice !== undefined) {
         if (existingHasVariants) {
-            throw new ValidationError('Update variants instead of base other price for foods with variants');
+            throw new ValidationError(
+                'Update variants instead of base other price for foods with variants'
+            );
         }
         const otherPrice = Number(body.otherPrice);
         update.otherPrice = Number.isFinite(otherPrice) && otherPrice > 0 ? otherPrice : 0;
@@ -101,76 +114,59 @@ const getUpdatedFoodPricing = (existing = {}, body = {}) => {
     return update;
 };
 
-const STOCK_OFF_MODES = new Set(['manual', 'specific-time', 'next-business-day', 'custom-date-time']);
-
 const parseStockResumeAt = (value) => {
     if (value === null || value === undefined || value === '') return null;
     const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return null;
-    return date;
+    return Number.isNaN(date.getTime()) ? null : date;
 };
 
+/**
+ * Availability fields.
+ *
+ * Mongo needed a separate $unset map to remove a field; a column just goes to
+ * NULL, so this returns one flat object.
+ */
 const buildAvailabilityUpdate = (body = {}) => {
     const update = {};
-    const unset = {};
 
     if (body.isAvailable !== undefined) {
         update.isAvailable = body.isAvailable !== false;
+        // Coming back in stock clears whatever scheduled it off.
         if (body.isAvailable !== false) {
-            unset.stockResumeAt = 1;
-            unset.stockOffMode = 1;
+            update.stockResumeAt = null;
+            update.stockOffMode = null;
         }
     }
 
     if (body.stockResumeAt !== undefined) {
-        const resumeAt = parseStockResumeAt(body.stockResumeAt);
-        if (resumeAt) {
-            update.stockResumeAt = resumeAt;
-        } else {
-            unset.stockResumeAt = 1;
-        }
+        update.stockResumeAt = parseStockResumeAt(body.stockResumeAt);
     }
 
     if (body.stockOffMode !== undefined) {
-        const mode = String(body.stockOffMode || '').trim();
-        if (mode && STOCK_OFF_MODES.has(mode)) {
-            update.stockOffMode = mode;
-        } else {
-            unset.stockOffMode = 1;
-        }
+        update.stockOffMode = STOCK_OFF_MODES[String(body.stockOffMode || '').trim()] || null;
     }
 
-    return { update, unset };
+    return update;
 };
 
 const getRestaurantContext = async (restaurantId) => {
-    if (!restaurantId || !mongoose.Types.ObjectId.isValid(String(restaurantId))) {
-        throw new ValidationError('Invalid restaurant id');
-    }
+    if (!isId(restaurantId)) throw new ValidationError('Invalid restaurant id');
 
-    const restaurant = await FoodRestaurant.findById(restaurantId)
-        .select('pureVegRestaurant')
-        .lean();
-    if (!restaurant?._id) {
-        throw new ValidationError('Restaurant not found');
-    }
+    const restaurant = await prisma.foodRestaurant.findUnique({
+        where: { id: String(restaurantId) },
+        select: { id: true, pureVegRestaurant: true },
+    });
+    if (!restaurant) throw new ValidationError('Restaurant not found');
 
-    return {
-        restaurantId: new mongoose.Types.ObjectId(String(restaurantId)),
-        pureVegRestaurant: restaurant.pureVegRestaurant === true
-    };
+    return { restaurantId: restaurant.id, pureVegRestaurant: restaurant.pureVegRestaurant === true };
 };
 
+/** Approved categories this restaurant may file a dish under: its own, or global. */
 const getAccessibleCategoryFilter = (context) => ({
-    $or: [
-        { restaurantId: context.restaurantId, $or: APPROVED_CATEGORY_FILTER },
-        {
-            $and: [
-                { $or: GLOBAL_CATEGORY_FILTER },
-                { $or: APPROVED_CATEGORY_FILTER }
-            ]
-        }
-    ]
+    OR: [
+        { restaurantId: context.restaurantId, ...APPROVED_CATEGORY_FILTER },
+        { ...GLOBAL_CATEGORY_FILTER, ...APPROVED_CATEGORY_FILTER },
+    ],
 });
 
 const resolveCategoryForRestaurant = async (context, body = {}) => {
@@ -179,47 +175,39 @@ const resolveCategoryForRestaurant = async (context, body = {}) => {
     const foodType = normalizeFoodType(body.foodType);
 
     if (!categoryIdRaw && !categoryNameRaw) {
-        return { categoryObjectId: undefined, categoryName: '' };
+        return { categoryId: null, categoryName: '' };
     }
 
     const baseFilter = {
         ...getAccessibleCategoryFilter(context),
-        isActive: { $ne: false }
+        isActive: true,
+        ...(context.pureVegRestaurant ? { foodTypeScope: 'Veg' } : {}),
     };
-    if (context.pureVegRestaurant) {
-        baseFilter.foodTypeScope = 'Veg';
-    }
 
     let category = null;
     if (categoryIdRaw) {
-        if (!mongoose.Types.ObjectId.isValid(categoryIdRaw)) {
-            throw new ValidationError('Invalid category id');
-        }
-
-        category = await FoodCategory.findOne({
-            _id: new mongoose.Types.ObjectId(categoryIdRaw),
-            ...baseFilter
-        }).lean();
+        if (!isId(categoryIdRaw)) throw new ValidationError('Invalid category id');
+        category = await prisma.foodCategory.findFirst({
+            where: { id: categoryIdRaw, ...baseFilter },
+        });
     } else {
-        const exact = `^${String(categoryNameRaw).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`;
-        const matches = await FoodCategory.find({
-            ...baseFilter,
-            name: { $regex: exact, $options: 'i' }
-        })
-            .sort({ createdAt: -1 })
-            .limit(2)
-            .lean();
+        // An exact, case-insensitive name match. Two accessible categories can
+        // legitimately share a name (one global, one private), and silently
+        // picking either would file the dish under the wrong one.
+        const matches = await prisma.foodCategory.findMany({
+            where: { ...baseFilter, name: { equals: categoryNameRaw, mode: 'insensitive' } },
+            orderBy: { createdAt: 'desc' },
+            take: 2,
+        });
         if (matches.length > 1) {
-            throw new ValidationError('Multiple categories share this name. Please choose a specific category.');
+            throw new ValidationError(
+                'Multiple categories share this name. Please choose a specific category.'
+            );
         }
         category = matches[0] || null;
     }
 
-    if (!category?._id) {
-        throw new ValidationError('Category not found for this restaurant');
-    }
-
-    await backfillLegacyCategoryWorkflow([category]);
+    if (!category) throw new ValidationError('Category not found for this restaurant');
 
     if (String(category.approvalStatus || '') !== 'approved') {
         throw new ValidationError('This category is awaiting admin approval');
@@ -228,14 +216,27 @@ const resolveCategoryForRestaurant = async (context, body = {}) => {
         throw new ValidationError('Pure veg restaurants can only use veg categories');
     }
     if (!categoryAllowsFoodType(category.foodTypeScope, foodType)) {
-        throw new ValidationError(`This ${category.foodTypeScope} category cannot accept ${foodType} food`);
+        throw new ValidationError(
+            `This ${category.foodTypeScope} category cannot accept ${foodType} food`
+        );
     }
 
-    return {
-        categoryObjectId: category._id,
-        categoryName: category.name || '',
-        category
-    };
+    return { categoryId: category.id, categoryName: category.name || '', category };
+};
+
+const notifyAdmins = async (title, body, id) => {
+    try {
+        const { notifyAdminsSafely } = await import(
+            '../../../../core/notifications/firebase.service.js'
+        );
+        void notifyAdminsSafely({
+            title,
+            body,
+            data: { type: 'approval_request', subType: 'food', id: String(id) },
+        });
+    } catch (e) {
+        console.error('Failed to notify admins of food approval request:', e);
+    }
 };
 
 export async function createRestaurantFood(restaurantId, body = {}) {
@@ -246,59 +247,91 @@ export async function createRestaurantFood(restaurantId, body = {}) {
     if (name.length > 200) throw new ValidationError('Item name is too long');
 
     const { price, otherPrice, variants } = getCreateFoodPricing(body);
-
-    const description = toStr(body.description);
-    const isAvailable = body.isAvailable !== false;
     const foodType = normalizeFoodType(body.foodType);
-    const preparationTime = toStr(body.preparationTime);
-    const { categoryObjectId, categoryName } = await resolveCategoryForRestaurant(context, { ...body, foodType });
-
-    const doc = await FoodItem.create({
-        restaurantId,
-        categoryId: categoryObjectId,
-        categoryName: categoryName || '',
-        name,
-        description,
-        price,
-        otherPrice,
-        variants,
-        // Same normaliser the admin service uses, so a dish gets the same
-        // image/images relationship regardless of which panel created it.
-        ...(normalizeFoodImages(body) ?? { image: '', images: [] }),
+    const { categoryId, categoryName } = await resolveCategoryForRestaurant(context, {
+        ...body,
         foodType,
-        isAvailable,
-        isRecommended: body.isRecommended === true,
-        preparationTime,
-        approvalStatus: 'pending',
-        requestedAt: new Date()
     });
 
-    try {
-        const { notifyAdminsSafely } = await import('../../../../core/notifications/firebase.service.js');
-        void notifyAdminsSafely({
-            title: 'New Product Approval Request ðŸ”',
-            body: `Restaurant has submitted a new item "${doc.name}" for approval.`,
-            data: {
-                type: 'approval_request',
-                subType: 'food',
-                id: String(doc._id)
-            }
-        });
-    } catch (e) {
-        // eslint-disable-next-line no-console
-        console.error('Failed to notify admins of new food approval request:', e);
-    }
+    const doc = await prisma.foodItem.create({
+        data: {
+            restaurantId: context.restaurantId,
+            categoryId,
+            categoryName: categoryName || '',
+            name,
+            description: toStr(body.description),
+            price,
+            otherPrice,
+            // variants is a table now, so it is created alongside the dish in
+            // one statement rather than embedded in it.
+            variants: {
+                create: variants.map((variant, index) => ({
+                    name: variant.name,
+                    price: variant.price,
+                    otherPrice: variant.otherPrice,
+                    sortOrder: index,
+                })),
+            },
+            // Same normaliser the admin service uses, so a dish gets the same
+            // image/images relationship regardless of which panel created it.
+            ...(normalizeFoodImages(body) ?? { image: '', images: [] }),
+            foodType: toFoodTypeColumn(foodType),
+            isAvailable: body.isAvailable !== false,
+            isRecommended: body.isRecommended === true,
+            preparationTime: toStr(body.preparationTime),
+            approvalStatus: 'pending',
+            requestedAt: new Date(),
+        },
+        include: WITH_VARIANTS,
+    });
 
-    return doc.toObject();
+    await notifyAdmins(
+        'New Product Approval Request',
+        `Restaurant has submitted a new item "${doc.name}" for approval.`,
+        doc.id
+    );
+
+    return doc;
 }
+
+/**
+ * Reconcile the variant rows against what the client sent.
+ *
+ * An entry carrying an id updates that row; one without is new; a row whose id
+ * is absent from the payload is removed. Replacing the whole set wholesale
+ * would hand every variant a new id, and a cart already holding one would fail
+ * checkout with "that size no longer exists".
+ */
+const syncVariants = async (tx, foodItemId, variants) => {
+    const keepIds = variants.map((variant) => variant.id).filter(Boolean);
+
+    await tx.foodItemVariant.deleteMany({
+        where: { foodItemId, ...(keepIds.length ? { id: { notIn: keepIds } } : {}) },
+    });
+
+    for (const [index, variant] of variants.entries()) {
+        const data = {
+            name: variant.name,
+            price: variant.price,
+            otherPrice: variant.otherPrice,
+            sortOrder: index,
+        };
+        if (variant.id) {
+            await tx.foodItemVariant.update({ where: { id: variant.id }, data });
+        } else {
+            await tx.foodItemVariant.create({ data: { foodItemId, ...data } });
+        }
+    }
+};
 
 export async function updateRestaurantFood(restaurantId, foodId, body = {}) {
     const context = await getRestaurantContext(restaurantId);
-    if (!foodId || !mongoose.Types.ObjectId.isValid(String(foodId))) {
-        throw new ValidationError('Invalid food id');
-    }
+    if (!isId(foodId)) throw new ValidationError('Invalid food id');
 
-    const existing = await FoodItem.findOne({ _id: foodId, restaurantId }).lean();
+    const existing = await prisma.foodItem.findFirst({
+        where: { id: String(foodId), restaurantId: context.restaurantId },
+        include: WITH_VARIANTS,
+    });
     if (!existing) return null;
 
     const update = {};
@@ -310,42 +343,54 @@ export async function updateRestaurantFood(restaurantId, foodId, body = {}) {
         update.name = name;
     }
     if (body.description !== undefined) update.description = toStr(body.description);
+
     const nextImages = normalizeFoodImages(body, existing);
     if (nextImages) {
         update.images = nextImages.images;
         update.image = nextImages.image;
     }
-    Object.assign(update, getUpdatedFoodPricing(existing, body));
-    const availabilityUpdate = buildAvailabilityUpdate(body);
-    Object.assign(update, availabilityUpdate.update);
+
+    const pricing = getUpdatedFoodPricing(existing, body);
+    // Held back from the column update — variants live in their own table.
+    const nextVariants = pricing.variants;
+    delete pricing.variants;
+    Object.assign(update, pricing);
+
+    Object.assign(update, buildAvailabilityUpdate(body));
     if (body.preparationTime !== undefined) update.preparationTime = toStr(body.preparationTime);
     if (body.isRecommended !== undefined) update.isRecommended = body.isRecommended === true;
 
-    const targetFoodType = body.foodType !== undefined ? normalizeFoodType(body.foodType) : normalizeFoodType(existing.foodType);
-    if (body.foodType !== undefined) update.foodType = targetFoodType;
+    const targetFoodType =
+        body.foodType !== undefined
+            ? normalizeFoodType(body.foodType)
+            : normalizeFoodType(existing.foodType === 'NonVeg' ? 'Non-Veg' : existing.foodType);
+    if (body.foodType !== undefined) update.foodType = toFoodTypeColumn(targetFoodType);
 
     if (
         body.categoryId !== undefined ||
         body.categoryName !== undefined ||
         body.foodType !== undefined
     ) {
-        const { categoryObjectId, categoryName } = await resolveCategoryForRestaurant(context, {
+        const resolved = await resolveCategoryForRestaurant(context, {
             categoryId: body.categoryId !== undefined ? body.categoryId : existing.categoryId,
-            categoryName: body.categoryName !== undefined ? body.categoryName : existing.categoryName,
-            foodType: targetFoodType
+            categoryName:
+                body.categoryName !== undefined ? body.categoryName : existing.categoryName,
+            foodType: targetFoodType,
         });
-        update.categoryId = categoryObjectId;
-        update.categoryName = categoryName || '';
+        update.categoryId = resolved.categoryId;
+        update.categoryName = resolved.categoryName || '';
     }
 
     const CRITICAL_APPROVAL_FIELDS = [
         // `images` alongside `image`: adding or reordering photos changes what
         // customers are shown, so it goes back through approval for the same
         // reason a changed primary image always did.
-        'name', 'description', 'image', 'images', 'price', 'variants',
-        'foodType', 'categoryId', 'categoryName', 'preparationTime'
+        'name', 'description', 'image', 'images', 'price',
+        'foodType', 'categoryId', 'categoryName', 'preparationTime',
     ];
-    const shouldResubmitForApproval = Object.keys(update).some(key => CRITICAL_APPROVAL_FIELDS.includes(key));
+    const shouldResubmitForApproval =
+        Object.keys(update).some((key) => CRITICAL_APPROVAL_FIELDS.includes(key)) ||
+        nextVariants !== undefined;
 
     if (shouldResubmitForApproval) {
         update.approvalStatus = 'pending';
@@ -355,30 +400,25 @@ export async function updateRestaurantFood(restaurantId, foodId, body = {}) {
         update.rejectedAt = null;
     }
 
-    const updated = await FoodItem.findOneAndUpdate(
-        { _id: foodId, restaurantId },
-        {
-            ...(Object.keys(update).length ? { $set: update } : {}),
-            ...(Object.keys(availabilityUpdate.unset).length ? { $unset: availabilityUpdate.unset } : {})
-        },
-        { new: true }
-    ).lean();
-
-    if (updated && shouldResubmitForApproval) {
-        try {
-            const { notifyAdminsSafely } = await import('../../../../core/notifications/firebase.service.js');
-            void notifyAdminsSafely({
-                title: 'Updated Product Approval Request',
-                body: `Restaurant has updated and resubmitted "${updated.name}" for approval.`,
-                data: {
-                    type: 'approval_request',
-                    subType: 'food',
-                    id: String(updated._id)
-                }
-            });
-        } catch (e) {
-            console.error('Failed to notify admins of resubmitted food approval request:', e);
+    // One transaction: a dish must never end up priced from variants that
+    // failed to save, or resubmitted for approval without its new sizes.
+    const updated = await prisma.$transaction(async (tx) => {
+        if (nextVariants !== undefined) {
+            await syncVariants(tx, existing.id, nextVariants);
         }
+        return tx.foodItem.update({
+            where: { id: existing.id },
+            data: update,
+            include: WITH_VARIANTS,
+        });
+    });
+
+    if (shouldResubmitForApproval) {
+        await notifyAdmins(
+            'Updated Product Approval Request',
+            `Restaurant has updated and resubmitted "${updated.name}" for approval.`,
+            updated.id
+        );
     }
 
     return updated;
