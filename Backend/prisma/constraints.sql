@@ -94,6 +94,23 @@ ALTER TABLE "delivery_fee_bands" ADD CONSTRAINT "delivery_fee_band_no_overlap"
     numrange("minDistanceKm", "maxDistanceKm", '[)') WITH &&
   );
 
+-- ─── delivery commission slabs must not overlap ──────────────────────────────
+-- Same reasoning as the fee bands above. The slab set decides what a rider is
+-- paid, and the overlap rule lived in JS: two admins saving concurrently each
+-- validated against a set that did not yet include the other's slab, so an
+-- overlap could be written by a check that had just passed. A NULL maxDistance
+-- means "and everything beyond", which is upper-unbounded rather than absent.
+--
+-- Inactive slabs are excluded: a disabled slab prices nothing, so it is allowed
+-- to sit under a live one while an admin reworks the ladder.
+ALTER TABLE "food_delivery_commission_rules"
+  DROP CONSTRAINT IF EXISTS "delivery_commission_rule_no_overlap";
+ALTER TABLE "food_delivery_commission_rules"
+  ADD CONSTRAINT "delivery_commission_rule_no_overlap"
+  EXCLUDE USING gist (
+    numrange("minDistance", "maxDistance", '[)') WITH &&
+  ) WHERE ("status");
+
 -- ─── one default address per customer ────────────────────────────────────────
 -- A partial unique index: many non-default addresses, at most one default. This
 -- was previously "whatever the last save happened to leave true" across an
