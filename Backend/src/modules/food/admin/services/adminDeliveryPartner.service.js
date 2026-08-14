@@ -1,6 +1,6 @@
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
-import { ValidationError } from '../../../../core/auth/errors.js';
+import { NotFoundError, ValidationError } from '../../../../core/auth/errors.js';
 
 /**
  * The admin delivery-partner list and its money summary, extracted from
@@ -362,34 +362,93 @@ export async function rejectDeliveryPartner(id, reason) {
     return partner;
 }
 
+/**
+ * Edits a delivery partner's name and phone from the admin panel.
+ *
+ * Phone is not just a display field — it is how the rider logs in, and it
+ * carries a unique index. Two things follow:
+ *
+ *  - A number already used by another partner has to be rejected with a
+ *    readable message. A deactivated partner still holds its number, so the
+ *    collision is not always visible in the list, and the message says so.
+ *  - Changing the number changes who can sign in, so the rider's existing
+ *    sessions are invalidated: the old handset must not keep acting on an
+ *    identity that has moved.
+ */
 export async function updateDeliveryPartnerProfile(id, { name, phone } = {}) {
-    if (!isId(id)) throw new ValidationError('Invalid delivery partner id');
+    if (!isId(id)) throw new NotFoundError('Delivery partner not found');
+
+    const partner = await prisma.foodDeliveryPartner.findUnique({ where: { id: String(id) } });
+    if (!partner) throw new NotFoundError('Delivery partner not found');
+
+    const nextName = typeof name === 'string' ? name.trim() : undefined;
+    const nextPhone = typeof phone === 'string' ? phone.trim() : undefined;
 
     const data = {};
-    if (name !== undefined) {
-        const next = String(name || '').trim();
-        if (!next) throw new ValidationError('Name cannot be empty');
-        data.name = next;
+
+    if (nextName !== undefined) {
+        if (!nextName) throw new ValidationError('Name cannot be empty');
+        data.name = nextName;
     }
-    if (phone !== undefined) {
-        const next = String(phone || '').replace(/\D/g, '');
-        if (!next) throw new ValidationError('Phone cannot be empty');
-        data.phone = next;
+
+    if (nextPhone !== undefined && nextPhone !== partner.phone) {
+        if (!/^\d{10}$/.test(nextPhone)) {
+            throw new ValidationError('Phone must be a 10 digit number');
+        }
+
+        const clash = await prisma.foodDeliveryPartner.findFirst({
+            where: { phone: nextPhone, id: { not: partner.id } },
+            select: { name: true, status: true },
+        });
+        if (clash) {
+            throw new ValidationError(
+                `That number already belongs to ${clash.name || 'another delivery partner'}` +
+                    (clash.status === 'deactivated' ? ' (a deactivated account)' : ''),
+            );
+        }
+
+        data.phone = nextPhone;
+        // Moving the number moves the login. Bump the token version so sessions
+        // issued against the old identity stop being accepted on their next
+        // request.
+        data.tokenVersion = { increment: 1 };
     }
-    if (!Object.keys(data).length) return null;
+
+    if (!Object.keys(data).length) return partner;
 
     try {
-        const { count } = await prisma.foodDeliveryPartner.updateMany({
-            where: { id: String(id) },
-            data,
-        });
-        if (!count) return null;
-        return prisma.foodDeliveryPartner.findUnique({ where: { id: String(id) } });
+        return await prisma.foodDeliveryPartner.update({ where: { id: partner.id }, data });
     } catch (error) {
-        // phone is unique — two riders cannot share a login.
+        // The unique index is the last word, in case the clash appeared between
+        // the check above and this write.
         if (error?.code === 'P2002') {
             throw new ValidationError('Another delivery partner already uses this phone number');
         }
         throw error;
     }
+}
+
+/**
+ * Deactivate a delivery partner.
+ *
+ * A soft state, not a delete: their orders, wallet and payout history all
+ * reference them, and 'deactivated' still holds the phone number so it cannot
+ * be reissued to someone else.
+ */
+export async function deleteDeliveryPartner(id) {
+    if (!isId(id)) throw new NotFoundError('Delivery partner not found');
+
+    const { count } = await prisma.foodDeliveryPartner.updateMany({
+        where: { id: String(id) },
+        data: {
+            status: 'deactivated',
+            // Sessions end with the account, and a deactivated rider must stop
+            // receiving dispatch offers.
+            tokenVersion: { increment: 1 },
+            availabilityStatus: 'offline',
+        },
+    });
+    if (!count) throw new NotFoundError('Delivery partner not found');
+
+    return prisma.foodDeliveryPartner.findUnique({ where: { id: String(id) } });
 }

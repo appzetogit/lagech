@@ -58,6 +58,7 @@ export * from './adminSupportTicket.service.js';
 export * from './adminWithdrawal.service.js';
 export * from './adminEarningAddon.service.js';
 export * from './adminDeliveryPartner.service.js';
+export * from './adminDeliveryWallet.service.js';
 
 import {
     getCategoryStats,
@@ -4006,85 +4007,7 @@ export async function getDeliverymanReviews(query = {}) {
 /**
  * Fetch delivery partner wallets with financial summary
  */
-export async function getDeliveryWallets(query = {}) {
-    const limit = parseInt(query.limit, 10) || 20;
-    const page = parseInt(query.page, 10) || 1;
-    const skip = (page - 1) * limit;
 
-    const filter = { status: 'approved' };
-    if (query.search) {
-        filter.$or = [
-            { name: new RegExp(query.search, 'i') },
-            { phone: new RegExp(query.search, 'i') }
-        ];
-    }
-
-    const [partners, total] = await Promise.all([
-        FoodDeliveryPartner.find(filter)
-            .sort({ createdAt: -1 })
-            .skip(skip)
-            .limit(limit)
-            .lean(),
-        FoodDeliveryPartner.countDocuments(filter)
-    ]);
-
-    const cashLimitSettings = await FoodDeliveryCashLimit.findOne({ isActive: true }).lean();
-    const globalLimit = Number(cashLimitSettings?.deliveryCashLimit || 0);
-
-    const partnerIds = partners.map(p => p._id);
-    const statsMap = await getBulkDeliveryPartnerStats(partnerIds);
-
-    const wallets = partners.map((p) => {
-        const stats = statsMap.get(p._id.toString()) || {};
-        return {
-            walletId: p._id, // Using partner ID as wallet ID fallback
-            deliveryId: p._id,
-            name: p.name,
-            deliveryIdString: p.phone,
-            pocketBalance: stats.pocketBalance || 0,
-            remainingCashLimit: Math.max(0, globalLimit - (stats.cashInHand || 0)),
-            cashCollected: stats.cashInHand || 0,
-            totalEarning: stats.totalEarning || 0,
-            bonus: stats.bonus || 0,
-            totalWithdrawn: stats.totalWithdrawn || 0,
-            availableCashLimit: globalLimit,
-            totalOrders: stats.totalOrders || 0
-        };
-    });
-
-    return { 
-        wallets, 
-        pagination: { 
-            total, 
-            page, 
-            limit, 
-            pages: Math.ceil(total / limit) || 1 
-        } 
-    };
-}
-
-/**
- * Update delivery partner wallet manually (admin)
- */
-export async function updateDeliveryBoyWallet(data) {
-    const { deliveryId, pocketBalance, cashInHand } = data;
-    if (!deliveryId) throw new ValidationError('Delivery partner ID required');
-
-    let wallet = await FoodDeliveryWallet.findOne({ deliveryPartnerId: deliveryId });
-    if (!wallet) {
-        wallet = new FoodDeliveryWallet({
-            deliveryPartnerId: deliveryId,
-            balance: pocketBalance || 0,
-            cashInHand: cashInHand || 0
-        });
-    } else {
-        if (pocketBalance !== undefined) wallet.balance = pocketBalance;
-        if (cashInHand !== undefined) wallet.cashInHand = cashInHand;
-    }
-
-    await wallet.save();
-    return wallet.toObject();
-}
 
 /**
  * Deactivate a delivery partner (admin)
@@ -4103,67 +4026,12 @@ export async function updateDeliveryBoyWallet(data) {
  *    invalidated so the old handset cannot keep acting on an identity that has moved.
  */
 
-export async function deleteDeliveryPartner(id) {
-    const partner = await FoodDeliveryPartner.findById(id);
-    if (!partner) throw new NotFoundError('Delivery partner not found');
 
-    partner.status = 'deactivated';
-    await partner.save();
-
-    // Optional: You could also clear FCM tokens to log them out
-    // partner.fcmTokens = [];
-    // await partner.save();
-
-    return partner.toObject();
-}
 
 /**
  * Fetch cash limit settlement (deposit) transactions
  */
-export async function getCashLimitSettlements(query = {}) {
-    const limit = parseInt(query.limit, 10) || 20;
-    const page = parseInt(query.page, 10) || 1;
-    const skip = (page - 1) * limit;
 
-    const filter = {};
-    if (query.search) {
-        // Search by razorpay ID or find partner IDs to search by partner
-        if (query.search.startsWith('pay_')) {
-            filter.razorpayPaymentId = query.search;
-        }
-    }
-
-    const [deposits, total] = await Promise.all([
-        FoodDeliveryCashDeposit.find(filter)
-            .sort({ createdAt: -1 })
-            .skip(skip)
-            .limit(limit)
-            .populate('deliveryPartnerId', 'name phone')
-            .lean(),
-        FoodDeliveryCashDeposit.countDocuments(filter)
-    ]);
-
-    const transactions = deposits.map((d) => ({
-        id: d._id,
-        createdAt: d.createdAt,
-        deliveryId: d.deliveryPartnerId?._id,
-        deliveryName: d.deliveryPartnerId?.name || 'N/A',
-        deliveryIdString: d.deliveryPartnerId?.phone || 'N/A',
-        amount: Number(d.amount || 0),
-        status: d.status,
-        razorpayPaymentId: d.razorpayPaymentId || '-'
-    }));
-
-    return { 
-        transactions, 
-        pagination: { 
-            total, 
-            page, 
-            limit,
-            pages: Math.ceil(total / limit) || 1
-        }
-    };
-}
 
 export async function getSidebarBadges() {
     try {

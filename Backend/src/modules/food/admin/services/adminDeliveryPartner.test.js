@@ -247,9 +247,8 @@ test('deciding an unknown application returns null', { skip: !live }, async () =
     assert.equal(await approveDeliveryPartner('not-an-id'), null);
 });
 
-test('a rider profile edit rejects blanks and duplicate phones', { skip: !live }, async () => {
+test('a rider profile edit trims the name and rejects a blank one', { skip: !live }, async () => {
     const partner = await makePartner();
-    const other = await makePartner();
 
     const renamed = await updateDeliveryPartnerProfile(partner.id, { name: '  Renamed  ' });
     assert.equal(renamed.name, 'Renamed');
@@ -259,12 +258,11 @@ test('a rider profile edit rejects blanks and duplicate phones', { skip: !live }
         /Name cannot be empty/,
     );
 
-    // Two riders sharing a phone would share a login.
-    await assert.rejects(
-        () => updateDeliveryPartnerProfile(partner.id, { phone: other.phone }),
-        /already uses this phone/,
-    );
+    // An edit that changes nothing returns the partner untouched.
+    const unchanged = await updateDeliveryPartnerProfile(partner.id, {});
+    assert.equal(unchanged.name, 'Renamed');
 
-    assert.equal(await updateDeliveryPartnerProfile(partner.id, {}), null);
-    assert.equal(await updateDeliveryPartnerProfile('a'.repeat(24), { name: 'x' }), null);
+    // The phone rules — ten digits, unused, and the session invalidation that
+    // comes with a number change — are covered in adminDeliveryWallet.test.js,
+    // which owns that behaviour.
 });
