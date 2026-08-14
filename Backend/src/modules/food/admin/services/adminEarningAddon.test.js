@@ -13,6 +13,7 @@ import {
     cancelEarningAddonHistory,
     checkEarningAddonCompletions,
 } from './adminEarningAddon.service.js';
+import { uniquePhone } from '../../../../utils/testIds.js';
 
 /**
  * Rider incentives.
@@ -34,7 +35,7 @@ const makePartner = async () => {
     const partner = await prisma.foodDeliveryPartner.create({
         data: {
             name: `Incentive Rider ${stamp()}`,
-            phone: `6${String(Date.now()).slice(-8)}${created.partners.length}`,
+            phone: uniquePhone('6'),
             status: 'approved',
         },
     });
@@ -60,14 +61,14 @@ const makeDeliveredOrders = async (partner, count) => {
         data: {
             restaurantName: `Inc Rest ${stamp()}`,
             ownerName: 'Owner',
-            ownerPhone: `9${String(Date.now()).slice(-9)}`,
+            ownerPhone: uniquePhone('9'),
             status: 'approved',
         },
     });
     created.restaurants.push(restaurant.id);
 
     const user = await prisma.foodUser.create({
-        data: { phone: `5${String(Date.now()).slice(-9)}` },
+        data: { phone: uniquePhone('5') },
     });
 
     for (let i = 0; i < count; i += 1) {

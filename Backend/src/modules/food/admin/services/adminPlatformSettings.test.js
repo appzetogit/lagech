@@ -10,6 +10,7 @@ import {
     updateSafetyEmergencyPriority,
     deleteSafetyEmergencyReport,
 } from './adminPlatformSettings.service.js';
+import { uniquePhone } from '../../../../utils/testIds.js';
 /**
  * Referral settings and the safety/emergency inbox.
  *
@@ -32,7 +33,7 @@ test.after(async () => {
 
 const makeReport = async (data = {}) => {
     const user = await prisma.foodUser.create({
-        data: { phone: `8${String(Date.now()).slice(-9)}${created.users.length}` },
+        data: { phone: uniquePhone('8') },
     });
     created.users.push(user.id);
 

@@ -16,6 +16,7 @@ import {
     replaceFirebaseDeviceToken,
     detachFirebaseDeviceTokenEverywhere,
 } from './firebase.service.js';
+import { uniquePhone } from '../../utils/testIds.js';
 
 /**
  * The inbox and the FCM token lists.
@@ -34,8 +35,8 @@ let broadcastId;
 test.before(async () => {
     if (!live) return;
     const [user, other, admin] = await Promise.all([
-        prisma.foodUser.create({ data: { phone: `91${String(Date.now()).slice(-8)}` } }),
-        prisma.foodUser.create({ data: { phone: `92${String(Date.now()).slice(-8)}` } }),
+        prisma.foodUser.create({ data: { phone: uniquePhone('91') } }),
+        prisma.foodUser.create({ data: { phone: uniquePhone('92') } }),
         prisma.foodAdmin.create({
             data: { email: `notif-${Date.now()}@test.local`, password: 'x' },
         }),

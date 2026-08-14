@@ -8,6 +8,7 @@ import {
     getFoodSupportTicketStats,
     updateSupportTicket,
 } from './adminSupportTicket.service.js';
+import { uniquePhone } from '../../../../utils/testIds.js';
 
 /**
  * The admin customer list and support inbox.
@@ -26,7 +27,7 @@ const makeUser = async (name, over = {}) => {
     const user = await prisma.foodUser.create({
         data: {
             name,
-            phone: `7${String(Date.now()).slice(-8)}${created.users.length}`,
+            phone: uniquePhone('7'),
             role: 'USER',
             ...over,
         },
@@ -40,7 +41,7 @@ const makeRestaurant = async () => {
         data: {
             restaurantName: `Cust Test ${stamp()}`,
             ownerName: 'Owner',
-            ownerPhone: `9${String(Date.now()).slice(-9)}`,
+            ownerPhone: uniquePhone('9'),
             status: 'approved',
         },
     });

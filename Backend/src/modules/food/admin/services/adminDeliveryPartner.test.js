@@ -11,6 +11,7 @@ import {
     rejectDeliveryPartner,
     updateDeliveryPartnerProfile,
 } from './adminDeliveryPartner.service.js';
+import { uniquePhone } from '../../../../utils/testIds.js';
 
 /**
  * The admin rider list and its money summary.
@@ -28,7 +29,7 @@ const makePartner = async (over = {}) => {
     const partner = await prisma.foodDeliveryPartner.create({
         data: {
             name: `Rider ${stamp()}`,
-            phone: `6${String(Date.now()).slice(-8)}${created.partners.length}`,
+            phone: uniquePhone('6'),
             status: 'approved',
             ...over,
         },
@@ -42,13 +43,13 @@ const makeOrders = async (partner, rows) => {
         data: {
             restaurantName: `DP Rest ${stamp()}`,
             ownerName: 'Owner',
-            ownerPhone: `9${String(Date.now()).slice(-9)}`,
+            ownerPhone: uniquePhone('9'),
             status: 'approved',
         },
     });
     created.restaurants.push(restaurant.id);
 
-    const user = await prisma.foodUser.create({ data: { phone: `5${String(Date.now()).slice(-9)}` } });
+    const user = await prisma.foodUser.create({ data: { phone: uniquePhone('5') } });
     created.users.push(user.id);
 
     for (const row of rows) {

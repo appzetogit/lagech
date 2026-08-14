@@ -5,6 +5,7 @@ import { prisma } from '../../config/prisma.js';
 import { createOrUpdateOtp, verifyOtp } from './otp.service.js';
 import { findOrCreateUserByPhone } from '../users/user.service.js';
 import { hashAdminPassword, compareAdminPassword } from '../auth/adminPassword.util.js';
+import { uniquePhone } from '../../utils/testIds.js';
 
 /**
  * OTP issue/verify and the admin password helpers.
@@ -17,7 +18,7 @@ import { hashAdminPassword, compareAdminPassword } from '../auth/adminPassword.u
  */
 const live = Boolean(process.env.DATABASE_URL) && process.env.USE_DEFAULT_OTP === 'true';
 
-const phone = () => `55${String(Date.now()).slice(-8)}`;
+const phone = () => uniquePhone('55');
 const created = [];
 
 const issue = async (p) => {

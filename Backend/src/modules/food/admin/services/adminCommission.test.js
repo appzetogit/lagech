@@ -15,6 +15,7 @@ import {
     deleteDeliveryCommissionRule,
     toggleDeliveryCommissionRuleStatus,
 } from './adminCommission.service.js';
+import { uniquePhone } from '../../../../utils/testIds.js';
 
 /**
  * Commission rates and delivery payout slabs.
@@ -32,7 +33,7 @@ const makeRestaurant = async () => {
         data: {
             restaurantName: `Commission Test ${stamp()}`,
             ownerName: 'Owner',
-            ownerPhone: `9${String(Date.now()).slice(-9)}`,
+            ownerPhone: uniquePhone('9'),
             status: 'approved',
         },
     });

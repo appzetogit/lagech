@@ -11,6 +11,7 @@ import {
 } from './restaurantCategory.service.js';
 import { createRestaurantFood, updateRestaurantFood } from './restaurantFood.service.js';
 import { getCategoryStats } from '../../shared/categoryWorkflow.js';
+import { uniquePhone } from '../../../../utils/testIds.js';
 
 /**
  * The category/dish cluster.
@@ -29,7 +30,7 @@ const makeRestaurant = async (overrides = {}) => {
         data: {
             restaurantName: `Cat Test ${Date.now()}${created.restaurants.length}`,
             ownerName: 'Owner',
-            ownerPhone: `9${String(Date.now()).slice(-9)}`,
+            ownerPhone: uniquePhone('9'),
             status: 'approved',
             ...overrides,
         },

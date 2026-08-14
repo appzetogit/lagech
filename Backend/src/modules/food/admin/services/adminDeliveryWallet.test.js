@@ -11,6 +11,7 @@ import {
     updateDeliveryPartnerProfile,
     deleteDeliveryPartner,
 } from './adminDeliveryPartner.service.js';
+import { uniquePhone } from '../../../../utils/testIds.js';
 
 /**
  * Rider wallets, cash settlements, and the two writes that change who can log
@@ -21,13 +22,11 @@ const live = Boolean(process.env.DATABASE_URL);
 const created = { partners: [], restaurants: [], users: [], orders: [], deposits: [], limits: [] };
 const stamp = () => `${Date.now()}${Math.floor(performance.now() * 1000) % 1000}`;
 
-const phone10 = () => String(6000000000 + (Number(String(Date.now()).slice(-8)) % 999999999)).slice(0, 10);
-
 const makePartner = async (over = {}) => {
     const partner = await prisma.foodDeliveryPartner.create({
         data: {
             name: `Wallet Rider ${stamp()}`,
-            phone: `7${String(Date.now()).slice(-8)}${created.partners.length}`,
+            phone: uniquePhone('7'),
             status: 'approved',
             ...over,
         },
@@ -41,13 +40,13 @@ const makeCodOrders = async (partner, totals) => {
         data: {
             restaurantName: `W Rest ${stamp()}`,
             ownerName: 'Owner',
-            ownerPhone: `9${String(Date.now()).slice(-9)}`,
+            ownerPhone: uniquePhone('9'),
             status: 'approved',
         },
     });
     created.restaurants.push(restaurant.id);
 
-    const user = await prisma.foodUser.create({ data: { phone: `5${String(Date.now()).slice(-9)}` } });
+    const user = await prisma.foodUser.create({ data: { phone: uniquePhone('5') } });
     created.users.push(user.id);
 
     for (const total of totals) {
@@ -186,7 +185,7 @@ test('changing a rider phone ends their sessions', { skip: !live }, async () => 
     const partner = await makePartner();
     const before = partner.tokenVersion;
 
-    const updated = await updateDeliveryPartnerProfile(partner.id, { phone: phone10() });
+    const updated = await updateDeliveryPartnerProfile(partner.id, { phone: uniquePhone('6') });
     assert.notEqual(updated.phone, partner.phone);
     // The number is the login, so the old handset must stop being accepted.
     assert.equal(updated.tokenVersion, before + 1);

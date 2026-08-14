@@ -15,6 +15,7 @@ import {
     getCurrentRestaurantProfile,
     deleteCurrentRestaurantAccount,
 } from './restaurant.service.js';
+import { uniquePhone } from '../../../../utils/testIds.js';
 
 /**
  * The public restaurant feed and the offer/profile writes.
@@ -37,7 +38,7 @@ const makeRestaurant = async (overrides = {}) => {
         data: {
             restaurantName: `Feed Test ${stamp()}`,
             ownerName: 'Owner',
-            ownerPhone: `9${String(Date.now()).slice(-9)}`,
+            ownerPhone: uniquePhone('9'),
             status: 'approved',
             ...overrides,
         },

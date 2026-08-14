@@ -9,6 +9,7 @@ import {
     deleteAddress,
     setDefaultAddress,
 } from './userAddress.service.js';
+import { uniquePhone } from '../../../../utils/testIds.js';
 
 /**
  * Addresses were an embedded array on FoodUser; they are their own table now,
@@ -32,7 +33,7 @@ const address = (over = {}) => ({
 test.before(async () => {
     if (!live) return;
     const user = await prisma.foodUser.create({
-        data: { phone: `9${String(Date.now()).slice(-9)}` },
+        data: { phone: uniquePhone('9') },
     });
     userId = user.id;
 });
@@ -99,7 +100,7 @@ test('setting a default clears the previous one', { skip: !live }, async () => {
 
 test('another user cannot touch this address', { skip: !live }, async () => {
     const stranger = await prisma.foodUser.create({
-        data: { phone: `8${String(Date.now()).slice(-9)}` },
+        data: { phone: uniquePhone('8') },
     });
     const { addresses } = await listAddresses(userId);
 

@@ -8,6 +8,7 @@ import {
     getDeliveryWithdrawals,
     updateDeliveryWithdrawalStatus,
 } from './adminWithdrawal.service.js';
+import { uniquePhone } from '../../../../utils/testIds.js';
 
 /**
  * Withdrawal approvals — a payout path.
@@ -26,7 +27,7 @@ const makePartner = async (balance = 0, lockedAmount = 0) => {
     const partner = await prisma.foodDeliveryPartner.create({
         data: {
             name: `Payout Rider ${stamp()}`,
-            phone: `6${String(Date.now()).slice(-8)}${created.partners.length}`,
+            phone: uniquePhone('6'),
             status: 'approved',
         },
     });
@@ -191,7 +192,7 @@ test('a restaurant payout is decided once', { skip: !live }, async () => {
         data: {
             restaurantName: `Payout Rest ${stamp()}`,
             ownerName: 'Owner',
-            ownerPhone: `9${String(Date.now()).slice(-9)}`,
+            ownerPhone: uniquePhone('9'),
             status: 'approved',
             accountHolderName: 'Owner Name',
             accountNumber: '000111222',

@@ -11,6 +11,7 @@ import {
 } from './adminSettings.service.js';
 import { isFeatureEnabled, listFeatureSettings, updateFeatureSetting, FEATURE_KEYS } from './featureSettings.service.js';
 import { deleteDeliveryPartnerAccount } from '../../delivery/services/delivery.service.js';
+import { uniquePhone } from '../../../../utils/testIds.js';
 
 /**
  * Platform settings, extracted out of the 6,453-line admin.service.js because
@@ -86,7 +87,7 @@ test('a configured emergency number replaces the default', { skip: !live }, asyn
 
 test('an admin bonus goes through the ledger, not a direct balance write', { skip: !live }, async () => {
     const partner = await prisma.foodDeliveryPartner.create({
-        data: { name: 'Bonus Rider', phone: `7${String(Date.now()).slice(-9)}`, status: 'approved' },
+        data: { name: 'Bonus Rider', phone: uniquePhone('7'), status: 'approved' },
     });
     created.partners.push(partner.id);
 
@@ -114,7 +115,7 @@ test('an admin bonus goes through the ledger, not a direct balance write', { ski
 
 test('a bonus is refused for an unapproved partner', { skip: !live }, async () => {
     const pending = await prisma.foodDeliveryPartner.create({
-        data: { name: 'Pending Rider', phone: `6${String(Date.now()).slice(-9)}`, status: 'pending' },
+        data: { name: 'Pending Rider', phone: uniquePhone('6'), status: 'pending' },
     });
     created.partners.push(pending.id);
 
