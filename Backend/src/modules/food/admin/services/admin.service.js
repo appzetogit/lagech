@@ -64,6 +64,7 @@ export * from './adminOffer.service.js';
 export * from './adminAddon.service.js';
 export * from './adminFood.service.js';
 export * from './adminRestaurantLifecycle.service.js';
+export * from './adminRestaurantDirectory.service.js';
 
 import {
     getCategoryStats,
@@ -390,98 +391,7 @@ export async function updateRestaurantComplaint(id, updateData) {
     return updated;
 }
 
-export async function getRestaurants(query) {
-    const limit = Math.min(Math.max(parseInt(query.limit, 10) || 100, 1), 1000);
-    const page = Math.max(parseInt(query.page, 10) || 1, 1);
-    const skip = (page - 1) * limit;
-    const status = query.status;
-    const search = String(query.search || '').trim();
-    const isActiveRaw = query.isActive;
-    const sortBy = String(query.sortBy || 'created-desc').trim();
-    const includeStats = query.includeStats === 'true' || query.includeStats === true;
 
-    const filter = {};
-    if (status && ['pending', 'approved', 'rejected'].includes(status)) {
-        filter.status = status;
-    }
-    if (search) {
-        const raw = search.slice(0, 80);
-        const escaped = raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const normalized = raw.toLowerCase().trim().replace(/\s+/g, ' ');
-        const phoneDigits = raw.replace(/\D/g, '');
-        const or = [
-            { restaurantName: { $regex: escaped, $options: 'i' } },
-            { ownerName: { $regex: escaped, $options: 'i' } },
-            { ownerEmail: { $regex: escaped, $options: 'i' } },
-            { ownerPhone: { $regex: escaped, $options: 'i' } },
-            { primaryContactNumber: { $regex: escaped, $options: 'i' } },
-        ];
-        if (normalized.length >= 2) {
-            or.push({ restaurantNameNormalized: { $regex: normalized, $options: 'i' } });
-        }
-        if (phoneDigits.length >= 4) {
-            or.push({ ownerPhoneLast10: { $regex: phoneDigits } });
-            or.push({ ownerPhoneDigits: { $regex: phoneDigits } });
-        }
-        filter.$or = or;
-    }
-    if (isActiveRaw === 'true' || isActiveRaw === true) {
-        // Treat missing isActive as active (legacy restaurants may not have the field).
-        filter.isActive = { $ne: false };
-    } else if (isActiveRaw === 'false' || isActiveRaw === false) {
-        filter.isActive = false;
-    }
-
-    const sortMap = {
-        'created-desc': { createdAt: -1 },
-        'created-asc': { createdAt: 1 },
-        'name-asc': { restaurantName: 1 },
-        'name-desc': { restaurantName: -1 },
-        'owner-asc': { ownerName: 1 },
-        'owner-desc': { ownerName: -1 },
-        'rating-asc': { rating: 1 },
-        'rating-desc': { rating: -1 },
-        'active-asc': { isActive: 1 },
-        'active-desc': { isActive: -1 },
-    };
-    const sort = sortMap[sortBy] || { createdAt: -1 };
-
-    const listPromise = FoodRestaurant.find(filter)
-        .sort(sort)
-        .skip(skip)
-        .limit(limit)
-        .select('restaurantName slug location area city status ownerName ownerPhone primaryContactNumber zoneId profileImage coverImages menuImages rating totalRatings isActive')
-        .populate('zoneId', 'name zoneName')
-        .lean();
-    const countPromise = FoodRestaurant.countDocuments(filter);
-
-    const statsFilter = status && ['pending', 'approved', 'rejected'].includes(status)
-        ? { status }
-        : {};
-    const statsPromises = includeStats
-        ? [
-            FoodRestaurant.countDocuments(statsFilter),
-            FoodRestaurant.countDocuments({ ...statsFilter, isActive: true }),
-            FoodRestaurant.countDocuments({ ...statsFilter, isActive: { $ne: true } }),
-        ]
-        : [];
-
-    const [restaurants, total, statsTotal, statsActive, statsInactive] = await Promise.all([
-        listPromise,
-        countPromise,
-        ...statsPromises,
-    ]);
-
-    const result = { restaurants, total, page, limit };
-    if (includeStats) {
-        result.stats = {
-            total: Number(statsTotal || 0),
-            active: Number(statsActive || 0),
-            inactive: Number(statsInactive || 0),
-        };
-    }
-    return result;
-}
 
 
 const PENDING_ORDER_STATUSES = ['created', 'confirmed', 'preparing', 'ready_for_pickup', 'picked_up'];
@@ -1631,13 +1541,7 @@ export async function getRestaurantReviews(query = {}) {
     return { reviews, total, page, limit };
 }
 
-export async function getRestaurantById(id) {
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
-    return FoodRestaurant.findById(id)
-        .select('-__v')
-        .populate('zoneId', 'name zoneName serviceLocation isActive')
-        .lean();
-}
+
 
 function formatSubscriptionPlanLabel(plan) {
     const key = String(plan || '').trim().toLowerCase();
@@ -2022,22 +1926,7 @@ export async function getRestaurantAnalytics(restaurantId) {
     return { restaurant, analytics, paymentSummary, subscriptionSummary };
 }
 
-export async function getRestaurantMenuById(id) {
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
-    const doc = await FoodRestaurant.findById(id).select('menu').lean();
-    if (!doc) return null;
-    return doc.menu || { sections: [] };
-}
 
-export async function updateRestaurantMenuById(id, menu) {
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
-    const doc = await FoodRestaurant.findById(id);
-    if (!doc) return null;
-    const sections = Array.isArray(menu?.sections) ? menu.sections : [];
-    doc.menu = { sections };
-    await doc.save();
-    return doc.menu || { sections: [] };
-}
 
 
 
