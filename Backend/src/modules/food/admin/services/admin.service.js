@@ -3,6 +3,15 @@ import mongoose from 'mongoose';
 // without ever being imported — that path threw a ReferenceError instead of a 404
 // whenever the partner was missing.
 import { NotFoundError, ValidationError } from '../../../../core/auth/errors.js';
+import {
+    DAY_NAMES,
+    normalizeDayName,
+    normalizeRestaurantTime,
+    parseBooleanLike,
+    timeToMinutes,
+    toFiniteNumber,
+    validateOpeningClosingTimes,
+} from './adminRestaurantWrite.helpers.js';
 import { normalizeFoodImages } from './foodImages.util.js';
 import { FoodRestaurant } from '../../restaurant/models/restaurant.model.js';
 import { FoodRestaurantOutletTimings } from '../../restaurant/models/outletTimings.model.js';
@@ -66,6 +75,7 @@ export * from './adminFood.service.js';
 export * from './adminRestaurantLifecycle.service.js';
 export * from './adminRestaurantDirectory.service.js';
 export * from './adminFeedback.service.js';
+export * from './adminRestaurantWrite.service.js';
 
 import {
     getCategoryStats,
@@ -100,124 +110,6 @@ export {
     getRestaurantSubscriptionSettings,
     addDeliveryPartnerBonus,
 } from './adminSettings.service.js';
-
-
-const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-
-const parseBooleanLike = (value, fieldName) => {
-    if (typeof value === 'boolean') return value;
-    if (typeof value === 'string') {
-        const normalized = value.trim().toLowerCase();
-        if (['true', '1', 'yes', 'y', 'on', 'active'].includes(normalized)) return true;
-        if (['false', '0', 'no', 'n', 'off', 'inactive'].includes(normalized)) return false;
-    }
-    throw new ValidationError(`${fieldName} must be a boolean`);
-};
-
-const toFiniteNumber = (value) => {
-    if (value === null || value === undefined || value === '') return null;
-    const num = typeof value === 'number' ? value : Number(String(value).trim());
-    return Number.isFinite(num) ? num : null;
-};
-
-const normalizeRestaurantTime = (value) => {
-    const raw = String(value || '').trim();
-    if (!raw) return '';
-
-    const toHHMM = (hour, minute) => {
-        const h = Number(hour);
-        const m = Number(minute);
-        if (!Number.isFinite(h) || !Number.isFinite(m)) return '';
-        if (h < 0 || h > 23 || m < 0 || m > 59) return '';
-        return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-    };
-
-    const hhmm = raw.match(/^(\d{1,2}):(\d{2})$/);
-    if (hhmm) return toHHMM(hhmm[1], hhmm[2]);
-
-    const ampm = raw.match(/^(\d{1,2}):(\d{2})\s*([AaPp][Mm])$/);
-    if (ampm) {
-        let hour = Number(ampm[1]);
-        const minute = Number(ampm[2]);
-        const period = ampm[3].toUpperCase();
-        if (!Number.isFinite(hour) || !Number.isFinite(minute)) return '';
-        if (hour < 1 || hour > 12 || minute < 0 || minute > 59) return '';
-        if (period === 'AM') hour = hour === 12 ? 0 : hour;
-        if (period === 'PM') hour = hour === 12 ? 12 : hour + 12;
-        return toHHMM(hour, minute);
-    }
-
-    const parsed = new Date(raw);
-    if (!Number.isNaN(parsed.getTime())) {
-        return toHHMM(parsed.getHours(), parsed.getMinutes());
-    }
-
-    return '';
-};
-
-const timeToMinutes = (value) => {
-    const normalized = normalizeRestaurantTime(value);
-    if (!normalized) return null;
-    const [h, m] = normalized.split(':').map(Number);
-    if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
-    return h * 60 + m;
-};
-
-const validateOpeningClosingTimes = (openingTime, closingTime) => {
-    const open = timeToMinutes(openingTime);
-    const close = timeToMinutes(closingTime);
-    if (open === null || close === null) return;
-    if (open === close) {
-        throw new ValidationError('Opening time and closing time cannot be same');
-    }
-    if (close < open) {
-        throw new ValidationError('Closing time cannot be less than opening time');
-    }
-};
-
-const normalizeDayName = (value) => {
-    const raw = String(value || '').trim();
-    if (!raw) return null;
-    const exact = DAY_NAMES.find((d) => d.toLowerCase() === raw.toLowerCase());
-    if (exact) return exact;
-    const abbr = raw.slice(0, 3).toLowerCase();
-    return DAY_NAMES.find((d) => d.toLowerCase().startsWith(abbr)) || null;
-};
-
-const syncAdminRestaurantOutletTimings = async (restaurantDoc) => {
-    const openingTime = normalizeRestaurantTime(restaurantDoc?.openingTime) || '09:00';
-    const closingTime = normalizeRestaurantTime(restaurantDoc?.closingTime) || '22:00';
-    const normalizedOpenDays = Array.isArray(restaurantDoc?.openDays)
-        ? [...new Set(restaurantDoc.openDays.map(normalizeDayName).filter(Boolean))]
-        : [];
-    const fallbackOpenDays = new Set(normalizedOpenDays.length ? normalizedOpenDays : DAY_NAMES);
-
-    const existing = await FoodRestaurantOutletTimings.findOne({ restaurantId: restaurantDoc._id })
-        .select('timings')
-        .lean();
-    const existingTimings = Array.isArray(existing?.timings) ? existing.timings : [];
-
-    const timings = DAY_NAMES.map((day) => {
-        const current = existingTimings.find((slot) => normalizeDayName(slot?.day) === day);
-        const isOpen = current ? current.isOpen !== false : fallbackOpenDays.has(day);
-        return {
-            day,
-            isOpen,
-            openingTime: isOpen ? openingTime : '',
-            closingTime: isOpen ? closingTime : '',
-        };
-    });
-
-    await FoodRestaurantOutletTimings.updateOne(
-        { restaurantId: restaurantDoc._id },
-        { $set: { timings } },
-        { upsert: true }
-    );
-};
-
-
-
-
 
 
 const PENDING_ORDER_STATUSES = ['created', 'confirmed', 'preparing', 'ready_for_pickup', 'picked_up'];
@@ -1230,19 +1122,11 @@ export async function getTaxReportDetail(restaurantId, query = {}) {
 // ----- Customers / Users (admin) -----
 
 
-
-
 // ----- Restaurant Commission (admin) -----
-
-
-
-
 
 
 // ----- Delivery Cash Limit (admin) -----
 // ----- Delivery Emergency Help (admin) -----
-
-
 
 
 function formatSubscriptionPlanLabel(plan) {
@@ -1629,304 +1513,7 @@ export async function getRestaurantAnalytics(restaurantId) {
 }
 
 
-
-
-
-export async function updateRestaurantById(id, body = {}) {
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
-    const doc = await FoodRestaurant.findById(id);
-    if (!doc) return null;
-
-    const toStr = (v) => (v != null ? String(v).trim() : '');
-    const toFinite = (v) => {
-        const n = Number(v);
-        return Number.isFinite(n) ? n : undefined;
-    };
-
-    if (body.name !== undefined || body.restaurantName !== undefined) {
-        const name = toStr(body.name !== undefined ? body.name : body.restaurantName);
-        if (!name) throw new ValidationError('Restaurant name cannot be empty');
-        doc.restaurantName = name;
-    }
-
-    if (body.ownerName !== undefined) doc.ownerName = toStr(body.ownerName);
-    if (body.ownerEmail !== undefined) doc.ownerEmail = toStr(body.ownerEmail).toLowerCase();
-    if (body.ownerPhone !== undefined) doc.ownerPhone = toStr(body.ownerPhone);
-    if (body.primaryContactNumber !== undefined) doc.primaryContactNumber = toStr(body.primaryContactNumber);
-
-    if (body.pureVegRestaurant !== undefined) {
-        doc.pureVegRestaurant = parseBooleanLike(body.pureVegRestaurant, 'pureVegRestaurant');
-    }
-
-    if (body.isAcceptingOrders !== undefined) {
-        doc.isAcceptingOrders = parseBooleanLike(body.isAcceptingOrders, 'isAcceptingOrders');
-        doc.outsideHoursOverride = false;
-    }
-
-    if (body.cuisines !== undefined) {
-        if (Array.isArray(body.cuisines)) {
-            doc.cuisines = body.cuisines
-                .map((c) => toStr(c))
-                .filter(Boolean)
-                .slice(0, 50);
-        } else if (typeof body.cuisines === 'string') {
-            doc.cuisines = body.cuisines
-                .split(',')
-                .map((c) => toStr(c))
-                .filter(Boolean)
-                .slice(0, 50);
-        } else {
-            throw new ValidationError('cuisines must be an array or comma-separated string');
-        }
-    }
-
-    if (body.openingTime !== undefined) doc.openingTime = normalizeRestaurantTime(body.openingTime) || '';
-    if (body.closingTime !== undefined) doc.closingTime = normalizeRestaurantTime(body.closingTime) || '';
-    validateOpeningClosingTimes(doc.openingTime, doc.closingTime);
-    if (body.openDays !== undefined && Array.isArray(body.openDays)) {
-        doc.openDays = body.openDays.map(d => toStr(d)).filter(Boolean);
-    }
-    if (body.offer !== undefined) doc.offer = toStr(body.offer);
-
-    if (body.estimatedDeliveryTime !== undefined) {
-        doc.estimatedDeliveryTime = toStr(body.estimatedDeliveryTime);
-    }
-    if (body.estimatedDeliveryTimeMinutes !== undefined) {
-        const minutes = toFiniteNumber(body.estimatedDeliveryTimeMinutes);
-        if (minutes === null) {
-            doc.estimatedDeliveryTimeMinutes = undefined;
-        } else if (minutes < 0) {
-            throw new ValidationError('estimatedDeliveryTimeMinutes must be >= 0');
-        } else {
-            doc.estimatedDeliveryTimeMinutes = Math.round(minutes);
-        }
-    }
-
-    // Business & Docs
-    if (body.panNumber !== undefined) doc.panNumber = toStr(body.panNumber);
-    if (body.nameOnPan !== undefined) doc.nameOnPan = toStr(body.nameOnPan);
-    if (body.gstRegistered !== undefined) doc.gstRegistered = parseBooleanLike(body.gstRegistered, 'gstRegistered');
-    if (body.gstNumber !== undefined) doc.gstNumber = toStr(body.gstNumber);
-    if (body.gstLegalName !== undefined) doc.gstLegalName = toStr(body.gstLegalName);
-    if (body.gstAddress !== undefined) doc.gstAddress = toStr(body.gstAddress);
-    if (body.fssaiNumber !== undefined) doc.fssaiNumber = toStr(body.fssaiNumber);
-    if (body.fssaiExpiry !== undefined) doc.fssaiExpiry = body.fssaiExpiry ? new Date(body.fssaiExpiry) : undefined;
-
-    // Bank Details
-    if (body.accountNumber !== undefined) doc.accountNumber = toStr(body.accountNumber);
-    if (body.ifscCode !== undefined) doc.ifscCode = toStr(body.ifscCode);
-    if (body.accountHolderName !== undefined) doc.accountHolderName = toStr(body.accountHolderName);
-    if (body.accountType !== undefined) doc.accountType = toStr(body.accountType);
-
-    // Featured Info
-    if (body.featuredDish !== undefined) doc.featuredDish = toStr(body.featuredDish);
-    if (body.featuredPrice !== undefined) doc.featuredPrice = toFinite(body.featuredPrice);
-
-    // Images
-    const getUrl = (v) => (v && typeof v === 'object' ? v.url : v);
-    if (body.profileImage !== undefined) doc.profileImage = toStr(getUrl(body.profileImage)) || undefined;
-    if (body.panImage !== undefined) doc.panImage = toStr(getUrl(body.panImage)) || undefined;
-    if (body.gstImage !== undefined) doc.gstImage = toStr(getUrl(body.gstImage)) || undefined;
-    if (body.fssaiImage !== undefined) doc.fssaiImage = toStr(getUrl(body.fssaiImage)) || undefined;
-
-    const toUrlList = (value, max) => {
-        const list = Array.isArray(value) ? value : [value];
-        return list.map((v) => toStr(getUrl(v))).filter(Boolean).slice(0, max);
-    };
-
-    if (body.menuImages !== undefined) doc.menuImages = toUrlList(body.menuImages, 10);
-
-    // Media images. These were missing, so an admin could edit a restaurant's
-    // documents and menu photos but not the cover or premises gallery — the two
-    // the customer app and the rider's pickup screen actually show.
-    //
-    // coverImage is the single hero; coverImages is the public page's banner array.
-    // Both are kept because the model carries them separately and onboarding does
-    // not consistently fill the same one.
-    if (body.coverImage !== undefined) doc.coverImage = toStr(getUrl(body.coverImage)) || undefined;
-    if (body.coverImages !== undefined) doc.coverImages = toUrlList(body.coverImages, 10);
-    if (body.galleryImages !== undefined) doc.galleryImages = toUrlList(body.galleryImages, 10);
-
-    await doc.save();
-
-    if (body.openingTime !== undefined || body.closingTime !== undefined) {
-        await syncAdminRestaurantOutletTimings(doc);
-    }
-
-    // Always invalidate, not only on a timings change. Name, cuisines and every
-    // image field above are part of the cached public payload, so editing an image
-    // and seeing the old one for the rest of the TTL was indistinguishable from the
-    // upload silently failing.
-    {
-        const { invalidateCache } = await import('../../../../middleware/cache.js');
-        void invalidateCache('restaurants:*');
-        void invalidateCache('restaurant_detail:*');
-        void invalidateCache('restaurant_timings:*');
-    }
-
-    return FoodRestaurant.findById(id).select('-__v').populate('zoneId', 'name zoneName serviceLocation isActive').lean();
-}
-
-
-
 // ----- Categories -----
-
-
-
-
-/** Admin creates a restaurant (JSON body with image URLs already uploaded). Single API. */
-export async function createRestaurantByAdmin(body) {
-    const loc = body.location || {};
-    const toStr = (v) => (v != null && v !== undefined ? String(v).trim() : '');
-    const toUrl = (v) => (v && (typeof v === 'string' ? v : v.url)) ? (typeof v === 'string' ? v : v.url) : undefined;
-    const coordinates = Array.isArray(loc.coordinates) ? loc.coordinates : [];
-    const lngFromCoordinates = toFiniteNumber(coordinates[0]);
-    const latFromCoordinates = toFiniteNumber(coordinates[1]);
-    const latitude = toFiniteNumber(loc.latitude ?? latFromCoordinates);
-    const longitude = toFiniteNumber(loc.longitude ?? lngFromCoordinates);
-    const menuUrls = Array.isArray(body.menuImages)
-        ? body.menuImages.map((m) => toUrl(m)).filter(Boolean)
-        : [];
-
-    const normalizedOpeningTime = normalizeRestaurantTime(body.openingTime) || '09:00';
-    const normalizedClosingTime = normalizeRestaurantTime(body.closingTime) || '22:00';
-    validateOpeningClosingTimes(normalizedOpeningTime, normalizedClosingTime);
-
-    const doc = {
-        restaurantName: toStr(body.restaurantName) || toStr(body.name),
-        ownerName: toStr(body.ownerName),
-        ownerEmail: toStr(body.ownerEmail),
-        ownerPhone: toStr(body.ownerPhone),
-        primaryContactNumber: toStr(body.primaryContactNumber) || toStr(body.ownerPhone),
-        pureVegRestaurant: body.pureVegRestaurant !== undefined
-            ? parseBooleanLike(body.pureVegRestaurant, 'pureVegRestaurant')
-            : false,
-        addressLine1: toStr(loc.addressLine1),
-        addressLine2: toStr(loc.addressLine2),
-        area: toStr(loc.area),
-        city: toStr(loc.city),
-        state: toStr(loc.state),
-        pincode: toStr(loc.pincode),
-        landmark: toStr(loc.landmark),
-        cuisines: Array.isArray(body.cuisines) ? body.cuisines : [],
-        openingTime: normalizedOpeningTime,
-        closingTime: normalizedClosingTime,
-        openDays: Array.isArray(body.openDays) ? body.openDays : [],
-        panNumber: toStr(body.panNumber),
-        nameOnPan: toStr(body.nameOnPan),
-        gstRegistered: Boolean(body.gstRegistered),
-        gstNumber: toStr(body.gstNumber),
-        gstLegalName: toStr(body.gstLegalName),
-        gstAddress: toStr(body.gstAddress),
-        fssaiNumber: toStr(body.fssaiNumber),
-        fssaiExpiry: body.fssaiExpiry ? new Date(body.fssaiExpiry) : undefined,
-        accountNumber: toStr(body.accountNumber),
-        ifscCode: toStr(body.ifscCode),
-        accountHolderName: toStr(body.accountHolderName),
-        accountType: toStr(body.accountType),
-        menuImages: menuUrls,
-        profileImage: toUrl(body.profileImage),
-        panImage: toUrl(body.panImage),
-        gstImage: toUrl(body.gstImage),
-        fssaiImage: toUrl(body.fssaiImage),
-        estimatedDeliveryTime: toStr(body.estimatedDeliveryTime),
-        featuredDish: toStr(body.featuredDish),
-        featuredPrice: typeof body.featuredPrice === 'number' ? body.featuredPrice : (parseFloat(body.featuredPrice) || undefined),
-        offer: toStr(body.offer),
-        diningSettings: body.diningSettings && typeof body.diningSettings === 'object'
-            ? {
-                isEnabled: Boolean(body.diningSettings.isEnabled),
-                maxGuests: Math.max(1, parseInt(body.diningSettings.maxGuests, 10) || 6),
-                diningType: toStr(body.diningSettings.diningType) || 'family-dining'
-            }
-            : undefined,
-        status: 'approved',
-        approvedAt: new Date()
-    };
-
-    if (body.zoneId !== undefined) {
-        const zoneId = String(body.zoneId || '').trim();
-        if (!zoneId) {
-            doc.zoneId = undefined;
-        } else if (!mongoose.Types.ObjectId.isValid(zoneId)) {
-            throw new ValidationError('Invalid zoneId');
-        } else {
-            doc.zoneId = new mongoose.Types.ObjectId(zoneId);
-        }
-    }
-
-    if (latitude !== null && longitude !== null) {
-        doc.location = {
-            type: 'Point',
-            coordinates: [longitude, latitude],
-            latitude,
-            longitude,
-            formattedAddress: toStr(loc.formattedAddress || loc.address || loc.addressLine1),
-            address: toStr(loc.address || loc.formattedAddress || loc.addressLine1),
-            addressLine1: toStr(loc.addressLine1 || loc.formattedAddress || loc.address),
-            addressLine2: toStr(loc.addressLine2),
-            area: toStr(loc.area),
-            city: toStr(loc.city),
-            state: toStr(loc.state),
-            pincode: toStr(loc.pincode || loc.zipCode || loc.postalCode),
-            landmark: toStr(loc.landmark),
-        };
-    }
-
-    if (!doc.restaurantName || !doc.ownerName) {
-        throw new ValidationError('Restaurant name and owner name are required');
-    }
-    if (!doc.ownerPhone && !doc.primaryContactNumber) {
-        throw new ValidationError('Owner phone or primary contact number is required');
-    }
-
-    // Prevent duplicate restaurant onboarding with the same contact number
-    // across existing restaurants and restaurant-auth users.
-    const phoneCandidates = [doc.ownerPhone, doc.primaryContactNumber]
-        .map((v) => String(v || '').trim())
-        .filter(Boolean);
-    const normalizedPhoneCandidates = Array.from(
-        new Set(
-            phoneCandidates.flatMap((phone) => {
-                const digits = phone.replace(/\D/g, '');
-                const last10 = digits.slice(-10);
-                return [phone, digits, last10].filter(Boolean);
-            })
-        )
-    );
-
-    if (normalizedPhoneCandidates.length) {
-        const duplicateRestaurant = await FoodRestaurant.findOne({
-            $or: [
-                { ownerPhone: { $in: normalizedPhoneCandidates } },
-                { primaryContactNumber: { $in: normalizedPhoneCandidates } },
-                { ownerPhoneDigits: { $in: normalizedPhoneCandidates } },
-                { ownerPhoneLast10: { $in: normalizedPhoneCandidates } },
-            ],
-        })
-            .select('_id restaurantName ownerPhone primaryContactNumber')
-            .lean();
-
-        if (duplicateRestaurant?._id) {
-            throw new ValidationError('A restaurant with this phone number already exists');
-        }
-
-        const duplicateRestaurantUser = await FoodUser.findOne({
-            role: 'RESTAURANT',
-            phone: { $in: normalizedPhoneCandidates },
-        })
-            .select('_id phone')
-            .lean();
-
-        if (duplicateRestaurantUser?._id) {
-            throw new ValidationError('A restaurant account with this phone number already exists');
-        }
-    }
-
-    const restaurant = await FoodRestaurant.create(doc);
-    return restaurant.toObject();
-}
-
 
 
 // ----- Delivery join requests -----
@@ -2103,8 +1690,6 @@ export const getAdminRestaurantSubscriptionHistory = async (query = {}) => {
 /**
  * Private helper to get financial stats for multiple delivery partners in bulk.
  */
-
-
 
 
 // ----- Delivery partner bonus (admin) -----
@@ -2336,7 +1921,6 @@ export async function getDeliveryEarnings(query = {}) {
 // ----- Earning Addon Offers (admin) -----
 
 
-
 export async function getDeliverymanReviews(query = {}) {
     const limit = Math.min(Math.max(parseInt(query.limit, 10) || 50, 1), 1000);
     const page = Math.max(parseInt(query.page, 10) || 1, 1);
@@ -2405,9 +1989,6 @@ export async function getDeliverymanReviews(query = {}) {
 }
 
 
-
-
-
 // ----- Zones CRUD -----
 
 
@@ -2435,7 +2016,6 @@ export async function getDeliverymanReviews(query = {}) {
  *  - Changing the number changes who can sign in. The rider's existing sessions are
  *    invalidated so the old handset cannot keep acting on an identity that has moved.
  */
-
 
 
 /**
@@ -2498,8 +2078,5 @@ export async function getSidebarBadges() {
         return {};
     }
 }
-
-
-
 
 
