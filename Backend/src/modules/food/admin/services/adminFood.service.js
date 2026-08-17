@@ -1,4 +1,6 @@
 import { prisma } from '../../../../config/prisma.js';
+import { toFoodTypeColumn, fromFoodTypeColumn } from '../../shared/foodType.util.js';
+import { dropMenuCache } from '../../shared/menuCache.util.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { normalizeFoodImages } from './foodImages.util.js';
@@ -23,9 +25,6 @@ import { categoryAllowsFoodType } from '../../shared/categoryWorkflow.js';
 
 const WITH_VARIANTS = { variants: { orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] } };
 
-/** FoodType's Prisma name for 'Non-Veg' is NonVeg; the hyphen is a @map. */
-const toFoodTypeColumn = (v) => (String(v || '').trim() === 'Veg' ? 'Veg' : 'NonVeg');
-const fromFoodTypeColumn = (v) => (String(v || '') === 'Veg' ? 'Veg' : 'Non-Veg');
 
 const serializeFood = (f, restaurantName) => ({
     id: f.id,
@@ -53,15 +52,6 @@ const serializeFood = (f, restaurantName) => ({
     updatedAt: f.updatedAt,
 });
 
-const dropMenuCache = async (restaurantId) => {
-    if (!restaurantId) return;
-    try {
-        const { invalidateCache } = await import('../../../../middleware/cache.js');
-        await invalidateCache(`restaurant_menu:${restaurantId}`);
-    } catch (cacheErr) {
-        console.error('Failed to invalidate menu cache:', cacheErr);
-    }
-};
 
 export async function getFoods(query = {}) {
     const limit = Math.min(Math.max(parseInt(query.limit, 10) || 100, 1), 1000);

@@ -34,6 +34,12 @@ for (const match of schema.matchAll(/^model\s+(\w+)\s*\{([\s\S]*?)^\}/gm)) {
     const fields = new Set();
     const relations = new Map();
 
+    // `@@unique([a, b])` and `@@id([a, b])` are addressable in a `where` under
+    // the joined name Prisma generates for them, e.g. `entityType_entityId`.
+    for (const compound of body.matchAll(/@@(?:unique|id)\(\s*(?:name:\s*"(\w+)",\s*)?\[([^\]]+)\]/g)) {
+        fields.add(compound[1] || compound[2].split(',').map((f) => f.trim()).join('_'));
+    }
+
     for (const line of body.split('\n')) {
         const trimmed = line.trimStart();
         if (trimmed.startsWith('//') || trimmed.startsWith('@@')) continue;
@@ -96,7 +102,13 @@ const entries = (block) => {
         if (depth !== 1) continue;
 
         const key = block.slice(i).match(/^(\w+)\s*:/);
-        if (!key || !/[{,\s]/.test(block[i - 1] || '')) continue;
+        if (!key) continue;
+
+        // A real key opens the object or follows a comma. Anything else that
+        // looks like `word:` is prose in a comment, a `case` label, or the
+        // second half of a ternary — all of which used to be reported.
+        const before = block.slice(0, i).trimEnd().slice(-1);
+        if (before !== '{' && before !== ',') continue;
 
         const after = i + key[0].length;
         const brace = block.slice(after).match(/^\s*\{/);
@@ -126,6 +138,65 @@ const constantBlock = (src, ident) => {
 };
 
 const problems = [];
+
+const report = (file, line, modelName, key) =>
+    problems.push(`${path.relative(root, file)}:${line}  ${modelName} has no field "${key}"`);
+
+/** Keys of a `where` that combine conditions rather than name a column. */
+const LOGICAL = new Set(['AND', 'OR', 'NOT']);
+/** Keys that wrap a condition on the far side of a relation. */
+const RELATION_OPS = new Set(['some', 'every', 'none', 'is', 'isNot']);
+
+/**
+ * Check one `where` block against `model`.
+ *
+ * Only the top level of each object is checked — what sits under a scalar field
+ * is an operator (`gte`, `contains`, `mode`…), not a column. Conditions inside
+ * an `AND: [...]` array are skipped rather than guessed at: this script must
+ * never report something that is actually fine.
+ */
+const checkWhere = (block, modelName, file, line, seen = 0) => {
+    const def = models.get(modelName);
+    if (!def || seen > 4) return;
+
+    for (const { key, block: nested } of entries(block)) {
+        if (LOGICAL.has(key)) {
+            if (nested) checkWhere(nested, modelName, file, line, seen + 1);
+            continue;
+        }
+        if (!def.fields.has(key)) {
+            report(file, line, modelName, key);
+            continue;
+        }
+
+        const related = def.relations.get(key);
+        if (!related || !nested) continue;
+
+        // `{ restaurant: { name: … } }` and `{ items: { some: { name: … } } }`
+        // both describe the related model; the second is one level deeper.
+        const wrapped = entries(nested).filter((e) => RELATION_OPS.has(e.key) && e.block);
+        if (wrapped.length) {
+            for (const w of wrapped) checkWhere(w.block, related, file, line, seen + 1);
+        } else {
+            checkWhere(nested, related, file, line, seen + 1);
+        }
+    }
+};
+
+/**
+ * Check one `data` / `create` / `update` block against `model`.
+ *
+ * Every key at this level is a column or a relation; the nested-write verbs
+ * (`create`, `connect`, `set`, `increment`…) only appear one level down, so a
+ * top-level key that is not a field is always wrong.
+ */
+const checkData = (block, modelName, file, line) => {
+    const def = models.get(modelName);
+    if (!def) return;
+    for (const { key } of entries(block)) {
+        if (!def.fields.has(key)) report(file, line, modelName, key);
+    }
+};
 
 /** Check one select/include block against `model`, following relations. */
 const checkBlock = (block, modelName, file, line, seen = 0, src = '') => {
@@ -160,15 +231,31 @@ for (const file of sourceFiles) {
         const def = byDelegate.get(call[1]);
         if (!def) continue;
 
-        const args = readBlock(src, src.indexOf('{', call.index + call[0].length - 1));
+        // The argument has to start right here. Scanning forward for the next
+        // `{` instead means a call written as `deleteMany(byPartner)` — or with
+        // no argument at all — picks up an unrelated object further down the
+        // file and checks it against the wrong model.
+        const rest = src.slice(call.index + call[0].length);
+        const literal = rest.match(/^\s*\{/);
+        const named = literal ? null : rest.match(/^\s*(\w+)\s*\)/);
+
+        const args = literal
+            ? readBlock(src, call.index + call[0].length + literal[0].length - 1)
+            : constantBlock(src, named?.[1]);
         if (!args) continue;
 
         const line = src.slice(0, call.index).split('\n').length;
         for (const { key, block, ident } of entries(args)) {
-            if (key !== 'select' && key !== 'include') continue;
-
             const resolved = block || constantBlock(src, ident);
-            if (resolved) checkBlock(resolved, def.name, file, line, 0, src);
+            if (!resolved) continue;
+
+            if (key === 'select' || key === 'include') {
+                checkBlock(resolved, def.name, file, line, 0, src);
+            } else if (key === 'where') {
+                checkWhere(resolved, def.name, file, line);
+            } else if (key === 'data' || key === 'create' || key === 'update') {
+                checkData(resolved, def.name, file, line);
+            }
         }
     }
 }

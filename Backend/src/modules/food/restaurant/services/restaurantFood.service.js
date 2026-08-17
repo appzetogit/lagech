@@ -1,4 +1,8 @@
 import { prisma } from '../../../../config/prisma.js';
+import {
+    toFoodTypeColumn,
+    fromFoodTypeColumn as normalizeFoodType,
+} from '../../shared/foodType.util.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { normalizeFoodImages } from '../../admin/services/foodImages.util.js';
@@ -21,16 +25,6 @@ const toStr = (v) => (v != null ? String(v).trim() : '');
 /** The dish plus its variant rows — hasFoodVariants() needs them loaded. */
 const WITH_VARIANTS = { variants: { orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] } };
 
-/**
- * FoodType's Prisma name for 'Non-Veg' is NonVeg (the hyphen is a @map), so the
- * client value and the wire value differ and have to be translated both ways.
- */
-const toFoodTypeColumn = (v) => (String(v || '').trim() === 'Veg' ? 'Veg' : 'NonVeg');
-const normalizeFoodType = (v) => {
-    const t = String(v || '').trim();
-    // 'Egg' and anything unrecognised have always counted as non-veg.
-    return t === 'Veg' ? 'Veg' : 'Non-Veg';
-};
 
 /** Same story for the hyphenated stock modes. */
 const STOCK_OFF_MODES = {

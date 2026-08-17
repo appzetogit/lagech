@@ -1,5 +1,4 @@
-import { FoodRestaurant } from '../models/restaurant.model.js';
-import { FoodNotification } from '../../../../core/notifications/models/notification.model.js';
+import { prisma } from '../../../../config/prisma.js';
 import { notifyOwnerSafely, notifyAdminsSafely } from '../../../../core/notifications/firebase.service.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -21,136 +20,124 @@ const startOfToday = () => {
 
 const nextDay = (date) => new Date(date.getTime() + DAY_MS);
 
-const buildRestaurantNotificationPayload = (restaurant) => {
-    const expiryDate = restaurant?.fssaiExpiry ? new Date(restaurant.fssaiExpiry) : null;
-    const restaurantName = restaurant?.restaurantName || 'Restaurant';
-    const ownerName = restaurant?.ownerName || 'Restaurant owner';
-    const expiryLabel = toDateLabel(expiryDate);
-    const title = 'FSSAI License Expired';
-    const message = `${restaurantName} FSSAI license expired on ${expiryLabel}. Owner: ${ownerName}. FSSAI No: ${restaurant?.fssaiNumber || 'N/A'}.`;
-
-    return {
-        title,
-        message,
-        link: '/restaurant/fssai',
-        category: 'compliance',
-        source: 'FSSAI_EXPIRY',
-        metadata: {
-            restaurantId: String(restaurant?._id || ''),
-            restaurantName,
-            ownerName,
-            ownerPhone: restaurant?.ownerPhone || '',
-            fssaiNumber: restaurant?.fssaiNumber || '',
-            expiryDate: expiryDate ? expiryDate.toISOString() : null
-        }
-    };
-};
-
 const buildAdminSummary = (restaurant) => {
-    const expiryDate = restaurant?.fssaiExpiry ? new Date(restaurant.fssaiExpiry) : null;
+    const expiryDate = restaurant.fssaiExpiry ? new Date(restaurant.fssaiExpiry) : null;
     const expiryLabel = toDateLabel(expiryDate);
+    const restaurantName = restaurant.restaurantName || 'Restaurant';
     return {
-        id: `fssai-expired-${String(restaurant?._id || '')}`,
-        restaurantId: String(restaurant?._id || ''),
-        restaurantName: restaurant?.restaurantName || 'Restaurant',
-        ownerName: restaurant?.ownerName || '',
-        ownerPhone: restaurant?.ownerPhone || '',
-        fssaiNumber: restaurant?.fssaiNumber || '',
+        id: `fssai-expired-${restaurant.id}`,
+        restaurantId: restaurant.id,
+        restaurantName,
+        ownerName: restaurant.ownerName || '',
+        ownerPhone: restaurant.ownerPhone || '',
+        fssaiNumber: restaurant.fssaiNumber || '',
         fssaiExpiry: expiryDate ? expiryDate.toISOString() : null,
         expiryLabel,
         title: 'FSSAI License Expired',
-        message: `${restaurant?.restaurantName || 'Restaurant'} FSSAI expired on ${expiryLabel}. Owner: ${restaurant?.ownerName || 'N/A'}.`,
-        createdAt: expiryDate ? expiryDate.toISOString() : restaurant?.updatedAt || restaurant?.createdAt || new Date().toISOString(),
+        message: `${restaurantName} FSSAI expired on ${expiryLabel}. Owner: ${restaurant.ownerName || 'N/A'}.`,
+        createdAt: expiryDate
+            ? expiryDate.toISOString()
+            : restaurant.updatedAt || restaurant.createdAt || new Date().toISOString(),
         path: '/admin/food/restaurants'
     };
 };
 
 export const listExpiredFssaiRestaurants = async () => {
-    const today = startOfToday();
+    // Anything dated before tomorrow has expired: a licence that runs out today
+    // is not valid tomorrow, and the column carries no time of day.
+    const restaurants = await prisma.foodRestaurant.findMany({
+        where: { status: 'approved', fssaiExpiry: { lt: nextDay(startOfToday()) } },
+        select: {
+            id: true,
+            restaurantName: true,
+            ownerName: true,
+            ownerPhone: true,
+            fssaiNumber: true,
+            fssaiExpiry: true,
+            createdAt: true,
+            updatedAt: true,
+        },
+        orderBy: [{ fssaiExpiry: 'desc' }, { updatedAt: 'desc' }],
+    });
 
-    const restaurants = await FoodRestaurant.find({
-        status: 'approved',
-        fssaiExpiry: { $lt: nextDay(today) }
-    })
-        .select('restaurantName ownerName ownerPhone fssaiNumber fssaiExpiry')
-        .sort({ fssaiExpiry: -1, updatedAt: -1 })
-        .lean();
-
-    return restaurants
-        .filter((restaurant) => restaurant?.fssaiExpiry)
-        .map(buildAdminSummary);
+    return restaurants.filter((r) => r.fssaiExpiry).map(buildAdminSummary);
 };
 
 export const syncExpiredFssaiNotifications = async () => {
     const restaurants = await listExpiredFssaiRestaurants();
+    if (!restaurants.length) return { totalExpired: 0, createdCount: 0 };
+
+    // One read for the whole batch. The old code asked per restaurant, so a
+    // hundred expired licences meant a hundred round trips before any work.
+    const alreadySent = await prisma.foodNotification.findMany({
+        where: {
+            ownerType: 'RESTAURANT',
+            source: 'FSSAI_EXPIRY',
+            ownerId: { in: restaurants.map((r) => r.restaurantId) },
+        },
+        select: { ownerId: true, metadata: true },
+    });
+
+    // Keyed by expiry too: a renewed-then-expired-again licence is a new alert,
+    // but the same expiry date must never be announced twice.
+    const seen = new Set(
+        alreadySent.map((n) => `${n.ownerId}|${n.metadata?.expiryDate || ''}`)
+    );
+
     let createdCount = 0;
 
     for (const summary of restaurants) {
-        const expiryIso = summary.fssaiExpiry;
-        const restaurantId = summary.restaurantId;
+        const { restaurantId, fssaiExpiry: expiryIso } = summary;
         if (!restaurantId || !expiryIso) continue;
+        if (seen.has(`${restaurantId}|${expiryIso}`)) continue;
 
-        const payload = buildRestaurantNotificationPayload({
-            _id: restaurantId,
-            restaurantName: summary.restaurantName,
-            ownerName: summary.ownerName,
-            ownerPhone: summary.ownerPhone,
-            fssaiNumber: summary.fssaiNumber,
-            fssaiExpiry: expiryIso
+        const message = `${summary.restaurantName} FSSAI license expired on ${summary.expiryLabel}.`
+            + ` Owner: ${summary.ownerName || 'Restaurant owner'}.`
+            + ` FSSAI No: ${summary.fssaiNumber || 'N/A'}.`;
+
+        // ponytail: check-then-insert. Safe because this runs from a single
+        // scheduled job; a unique index on (ownerId, source, expiry) is the fix
+        // if it ever runs concurrently.
+        await prisma.foodNotification.create({
+            data: {
+                ownerType: 'RESTAURANT',
+                ownerId: restaurantId,
+                title: 'FSSAI License Expired',
+                message,
+                link: '/restaurant/fssai',
+                category: 'compliance',
+                source: 'FSSAI_EXPIRY',
+                metadata: {
+                    restaurantId,
+                    restaurantName: summary.restaurantName,
+                    ownerName: summary.ownerName,
+                    ownerPhone: summary.ownerPhone,
+                    fssaiNumber: summary.fssaiNumber,
+                    expiryDate: expiryIso,
+                },
+            },
         });
+        seen.add(`${restaurantId}|${expiryIso}`);
 
-        const existing = await FoodNotification.findOne({
-            ownerType: 'RESTAURANT',
-            ownerId: restaurantId,
-            source: 'FSSAI_EXPIRY',
-            'metadata.expiryDate': expiryIso
-        })
-            .select('_id')
-            .lean();
-
-        if (existing) continue;
-
-        await FoodNotification.create({
-            ownerType: 'RESTAURANT',
-            ownerId: restaurantId,
-            title: payload.title,
-            message: payload.message,
-            link: payload.link,
-            category: payload.category,
-            source: payload.source,
-            metadata: payload.metadata
-        });
+        const data = {
+            restaurantId,
+            expiryDate: expiryIso,
+            fssaiNumber: summary.fssaiNumber || '',
+        };
 
         await notifyOwnerSafely(
             { ownerType: 'RESTAURANT', ownerId: restaurantId },
-            {
-                title: payload.title,
-                body: payload.message,
-                data: {
-                    type: 'fssai_expired',
-                    restaurantId,
-                    expiryDate: expiryIso,
-                    fssaiNumber: summary.fssaiNumber || ''
-                }
-            }
+            { title: 'FSSAI License Expired', body: message, data: { type: 'fssai_expired', ...data } }
         );
 
         await notifyAdminsSafely({
             title: 'Restaurant FSSAI Expired',
-            body: `${summary.restaurantName} FSSAI expired on ${summary.expiryLabel}. Owner: ${summary.ownerName || 'N/A'}.`,
-            data: {
-                type: 'restaurant_fssai_expired',
-                restaurantId,
-                expiryDate: expiryIso,
-                fssaiNumber: summary.fssaiNumber || ''
-            }
+            body: summary.message,
+            data: { type: 'restaurant_fssai_expired', ...data },
         });
 
         createdCount += 1;
     }
 
-    return {
-        totalExpired: restaurants.length,
-        createdCount
-    };
+    return { totalExpired: restaurants.length, createdCount };
 };
