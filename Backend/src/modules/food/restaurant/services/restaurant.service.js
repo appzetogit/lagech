@@ -2152,3 +2152,21 @@ export const deleteCurrentRestaurantAccount = async (restaurantId) => {
 
     return { success: true };
 };
+
+/**
+ * A lead: somebody who filled in the "list my restaurant" form without going
+ * through registration. Admin works through these in
+ * adminRestaurantLifecycle.service.js.
+ */
+export const submitUnregisteredRestaurant = async (body = {}) => {
+    const fields = ['ownerName', 'restaurantName', 'mobileNumber', 'emailId', 'location'];
+    const data = {};
+
+    for (const field of fields) {
+        const value = String(body[field] ?? '').trim();
+        if (!value) throw new ValidationError('All fields are required');
+        data[field] = value;
+    }
+
+    return prisma.foodUnregisteredRestaurant.create({ data });
+};

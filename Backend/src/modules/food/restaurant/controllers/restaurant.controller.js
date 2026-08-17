@@ -15,11 +15,11 @@ import {
     getRestaurantComplaints,
     deleteCurrentRestaurantAccount,
     createRestaurantOnboardingFeeOrder,
+    submitUnregisteredRestaurant,
 } from '../services/restaurant.service.js';
 import { getRestaurantSubscriptionHistory } from '../services/subscriptionHistory.service.js';
 import { validateRestaurantRegisterDto } from '../validators/restaurant.validator.js';
 import { sendResponse, sendError } from '../../../../utils/response.js';
-import { FoodUnregisteredRestaurant } from '../models/unregisteredRestaurant.model.js';
 
 
 export const uploadRestaurantAttachmentController = async (req, res, next) => {
@@ -193,18 +193,8 @@ export const getRestaurantSubscriptionHistoryController = async (req, res, next)
 
 export const registerUnregisteredRestaurantController = async (req, res, next) => {
     try {
-        const { ownerName, restaurantName, mobileNumber, emailId, location } = req.body;
-        if (!ownerName || !restaurantName || !mobileNumber || !emailId || !location) {
-            return sendError(res, 400, 'All fields are required');
-        }
-        const newUnregistered = await FoodUnregisteredRestaurant.create({
-            ownerName,
-            restaurantName,
-            mobileNumber,
-            emailId,
-            location
-        });
-        return sendResponse(res, 201, 'Restaurant details submitted successfully', newUnregistered);
+        const lead = await submitUnregisteredRestaurant(req.body || {});
+        return sendResponse(res, 201, 'Restaurant details submitted successfully', lead);
     } catch (error) {
         next(error);
     }
