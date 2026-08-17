@@ -6,7 +6,6 @@
  *   node scripts/simulate-monthly-billing.js                            (catch-up: all unbilled closed months)
  */
 import 'dotenv/config';
-import mongoose from 'mongoose';
 import { connectDB, disconnectDB } from '../src/config/prisma.js';
 import {
     runMonthlyBilling,
@@ -31,7 +30,7 @@ const main = async () => {
             console.log('[simulate-monthly-billing] catch-up result:', JSON.stringify(result, null, 2));
         }
     } finally {
-        await disconnectDB().catch(() => mongoose.disconnect());
+        await disconnectDB();
     }
 };
 
