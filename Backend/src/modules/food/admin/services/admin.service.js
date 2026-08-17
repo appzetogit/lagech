@@ -76,6 +76,7 @@ export * from './adminRestaurantLifecycle.service.js';
 export * from './adminRestaurantDirectory.service.js';
 export * from './adminFeedback.service.js';
 export * from './adminRestaurantWrite.service.js';
+export * from './adminDeliverySupport.service.js';
 
 import {
     getCategoryStats,
@@ -1519,172 +1520,7 @@ export async function getRestaurantAnalytics(restaurantId) {
 // ----- Delivery join requests -----
 
 
-export function getDeliveryWalletsStub() {
-    return {
-        wallets: [],
-        pagination: { page: 1, limit: 100, total: 0, pages: 0 }
-    };
-}
 
-// ----- Support tickets -----
-export async function getSupportTicketStats() {
-    const [open, inProgress, resolved, closed] = await Promise.all([
-        DeliverySupportTicket.countDocuments({ status: 'open' }),
-        DeliverySupportTicket.countDocuments({ status: 'in_progress' }),
-        DeliverySupportTicket.countDocuments({ status: 'resolved' }),
-        DeliverySupportTicket.countDocuments({ status: 'closed' })
-    ]);
-    return {
-        total: open + inProgress + resolved + closed,
-        open,
-        inProgress,
-        resolved,
-        closed
-    };
-}
-
-export async function getDeliverySupportTickets(query = {}) {
-    const { status, priority, search, page = 1, limit = 100 } = query;
-    const filter = {};
-    if (status && String(status).trim()) filter.status = String(status).trim();
-    if (priority && String(priority).trim()) filter.priority = String(priority).trim();
-    if (search && typeof search === 'string' && search.trim()) {
-        const term = search.trim();
-        filter.$or = [
-            { subject: { $regex: term, $options: 'i' } },
-            { description: { $regex: term, $options: 'i' } },
-            { ticketId: { $regex: term, $options: 'i' } }
-        ];
-    }
-
-    const skip = Math.max(0, (Number(page) || 1) - 1) * Math.max(1, Math.min(500, Number(limit) || 100));
-    const limitNum = Math.max(1, Math.min(500, Number(limit) || 100));
-
-    const [list, total] = await Promise.all([
-        DeliverySupportTicket.find(filter)
-            .populate('deliveryPartnerId', 'name phone email')
-            .sort({ createdAt: -1 })
-            .skip(skip)
-            .limit(limitNum)
-            .lean(),
-        DeliverySupportTicket.countDocuments(filter)
-    ]);
-
-    const tickets = list.map((t) => ({
-        _id: t._id,
-        ticketId: t.ticketId,
-        subject: t.subject,
-        description: t.description,
-        category: t.category,
-        priority: t.priority,
-        status: t.status,
-        adminResponse: t.adminResponse,
-        respondedAt: t.respondedAt,
-        createdAt: t.createdAt,
-        updatedAt: t.updatedAt,
-        deliveryPartner: t.deliveryPartnerId
-            ? {
-                _id: t.deliveryPartnerId._id,
-                name: t.deliveryPartnerId.name || '',
-                phone: t.deliveryPartnerId.phone || '',
-                email: t.deliveryPartnerId.email || ''
-            }
-            : null
-    }));
-
-    return {
-        tickets,
-        pagination: {
-            page: Number(page) || 1,
-            limit: limitNum,
-            total,
-            pages: Math.ceil(total / limitNum) || 1
-        }
-    };
-}
-
-export async function updateDeliverySupportTicket(id, body = {}) {
-    const ticket = await DeliverySupportTicket.findById(id);
-    if (!ticket) return null;
-    const { status, adminResponse } = body || {};
-    if (status !== undefined) {
-        const allowed = ['open', 'in_progress', 'resolved', 'closed'];
-        if (allowed.includes(String(status))) ticket.status = String(status);
-    }
-    if (adminResponse !== undefined) {
-        ticket.adminResponse = typeof adminResponse === 'string' ? adminResponse.trim() : '';
-        if (ticket.adminResponse) ticket.respondedAt = new Date();
-    }
-    await ticket.save();
-
-    // Send notification if admin response was added
-    if (adminResponse !== undefined && ticket.adminResponse && ticket.deliveryPartnerId) {
-        await FoodNotification.create({
-            ownerType: 'DELIVERY_PARTNER',
-            ownerId: ticket.deliveryPartnerId,
-            title: 'Support Ticket Response',
-            message: `Admin has responded to your ticket: "${ticket.subject}"`,
-            source: 'SUPPORT_RESPONSE',
-            category: 'support',
-            metadata: { ticketId: ticket._id }
-        }).catch(err => console.error('Error creating delivery support notification:', err));
-
-        // Also send push notification (FCM)
-        await sendNotificationToOwner({
-            ownerType: 'DELIVERY_PARTNER',
-            ownerId: ticket.deliveryPartnerId,
-            payload: {
-                title: 'Support Ticket Response',
-                body: `Admin has responded to your ticket: "${ticket.subject}"`,
-                data: {
-                    type: 'SUPPORT_RESPONSE',
-                    ticketId: String(ticket._id)
-                }
-            }
-        }).catch(err => console.error('Error sending delivery support push notification:', err));
-    }
-
-    return ticket.toObject();
-}
-
-/**
- * Subscription Settings
- */
-export const updateRestaurantSubscriptionSettings = async (data) => {
-    let settings = await FoodRestaurantSubscriptionSettings.findOne();
-    if (!settings) {
-        settings = new FoodRestaurantSubscriptionSettings();
-    }
-
-    if (data.starterPrice !== undefined) settings.starterPrice = Math.max(0, Number(data.starterPrice) || 0);
-    if (data.growthPrice !== undefined) settings.growthPrice = Math.max(0, Number(data.growthPrice) || 0);
-    if (data.premiumPrice !== undefined) settings.premiumPrice = Math.max(0, Number(data.premiumPrice) || 0);
-    if (data.starterMinGmv !== undefined) settings.starterMinGmv = Math.max(0, Number(data.starterMinGmv) || 0);
-    if (data.starterMaxGmv !== undefined) settings.starterMaxGmv = Math.max(0, Number(data.starterMaxGmv) || 0);
-    if (data.growthMinGmv !== undefined) settings.growthMinGmv = Math.max(0, Number(data.growthMinGmv) || 0);
-    if (data.growthMaxGmv !== undefined) settings.growthMaxGmv = Math.max(0, Number(data.growthMaxGmv) || 0);
-    if (data.premiumMinGmv !== undefined) settings.premiumMinGmv = Math.max(0, Number(data.premiumMinGmv) || 0);
-    if (data.onboardingFee !== undefined) settings.onboardingFee = Math.max(0, Number(data.onboardingFee) || 0);
-
-    // Keep ranges monotonic and contiguous by default.
-    settings.starterMinGmv = Math.min(Number(settings.starterMinGmv || 0), Number(settings.starterMaxGmv || 0));
-    if (Number(settings.growthMinGmv || 0) < Number(settings.starterMaxGmv || 0)) {
-        settings.growthMinGmv = Number(settings.starterMaxGmv || 0);
-    }
-    if (Number(settings.growthMaxGmv || 0) < Number(settings.growthMinGmv || 0)) {
-        settings.growthMaxGmv = Number(settings.growthMinGmv || 0);
-    }
-    if (Number(settings.premiumMinGmv || 0) < Number(settings.growthMaxGmv || 0)) {
-        settings.premiumMinGmv = Number(settings.growthMaxGmv || 0);
-    }
-
-    await settings.save();
-    return getRestaurantSubscriptionSettings();
-};
-
-export const getAdminRestaurantSubscriptionHistory = async (query = {}) => {
-    return getAdminRestaurantSubscriptionHistoryFromRestaurant(query);
-};
 
 // ----- Delivery partners (approved list) -----
 /**
@@ -1693,65 +1529,7 @@ export const getAdminRestaurantSubscriptionHistory = async (query = {}) => {
 
 
 // ----- Delivery partner bonus (admin) -----
-export async function getDeliveryPartnerBonusTransactions(query = {}) {
-    const { page = 1, limit = 1000, search } = query;
-    const filter = {};
 
-    // For search (name/phone/email/transactionId) we do a two-step lookup to keep it simple.
-    if (search && typeof search === 'string' && search.trim()) {
-        const term = search.trim();
-        const partnerIds = await FoodDeliveryPartner.find({
-            $or: [
-                { name: { $regex: term, $options: 'i' } },
-                { phone: { $regex: term, $options: 'i' } },
-                { email: { $regex: term, $options: 'i' } }
-            ]
-        }).select('_id').lean();
-        filter.$or = [
-            { transactionId: { $regex: term, $options: 'i' } },
-            { deliveryPartnerId: { $in: partnerIds.map((p) => p._id) } }
-        ];
-    }
-
-    const skip = Math.max(0, (Number(page) || 1) - 1) * Math.max(1, Math.min(1000, Number(limit) || 100));
-    const limitNum = Math.max(1, Math.min(1000, Number(limit) || 100));
-
-    const [list, total] = await Promise.all([
-        DeliveryBonusTransaction.find(filter)
-            .sort({ createdAt: -1 })
-            .skip(skip)
-            .limit(limitNum)
-            .populate({ path: 'deliveryPartnerId', select: 'name phone email' })
-            .lean(),
-        DeliveryBonusTransaction.countDocuments(filter)
-    ]);
-
-    const transactions = list.map((t, index) => {
-        const partner = t.deliveryPartnerId;
-        const partnerId = partner?._id ? String(partner._id) : null;
-        return {
-            sl: skip + index + 1,
-            transactionId: t.transactionId,
-            deliveryPartnerId: partnerId,
-            deliveryId: partnerId ? `DP-${partnerId.slice(-8).toUpperCase()}` : null,
-            deliveryman: partner?.name || '',
-            amount: t.amount,
-            bonus: t.amount, // legacy compatibility
-            reference: t.reference || '',
-            createdAt: t.createdAt
-        };
-    });
-
-    return {
-        transactions,
-        pagination: {
-            page: Number(page) || 1,
-            limit: limitNum,
-            total,
-            pages: Math.ceil(total / limitNum) || 1
-        }
-    };
-}
 
 export async function getDeliveryEarnings(query = {}) {
     const page = Math.max(parseInt(query.page, 10) || 1, 1);
@@ -1921,72 +1699,7 @@ export async function getDeliveryEarnings(query = {}) {
 // ----- Earning Addon Offers (admin) -----
 
 
-export async function getDeliverymanReviews(query = {}) {
-    const limit = Math.min(Math.max(parseInt(query.limit, 10) || 50, 1), 1000);
-    const page = Math.max(parseInt(query.page, 10) || 1, 1);
-    const skip = (page - 1) * limit;
 
-    const filter = {
-        'ratings.deliveryPartner.rating': { $exists: true, $ne: null }
-    };
-
-    if (query.search && String(query.search).trim()) {
-        const term = String(query.search).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const searchRegex = new RegExp(term, 'i');
-        
-        // Find delivery partners matching search
-        const partners = await FoodDeliveryPartner.find({
-            $or: [
-                { name: searchRegex },
-                { phone: searchRegex }
-            ]
-        }).select('_id').lean();
-        
-        // Find customers matching search
-        const customers = await FoodUser.find({
-            $or: [
-                { name: searchRegex },
-                { email: searchRegex }
-            ]
-        }).select('_id').lean();
-
-        filter.$or = [
-            { orderId: searchRegex },
-            { 'ratings.deliveryPartner.comment': searchRegex },
-            { 'dispatch.deliveryPartnerId': { $in: partners.map(p => p._id) } },
-            { userId: { $in: customers.map(c => c._id) } }
-        ];
-    }
-
-    const [docs, total] = await Promise.all([
-        FoodOrder.find(filter)
-            .sort({ createdAt: -1 })
-            .skip(skip)
-            .limit(limit)
-            .populate('userId', 'name email phone')
-            .populate('dispatch.deliveryPartnerId', 'name phone')
-            .select('orderId userId dispatch.deliveryPartnerId ratings.deliveryPartner createdAt deliveryState.deliveredAt')
-            .lean(),
-        FoodOrder.countDocuments(filter)
-    ]);
-
-    const reviews = docs.map((doc, index) => ({
-        sl: skip + index + 1,
-        orderId: doc.orderId,
-        deliveryman: doc.dispatch?.deliveryPartnerId?.name || 'Unknown',
-        deliverymanId: doc.dispatch?.deliveryPartnerId?._id || 'N/A',
-        deliverymanPhone: doc.dispatch?.deliveryPartnerId?.phone || 'N/A',
-        customer: doc.userId?.name || 'Unknown',
-        customerId: doc.userId?._id || 'N/A',
-        customerPhone: doc.userId?.phone || 'N/A',
-        review: doc.ratings?.deliveryPartner?.comment || '',
-        rating: doc.ratings?.deliveryPartner?.rating || 0,
-        submittedAt: doc.createdAt,
-        deliveredAt: doc.deliveryState?.deliveredAt
-    }));
-
-    return { reviews, total, page, limit };
-}
 
 
 // ----- Zones CRUD -----
