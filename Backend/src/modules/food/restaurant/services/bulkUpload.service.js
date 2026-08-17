@@ -1,10 +1,11 @@
 import ExcelJS from 'exceljs';
-import mongoose from 'mongoose';
-import { FoodItem } from '../../admin/models/food.model.js';
-import { FoodCategory } from '../../admin/models/category.model.js';
-import { FoodRestaurant } from '../models/restaurant.model.js';
+import { prisma } from '../../../../config/prisma.js';
+import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { categoryAllowsFoodType, normalizeFoodTypeForCategory } from '../../shared/categoryWorkflow.js';
+import { toFoodTypeColumn } from '../../shared/foodType.util.js';
+import { dropMenuCache } from '../../shared/menuCache.util.js';
+import { syncFoodVariants } from '../../admin/services/foodVariant.service.js';
 import { isHostedUploadUrl, saveImageFromUrl } from '../../../../services/storage.service.js';
 
 const PREP_TIME_OPTIONS = [
@@ -179,8 +180,11 @@ export async function processBulkMenuUpload(restaurantId, fileBuffer, options = 
             `Uploaded Excel is missing required column(s): ${missingHeaders.join(', ')}`,
         );
     }
-
-    const restaurant = await FoodRestaurant.findById(restaurantId).lean();
+    if (!isId(restaurantId)) throw new ValidationError('Invalid restaurant id');
+    const restaurant = await prisma.foodRestaurant.findUnique({
+        where: { id: String(restaurantId) },
+        select: { id: true, zoneId: true },
+    });
     if (!restaurant) throw new ValidationError('Restaurant not found');
 
     const items = [];
@@ -198,23 +202,23 @@ export async function processBulkMenuUpload(restaurantId, fileBuffer, options = 
 
     const getTextValue = (cell) => {
         if (!cell || cell.value === null || cell.value === undefined) return '';
-        
+
         // Handle Hyperlinks (often how URLs are stored in Excel)
         if (typeof cell.value === 'object') {
             if (cell.value.hyperlink) return String(cell.value.hyperlink).trim();
             if (cell.value.text) return String(cell.value.text).trim();
         }
-        
+
         // Handle Rich Text
         if (cell.value.richText) {
-            return cell.value.richText.map(rt => rt.text).join('').trim();
+            return cell.value.richText.map((rt) => rt.text).join('').trim();
         }
-        
+
         // Handle Formula Result
         if (typeof cell.value === 'object' && cell.value.result !== undefined) {
             return String(cell.value.result).trim();
         }
-        
+
         // Handle Shared Strings / Plain Values
         return String(cell.value).trim();
     };
@@ -233,18 +237,18 @@ export async function processBulkMenuUpload(restaurantId, fileBuffer, options = 
                 isRecommended: String(row.getCell(6).value || '').toLowerCase() === 'yes',
                 prepTime: getTextValue(row.getCell(7)),
                 imageUrl: getTextValue(row.getCell(8)),
-                variants: []
+                variants: [],
             };
 
             // Mandatory Field Check
             if (!data.category || !data.name) {
                 // Only report as error if row is not completely empty
-                const hasAnyData = row.values.some(v => v !== null && v !== undefined && v !== '');
+                const hasAnyData = row.values.some((v) => v !== null && v !== undefined && v !== '');
                 if (hasAnyData) {
                     parsingErrors.push({
                         row: rowNumber,
                         item: data.name || 'Unknown Entry',
-                        error: 'Category and Item Name are mandatory'
+                        error: 'Category and Item Name are mandatory',
                     });
                 }
                 return;
@@ -263,16 +267,14 @@ export async function processBulkMenuUpload(restaurantId, fileBuffer, options = 
 
             // Backward compatibility guard:
             // Old templates had a pre-filled sample row (Paneer Tikka). Skip it automatically.
-            if (isLegacyTemplateSampleRow(data)) {
-                return;
-            }
+            if (isLegacyTemplateSampleRow(data)) return;
 
             items.push({ data, rowNumber });
         } catch (err) {
             parsingErrors.push({
                 row: rowNumber,
                 item: getTextValue(row.getCell(2)) || 'Unknown Entry',
-                error: `Parsing error: ${err.message}`
+                error: `Parsing error: ${err.message}`,
             });
         }
     });
@@ -281,151 +283,151 @@ export async function processBulkMenuUpload(restaurantId, fileBuffer, options = 
         throw new ValidationError('No valid items found in the Excel sheet');
     }
 
-    const totalProcessedRows = items.length + parsingErrors.length;
-    const results = {
-        success: 0,
-        failed: parsingErrors.length,
-        details: [...parsingErrors]
+    const results = { success: 0, failed: parsingErrors.length, details: [...parsingErrors] };
+    const fail = (rowNumber, name, error) => {
+        results.failed += 1;
+        results.details.push({ row: rowNumber, item: name || 'Unknown Entry', error });
     };
 
-    // --- OPTIMIZATION: Resolve All Categories First ---
+    // ── Resolve every category once ──────────────────────────────────────────
+    // A sheet of 500 rows usually names a handful of categories, so this is a
+    // handful of queries rather than one per row.
     const categoryCache = new Map();
-    const uniqueCategoryNames = [...new Set(items.map(it => it.data.category))];
-    
-    for (const catName of uniqueCategoryNames) {
-        const normalized = catName.trim();
-        let cat = await FoodCategory.findOne({
-            name: { $regex: new RegExp(`^${escapeRegExp(normalized)}$`, 'i') },
-            $or: [{ restaurantId: null }, { restaurantId: restaurant._id }]
+    for (const name of new Set(items.map((it) => it.data.category.trim()))) {
+        let category = await prisma.foodCategory.findFirst({
+            where: {
+                name: { equals: name, mode: 'insensitive' },
+                OR: [{ restaurantId: null }, { restaurantId: restaurant.id }],
+            },
         });
 
-        if (!cat) {
-            cat = await FoodCategory.create({
-                name: normalized,
-                restaurantId: restaurant._id,
-                createdByRestaurantId: restaurant._id,
-                approvalStatus: 'approved',
-                zoneId: restaurant.zoneId,
-                isActive: true
+        if (!category) {
+            category = await prisma.foodCategory.create({
+                data: {
+                    name,
+                    restaurantId: restaurant.id,
+                    createdByRestaurantId: restaurant.id,
+                    approvalStatus: 'approved',
+                    zoneId: restaurant.zoneId,
+                },
             });
         }
-        categoryCache.set(normalized.toLowerCase(), cat);
+        categoryCache.set(name.toLowerCase(), category);
     }
 
-    // --- OPTIMIZATION: Batch process items with concurrency ---
+    // ── Fetch the images, in batches ─────────────────────────────────────────
+    // The one genuinely slow step: a row may name a remote image that has to be
+    // downloaded and re-hosted. Ten at a time, as before.
     const CONCURRENCY = 10;
-    const itemChunks = [];
+    const resolveImage = async ({ data, rowNumber }) => {
+        const url = String(data.imageUrl || '').trim();
+        if (!url) return '';
+
+        // Already ours (local VPS or legacy Cloudinary) — nothing to fetch.
+        if (isHostedUploadUrl(url) || url.includes('cloudinary.com')) return url;
+        if (!url.startsWith('http') && !url.startsWith('//')) return '';
+
+        try {
+            const saved = await saveImageFromUrl(
+                url.startsWith('//') ? `https:${url}` : url,
+                `restaurants/${restaurant.id}/food`,
+            );
+            return saved.url;
+        } catch (imgErr) {
+            // A missing picture is not worth losing the dish over.
+            console.error(`Row ${rowNumber}: Image upload failed [${url}]:`, imgErr.message);
+            return '';
+        }
+    };
+
+    const prepared = [];
     for (let i = 0; i < items.length; i += CONCURRENCY) {
-        itemChunks.push(items.slice(i, i + CONCURRENCY));
-    }
+        const chunk = items.slice(i, i + CONCURRENCY);
+        const images = await Promise.all(chunk.map(resolveImage));
 
-    const bulkOps = [];
-
-    for (const chunk of itemChunks) {
-        const chunkPromises = chunk.map(async (item) => {
-            try {
-                const { data, rowNumber } = item;
-
-                // 1. Get Pre-Resolved Category
-                const category = categoryCache.get(data.category.toLowerCase());
-                if (!category) throw new Error(`Category ${data.category} could not be resolved`);
-
-                // 2. Handle Image Parallel Upload
-                let finalImageUrl = '';
-                if (data.imageUrl) {
-                    const trimmedUrl = data.imageUrl.trim();
-                    // Keep already-hosted URLs (local VPS or legacy Cloudinary)
-                    if (isHostedUploadUrl(trimmedUrl) || trimmedUrl.includes('cloudinary.com')) {
-                        finalImageUrl = trimmedUrl;
-                    } else if (trimmedUrl.startsWith('http') || trimmedUrl.startsWith('//')) {
-                        try {
-                            const urlToUpload = trimmedUrl.startsWith('//') ? `https:${trimmedUrl}` : trimmedUrl;
-                            const saved = await saveImageFromUrl(
-                                urlToUpload,
-                                `restaurants/${restaurantId}/food`
-                            );
-                            finalImageUrl = saved.url;
-                        } catch (imgErr) {
-                            console.error(`Row ${rowNumber}: Image upload failed [${trimmedUrl}]:`, imgErr.message);
-                        }
-                    }
-                }
-
-                // 3. Prepare Bulk Operation
-                const normalizedFoodType = normalizeFoodTypeForCategory(data.foodType);
-                const categoryScope = String(category?.foodTypeScope || 'Both').trim();
-                if (!categoryAllowsFoodType(categoryScope, normalizedFoodType)) {
-                    throw new Error(
-                        `Category "${category.name}" allows only ${categoryScope} items, but row has ${normalizedFoodType}`
-                    );
-                }
-
-                bulkOps.push({
-                    updateOne: {
-                        filter: { name: data.name, restaurantId: restaurant._id },
-                        update: {
-                            $set: {
-                                categoryId: category._id,
-                                categoryName: category.name,
-                                description: data.description,
-                                price: data.variants.length > 0 ? Math.min(...data.variants.map(v => v.price)) : data.price,
-                                variants: data.variants,
-                                ...(finalImageUrl && { image: finalImageUrl }),
-                                foodType: normalizedFoodType,
-                                isRecommended: data.isRecommended,
-                                preparationTime: data.prepTime,
-                                approvalStatus,
-                                ...(approvalStatus === 'pending'
-                                    ? { requestedAt: new Date(), approvedAt: null }
-                                    : { approvedAt: new Date(), requestedAt: null }),
-                                rejectionReason: '',
-                                rejectedAt: null
-                            }
-                        },
-                        upsert: true
-                    }
-                });
-
-            } catch (err) {
-                results.failed++;
-                results.details.push({
-                    row: item.rowNumber,
-                    item: item?.data?.name || 'Unknown Entry',
-                    error: err.message
-                });
+        chunk.forEach((item, index) => {
+            const { data, rowNumber } = item;
+            const category = categoryCache.get(data.category.trim().toLowerCase());
+            if (!category) {
+                fail(rowNumber, data.name, `Category ${data.category} could not be resolved`);
+                return;
             }
+
+            const foodType = normalizeFoodTypeForCategory(data.foodType);
+            const scope = String(category.foodTypeScope || 'Both').trim();
+            if (!categoryAllowsFoodType(scope, foodType)) {
+                fail(
+                    rowNumber,
+                    data.name,
+                    `Category "${category.name}" allows only ${scope} items, but row has ${foodType}`,
+                );
+                return;
+            }
+
+            prepared.push({ data, rowNumber, category, foodType, image: images[index] });
         });
-
-        await Promise.all(chunkPromises);
     }
 
-    // --- OPTIMIZATION: Execute Bulk Write ---
-    if (bulkOps.length > 0) {
+    // ── Write ────────────────────────────────────────────────────────────────
+    // Matched by name within this restaurant, as the Mongo upsert was. Ids
+    // created during this run go into the map too, so a sheet that lists the
+    // same dish twice updates one row instead of creating two.
+    const existing = await prisma.foodItem.findMany({
+        where: { restaurantId: restaurant.id, name: { in: prepared.map((p) => p.data.name) } },
+        select: { id: true, name: true },
+    });
+    const idByName = new Map(existing.map((f) => [f.name, f.id]));
+
+    const now = new Date();
+    const approvalStamps = approvalStatus === 'pending'
+        ? { requestedAt: now, approvedAt: null }
+        : { approvedAt: now, requestedAt: null };
+
+    for (const { data, rowNumber, category, foodType, image } of prepared) {
+        const fields = {
+            categoryId: category.id,
+            categoryName: category.name,
+            description: data.description,
+            // A dish with sizes is advertised at its cheapest one.
+            price: data.variants.length > 0
+                ? Math.min(...data.variants.map((v) => v.price))
+                : data.price,
+            ...(image ? { image } : {}),
+            foodType: toFoodTypeColumn(foodType),
+            isRecommended: data.isRecommended,
+            preparationTime: data.prepTime,
+            approvalStatus,
+            ...approvalStamps,
+            rejectionReason: '',
+            rejectedAt: null,
+        };
+
         try {
-            await FoodItem.bulkWrite(bulkOps);
-        } catch (bulkErr) {
-            console.error('Bulk write failed:', bulkErr.message);
-            results.details.push({ row: 'N/A', error: `Database saving failed: ${bulkErr.message}` });
+            // One transaction per dish: variants are their own rows now, so a
+            // dish and its sizes have to land together or not at all.
+            const id = await prisma.$transaction(async (tx) => {
+                const existingId = idByName.get(data.name);
+                const food = existingId
+                    ? await tx.foodItem.update({ where: { id: existingId }, data: fields })
+                    : await tx.foodItem.create({
+                        data: { restaurantId: restaurant.id, name: data.name, ...fields },
+                    });
+
+                await syncFoodVariants(tx, food.id, data.variants);
+                return food.id;
+            });
+
+            idByName.set(data.name, id);
+            // Counted from what actually landed. The old code derived this by
+            // subtracting failures from the row count, so a bulk write that blew
+            // up still reported every row as a success.
+            results.success += 1;
+        } catch (err) {
+            fail(rowNumber, data.name, `Could not be saved: ${err.message}`);
         }
     }
 
-    results.success = Math.max(0, totalProcessedRows - results.failed);
-
-    if (results.success > 0) {
-        try {
-            const { invalidateCache } = await import('../../../../middleware/cache.js');
-            await invalidateCache(`restaurant_menu:${restaurantId}`);
-        } catch (cacheErr) {
-            console.error('Failed to invalidate cache after bulk upload:', cacheErr);
-        }
-    }
+    if (results.success > 0) await dropMenuCache(restaurant.id);
 
     return results;
-}
-
-/**
- * Escapes characters for use in a regular expression.
- */
-function escapeRegExp(string) {
-    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
