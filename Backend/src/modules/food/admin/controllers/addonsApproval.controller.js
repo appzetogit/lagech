@@ -1,5 +1,5 @@
-import mongoose from 'mongoose';
 import * as adminService from '../services/admin.service.js';
+import { isId } from '../../../../utils/helpers.js';
 import { validateAddonAdminListQuery, validateAddonRejectDto } from '../validators/addonApproval.validator.js';
 
 export async function getRestaurantAddons(req, res, next) {
@@ -15,7 +15,7 @@ export async function getRestaurantAddons(req, res, next) {
 export async function approveRestaurantAddon(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid add-on id' });
         }
         const updated = await adminService.approveRestaurantAddon(id);
@@ -31,7 +31,7 @@ export async function approveRestaurantAddon(req, res, next) {
 export async function rejectRestaurantAddon(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid add-on id' });
         }
         const { reason } = validateAddonRejectDto(req.body || {});
@@ -48,7 +48,7 @@ export async function rejectRestaurantAddon(req, res, next) {
 export async function updateRestaurantAddon(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid add-on id' });
         }
         const updated = await adminService.updateRestaurantAddonAdmin(id, req.body || {});

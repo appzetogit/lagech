@@ -6,13 +6,10 @@ import {
     deleteRestaurantCategory
 } from '../services/restaurantCategory.service.js';
 import { sendResponse, sendError } from '../../../../utils/response.js';
-import { FoodRestaurant } from '../models/restaurant.model.js';
 
 export const listCategoriesController = async (req, res, next) => {
     try {
         const restaurantId = req.user?.userId;
-        // Default to restaurant's zone when caller doesn't pass zoneId.
-        // This returns (zone categories + global categories) instead of only global.
         const query = { ...(req.query || {}) };
         if (!restaurantId) {
             // Public endpoint: no auth available. Return approved categories (zone-aware).
@@ -20,12 +17,8 @@ export const listCategoriesController = async (req, res, next) => {
             return sendResponse(res, 200, 'Categories fetched successfully', data);
         }
 
-        if (!query.zoneId) {
-            const r = await FoodRestaurant.findById(restaurantId).select('zoneId').lean();
-            if (r?.zoneId) {
-                query.zoneId = String(r.zoneId);
-            }
-        }
+        // The zone defaulting used to happen here; listRestaurantCategories
+        // already falls back to the restaurant's own zone.
         const data = await listRestaurantCategories(restaurantId, query);
         return sendResponse(res, 200, 'Categories fetched successfully', data);
     } catch (error) {

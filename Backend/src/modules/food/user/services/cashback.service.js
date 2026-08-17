@@ -22,6 +22,35 @@ export const getActiveCashbackSettings = async () => {
     );
 };
 
+/**
+ * Save the cashback rules from the admin panel.
+ *
+ * Only the keys the form actually sent are touched, so a screen that posts a
+ * subset cannot silently zero the rest. Every amount is clamped at zero — a
+ * negative cashback would debit the customer.
+ */
+export const upsertCashbackSettings = async (body = {}) => {
+    const data = {};
+    if (body.isEnabled !== undefined) data.isEnabled = Boolean(body.isEnabled);
+    if (body.cashbackType !== undefined) {
+        data.cashbackType = body.cashbackType === 'flat' ? 'flat' : 'percentage';
+    }
+    for (const key of ['cashbackValue', 'minOrderValue', 'maxCashback']) {
+        if (body[key] !== undefined) data[key] = Math.max(0, Number(body[key]) || 0);
+    }
+    if (body.firstOrderOnly !== undefined) data.firstOrderOnly = Boolean(body.firstOrderOnly);
+    if (body.perUserLimit !== undefined) data.perUserLimit = Math.max(0, Number(body.perUserLimit) || 0);
+
+    const existing = await prisma.foodCashbackSettings.findFirst({
+        where: { isActive: true },
+        orderBy: { createdAt: 'desc' },
+    });
+
+    return existing
+        ? prisma.foodCashbackSettings.update({ where: { id: existing.id }, data })
+        : prisma.foodCashbackSettings.create({ data: { ...data, isActive: true } });
+};
+
 /** Preview the cashback an order would earn. Pure — no writes. */
 export const computeCashbackAmount = (settings, subtotal) => {
     if (!settings?.isEnabled) return 0;
