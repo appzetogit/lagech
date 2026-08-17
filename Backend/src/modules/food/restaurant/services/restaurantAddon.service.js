@@ -1,10 +1,23 @@
-import mongoose from 'mongoose';
+import { prisma } from '../../../../config/prisma.js';
+import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
-import { FoodAddon } from '../models/foodAddon.model.js';
-import { FoodItem } from '../../admin/models/food.model.js';
+import { notifyAdminsSafely } from '../../../../core/notifications/firebase.service.js';
 import { logger } from '../../../../utils/logger.js';
 
-const escapeRegex = (s) => String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/**
+ * The restaurant's own side of add-ons.
+ *
+ * `draft` is what the restaurant edits and `published` is what the customer app
+ * serves; the two only converge when an admin approves. Both are Json columns,
+ * so any edit is a read-merge-write — Prisma replaces a Json column whole, and
+ * writing a partial object would silently drop the other keys.
+ */
+
+const ADDON_STATUSES = ['pending', 'approved', 'rejected'];
+const MAX_IMAGES = 10;
+
+/** A live add-on: soft-deleted rows are invisible to every path here. */
+const live = (extra = {}) => ({ isDeleted: false, ...extra });
 
 /**
  * Drops the cached public add-on responses.
@@ -24,6 +37,11 @@ export async function invalidatePublicAddonCache() {
     }
 }
 
+const assertRestaurantId = (restaurantId) => {
+    if (!isId(restaurantId)) throw new ValidationError('Invalid restaurant id');
+    return String(restaurantId);
+};
+
 /**
  * Keeps only ids that are real menu items of THIS restaurant.
  *
@@ -32,286 +50,251 @@ export async function invalidatePublicAddonCache() {
  * at a price its owner never set.
  */
 async function sanitizeFoodIds(restaurantId, foodIds) {
-    const ids = [...new Set((Array.isArray(foodIds) ? foodIds : []).map((v) => String(v || '').trim()))]
-        .filter((v) => mongoose.Types.ObjectId.isValid(v));
+    const ids = [...new Set(
+        (Array.isArray(foodIds) ? foodIds : []).map((v) => String(v || '').trim())
+    )].filter(isId);
     if (!ids.length) return [];
 
-    const owned = await FoodItem.find({
-        restaurantId: new mongoose.Types.ObjectId(String(restaurantId)),
-        _id: { $in: ids.map((v) => new mongoose.Types.ObjectId(v)) }
-    })
-        .select('_id')
-        .lean();
+    const owned = await prisma.foodItem.findMany({
+        where: { restaurantId, id: { in: ids } },
+        select: { id: true },
+    });
 
     if (owned.length !== ids.length) {
         throw new ValidationError('One or more selected menu items do not belong to this restaurant');
     }
-    return owned.map((doc) => doc._id);
+    return owned.map((f) => f.id);
 }
 
-const normalizeAddonDoc = (doc) => {
-    if (!doc) return null;
-    const draft = doc.draft || {};
-    const published = doc.published || null;
+/**
+ * Is this name already taken at this restaurant?
+ *
+ * Prisma's Json filters can only match a string case-insensitively with
+ * `string_contains`, so the exact comparison happens here. The candidate set is
+ * one restaurant's add-ons, so it stays small.
+ */
+async function nameIsTaken(restaurantId, name, exceptId = null) {
+    const candidates = await prisma.foodAddon.findMany({
+        where: live({
+            restaurantId,
+            ...(exceptId ? { id: { not: exceptId } } : {}),
+            draft: { path: ['name'], string_contains: name, mode: 'insensitive' },
+        }),
+        select: { draft: true },
+    });
+
+    const target = name.toLowerCase();
+    return candidates.some((a) => String(a.draft?.name || '').trim().toLowerCase() === target);
+}
+
+const cleanImages = (images) =>
+    (Array.isArray(images) ? images : []).filter(Boolean).slice(0, MAX_IMAGES);
+
+/** 'veg' unless explicitly non-veg — the same rule the old sub-schema had. */
+const normalizeAddonFoodType = (value) => (value === 'non-veg' ? 'non-veg' : 'veg');
+
+const serializeContent = (content) => {
+    if (!content) return null;
     return {
-        _id: doc._id,
-        id: doc._id,
-        restaurantId: doc.restaurantId,
-        approvalStatus: doc.approvalStatus || 'pending',
-        rejectionReason: doc.rejectionReason || '',
-        requestedAt: doc.requestedAt,
-        approvedAt: doc.approvedAt,
-        rejectedAt: doc.rejectedAt,
-        isAvailable: doc.isAvailable !== false,
+        name: content.name || '',
+        description: content.description || '',
+        foodType: normalizeAddonFoodType(content.foodType),
+        isVeg: content.foodType !== 'non-veg',
+        price: Number(content.price) || 0,
+        image: content.image || '',
+        images: Array.isArray(content.images) ? content.images : [],
+    };
+};
+
+const serializeAddon = (a) => {
+    if (!a) return null;
+    const draft = a.draft || {};
+    const foodIds = Array.isArray(a.foodIds) ? a.foodIds : [];
+    return {
+        _id: a.id,
+        id: a.id,
+        restaurantId: a.restaurantId,
+        approvalStatus: a.approvalStatus || 'pending',
+        rejectionReason: a.rejectionReason || '',
+        requestedAt: a.requestedAt,
+        approvedAt: a.approvedAt,
+        rejectedAt: a.rejectedAt,
+        isAvailable: a.isAvailable !== false,
         // Empty => applies to the whole menu.
-        foodIds: (Array.isArray(doc.foodIds) ? doc.foodIds : []).map((v) => String(v)),
-        isItemSpecific: Array.isArray(doc.foodIds) && doc.foodIds.length > 0,
+        foodIds,
+        isItemSpecific: foodIds.length > 0,
         group: {
-            name: doc.group?.name || '',
-            minSelect: Number(doc.group?.minSelect) || 0,
-            maxSelect: Number(doc.group?.maxSelect) || 1,
-            sortOrder: Number(doc.group?.sortOrder) || 0
+            name: a.groupName || '',
+            minSelect: a.groupMinSelect || 0,
+            maxSelect: a.groupMaxSelect || 1,
+            sortOrder: a.groupSortOrder || 0,
         },
-        // Draft fields (what restaurant edits)
-        name: draft.name || '',
-        description: draft.description || '',
-        foodType: draft.foodType === 'non-veg' ? 'non-veg' : 'veg',
-        isVeg: draft.foodType !== 'non-veg',
-        price: Number(draft.price) || 0,
-        image: draft.image || '',
-        images: Array.isArray(draft.images) ? draft.images : [],
-        // Published snapshot (what user app sees)
-        published: published
-            ? {
-                name: published.name || '',
-                description: published.description || '',
-                foodType: published.foodType === 'non-veg' ? 'non-veg' : 'veg',
-                isVeg: published.foodType !== 'non-veg',
-                price: Number(published.price) || 0,
-                image: published.image || '',
-                images: Array.isArray(published.images) ? published.images : []
-            }
-            : null,
-        createdAt: doc.createdAt,
-        updatedAt: doc.updatedAt
+        // Draft fields (what the restaurant edits), flattened for the editor.
+        ...serializeContent(draft),
+        // Published snapshot (what the user app sees).
+        published: serializeContent(a.published),
+        createdAt: a.createdAt,
+        updatedAt: a.updatedAt,
     };
 };
 
 export async function listRestaurantAddons(restaurantId, query = {}) {
-    if (!restaurantId || !mongoose.Types.ObjectId.isValid(String(restaurantId))) {
-        throw new ValidationError('Invalid restaurant id');
-    }
+    const rid = assertRestaurantId(restaurantId);
+
     const limit = Math.min(Math.max(parseInt(query.limit, 10) || 100, 1), 100);
     const page = Math.max(parseInt(query.page, 10) || 1, 1);
     const skip = (page - 1) * limit;
-    const includeDeleted = query.includeDeleted === true;
-    const status = String(query.status || '').trim();
-    const search = typeof query.search === 'string' ? query.search.trim().slice(0, 80) : '';
 
-    const filter = {
-        restaurantId: new mongoose.Types.ObjectId(String(restaurantId)),
-        ...(includeDeleted ? {} : { isDeleted: { $ne: true } })
-    };
-    if (status && ['pending', 'approved', 'rejected'].includes(status)) {
-        filter.approvalStatus = status;
+    const where = { restaurantId: rid };
+    if (query.includeDeleted !== true) where.isDeleted = false;
+    if (ADDON_STATUSES.includes(String(query.status || '').trim())) {
+        where.approvalStatus = String(query.status).trim();
     }
+
+    const search = typeof query.search === 'string' ? query.search.trim().slice(0, 80) : '';
     if (search) {
-        const term = escapeRegex(search);
-        filter.$or = [{ 'draft.name': { $regex: term, $options: 'i' } }];
+        where.draft = { path: ['name'], string_contains: search, mode: 'insensitive' };
     }
 
     const [list, total] = await Promise.all([
-        FoodAddon.find(filter)
-            .sort({ requestedAt: -1, createdAt: -1 })
-            .skip(skip)
-            .limit(limit)
-            .lean(),
-        FoodAddon.countDocuments(filter)
+        prisma.foodAddon.findMany({
+            where,
+            orderBy: [{ requestedAt: 'desc' }, { createdAt: 'desc' }],
+            skip,
+            take: limit,
+        }),
+        prisma.foodAddon.count({ where }),
     ]);
 
-    return {
-        addons: list.map(normalizeAddonDoc),
-        total,
-        page,
-        limit
-    };
+    return { addons: list.map(serializeAddon), total, page, limit };
 }
 
-export async function createRestaurantAddon(restaurantId, body) {
-    if (!restaurantId || !mongoose.Types.ObjectId.isValid(String(restaurantId))) {
-        throw new ValidationError('Invalid restaurant id');
-    }
-    const rid = new mongoose.Types.ObjectId(String(restaurantId));
+export async function createRestaurantAddon(restaurantId, body = {}) {
+    const rid = assertRestaurantId(restaurantId);
+
     const name = String(body?.name || '').trim();
     if (!name) throw new ValidationError('Add-on name is required');
+    if (await nameIsTaken(rid, name)) throw new ValidationError('Add-on already exists');
 
-    // Prevent duplicates per restaurant among non-deleted docs (case-insensitive exact).
-    const exact = `^${escapeRegex(name)}$`;
-    const exists = await FoodAddon.findOne({
-        restaurantId: rid,
-        isDeleted: { $ne: true },
-        'draft.name': { $regex: exact, $options: 'i' }
-    })
-        .select('_id')
-        .lean();
-    if (exists?._id) {
-        throw new ValidationError('Add-on already exists');
-    }
+    const foodIds = await sanitizeFoodIds(rid, body?.foodIds);
 
-    const doc = await FoodAddon.create({
-        restaurantId: rid,
-        draft: {
-            name,
-            description: String(body.description || '').trim(),
-            foodType: body?.foodType === 'non-veg' ? 'non-veg' : 'veg',
-            price: Number(body.price) || 0,
-            image: String(body.image || '').trim(),
-            images: Array.isArray(body.images) ? body.images.filter(Boolean).slice(0, 10) : []
+    const addon = await prisma.foodAddon.create({
+        data: {
+            restaurantId: rid,
+            draft: {
+                name,
+                description: String(body.description || '').trim(),
+                foodType: normalizeAddonFoodType(body?.foodType),
+                price: Number(body.price) || 0,
+                image: String(body.image || '').trim(),
+                images: cleanImages(body.images),
+            },
+            published: undefined,
+            foodIds,
+            groupName: String(body?.group?.name || '').trim(),
+            groupMinSelect: Number(body?.group?.minSelect) || 0,
+            groupMaxSelect: Number(body?.group?.maxSelect) || 1,
+            groupSortOrder: Number(body?.group?.sortOrder) || 0,
+            approvalStatus: 'pending',
+            requestedAt: new Date(),
         },
-        foodIds: await sanitizeFoodIds(rid, body?.foodIds),
-        group: {
-            name: String(body?.group?.name || '').trim(),
-            minSelect: Number(body?.group?.minSelect) || 0,
-            maxSelect: Number(body?.group?.maxSelect) || 1,
-            sortOrder: Number(body?.group?.sortOrder) || 0
-        },
-        published: null,
-        approvalStatus: 'pending',
-        rejectionReason: '',
-        requestedAt: new Date(),
-        approvedAt: null,
-        rejectedAt: null,
-        isAvailable: true,
-        isDeleted: false
     });
 
-    try {
-        const { notifyAdminsSafely } = await import('../../../../core/notifications/firebase.service.js');
-        void notifyAdminsSafely({
-            title: 'New Addon Approval Request 🍟',
-            body: `Restaurant has submitted a new addon "${name}" for approval.`,
-            data: {
-                type: 'approval_request',
-                subType: 'addon',
-                id: String(doc._id)
-            }
-        });
-    } catch (e) {
-        // eslint-disable-next-line no-console
-        console.error('Failed to notify admins of new addon approval request:', e);
-    }
+    void notifyAdminsSafely({
+        title: 'New Addon Approval Request 🍟',
+        body: `Restaurant has submitted a new addon "${name}" for approval.`,
+        data: { type: 'approval_request', subType: 'addon', id: addon.id },
+    }).catch((err) => logger.warn(`Addon approval notification failed: ${err?.message || err}`));
 
     await invalidatePublicAddonCache();
-    return normalizeAddonDoc(doc.toObject());
+    return serializeAddon(addon);
 }
 
-export async function updateRestaurantAddon(restaurantId, addonId, updateDto) {
-    if (!restaurantId || !mongoose.Types.ObjectId.isValid(String(restaurantId))) {
-        throw new ValidationError('Invalid restaurant id');
-    }
-    if (!addonId || !mongoose.Types.ObjectId.isValid(String(addonId))) {
-        throw new ValidationError('Invalid add-on id');
-    }
-    const rid = new mongoose.Types.ObjectId(String(restaurantId));
-    const _id = new mongoose.Types.ObjectId(String(addonId));
+export async function updateRestaurantAddon(restaurantId, addonId, updateDto = {}) {
+    const rid = assertRestaurantId(restaurantId);
+    if (!isId(addonId)) throw new ValidationError('Invalid add-on id');
+    const id = String(addonId);
 
-    const set = {};
+    const existing = await prisma.foodAddon.findFirst({ where: live({ id, restaurantId: rid }) });
+    if (!existing) return null;
 
-    if (updateDto?.isAvailable !== undefined) {
-        set.isAvailable = updateDto.isAvailable !== false;
-    }
+    const data = {};
+
+    if (updateDto?.isAvailable !== undefined) data.isAvailable = updateDto.isAvailable !== false;
 
     // Re-linking to menu items is not a content change, so this deliberately does
     // NOT reset approvalStatus the way a draft edit below does.
     if (updateDto?.foodIds !== undefined) {
-        set.foodIds = await sanitizeFoodIds(rid, updateDto.foodIds);
+        data.foodIds = await sanitizeFoodIds(rid, updateDto.foodIds);
     }
 
     // Also presentation, not content — no re-approval.
     if (updateDto?.group !== undefined) {
         const g = updateDto.group || {};
-        set['group.name'] = String(g.name || '').trim();
-        set['group.minSelect'] = Number(g.minSelect) || 0;
-        set['group.maxSelect'] = Number(g.maxSelect) || 1;
-        set['group.sortOrder'] = Number(g.sortOrder) || 0;
+        data.groupName = String(g.name || '').trim();
+        data.groupMinSelect = Number(g.minSelect) || 0;
+        data.groupMaxSelect = Number(g.maxSelect) || 1;
+        data.groupSortOrder = Number(g.sortOrder) || 0;
     }
 
     if (updateDto?.draft) {
         const d = updateDto.draft;
+        // Merged onto what is already stored: Json columns are replaced whole,
+        // so writing only the edited keys would erase the rest.
+        const draft = { ...(existing.draft || {}) };
+
         if (d.name !== undefined) {
             const name = String(d.name || '').trim();
             if (!name) throw new ValidationError('Add-on name is required');
             if (name.length > 200) throw new ValidationError('Add-on name is too long');
-
-            // Duplicate check excluding current doc.
-            const exact = `^${escapeRegex(name)}$`;
-            const exists = await FoodAddon.findOne({
-                restaurantId: rid,
-                isDeleted: { $ne: true },
-                _id: { $ne: _id },
-                'draft.name': { $regex: exact, $options: 'i' }
-            })
-                .select('_id')
-                .lean();
-            if (exists?._id) throw new ValidationError('Add-on already exists');
-
-            set['draft.name'] = name;
+            if (await nameIsTaken(rid, name, id)) throw new ValidationError('Add-on already exists');
+            draft.name = name;
         }
-        if (d.description !== undefined) set['draft.description'] = String(d.description || '').trim();
+        if (d.description !== undefined) draft.description = String(d.description || '').trim();
         if (d.foodType !== undefined) {
             const ft = String(d.foodType || '').trim().toLowerCase();
             if (ft !== 'veg' && ft !== 'non-veg') {
                 throw new ValidationError('Food type must be veg or non-veg');
             }
-            set['draft.foodType'] = ft;
+            draft.foodType = ft;
         }
         if (d.price !== undefined) {
             const price = Number(d.price);
             if (!Number.isFinite(price) || price < 0) throw new ValidationError('Price must be >= 0');
-            set['draft.price'] = price;
+            draft.price = price;
         }
-        if (d.image !== undefined) set['draft.image'] = String(d.image || '').trim();
-        if (d.images !== undefined) {
-            const imgs = Array.isArray(d.images) ? d.images.filter(Boolean).slice(0, 10) : [];
-            set['draft.images'] = imgs;
-        }
+        if (d.image !== undefined) draft.image = String(d.image || '').trim();
+        if (d.images !== undefined) draft.images = cleanImages(d.images);
+
+        data.draft = draft;
 
         // Any draft content change must go through admin approval again.
-        set.approvalStatus = 'pending';
-        set.rejectionReason = '';
-        set.requestedAt = new Date();
-        set.approvedAt = null;
-        set.rejectedAt = null;
+        data.approvalStatus = 'pending';
+        data.rejectionReason = '';
+        data.requestedAt = new Date();
+        data.approvedAt = null;
+        data.rejectedAt = null;
     }
 
-    if (Object.keys(set).length === 0) {
-        const existing = await FoodAddon.findOne({ _id, restaurantId: rid, isDeleted: { $ne: true } }).lean();
-        return existing ? normalizeAddonDoc(existing) : null;
-    }
+    if (Object.keys(data).length === 0) return serializeAddon(existing);
 
-    const updated = await FoodAddon.findOneAndUpdate(
-        { _id, restaurantId: rid, isDeleted: { $ne: true } },
-        { $set: set },
-        { new: true }
-    ).lean();
-    if (updated) await invalidatePublicAddonCache();
-    return updated ? normalizeAddonDoc(updated) : null;
+    const updated = await prisma.foodAddon.update({ where: { id }, data });
+    await invalidatePublicAddonCache();
+    return serializeAddon(updated);
 }
 
 export async function deleteRestaurantAddon(restaurantId, addonId) {
-    if (!restaurantId || !mongoose.Types.ObjectId.isValid(String(restaurantId))) {
-        throw new ValidationError('Invalid restaurant id');
-    }
-    if (!addonId || !mongoose.Types.ObjectId.isValid(String(addonId))) {
-        throw new ValidationError('Invalid add-on id');
-    }
-    const rid = new mongoose.Types.ObjectId(String(restaurantId));
-    const _id = new mongoose.Types.ObjectId(String(addonId));
-    const updated = await FoodAddon.findOneAndUpdate(
-        { _id, restaurantId: rid, isDeleted: { $ne: true } },
-        { $set: { isDeleted: true } },
-        { new: true }
-    ).lean();
-    if (updated) await invalidatePublicAddonCache();
-    return updated ? { id: updated._id } : null;
+    const rid = assertRestaurantId(restaurantId);
+    if (!isId(addonId)) throw new ValidationError('Invalid add-on id');
+
+    // Soft delete, and only if it is still live — deleting twice must not
+    // report success the second time.
+    const { count } = await prisma.foodAddon.updateMany({
+        where: live({ id: String(addonId), restaurantId: rid }),
+        data: { isDeleted: true },
+    });
+    if (!count) return null;
+
+    await invalidatePublicAddonCache();
+    return { id: String(addonId) };
 }

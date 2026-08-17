@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { prisma } from '../../../../config/prisma.js';
+import { testPatch } from '../../../../utils/testGeo.js';
 import { uniquePhone, uniqueTag } from '../../../../utils/testIds.js';
 import { createRestaurantByAdmin, updateRestaurantById } from './adminRestaurantWrite.service.js';
 
@@ -13,6 +14,8 @@ import { createRestaurantByAdmin, updateRestaurantById } from './adminRestaurant
  * restaurant with no timings row reads as closed every day.
  */
 const live = Boolean(process.env.DATABASE_URL);
+
+const HERE = testPatch(3);
 
 const created = { restaurants: [], zones: [], users: [] };
 
@@ -123,11 +126,7 @@ test('the nested location input becomes flat columns', { skip: !live }, async ()
     const zone = await prisma.foodZone.create({
         data: {
             name: `Write Zone ${uniqueTag('Z')}`,
-            coordinates: [
-                { latitude: 22.6, longitude: 75.7 },
-                { latitude: 22.9, longitude: 75.7 },
-                { latitude: 22.9, longitude: 76.0 },
-            ],
+            coordinates: HERE.ring,
         },
     });
     created.zones.push(zone.id);

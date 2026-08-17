@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { prisma } from '../../../../config/prisma.js';
+import { testPatch } from '../../../../utils/testGeo.js';
 import {
     listApprovedRestaurants,
     getApprovedRestaurantByIdOrSlug,
@@ -26,9 +27,11 @@ import { uniquePhone } from '../../../../utils/testIds.js';
  */
 const live = Boolean(process.env.DATABASE_URL);
 
-// Indore, and a point ~400km away.
-const HERE = { lat: 22.7196, lng: 75.8577 };
-const FAR = { lat: 19.076, lng: 72.8777 };
+// This file's own patch of the map, and a point far outside it. Zone lookup
+// searches every zone in the database, so overlapping another test file's zone
+// makes both of them flaky.
+const HERE = testPatch(4);
+const FAR = { lat: HERE.lat - 20, lng: HERE.lng - 20 };
 
 const created = { restaurants: [], offers: [], zones: [], invoices: [] };
 const stamp = () => `${Date.now()}${Math.floor(performance.now() * 1000) % 1000}`;
@@ -226,12 +229,7 @@ test('the first location goes live, a later move needs approval', { skip: !live 
         data: {
             name: `Test Zone ${stamp()}`,
             isActive: true,
-            coordinates: [
-                { latitude: 22.6, longitude: 75.7 },
-                { latitude: 22.9, longitude: 75.7 },
-                { latitude: 22.9, longitude: 76.0 },
-                { latitude: 22.6, longitude: 76.0 },
-            ],
+            coordinates: HERE.ring,
         },
     });
     created.zones.push(zone.id);
@@ -252,13 +250,13 @@ test('the first location goes live, a later move needs approval', { skip: !live 
     // Moving an already-published restaurant is a request: the live location
     // keeps serving orders until an admin approves.
     const second = await updateRestaurantProfile(r.id, {
-        location: { latitude: 22.75, longitude: 75.9, city: 'Indore' },
+        location: { latitude: HERE.lat + 0.2, longitude: HERE.lng + 0.2, city: 'Indore' },
     });
     assert.equal(second.locationUpdateStatus, 'pending');
 
     const afterSecond = await prisma.foodRestaurant.findUnique({ where: { id: r.id } });
     assert.equal(Number(afterSecond.latitude).toFixed(3), HERE.lat.toFixed(3), 'the live pin is untouched');
-    assert.equal(Number(afterSecond.pendingLatitude).toFixed(2), '22.75');
+    assert.equal(Number(afterSecond.pendingLatitude).toFixed(2), (HERE.lat + 0.2).toFixed(2));
     assert.equal(afterSecond.pendingZoneId, zone.id);
 });
 

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { prisma } from '../../../../config/prisma.js';
+import { testPatch } from '../../../../utils/testGeo.js';
 import { uniquePhone, uniqueTag } from '../../../../utils/testIds.js';
 import {
     getPendingRestaurants,
@@ -26,16 +27,14 @@ const live = Boolean(process.env.DATABASE_URL);
 
 const created = { restaurants: [], zones: [], unregistered: [], users: [], invoices: [] };
 
+const HERE = testPatch(2);
+
 const makeZone = async () => {
     const zone = await prisma.foodZone.create({
         data: {
             name: `Lifecycle Zone ${uniqueTag('Z')}`,
             zoneName: 'Central',
-            coordinates: [
-                { latitude: 22.6, longitude: 75.7 },
-                { latitude: 22.9, longitude: 75.7 },
-                { latitude: 22.9, longitude: 76.0 },
-            ],
+            coordinates: HERE.ring,
         },
     });
     created.zones.push(zone.id);
@@ -85,11 +84,11 @@ test('approving publishes a pending move', { skip: !live }, async () => {
     const zone = await makeZone();
     const restaurant = await makeRestaurant({
         status: 'approved',
-        latitude: 22.70,
-        longitude: 75.85,
+        latitude: HERE.lat,
+        longitude: HERE.lng,
         locationUpdateStatus: 'pending',
-        pendingLatitude: 22.75,
-        pendingLongitude: 75.90,
+        pendingLatitude: HERE.lat + 0.05,
+        pendingLongitude: HERE.lng + 0.05,
         pendingZoneId: zone.id,
         locationUpdateRequestedAt: new Date(),
     });
@@ -97,8 +96,8 @@ test('approving publishes a pending move', { skip: !live }, async () => {
     const approved = await approveRestaurant(restaurant.id);
 
     // The live pin moves to where the restaurant asked to go.
-    assert.equal(Number(approved.latitude).toFixed(2), '22.75');
-    assert.equal(Number(approved.longitude).toFixed(2), '75.90');
+    assert.equal(Number(approved.latitude).toFixed(2), (HERE.lat + 0.05).toFixed(2));
+    assert.equal(Number(approved.longitude).toFixed(2), (HERE.lng + 0.05).toFixed(2));
     assert.equal(approved.zoneId, zone.id);
 
     assert.equal(approved.locationUpdateStatus, 'approved');
@@ -111,8 +110,8 @@ test('approving publishes a pending move', { skip: !live }, async () => {
 test('rejecting a move leaves the restaurant trading', { skip: !live }, async () => {
     const restaurant = await makeRestaurant({
         status: 'approved',
-        latitude: 22.70,
-        longitude: 75.85,
+        latitude: HERE.lat,
+        longitude: HERE.lng,
         locationUpdateStatus: 'pending',
         pendingLatitude: 1.5,
         pendingLongitude: 1.5,
@@ -125,7 +124,7 @@ test('rejecting a move leaves the restaurant trading', { skip: !live }, async ()
     assert.equal(rejected.status, 'approved');
     assert.equal(rejected.locationUpdateStatus, 'rejected');
     assert.equal(rejected.locationRejectionReason, 'Pin is in the sea');
-    assert.equal(Number(rejected.latitude).toFixed(2), '22.70', 'the live pin is untouched');
+    assert.equal(Number(rejected.latitude).toFixed(2), HERE.lat.toFixed(2), 'the live pin is untouched');
     assert.equal(rejected.pendingLatitude, null);
 });
 
@@ -135,8 +134,8 @@ test('the queue holds registrations and moves alike', { skip: !live }, async () 
     const moving = await makeRestaurant({
         status: 'approved',
         locationUpdateStatus: 'pending',
-        pendingLatitude: 22.8,
-        pendingLongitude: 75.9,
+        pendingLatitude: HERE.lat + 0.1,
+        pendingLongitude: HERE.lng + 0.1,
         pendingZoneId: zone.id,
         zoneId: zone.id,
     });
@@ -182,8 +181,8 @@ test('an admin location edit applies at once', { skip: !live }, async () => {
 
     const updated = await updateRestaurantLocation(restaurant.id, {
         location: {
-            latitude: 22.72,
-            longitude: 75.86,
+            latitude: HERE.lat,
+            longitude: HERE.lng,
             addressLine1: '12 Test Road',
             city: 'Indore',
             state: 'MP',
@@ -194,7 +193,7 @@ test('an admin location edit applies at once', { skip: !live }, async () => {
 
     // No approval step: an admin moving the pin does not need their own sign-off.
     assert.equal(updated.locationUpdateStatus, 'none');
-    assert.equal(Number(updated.latitude).toFixed(2), '22.72');
+    assert.equal(Number(updated.latitude).toFixed(2), HERE.lat.toFixed(2));
     assert.equal(updated.city, 'Indore');
     assert.equal(updated.zoneId, zone.id);
     // The nested shape the clients read is rebuilt from the flat columns.

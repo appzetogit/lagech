@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { prisma } from '../../../../config/prisma.js';
+import { testPatch } from '../../../../utils/testGeo.js';
 import {
     getCategories,
     createCategory,
@@ -76,11 +77,7 @@ test('a category can be scoped to one zone, or explicitly global', { skip: !live
     const zone = await prisma.foodZone.create({
         data: {
             name: `Cat Zone ${stamp()}`,
-            coordinates: [
-                { latitude: 10, longitude: 10 },
-                { latitude: 11, longitude: 10 },
-                { latitude: 11, longitude: 11 },
-            ],
+            coordinates: testPatch(1).ring,
         },
     });
     created.zones.push(zone.id);
