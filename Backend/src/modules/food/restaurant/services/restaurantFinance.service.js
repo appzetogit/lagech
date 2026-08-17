@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { FEATURE_KEYS, isFeatureEnabled } from '../../admin/services/featureSettings.service.js';
-import { getOutstandingSummary } from './subscriptionBilling.service.js';
+import { getOutstandingSummary, OPEN_INVOICE_STATUSES } from './subscriptionBilling.service.js';
 import {
     isRestaurantEarnedOrder,
     computeRestaurantOrderShare,
@@ -73,35 +73,42 @@ const FINANCE_ORDER_SELECT = {
 };
 
 /** Only orders that were actually paid for, in the window the caller asked for. */
-const earnedWindowSql = (restaurantId, from, to) => Prisma.sql`
-    WHERE o."restaurantId" = ${restaurantId}
+const earnedWindowSql = (restaurantIds, from, to) => Prisma.sql`
+    WHERE o."restaurantId" IN (${Prisma.join(restaurantIds)})
       AND o."orderStatus" <> 'pending_payment'
       AND ${EARNED_ORDER}
       ${from ? Prisma.sql`AND o."createdAt" >= ${from}` : Prisma.empty}
       ${to ? Prisma.sql`AND o."createdAt" <= ${to}` : Prisma.empty}
 `;
 
+const ZERO_TOTALS = { orderCount: 0, payout: 0, gross: 0, tax: 0, net: 0 };
+
 /**
- * The money totals for a restaurant's earned orders, summed in the database.
+ * The money totals for earned orders, per restaurant, summed in the database.
  *
- * `overCount` corrects the one case SQL cannot settle — see
+ * Batched because the admin invoice table needs a page of restaurants at once;
+ * asking per restaurant made that screen issue a full finance computation per
+ * row. `overCount` corrects the one case SQL cannot settle — see
  * restaurantPayout.sql.js — and is normally zero.
  */
-async function earnedTotals(restaurantId, { from = null, to = null } = {}) {
-    const scope = earnedWindowSql(restaurantId, from, to);
+async function earnedTotalsByRestaurant(restaurantIds, { from = null, to = null, db = prisma } = {}) {
+    const ids = [...new Set(restaurantIds.filter(Boolean))];
+    if (!ids.length) return new Map();
 
-    const [[row], overCount] = await Promise.all([
-        prisma.$queryRaw`
-            SELECT COUNT(*)::int                                   AS "orderCount",
+    const [rows, overCount] = await Promise.all([
+        db.$queryRaw`
+            SELECT o."restaurantId"                                AS "restaurantId",
+                   COUNT(*)::int                                   AS "orderCount",
                    COALESCE(SUM(${RESTAURANT_SHARE}), 0)           AS "payout",
                    COALESCE(SUM(COALESCE(t."total", o."total")), 0) AS "gross",
                    COALESCE(SUM(COALESCE(t."tax",   o."tax")),   0) AS "tax"
             ${ORDERS_JOINED}
-            ${scope}
+            ${earnedWindowSql(ids, from, to)}
+            GROUP BY o."restaurantId"
         `,
         shareOverCountByRestaurant(
             {
-                restaurantId,
+                restaurantId: { in: ids },
                 orderStatus: { not: 'pending_payment' },
                 ...(from || to
                     ? { createdAt: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } }
@@ -111,17 +118,89 @@ async function earnedTotals(restaurantId, { from = null, to = null } = {}) {
         ),
     ]);
 
-    const gross = num(row?.gross);
-    const tax = num(row?.tax);
+    return new Map(rows.map((row) => {
+        const gross = num(row.gross);
+        const tax = num(row.tax);
+        return [row.restaurantId, {
+            orderCount: row.orderCount || 0,
+            payout: Math.max(0, num(row.payout) - num(overCount.get(row.restaurantId))),
+            gross,
+            tax,
+            // What the restaurant invoices on: gross less the tax collected on it.
+            net: Math.max(0, gross - tax),
+        }];
+    }));
+}
 
-    return {
-        orderCount: row?.orderCount || 0,
-        payout: Math.max(0, num(row?.payout) - num(overCount.get(restaurantId))),
-        gross,
-        tax,
-        // What the restaurant invoices on: gross less the tax collected on it.
-        net: Math.max(0, gross - tax),
-    };
+/** Sum one Decimal column per restaurant, as a Map. */
+async function sumByRestaurant(delegate, where, column) {
+    const rows = await delegate.groupBy({
+        by: ['restaurantId'],
+        where,
+        _sum: { [column]: true },
+    });
+    return new Map(rows.map((row) => [row.restaurantId, num(row._sum[column])]));
+}
+
+/**
+ * The wallet figures for a page of restaurants: what they have earned, what
+ * they have taken, and how much of the rest is locked against unpaid dues.
+ *
+ * Five grouped queries for the whole page, whatever its size. `db` exists so a
+ * test can pass a counting client and prove that — see
+ * adminSubscriptionBilling.test.js. The admin invoice
+ * table used to call getRestaurantFinance() once per row — each of which read
+ * that restaurant's order history and, latterly, a page of orders it had no use
+ * for. This is the same arithmetic as getRestaurantFinance below, which now
+ * shares it, so the two cannot disagree about what a restaurant is owed.
+ */
+export async function getWalletSummaries(restaurantIds = [], { db = prisma } = {}) {
+    const ids = [...new Set((restaurantIds || []).map((id) => String(id || '').trim()).filter(Boolean))];
+    if (!ids.length) return new Map();
+
+    const subscriptionEnabled = await isFeatureEnabled(FEATURE_KEYS.RESTAURANT_SUBSCRIPTION, true);
+    const scoped = { restaurantId: { in: ids } };
+
+    const [earned, withdrawn, deducted, locked] = await Promise.all([
+        earnedTotalsByRestaurant(ids, { db }),
+        // A pending request is money already spoken for, so it is subtracted
+        // before it is approved — otherwise it could be withdrawn twice.
+        sumByRestaurant(
+            db.foodRestaurantWithdrawal,
+            { ...scoped, status: { in: ['pending', 'approved'] } },
+            'amount',
+        ),
+        sumByRestaurant(
+            db.foodSubscriptionTransaction,
+            { ...scoped, type: 'wallet_deduction' },
+            'amount',
+        ),
+        subscriptionEnabled
+            ? sumByRestaurant(
+                db.foodSubscriptionInvoice,
+                { ...scoped, status: { in: OPEN_INVOICE_STATUSES }, outstandingAmount: { gt: 0 } },
+                'outstandingAmount',
+            )
+            : new Map(),
+    ]);
+
+    return new Map(ids.map((id) => {
+        const totals = earned.get(id) || ZERO_TOTALS;
+        const totalWithdrawn = num(withdrawn.get(id));
+        const lockedAmount = Math.max(0, num(locked.get(id)));
+
+        // The full balance stays visible; only withdrawal is limited by the lock.
+        const walletBalance = Math.max(0, totals.payout - totalWithdrawn - num(deducted.get(id)));
+
+        return [id, {
+            totals,
+            totalEarnings: totals.payout,
+            totalWithdrawn,
+            walletBalance,
+            netAvailable: Math.max(0, walletBalance - lockedAmount),
+            lockedAmount,
+        }];
+    }));
 }
 
 /** One page of earned orders, mapped for the finance table. */
@@ -213,7 +292,9 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
 
     const ordersPagination = parseOrdersPagination(query);
 
-    const [restaurant, relevantOffers, lifetime] = await Promise.all([
+    // The same helper the admin invoice table uses, so a restaurant and an
+    // admin looking at the same account cannot be shown different balances.
+    const [restaurant, relevantOffers, summaries] = await Promise.all([
         prisma.foodRestaurant.findUnique({
             where: { id: rid },
             select: {
@@ -230,8 +311,11 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
                 ],
             },
         }),
-        earnedTotals(rid),
+        getWalletSummaries([rid]),
     ]);
+
+    const summary = summaries.get(rid);
+    const lifetime = summary.totals;
 
     const address =
         restaurant?.formattedAddress ||
@@ -239,42 +323,21 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
             .filter(Boolean)
             .join(', ');
 
-    const [currentPage, committedWithdrawals, walletDeductions, outstandingSummary] =
-        await Promise.all([
-            earnedOrdersPage(rid, {}, ordersPagination, relevantOffers),
-            // A pending request is money already spoken for, so it is subtracted
-            // before it is approved — otherwise it could be withdrawn twice.
-            prisma.foodRestaurantWithdrawal.aggregate({
-                where: { restaurantId: rid, status: { in: ['pending', 'approved'] } },
-                _sum: { amount: true },
-            }),
-            prisma.foodSubscriptionTransaction.aggregate({
-                where: { restaurantId: rid, type: 'wallet_deduction' },
-                _sum: { amount: true },
-            }),
-            isRestaurantSubscriptionEnabled
-                ? getOutstandingSummary(rid)
-                : Promise.resolve({ lockedAmount: 0, openInvoices: [], monthsLabel: '' }),
-        ]);
-
-    const totalEarnings = lifetime.payout;
-    const totalCommittedWithdrawals = num(committedWithdrawals._sum.amount);
-    const totalWalletDeductions = num(walletDeductions._sum.amount);
-
-    // Locked balance = total outstanding subscription dues (calendar-month postpaid invoices).
-    // The full balance stays visible; only withdrawal is limited to balance − locked.
-    const lockedAmount = Math.max(0, num(outstandingSummary.lockedAmount));
-    const availableBalance = Math.max(
-        0,
-        totalEarnings - totalCommittedWithdrawals - totalWalletDeductions,
-    );
+    // The open invoices and their month labels are only needed for this one
+    // restaurant; the summary above already has the amount they lock.
+    const [currentPage, outstandingSummary] = await Promise.all([
+        earnedOrdersPage(rid, {}, ordersPagination, relevantOffers),
+        isRestaurantSubscriptionEnabled
+            ? getOutstandingSummary(rid)
+            : Promise.resolve({ lockedAmount: 0, openInvoices: [], monthsLabel: '' }),
+    ]);
 
     const wallet = {
-        totalEarnings,
-        totalWithdrawn: totalCommittedWithdrawals,
-        estimatedPayout: totalEarnings,
-        withdrawableBalance: availableBalance,
-        netAvailable: Math.max(0, availableBalance - lockedAmount), // what can ACTUALLY be withdrawn
+        totalEarnings: summary.totalEarnings,
+        totalWithdrawn: summary.totalWithdrawn,
+        estimatedPayout: summary.totalEarnings,
+        withdrawableBalance: summary.walletBalance,
+        netAvailable: summary.netAvailable, // what can ACTUALLY be withdrawn
         totalOrders: lifetime.orderCount,
         payoutDate: null,
         orders: currentPage.orders,
@@ -305,11 +368,11 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
             restaurantId: restaurant?.id ? `REST${restaurant.id.slice(-6).padStart(6, '0')}` : 'N/A',
             address,
             // Kept for backwards compatibility with existing clients: due = locked amount.
-            subscriptionDueAmount: lockedAmount,
-            subscriptionStatus: lockedAmount > 0 ? 'due' : 'paid',
+            subscriptionDueAmount: summary.lockedAmount,
+            subscriptionStatus: summary.lockedAmount > 0 ? 'due' : 'paid',
         },
         subscription: {
-            lockedAmount,
+            lockedAmount: summary.lockedAmount,
             lockedMonths: outstandingSummary.monthsLabel,
             openInvoices: outstandingSummary.openInvoices,
         },

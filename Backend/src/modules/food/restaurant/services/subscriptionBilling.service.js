@@ -329,7 +329,8 @@ export async function runBillingCatchUp() {
 
 // ---------- Outstanding / locking ----------
 
-const OPEN_INVOICE_STATUSES = ['pending', 'partially_settled'];
+/** Invoices that still owe something — what locks a restaurant's wallet. */
+export const OPEN_INVOICE_STATUSES = ['pending', 'partially_settled'];
 
 /**
  * Total outstanding subscription due = wallet locked amount, plus per-invoice breakdown.

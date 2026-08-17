@@ -13,7 +13,7 @@ import {
     formatBillingMonth,
     getOutstandingSummary,
 } from '../../restaurant/services/subscriptionBilling.service.js';
-import { getRestaurantFinance } from '../../restaurant/services/restaurantFinance.service.js';
+import { getWalletSummaries } from '../../restaurant/services/restaurantFinance.service.js';
 
 /**
  * The admin view of subscription billing: every restaurant's invoices, what
@@ -148,32 +148,19 @@ function sortInvoiceRows(rows, { sortBy, sortOrder }) {
 /**
  * The wallet figures shown beside each invoice.
  *
- * ponytail: one full finance computation per restaurant, and each one reads
- * that restaurant's whole order history — so a page of twenty invoices is
- * twenty history scans. It was the same before the port. A materialised
- * balance per restaurant is the fix when this gets slow.
+ * One batched call for the whole page. This used to compute a full finance
+ * summary per row — each of which read that restaurant's entire order history —
+ * so a page of twenty invoices meant twenty history scans.
  */
 async function getWalletSummariesForRestaurants(restaurantIds = []) {
-    const uniqueIds = [...new Set((restaurantIds || []).map((id) => String(id || '').trim()).filter(Boolean))];
-    if (uniqueIds.length === 0) return {};
+    const summaries = await getWalletSummaries(restaurantIds);
 
-    const entries = await Promise.all(uniqueIds.map(async (restaurantId) => {
-        try {
-            const finance = await getRestaurantFinance(restaurantId);
-            const wallet = finance?.wallet ?? finance?.currentCycle ?? {};
-            return [restaurantId, {
-                totalEarnings: Number(wallet.totalEarnings ?? wallet.estimatedPayout ?? 0),
-                walletBalance: Number(wallet.withdrawableBalance ?? 0),
-                netAvailable: Number(wallet.netAvailable ?? wallet.withdrawableBalance ?? 0),
-                lockedAmount: Number(finance?.subscription?.lockedAmount ?? 0),
-            }];
-        } catch {
-            // One unreadable restaurant must not blank the whole table.
-            return [restaurantId, { ...EMPTY_WALLET }];
-        }
-    }));
-
-    return Object.fromEntries(entries);
+    return Object.fromEntries([...summaries].map(([id, s]) => [id, {
+        totalEarnings: s.totalEarnings,
+        walletBalance: s.walletBalance,
+        netAvailable: s.netAvailable,
+        lockedAmount: s.lockedAmount,
+    }]));
 }
 
 async function listHydratedInvoicesAdmin(query = {}, { paginate = true } = {}) {
@@ -403,9 +390,10 @@ export async function deductInvoiceFromWalletAdmin(invoiceId, amount, admin, rem
     });
     if (!invoice) throw new NotFoundError('Invoice not found');
 
-    const finance = await getRestaurantFinance(invoice.restaurantId);
-    const wallet = finance?.wallet ?? finance?.currentCycle ?? {};
-    const walletBalance = Math.max(0, Number(wallet.withdrawableBalance ?? 0));
+    // The same balance the restaurant sees. The summary is enough here — the
+    // full finance view would also fetch a page of orders nobody reads.
+    const summaries = await getWalletSummaries([invoice.restaurantId]);
+    const walletBalance = Math.max(0, summaries.get(invoice.restaurantId)?.walletBalance ?? 0);
 
     return applyWalletDeduction(invoiceId, amount, admin, remarks, { maxDeductible: walletBalance });
 }
