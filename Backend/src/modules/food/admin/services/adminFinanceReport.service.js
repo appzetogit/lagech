@@ -82,14 +82,56 @@ export async function getTransactionReport(query = {}) {
         else if (Object.keys(restaurantWhere).length) where.restaurant = restaurantWhere;
     }
 
-    const transactionRows = await prisma.foodTransaction.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        include: {
-            order: { select: { orderId: true, orderStatus: true } },
-            restaurant: { select: { restaurantName: true } },
-        },
-    });
+    // A page, not the table. This used to fetch and return every transaction
+    // ever recorded — the response grew without bound and the summing below ran
+    // over all of it in Node.
+    const page = Math.max(parseInt(query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(query.limit, 10) || 100, 1), 500);
+
+    // Which rows count as money in, and which as money back out. Expressed once
+    // so the summary and any later filter cannot drift apart.
+    const COMPLETED = {
+        OR: [
+            // 'settled' was in this list too, but it is not a FoodTxnStatus —
+            // settleRestaurant() writes 'captured' and records the settlement
+            // as a history entry, so the extra value matched nothing in Mongo
+            // and throws outright here.
+            { status: 'captured' },
+            { order: { orderStatus: 'delivered' } },
+        ],
+    };
+    const REFUNDED = {
+        OR: [
+            { status: 'refunded' },
+            { order: { orderStatus: 'cancelled_by_admin' } },
+        ],
+    };
+
+    const [transactionRows, total, completed, refunded] = await Promise.all([
+        prisma.foodTransaction.findMany({
+            where,
+            orderBy: { createdAt: 'desc' },
+            skip: (page - 1) * limit,
+            take: limit,
+            include: {
+                order: { select: { orderId: true, orderStatus: true } },
+                restaurant: { select: { restaurantName: true } },
+            },
+        }),
+        prisma.foodTransaction.count({ where }),
+        // Summed by the database over the whole filter, not over the page.
+        prisma.foodTransaction.aggregate({
+            where: { AND: [where, COMPLETED] },
+            _sum: {
+                totalCustomerPaid: true, platformNetProfit: true,
+                restaurantShare: true, riderShare: true,
+            },
+        }),
+        prisma.foodTransaction.aggregate({
+            where: { AND: [where, REFUNDED] },
+            _sum: { totalCustomerPaid: true },
+        }),
+    ]);
 
     // The user is not a relation on the transaction, so the names come from one
     // extra query rather than one per row.
@@ -139,27 +181,18 @@ export async function getTransactionReport(query = {}) {
     });
 
     const summary = {
-        completedTransaction: 0,
-        refundedTransaction: 0,
-        adminEarning: 0,
-        restaurantEarning: 0,
-        deliverymanEarning: 0,
+        completedTransaction: num(completed._sum.totalCustomerPaid),
+        refundedTransaction: num(refunded._sum.totalCustomerPaid),
+        adminEarning: num(completed._sum.platformNetProfit),
+        restaurantEarning: num(completed._sum.restaurantShare),
+        deliverymanEarning: num(completed._sum.riderShare),
     };
 
-    for (const tx of transactionRows) {
-        const delivered = tx.order?.orderStatus === 'delivered';
-        if (tx.status === 'captured' || tx.status === 'settled' || delivered) {
-            summary.completedTransaction += num(tx.totalCustomerPaid);
-            summary.adminEarning += num(tx.platformNetProfit);
-            summary.restaurantEarning += num(tx.restaurantShare);
-            summary.deliverymanEarning += num(tx.riderShare);
-        }
-        if (tx.status === 'refunded' || tx.order?.orderStatus === 'cancelled_by_admin') {
-            summary.refundedTransaction += num(tx.totalCustomerPaid);
-        }
-    }
-
-    return { transactions, summary };
+    return {
+        transactions,
+        summary,
+        pagination: { page, limit, total, pages: Math.ceil(total / limit) || 1 },
+    };
 }
 
 /** The labelled ranges the report's dropdown offers. */

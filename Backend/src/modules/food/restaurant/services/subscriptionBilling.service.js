@@ -4,10 +4,11 @@ import { ValidationError, NotFoundError } from '../../../../core/auth/errors.js'
 import { logger } from '../../../../utils/logger.js';
 import { notifyOwnerSafely } from '../../../../core/notifications/firebase.service.js';
 import {
-    isRestaurantEarnedOrder,
-    computeRestaurantOrderShare,
-    orderMoney,
-} from '../../shared/restaurantPayout.util.js';
+    EARNED_ORDER,
+    RESTAURANT_SHARE,
+    ORDERS_JOINED,
+    shareOverCountByRestaurant,
+} from '../../shared/restaurantPayout.sql.js';
 import { getRestaurantSubscriptionSettings } from '../../admin/services/adminSettings.service.js';
 import { FEATURE_KEYS, isFeatureEnabled } from '../../admin/services/featureSettings.service.js';
 import { buildPlanCatalog, resolveEligiblePlanByGmv, GST_RATE } from './subscriptionPlan.service.js';
@@ -80,17 +81,6 @@ function isMonthBeforeOrEqual(a, b) {
 
 // ---------- GMV ----------
 
-/** Offers this restaurant's orders could have used. */
-const offersForRestaurant = (restaurantId) => prisma.foodOffer.findMany({
-    where: {
-        OR: [
-            { restaurantScope: { not: 'selected' } },
-            { restaurantId },
-            { restaurantIds: { has: restaurantId } },
-        ],
-    },
-});
-
 /**
  * Monthly GMV = sum of restaurant net share (payout) for earned orders in the window.
  * Uses the same per-order formula as Hub Finance / wallet balance.
@@ -99,41 +89,37 @@ export async function computeMonthlyGmv(restaurantId, start, end) {
     if (!isId(restaurantId)) return { gmv: 0, orderCount: 0 };
     const rid = String(restaurantId);
 
-    const orders = await prisma.foodOrder.findMany({
-        where: {
-            restaurantId: rid,
-            createdAt: { gte: start, lte: end },
-            orderStatus: { not: 'pending_payment' },
-        },
-        select: {
-            id: true, orderStatus: true, deliveryPhase: true,
-            subtotal: true, packagingFee: true, restaurantCommission: true,
-            discount: true, couponCode: true,
-        },
-    });
-
-    const earnedOrders = orders.filter(isRestaurantEarnedOrder);
-    if (!earnedOrders.length) return { gmv: 0, orderCount: 0 };
-
-    const [transactions, offers] = await Promise.all([
-        prisma.foodTransaction.findMany({
-            where: { orderId: { in: earnedOrders.map((o) => o.id) } },
-        }),
-        offersForRestaurant(rid),
+    // Summed by the database. This used to read the month's orders and their
+    // transactions into Node, so a busy restaurant's invoice run — and every
+    // admin analytics page, which calls this — grew with its order volume.
+    const [rows, overCount] = await Promise.all([
+        prisma.$queryRaw`
+            SELECT COUNT(*)::int                         AS "orderCount",
+                   COALESCE(SUM(${RESTAURANT_SHARE}), 0) AS "gmv"
+            ${ORDERS_JOINED}
+            WHERE o."restaurantId" = ${rid}
+              AND o."orderStatus" <> 'pending_payment'
+              AND o."createdAt" >= ${start}
+              AND o."createdAt" <= ${end}
+              AND ${EARNED_ORDER}
+        `,
+        shareOverCountByRestaurant(
+            {
+                restaurantId: rid,
+                orderStatus: { not: 'pending_payment' },
+                createdAt: { gte: start, lte: end },
+            },
+            new Map(),
+        ),
     ]);
 
-    const txByOrderId = new Map(transactions.map((tx) => [tx.orderId, tx]));
+    const row = rows[0] || {};
+    const gmv = Number(row.gmv || 0) - Number(overCount.get(rid) || 0);
 
-    let gmv = 0;
-    for (const order of earnedOrders) {
-        gmv += computeRestaurantOrderShare(
-            orderMoney(order, txByOrderId.get(order.id)),
-            offers,
-            rid,
-        );
-    }
-
-    return { gmv: round2(Math.max(0, gmv)), orderCount: earnedOrders.length };
+    return {
+        gmv: round2(Math.max(0, gmv)),
+        orderCount: row.orderCount || 0,
+    };
 }
 
 // ---------- Notifications ----------
