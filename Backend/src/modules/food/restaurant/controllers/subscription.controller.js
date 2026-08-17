@@ -1,7 +1,6 @@
-import mongoose from 'mongoose';
+import { prisma } from '../../../../config/prisma.js';
+import { isId } from '../../../../utils/helpers.js';
 import { sendResponse, sendError } from '../../../../utils/response.js';
-import { FoodSubscriptionInvoice } from '../models/subscriptionInvoice.model.js';
-import { FoodSubscriptionTransaction } from '../models/subscriptionTransaction.model.js';
 import {
     computeMonthlyGmv,
     getMonthWindow,
@@ -10,9 +9,34 @@ import {
     getOutstandingSummary,
 } from '../services/subscriptionBilling.service.js';
 import { getRestaurantFinance } from '../services/restaurantFinance.service.js';
-import { getRestaurantSubscriptionSettings } from '../../admin/services/admin.service.js';
+import { getRestaurantSubscriptionSettings } from '../../admin/services/adminSettings.service.js';
 import { FEATURE_KEYS, isFeatureEnabled } from '../../admin/services/featureSettings.service.js';
 import { buildPlanCatalog, resolveEligiblePlanByGmv, GST_RATE } from '../services/subscriptionPlan.service.js';
+
+const INVOICE_STATUSES = ['pending', 'partially_settled', 'settled', 'waived'];
+
+/** Decimal columns reach the client as strings otherwise. */
+const serializeInvoice = (inv) => ({
+    ...inv,
+    _id: inv.id,
+    gmv: Number(inv.gmv),
+    planAmount: Number(inv.planAmount),
+    gstAmount: Number(inv.gstAmount),
+    totalAmount: Number(inv.totalAmount),
+    paidAmount: Number(inv.paidAmount),
+    waivedAmount: Number(inv.waivedAmount),
+    adjustmentAmount: Number(inv.adjustmentAmount),
+    outstandingAmount: Number(inv.outstandingAmount),
+    billingMonthLabel: billingMonthLabel(inv.billingMonth),
+});
+
+const serializeTransaction = (tx) => ({
+    ...tx,
+    _id: tx.id,
+    amount: Number(tx.amount),
+    outstandingAfter: Number(tx.outstandingAfter),
+    billingMonthLabel: billingMonthLabel(tx.billingMonth),
+});
 
 /**
  * GET /subscription/overview — current-month live GMV, estimated plan/fee,
@@ -21,7 +45,7 @@ import { buildPlanCatalog, resolveEligiblePlanByGmv, GST_RATE } from '../service
 export const getSubscriptionOverviewController = async (req, res, next) => {
     try {
         const restaurantId = req.user?.userId;
-        if (!restaurantId) return sendError(res, 401, 'Restaurant authentication required');
+        if (!isId(restaurantId)) return sendError(res, 401, 'Restaurant authentication required');
 
         const featureEnabled = await isFeatureEnabled(FEATURE_KEYS.RESTAURANT_SUBSCRIPTION, true);
 
@@ -78,25 +102,28 @@ export const getSubscriptionOverviewController = async (req, res, next) => {
 export const listSubscriptionInvoicesController = async (req, res, next) => {
     try {
         const restaurantId = req.user?.userId;
-        if (!restaurantId) return sendError(res, 401, 'Restaurant authentication required');
+        if (!isId(restaurantId)) return sendError(res, 401, 'Restaurant authentication required');
 
         const page = Math.max(1, parseInt(req.query.page, 10) || 1);
         const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
 
-        const filter = { restaurantId: new mongoose.Types.ObjectId(String(restaurantId)) };
-        if (req.query.status) filter.status = String(req.query.status);
+        const where = { restaurantId };
+        if (INVOICE_STATUSES.includes(String(req.query.status || '').trim())) {
+            where.status = String(req.query.status).trim();
+        }
 
         const [invoices, total] = await Promise.all([
-            FoodSubscriptionInvoice.find(filter)
-                .sort({ billingMonth: -1 })
-                .skip((page - 1) * limit)
-                .limit(limit)
-                .lean(),
-            FoodSubscriptionInvoice.countDocuments(filter),
+            prisma.foodSubscriptionInvoice.findMany({
+                where,
+                orderBy: { billingMonth: 'desc' },
+                skip: (page - 1) * limit,
+                take: limit,
+            }),
+            prisma.foodSubscriptionInvoice.count({ where }),
         ]);
 
         return sendResponse(res, 200, 'Subscription invoices fetched', {
-            invoices: invoices.map((inv) => ({ ...inv, billingMonthLabel: billingMonthLabel(inv.billingMonth) })),
+            invoices: invoices.map(serializeInvoice),
             pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
         });
     } catch (error) {
@@ -110,25 +137,25 @@ export const listSubscriptionInvoicesController = async (req, res, next) => {
 export const getSubscriptionInvoiceController = async (req, res, next) => {
     try {
         const restaurantId = req.user?.userId;
-        if (!restaurantId) return sendError(res, 401, 'Restaurant authentication required');
+        if (!isId(restaurantId)) return sendError(res, 401, 'Restaurant authentication required');
         const { invoiceId } = req.params;
-        if (!mongoose.Types.ObjectId.isValid(String(invoiceId))) {
-            return sendError(res, 400, 'Invalid invoice id');
-        }
+        if (!isId(invoiceId)) return sendError(res, 400, 'Invalid invoice id');
 
-        const invoice = await FoodSubscriptionInvoice.findOne({
-            _id: invoiceId,
-            restaurantId: new mongoose.Types.ObjectId(String(restaurantId)),
-        }).lean();
+        // Scoped to the caller: an invoice id alone must not expose another
+        // restaurant's billing.
+        const invoice = await prisma.foodSubscriptionInvoice.findFirst({
+            where: { id: String(invoiceId), restaurantId },
+        });
         if (!invoice) return sendError(res, 404, 'Invoice not found');
 
-        const transactions = await FoodSubscriptionTransaction.find({ invoiceId: invoice._id })
-            .sort({ createdAt: 1 })
-            .lean();
+        const transactions = await prisma.foodSubscriptionTransaction.findMany({
+            where: { invoiceId: invoice.id },
+            orderBy: { createdAt: 'asc' },
+        });
 
         return sendResponse(res, 200, 'Subscription invoice fetched', {
-            invoice: { ...invoice, billingMonthLabel: billingMonthLabel(invoice.billingMonth) },
-            transactions,
+            invoice: serializeInvoice(invoice),
+            transactions: transactions.map(serializeTransaction),
         });
     } catch (error) {
         next(error);
@@ -141,28 +168,26 @@ export const getSubscriptionInvoiceController = async (req, res, next) => {
 export const listSubscriptionTransactionsController = async (req, res, next) => {
     try {
         const restaurantId = req.user?.userId;
-        if (!restaurantId) return sendError(res, 401, 'Restaurant authentication required');
+        if (!isId(restaurantId)) return sendError(res, 401, 'Restaurant authentication required');
 
         const page = Math.max(1, parseInt(req.query.page, 10) || 1);
         const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
 
-        const filter = { restaurantId: new mongoose.Types.ObjectId(String(restaurantId)) };
-        if (req.query.billingMonth) filter.billingMonth = String(req.query.billingMonth);
+        const where = { restaurantId };
+        if (req.query.billingMonth) where.billingMonth = String(req.query.billingMonth);
 
         const [transactions, total] = await Promise.all([
-            FoodSubscriptionTransaction.find(filter)
-                .sort({ createdAt: -1 })
-                .skip((page - 1) * limit)
-                .limit(limit)
-                .lean(),
-            FoodSubscriptionTransaction.countDocuments(filter),
+            prisma.foodSubscriptionTransaction.findMany({
+                where,
+                orderBy: { createdAt: 'desc' },
+                skip: (page - 1) * limit,
+                take: limit,
+            }),
+            prisma.foodSubscriptionTransaction.count({ where }),
         ]);
 
         return sendResponse(res, 200, 'Subscription transactions fetched', {
-            transactions: transactions.map((tx) => ({
-                ...tx,
-                billingMonthLabel: billingMonthLabel(tx.billingMonth),
-            })),
+            transactions: transactions.map(serializeTransaction),
             pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
         });
     } catch (error) {

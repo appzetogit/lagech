@@ -96,6 +96,7 @@ import { resolveDiscountSplit } from '../../shared/discountSplit.util.js';
 import {
     isRestaurantEarnedOrder,
     computeRestaurantOrderShare,
+    orderMoney,
 } from '../../shared/restaurantPayout.util.js';
 
 /**
@@ -988,7 +989,7 @@ async function summarizeRestaurantEarningsForTaxReport(orders = [], { taxRate, c
         const tx = txByOrderId.get(String(order._id));
         const pricing = tx?.pricing || order.pricing || {};
         const offers = offersByRestaurantId.get(restaurantId) || [];
-        const earnings = computeRestaurantOrderShare(order, tx, offers, restaurantId);
+        const earnings = computeRestaurantOrderShare(orderMoney(order, tx), offers, restaurantId);
         const taxAmount = computeOrderTaxAmount(pricing, taxRate, calculateTax);
 
         if (!grouped.has(restaurantId)) {
@@ -1107,7 +1108,7 @@ export async function getTaxReportDetail(restaurantId, query = {}) {
         orders: earnedOrders.map((order) => {
             const tx = txByOrderId.get(String(order._id));
             const pricing = tx?.pricing || order.pricing || {};
-            const earnings = computeRestaurantOrderShare(order, tx, offers, restaurantId);
+            const earnings = computeRestaurantOrderShare(orderMoney(order, tx), offers, restaurantId);
             const taxAmount = computeOrderTaxAmount(pricing, taxRate, calculateTax);
             return {
                 id: order._id,
@@ -1368,19 +1369,11 @@ export async function getRestaurantAnalytics(restaurantId) {
         const commission = Number(pricing?.restaurantCommission) || 0;
         return Math.max(0, subtotal + packagingFee - commission);
     };
-    const getOrderFromRow = (row) => (row?.orderId && typeof row.orderId === 'object' ? row.orderId : row);
-    const getDiscountShares = (row) => {
-        const pricing = getPricing(row);
-        const amounts = row?.amounts || {};
-        const order = getOrderFromRow(row);
-        return resolveDiscountSplit({
-            order,
-            pricing,
-            amounts,
-            offers: relevantOffers,
-            restaurantId: rId,
-        });
-    };
+    const getDiscountShares = (row) => resolveDiscountSplit({
+        money: { ...getPricing(row), ...(row?.amounts || {}) },
+        offers: relevantOffers,
+        restaurantId: rId,
+    });
 
     const completedOrders = orders.filter(isCompletedOrder);
     const orderStats = orderStatsRows?.[0] || {};
