@@ -17,7 +17,8 @@ import {
     downloadBulkMenuTemplateController,
     uploadAdminBulkMenuController,
 } from '../../restaurant/controllers/bulkUpload.controller.js';
-import { FoodAdmin } from '../../../../core/admin/admin.model.js';
+import { prisma } from '../../../../config/prisma.js';
+import { isId } from '../../../../utils/helpers.js';
 import { requireAdminPermission, requireAnyAdminPermission } from '../../../../core/roles/adminPermission.middleware.js';
 import * as driverRegField from '../../delivery/controllers/driverRegistrationField.controller.js';
 import * as cashbackSettings from '../controllers/cashbackSettings.controller.js';
@@ -44,9 +45,12 @@ const requireAdmin = (req, _res, next) => {
 router.use(requireAdmin);
 router.use(async (req, _res, next) => {
     try {
-        const admin = await FoodAdmin.findById(req.user?.userId)
-            .select('adminType permissions isActive isDeleted')
-            .lean();
+        const admin = isId(req.user?.userId)
+            ? await prisma.foodAdmin.findUnique({
+                where: { id: String(req.user.userId) },
+                select: { adminType: true, permissions: true, isActive: true, isDeleted: true },
+            })
+            : null;
         req.adminAccess = admin;
         return next();
     } catch (error) {

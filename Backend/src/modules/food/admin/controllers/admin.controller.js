@@ -1,4 +1,6 @@
-import mongoose from 'mongoose';
+import { prisma } from '../../../../config/prisma.js';
+import { isId } from '../../../../utils/helpers.js';
+import { notifyOwnersSafely } from '../../../../core/notifications/firebase.service.js';
 import * as adminService from '../services/admin.service.js';
 import * as featureSettingsService from '../services/featureSettings.service.js';
 import { validateCategoryListQuery, validateCategoryRejectDto, validateCategoryUpsertDto } from '../validators/category.validator.js';
@@ -31,7 +33,7 @@ export async function getCustomers(req, res, next) {
 export async function getCustomerById(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid customer id' });
         }
         const customer = await adminService.getCustomerById(id);
@@ -45,7 +47,7 @@ export async function getCustomerById(req, res, next) {
 export async function updateCustomerStatus(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid customer id' });
         }
         const isActive = req.body?.isActive;
@@ -430,7 +432,7 @@ export async function getRestaurantReviews(req, res, next) {
 export async function getRestaurantById(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid restaurant id' });
         }
         const restaurant = await adminService.getRestaurantById(id);
@@ -450,7 +452,7 @@ export async function getRestaurantById(req, res, next) {
 export async function getRestaurantAnalytics(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid restaurant id' });
         }
         const data = await adminService.getRestaurantAnalytics(id);
@@ -470,7 +472,7 @@ export async function getRestaurantAnalytics(req, res, next) {
 export async function getRestaurantMenuById(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid restaurant id' });
         }
         const menu = await adminService.getRestaurantMenuById(id);
@@ -486,7 +488,7 @@ export async function getRestaurantMenuById(req, res, next) {
 export async function updateRestaurantMenuById(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid restaurant id' });
         }
         const menu = await adminService.updateRestaurantMenuById(id, req.body || {});
@@ -502,7 +504,7 @@ export async function updateRestaurantMenuById(req, res, next) {
 export async function updateRestaurantById(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid restaurant id' });
         }
         const updated = await adminService.updateRestaurantById(id, req.body || {});
@@ -518,7 +520,7 @@ export async function updateRestaurantById(req, res, next) {
 export async function updateRestaurantStatus(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid restaurant id' });
         }
         const updated = await adminService.updateRestaurantStatus(id, req.body || {});
@@ -534,7 +536,7 @@ export async function updateRestaurantStatus(req, res, next) {
 export async function updateRestaurantLocation(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid restaurant id' });
         }
         const updated = await adminService.updateRestaurantLocation(id, req.body || {});
@@ -550,7 +552,7 @@ export async function updateRestaurantLocation(req, res, next) {
 export async function deleteRestaurant(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid restaurant id' });
         }
         const result = await adminService.deleteRestaurant(id);
@@ -585,7 +587,7 @@ export async function createFood(req, res, next) {
 export async function updateFood(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid food id' });
         }
         const updated = await adminService.updateFood(id, req.body || {});
@@ -601,7 +603,7 @@ export async function updateFood(req, res, next) {
 export async function deleteFood(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid food id' });
         }
         const result = await adminService.deleteFood(id);
@@ -638,7 +640,7 @@ export async function createCategory(req, res, next) {
 export async function updateCategory(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid category id' });
         }
         const body = validateCategoryUpsertDto(req.body || {});
@@ -655,7 +657,7 @@ export async function updateCategory(req, res, next) {
 export async function deleteCategory(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid category id' });
         }
         const result = await adminService.deleteCategory(id);
@@ -671,7 +673,7 @@ export async function deleteCategory(req, res, next) {
 export async function toggleCategoryStatus(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid category id' });
         }
         const updated = await adminService.toggleCategoryStatus(id);
@@ -687,7 +689,7 @@ export async function toggleCategoryStatus(req, res, next) {
 export async function approveCategory(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid category id' });
         }
         const updated = await adminService.approveCategory(id);
@@ -703,7 +705,7 @@ export async function approveCategory(req, res, next) {
 export async function rejectCategory(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid category id' });
         }
         const body = validateCategoryRejectDto(req.body || {});
@@ -720,7 +722,7 @@ export async function rejectCategory(req, res, next) {
 export async function makeCategoryGlobal(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid category id' });
         }
         const updated = await adminService.makeCategoryGlobal(id);
@@ -756,7 +758,7 @@ export async function createAdminOffer(req, res, next) {
 export async function updateAdminOfferCartVisibility(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid offer id' });
         }
         const body = validateUpdateOfferCartVisibilityDto(req.body || {});
@@ -773,7 +775,7 @@ export async function updateAdminOfferCartVisibility(req, res, next) {
 export async function deleteAdminOffer(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid offer id' });
         }
         const result = await adminService.deleteAdminOffer(id);
@@ -807,7 +809,7 @@ export async function getFoodSupportTicketStatsController(req, res, next) {
 export async function updateSupportTicketController(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid ticket id' });
         }
         const updated = await adminService.updateSupportTicket(id, req.body || {});
@@ -913,7 +915,7 @@ export async function createEarningAddon(req, res, next) {
 export async function updateEarningAddon(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid earning addon id' });
         }
         const body = validateEarningAddonUpsertDto(req.body || {});
@@ -930,7 +932,7 @@ export async function updateEarningAddon(req, res, next) {
 export async function deleteEarningAddon(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid earning addon id' });
         }
         const result = await adminService.deleteEarningAddon(id);
@@ -946,7 +948,7 @@ export async function deleteEarningAddon(req, res, next) {
 export async function toggleEarningAddonStatus(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid earning addon id' });
         }
         const { status } = validateToggleEarningAddonStatusDto(req.body || {});
@@ -972,7 +974,7 @@ export async function getEarningAddonHistory(req, res, next) {
 export async function creditEarningToWallet(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid history id' });
         }
         const { notes } = validateEarningAddonHistoryActionDto(req.body || {});
@@ -989,7 +991,7 @@ export async function creditEarningToWallet(req, res, next) {
 export async function cancelEarningAddonHistory(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid history id' });
         }
         const { reason } = validateEarningAddonHistoryActionDto(req.body || {});
@@ -1035,7 +1037,7 @@ export async function getRestaurantCommissionBootstrap(req, res, next) {
 export async function getRestaurantCommissionById(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid commission id' });
         }
         const commission = await adminService.getRestaurantCommissionById(id);
@@ -1061,7 +1063,7 @@ export async function createRestaurantCommission(req, res, next) {
 export async function updateRestaurantCommission(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid commission id' });
         }
         const body = validateRestaurantCommissionUpsertDto(req.body || {});
@@ -1078,7 +1080,7 @@ export async function updateRestaurantCommission(req, res, next) {
 export async function deleteRestaurantCommission(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid commission id' });
         }
         const result = await adminService.deleteRestaurantCommission(id);
@@ -1094,7 +1096,7 @@ export async function deleteRestaurantCommission(req, res, next) {
 export async function toggleRestaurantCommissionStatus(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid commission id' });
         }
         const updated = await adminService.toggleRestaurantCommissionStatus(id);
@@ -1130,7 +1132,7 @@ export async function createDeliveryCommissionRule(req, res, next) {
 export async function updateDeliveryCommissionRule(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid commission id' });
         }
         const body = validateDeliveryCommissionRuleDto(req.body || {});
@@ -1147,7 +1149,7 @@ export async function updateDeliveryCommissionRule(req, res, next) {
 export async function deleteDeliveryCommissionRule(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid commission id' });
         }
         const result = await adminService.deleteDeliveryCommissionRule(id);
@@ -1163,7 +1165,7 @@ export async function deleteDeliveryCommissionRule(req, res, next) {
 export async function toggleDeliveryCommissionRuleStatus(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({ success: false, message: 'Invalid commission id' });
         }
         const { status } = validateOptionalStatusDto(req.body || {});
@@ -1263,7 +1265,7 @@ export async function createOrUpdateEmergencyHelp(req, res, next) {
 export async function approveRestaurant(req, res, next) {
     try {
         const { id } = req.params;
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({
                 success: false,
                 message: 'Invalid restaurant id'
@@ -1303,7 +1305,7 @@ export async function rejectRestaurant(req, res, next) {
     try {
         const { id } = req.params;
         const { reason } = req.body || {};
-        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        if (!isId(id)) {
             return res.status(400).json({
                 success: false,
                 message: 'Invalid restaurant id'
@@ -1579,7 +1581,7 @@ export async function processRefund(req, res, next) {
     try {
         const { orderId } = req.params;
         const { refundAmount } = req.body;
-        if (!orderId || !mongoose.Types.ObjectId.isValid(orderId)) {
+        if (!orderId || !isId(orderId)) {
             return res.status(400).json({ success: false, message: 'Invalid order id' });
         }
         
@@ -1589,20 +1591,21 @@ export async function processRefund(req, res, next) {
         
         // Let's add the push notification here if we have access to the user ID
         // First we need to get the order to find the user ID
-        const order = await mongoose.model('FoodOrder').findById(orderId).lean();
-        
+        const order = isId(orderId)
+            ? await prisma.foodOrder.findUnique({ where: { id: String(orderId) } })
+            : null;
+
         if (order && order.userId) {
-            const { notifyOwnersSafely } = await import('../../notifications/firebase.service.js');
             await notifyOwnersSafely(
                 [{ ownerType: 'USER', ownerId: order.userId }],
                 {
                     title: 'Refund Processed! 💸',
-                    body: `Your refund of ₹${refundAmount || order.totalAmount || order.total || 0} for Order #${order.orderId} has been processed successfully.`,
+                    body: `Your refund of ₹${refundAmount || Number(order.total) || 0} for Order #${order.orderId} has been processed successfully.`,
                     image: 'https://i.ibb.co/5GzXz7r/Switcheats-Brand-Image.png',
                     data: {
                         type: 'refund_processed',
                         orderId: String(order.orderId),
-                        orderMongoId: String(order._id)
+                        orderRowId: order.id
                     }
                 }
             );
