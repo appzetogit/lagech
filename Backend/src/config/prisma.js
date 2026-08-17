@@ -66,6 +66,18 @@ function poolUrl(raw) {
 
 export const prisma = new PrismaClient({
     datasources: { db: { url: poolUrl(process.env.DATABASE_URL) } },
+    /**
+     * Prisma's default interactive-transaction timeout is 5s, measured from the
+     * moment the transaction opens — which includes the time it spends waiting
+     * for a free connection, not just the work inside it. Twenty concurrent
+     * wallet writes against a 25-connection pool can therefore blow the budget
+     * on queueing alone and fail with a message about doing "less work in the
+     * transaction", which points at the wrong thing entirely.
+     */
+    transactionOptions: {
+        timeout: Number(process.env.DATABASE_TRANSACTION_TIMEOUT_MS) || 20000,
+        maxWait: Number(process.env.DATABASE_TRANSACTION_MAX_WAIT_MS) || 20000,
+    },
 }).$extends({
     query: {
         $allModels: {
