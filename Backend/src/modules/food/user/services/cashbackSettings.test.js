@@ -24,7 +24,11 @@ test.after(async () => {
     if (!live) return;
     if (snapshot) {
         const { id, _id, createdAt, updatedAt, ...values } = snapshot;
-        await prisma.foodCashbackSettings.update({ where: { id }, data: values });
+        // Restored by id, not updated by it: these tables hold one row, and a
+        // test that deletes it makes the service create a replacement with a
+        // new id — so an update keyed on the old id finds nothing.
+        await prisma.foodCashbackSettings.deleteMany({});
+        await prisma.foodCashbackSettings.create({ data: { id, ...values } });
     } else {
         await prisma.foodCashbackSettings.deleteMany({});
     }

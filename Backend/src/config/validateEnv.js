@@ -8,8 +8,8 @@ import { logger } from '../utils/logger.js';
 export const validateConfig = () => {
     const missing = [];
 
-    if (!config.mongodbUri) {
-        missing.push('MONGO_URI or MONGODB_URI');
+    if (!config.databaseUrl) {
+        missing.push('DATABASE_URL');
     }
     if (!config.jwtAccessSecret) {
         missing.push('JWT_ACCESS_SECRET or JWT_SECRET');

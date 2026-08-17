@@ -52,7 +52,11 @@ test.after(async () => {
     await prisma.foodRestaurant.deleteMany({ where: { id: { in: created.restaurants } } });
     if (settingsSnapshot) {
         const { id, _id, createdAt, updatedAt, ...values } = settingsSnapshot;
-        await prisma.foodRestaurantSubscriptionSettings.update({ where: { id }, data: values });
+        // Restored by id, not updated by it: these tables hold one row, and a
+        // test that deletes it makes the service create a replacement with a
+        // new id — so an update keyed on the old id finds nothing.
+        await prisma.foodRestaurantSubscriptionSettings.deleteMany({});
+        await prisma.foodRestaurantSubscriptionSettings.create({ data: { id, ...values } });
     } else {
         // The test created the singleton; leaving it behind would give every
         // later run a different starting point.

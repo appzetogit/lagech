@@ -27,8 +27,6 @@ export const config = {
 
     // Database
     databaseUrl: process.env.DATABASE_URL,
-    // Retained until the last Mongoose model is deleted; unused by Prisma.
-    mongodbUri: process.env.MONGO_URI || process.env.MONGODB_URI,
 
     // JWT
     jwtAccessSecret: process.env.JWT_ACCESS_SECRET || process.env.JWT_SECRET,
