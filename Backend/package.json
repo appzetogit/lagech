@@ -13,11 +13,6 @@
     "worker:tracking": "node src/queues/workers/tracking.worker.js",
     "worker:payment": "node src/queues/workers/payment.worker.js",
     "worker:maintenance": "node src/queues/workers/maintenance.worker.js",
-    "migrate:otp-ttl": "node scripts/migrate-otp-ttl.js",
-    "migrate:fcm-tokens": "node scripts/migrate-fcm-tokens-to-profile-models.js",
-    "migrate:order-payments": "node scripts/migrate-orders-to-transactions.js",
-    "migrate:outlet-timings-from-opening-closing": "node scripts/sync-outlet-timings-from-opening-closing.js",
-    "cleanup:legacy-collections": "node scripts/cleanup-legacy-collections.js",
     "test": "node scripts/require-db.mjs && node scripts/check-prisma-fields.mjs && node --import ./scripts/test-env.mjs --test --test-concurrency=3 \"src/**/*.test.js\"",
     "db:migrate": "prisma migrate deploy && node prisma/apply-constraints.mjs && prisma generate",
     "db:generate": "prisma generate",
@@ -61,5 +56,8 @@
   "devDependencies": {
     "nodemon": "^3.1.2",
     "prisma": "^6.19.3"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

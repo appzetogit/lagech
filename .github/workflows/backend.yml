@@ -1,0 +1,60 @@
+# The backend test suite, on every push and pull request.
+#
+# The suite talks to a real Postgres rather than a mock. Most of the bugs this
+# migration turned up — an enum value that never existed, a filter on a dropped
+# column, a Decimal compared against a string — are ones only a real database
+# reports, so CI runs one too.
+name: backend
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        # postgis, matching docker-compose.yml: delivery zones are polygons.
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: minto
+          POSTGRES_PASSWORD: minto
+          POSTGRES_DB: minto
+        ports:
+          - 5432:5432
+        # Without the health check the first migration races the server's
+        # startup and fails on a connection the runner has not opened yet.
+        options: >-
+          --health-cmd "pg_isready -U minto -d minto"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    defaults:
+      run:
+        working-directory: Backend
+
+    env:
+      DATABASE_URL: postgresql://minto:minto@localhost:5432/minto?schema=public
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: Backend/package-lock.json
+
+      - run: npm ci
+
+      # migrate deploy, not migrate dev: CI applies the committed migrations and
+      # fails on a drift rather than inventing one to paper over it.
+      - name: Apply migrations
+        run: npm run db:migrate
+
+      - name: Test
+        run: npm test
