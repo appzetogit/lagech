@@ -1,7 +1,6 @@
 import http from 'http';
 import crypto from 'crypto';
 import path from 'path';
-import { exec } from 'child_process';
 
 import app from './src/app.js';
 import { config } from './src/config/env.js';
@@ -16,7 +15,7 @@ import { expireExpiredOffers } from './src/modules/food/admin/services/admin.ser
 import { syncExpiredFssaiNotifications } from './src/modules/food/restaurant/services/fssaiExpiry.service.js';
 
 import { logger } from './src/utils/logger.js';
-import { verifyDeploySignature } from './src/utils/deploySignature.js';
+import { mountDeployWebhook } from './src/middleware/deployWebhook.js';
 import { initializeFirebaseRealtime } from './src/config/firebase.js';
 import { ensureUploadStorageReady } from './src/services/storage.service.js';
 
@@ -132,34 +131,7 @@ const startServer = async () => {
             logger.info('BullMQ queue bootstrap disabled for this server process.');
         }
 
-        // Deploy webhook.
-        //
-        // Mounted only when DEPLOY_SECRET is set. The handler runs a shell
-        // script, so an unset secret means the route does not exist rather than
-        // that the check is skipped. The secret was a literal in this file until
-        // now, so it is in the git history — rotate it, do not reuse it.
-        if (config.deploySecret) {
-            app.post('/api/deploy', (req, res) => {
-                const ok = verifyDeploySignature({
-                    payload: JSON.stringify(req.body),
-                    signature: req.headers['x-hub-signature-256'],
-                    secret: config.deploySecret,
-                });
-                if (!ok) return res.status(403).send('Unauthorized');
-
-                exec('cd ~ && ./deploy.sh', (err, stdout) => {
-                    if (err) {
-                        console.error(err);
-                        return res.send('Deploy failed');
-                    }
-
-                    console.log(stdout);
-                    res.send('Deploy success');
-                });
-            });
-        } else {
-            logger.warn('DEPLOY_SECRET is not set - the /api/deploy webhook is not mounted.');
-        }
+        mountDeployWebhook(app);
 
         server = httpServer.listen(config.port, config.host, () => {
             logger.info(`Server running in ${config.nodeEnv} mode on ${config.host}:${config.port}`);

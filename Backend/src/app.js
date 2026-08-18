@@ -48,10 +48,20 @@ app.use(helmet({
 }));
 app.use(cors());
 app.use(morgan('dev'));
+/**
+ * Requests whose authenticity is checked against the bytes we actually received.
+ *
+ * A sender signs the exact payload it transmitted. Re-serialising the parsed
+ * JSON can change whitespace and key order, so an HMAC computed over
+ * JSON.stringify(req.body) only matches by luck — and fails closed when it does
+ * not, which reads as a rejected webhook rather than as a bug.
+ */
+const SIGNED_WEBHOOK_PATHS = ['/webhook/razorpay', '/api/deploy'];
+
 app.use(express.json({
-    verify: (req, res, buf) => {
-        // ✅ Store rawBody for signature verification (Razorpay Webhooks)
-        if (req.originalUrl && req.originalUrl.includes('/webhook/razorpay')) {
+    verify: (req, _res, buf) => {
+        const url = req.originalUrl || '';
+        if (SIGNED_WEBHOOK_PATHS.some((signed) => url.includes(signed))) {
             req.rawBody = buf;
         }
     }
