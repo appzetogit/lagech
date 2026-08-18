@@ -185,19 +185,42 @@ test('a partial refund credits only what was asked for', async () => {
     assert.equal(after.status, 'refunded');
 });
 
-test('an amount of zero refunds the whole payment', async () => {
+test('a refund of zero is refused, and an absent amount still means all of it', async () => {
+    const zero = await paidOrder({ amount: 500 });
+    // This used to pay the whole 500 back: the amount was read as
+    // `Number(amount) || Number(payment.amount)`, and zero is falsy. A caller
+    // that worked out a refund legitimately coming to nothing refunded in full.
+    await assert.rejects(
+        () => initiateRefund({
+            paymentId: zero.payment.id, orderId: zero.order.id, userId: zero.user.id, amount: 0,
+        }),
+        /greater than zero/,
+    );
+    assert.equal((await getBalance('user', zero.user.id)).balance, 0);
+    assert.equal((await prisma.refund.findMany({ where: { orderId: zero.order.id } })).length, 0);
+
+    // Leaving it out is still how you ask for the whole payment back.
+    const all = await paidOrder({ amount: 500 });
+    const refund = await initiateRefund({
+        paymentId: all.payment.id, orderId: all.order.id, userId: all.user.id,
+    });
+    assert.equal(Number(refund.amount), 500);
+    assert.equal((await getBalance('user', all.user.id)).balance, 500);
+});
+
+test('a refund cannot exceed the payment it is against', async () => {
     const { user, order, payment } = await paidOrder({ amount: 500 });
 
-    // `Number(amount) || Number(payment.amount)` — 0 is falsy, so it reads as
-    // "no amount given" and the full payment goes back. A caller computing a
-    // refund that legitimately comes to nothing would pay out in full instead.
-    const refund = await initiateRefund({
-        paymentId: payment.id, orderId: order.id, userId: user.id, amount: 0,
-    });
-
-    assert.equal(Number(refund.amount), 500);
-    const { balance } = await getBalance('user', user.id);
-    assert.equal(balance, 500);
+    // The refund row is written before the ledger ever sees the figure, so
+    // nothing downstream would have caught this.
+    await assert.rejects(
+        () => initiateRefund({
+            paymentId: payment.id, orderId: order.id, userId: user.id, amount: 501,
+        }),
+        /exceeds the payment/,
+    );
+    assert.equal((await getBalance('user', user.id)).balance, 0);
+    assert.equal((await prisma.refund.findMany({ where: { orderId: order.id } })).length, 0);
 });
 
 test('a gateway refund is recorded but pays out nothing yet', async () => {

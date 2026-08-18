@@ -64,12 +64,25 @@ export async function initiateRefund({ paymentId, orderId, userId, amount, reaso
     // override to gateway.
     const to = refundTo || 'wallet';
 
+    // Only an absent amount means "refund it all". This used to be
+    // `Number(amount) || Number(payment.amount)`, so a caller that worked out a
+    // refund of zero hit the falsy branch and paid the whole payment back.
+    const requested = amount == null || amount === '' ? Number(payment.amount) : Number(amount);
+    if (!Number.isFinite(requested) || requested <= 0) {
+        throw new Error('Refund amount must be greater than zero');
+    }
+    // Nothing else bounds this, and the refund row is written before the ledger
+    // ever sees the figure.
+    if (requested > Number(payment.amount)) {
+        throw new Error(`Refund of ${requested} exceeds the payment of ${payment.amount}`);
+    }
+
     const refund = await prisma.refund.create({
         data: {
             paymentId: payment.id,
             orderId: orderId ? String(orderId) : payment.orderId,
             userId: userId ? String(userId) : payment.userId,
-            amount: Number(amount) || Number(payment.amount),
+            amount: requested,
             currency: payment.currency || 'INR',
             reason,
             status: 'pending',
