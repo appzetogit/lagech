@@ -42,30 +42,6 @@ module.exports = {
       }
     },
     {
-      name: 'switcheats-worker-otp',
-      cwd: './Backend',
-      script: 'src/queues/workers/otp.worker.js',
-      instances: 1,
-      exec_mode: 'fork',
-      autorestart: true,
-      max_memory_restart: '250M',
-      env: {
-        NODE_ENV: 'production'
-      }
-    },
-    {
-      name: 'switcheats-worker-notification',
-      cwd: './Backend',
-      script: 'src/queues/workers/notification.worker.js',
-      instances: 1,
-      exec_mode: 'fork',
-      autorestart: true,
-      max_memory_restart: '250M',
-      env: {
-        NODE_ENV: 'production'
-      }
-    },
-    {
       name: 'switcheats-worker-order',
       cwd: './Backend',
       script: 'src/queues/workers/order.worker.js',
@@ -85,18 +61,6 @@ module.exports = {
       exec_mode: 'fork',
       autorestart: true,
       max_memory_restart: '350M',
-      env: {
-        NODE_ENV: 'production'
-      }
-    },
-    {
-      name: 'switcheats-worker-payment',
-      cwd: './Backend',
-      script: 'src/queues/workers/payment.worker.js',
-      instances: 1,
-      exec_mode: 'fork',
-      autorestart: true,
-      max_memory_restart: '250M',
       env: {
         NODE_ENV: 'production'
       }

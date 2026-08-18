@@ -7,11 +7,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "worker:otp": "node src/queues/workers/otp.worker.js",
-    "worker:notification": "node src/queues/workers/notification.worker.js",
     "worker:order": "node src/queues/workers/order.worker.js",
     "worker:tracking": "node src/queues/workers/tracking.worker.js",
-    "worker:payment": "node src/queues/workers/payment.worker.js",
     "worker:maintenance": "node src/queues/workers/maintenance.worker.js",
     "test": "node scripts/require-db.mjs && node scripts/check-prisma-fields.mjs && node --import ./scripts/test-env.mjs --test --test-concurrency=3 \"src/**/*.test.js\"",
     "db:migrate": "prisma migrate deploy && node prisma/apply-constraints.mjs && prisma generate",
