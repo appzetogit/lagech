@@ -49,7 +49,7 @@ export const mountDeployWebhook = (app, {
                 logger.error(`Deploy failed: ${err.message}`);
                 return res.status(500).send('Deploy failed');
             }
-            if (stdout) console.log(stdout);
+            if (stdout) logger.info(stdout);
             res.send('Deploy success');
         });
     });

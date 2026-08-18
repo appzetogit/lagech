@@ -389,9 +389,6 @@ export function buildDeliverySocketPayload(orderDoc, restaurantDoc = null) {
     tripDurationMins = Math.max(1, Math.ceil((tripDistanceKm * 60) / 25));
   }
 
-  console.log(`[DEBUG] buildDeliverySocketPayload - Order: ${order?.orderId || order?._id}`);
-  console.log(`[DEBUG] buildDeliverySocketPayload - riderEarning in doc: ${order?.riderEarning}`);
-  console.log(`[DEBUG] buildDeliverySocketPayload - deliveryFee in doc: ${order?.pricing?.deliveryFee}`);
 
   return {
     orderMongoId:

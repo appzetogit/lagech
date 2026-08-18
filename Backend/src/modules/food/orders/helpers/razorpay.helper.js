@@ -9,6 +9,7 @@ try {
 }
 
 import { config } from '../../../../config/env.js';
+import { logger } from '../../../../utils/logger.js';
 
 const KEY_ID = config.razorpayKeyId || process.env.RAZORPAY_KEY_ID || '';
 const KEY_SECRET = config.razorpayKeySecret || process.env.RAZORPAY_KEY_SECRET || '';
@@ -107,7 +108,7 @@ export async function initiateRazorpayRefund(paymentId, amount) {
         };
     } catch (err) {
         // Log locally but pass the error to the service to handle status update
-        console.error(`Razorpay Refund API Failure [PaymentId: ${paymentId}]:`, err?.message || err);
+        logger.error(`Razorpay Refund API Failure [PaymentId: ${paymentId}]:`, err?.message || err);
         return {
             success: false,
             error: err?.message || 'Razorpay refund API error',

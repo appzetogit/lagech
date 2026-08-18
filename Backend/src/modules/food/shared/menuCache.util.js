@@ -1,3 +1,4 @@
+import { logger } from '../../../utils/logger.js';
 /**
  * Drop a restaurant's cached menu after its dishes change.
  *
@@ -11,6 +12,6 @@ export const dropMenuCache = async (restaurantId) => {
         const { invalidateCache } = await import('../../../middleware/cache.js');
         await invalidateCache(`restaurant_menu:${restaurantId}`);
     } catch (cacheErr) {
-        console.error('Failed to invalidate menu cache:', cacheErr);
+        logger.error('Failed to invalidate menu cache:', cacheErr);
     }
 };

@@ -54,10 +54,10 @@ const sendSmsViaIndiaHub = async (phone, otp) => {
             const errMsg = `SMS India Hub ERROR for ${phone}: [${parsed.ErrorCode}] ${parsed.ErrorMessage || resultText}`;
             logger.error(errMsg);
             // eslint-disable-next-line no-console
-            console.error(`❌ [SMS ERROR] ${errMsg}`);
+            logger.error(`❌ [SMS ERROR] ${errMsg}`);
             if (parsed.ErrorCode === '006') {
                 // eslint-disable-next-line no-console
-                console.error('❌ [SMS ERROR] ErrorCode 006 = DLT Template mismatch. The message text must EXACTLY match your registered TRAI DLT template. Login to https://cloud.smsindiahub.in and verify the approved template text.');
+                logger.error('❌ [SMS ERROR] ErrorCode 006 = DLT Template mismatch. The message text must EXACTLY match your registered TRAI DLT template. Login to https://cloud.smsindiahub.in and verify the approved template text.');
             }
         } else if (!response.ok) {
             logger.error(`SMS API HTTP error for ${phone}: ${response.status} – ${resultText}`);

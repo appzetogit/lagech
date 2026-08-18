@@ -1,3 +1,4 @@
+import { logger } from '../../../../utils/logger.js';
 import { prisma } from '../../../../config/prisma.js';
 import {
     toFoodTypeColumn,
@@ -230,7 +231,7 @@ const notifyAdmins = async (title, body, id) => {
             data: { type: 'approval_request', subType: 'food', id: String(id) },
         });
     } catch (e) {
-        console.error('Failed to notify admins of food approval request:', e);
+        logger.error('Failed to notify admins of food approval request:', e);
     }
 };
 

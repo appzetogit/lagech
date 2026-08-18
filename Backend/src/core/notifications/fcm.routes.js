@@ -8,6 +8,7 @@ import {
 } from './firebase.service.js';
 import { prisma } from '../../config/prisma.js';
 import { normalizePlatform } from '../../utils/platform.js';
+import { logger } from '../../utils/logger.js';
 
 const router = express.Router();
 
@@ -78,15 +79,13 @@ router.post('/save', authMiddleware, async (req, res, next) => {
         const token = String(req.body?.token || '').trim();
         const platform = normalizePlatform(req.body?.platform);
 
-        console.log(`[FCM-DEBUG] /save request received: ownerType=${ownerType}, ownerId=${ownerId}, platform=${platform}, tokenPreview=${token?.slice(0, 10)}...`);
 
         if (!ownerType || !ownerId) {
-            console.warn('[FCM-DEBUG] /save - Authentication required');
+            logger.warn('FCM /save - Authentication required');
             return sendError(res, 401, 'Authentication required');
         }
 
         await upsertFirebaseDeviceToken({ ownerType, ownerId, token, platform });
-        console.log('[FCM-DEBUG] /save - Token saved successfully');
         return res.status(200).json({
             success: true,
             message: 'FCM token saved',
@@ -102,20 +101,18 @@ router.post('/mobile/save', authMiddleware, async (req, res, next) => {
         const { ownerType, ownerId } = getOwnerContext(req);
         const token = String(req.body?.token || '').trim();
 
-        console.log(`[FCM-DEBUG] /mobile/save request received: ownerType=${ownerType}, ownerId=${ownerId}, tokenPreview=${token?.slice(0, 10)}...`);
 
         if (!ownerType || !ownerId) {
-            console.warn('[FCM-DEBUG] /mobile/save - Authentication required');
+            logger.warn('FCM /mobile/save - Authentication required');
             return sendError(res, 401, 'Authentication required');
         }
 
         if (!token) {
-            console.warn('[FCM-DEBUG] /mobile/save - FCM token is required');
+            logger.warn('FCM /mobile/save - FCM token is required');
             return sendError(res, 400, 'FCM token is required');
         }
 
         await upsertFirebaseDeviceToken({ ownerType, ownerId, token, platform: 'mobile' });
-        console.log('[FCM-DEBUG] /mobile/save - Token saved successfully');
         return res.status(200).json({
             success: true,
             message: 'Mobile FCM token saved successfully',

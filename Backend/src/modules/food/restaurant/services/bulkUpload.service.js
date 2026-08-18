@@ -7,6 +7,7 @@ import { toFoodTypeColumn } from '../../shared/foodType.util.js';
 import { dropMenuCache } from '../../shared/menuCache.util.js';
 import { syncFoodVariants } from '../../admin/services/foodVariant.service.js';
 import { isHostedUploadUrl, saveImageFromUrl } from '../../../../services/storage.service.js';
+import { logger } from '../../../../utils/logger.js';
 
 const PREP_TIME_OPTIONS = [
     '5-10 mins', '10-15 mins', '15-20 mins', '20-25 mins', 
@@ -335,7 +336,7 @@ export async function processBulkMenuUpload(restaurantId, fileBuffer, options = 
             return saved.url;
         } catch (imgErr) {
             // A missing picture is not worth losing the dish over.
-            console.error(`Row ${rowNumber}: Image upload failed [${url}]:`, imgErr.message);
+            logger.error(`Row ${rowNumber}: Image upload failed [${url}]:`, imgErr.message);
             return '';
         }
     };

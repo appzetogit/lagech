@@ -5,8 +5,11 @@
 const quiet = Boolean(process.env.NODE_TEST_CONTEXT);
 const stamp = () => new Date().toLocaleTimeString();
 
+// Variadic, because the usual call is a message and the error that caused it.
+// Taking a single argument meant `logger.error('upload failed:', err)` printed
+// the message and dropped the error — which is the half worth having.
 export const logger = {
-    info: (msg) => { if (!quiet) console.log(`✅ [INFO] ${stamp()}: ${msg}`); },
-    error: (msg) => { if (!quiet) console.error(`❌ [ERROR] ${stamp()}: ${msg}`); },
-    warn: (msg) => { if (!quiet) console.warn(`⚠️ [WARN] ${stamp()}: ${msg}`); }
+    info: (...args) => { if (!quiet) console.log(`✅ [INFO] ${stamp()}:`, ...args); },
+    error: (...args) => { if (!quiet) console.error(`❌ [ERROR] ${stamp()}:`, ...args); },
+    warn: (...args) => { if (!quiet) console.warn(`⚠️ [WARN] ${stamp()}:`, ...args); }
 };

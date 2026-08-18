@@ -1,5 +1,6 @@
 import { prisma } from '../../../../config/prisma.js';
 import { saveImageFile, deleteStoredFile } from '../../../../services/storage.service.js';
+import { logger } from '../../../../utils/logger.js';
 
 const BANNER_FOLDER = 'food/top-banners';
 
@@ -65,7 +66,7 @@ export const deleteTopBannerController = async (req, res) => {
         // banner pointing at an image that no longer existed.
         if (banner.publicId) {
             await deleteStoredFile(banner.publicId).catch((err) =>
-                console.error('Storage deletion failed:', err.message));
+                logger.error('Storage deletion failed:', err.message));
         }
 
         res.status(200).json({ success: true, message: 'Banner deleted successfully' });

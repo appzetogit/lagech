@@ -1,3 +1,4 @@
+import { logger } from '../../../../utils/logger.js';
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
@@ -170,7 +171,7 @@ const decideFoodItem = async (id, decision, reason = '') => {
                 ...(approved ? {} : { reason }),
             },
         }
-    ).catch((err) => console.error('Failed to send food approval notification:', err));
+    ).catch((err) => logger.error('Failed to send food approval notification:', err));
 
     return food;
 };

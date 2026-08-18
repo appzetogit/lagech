@@ -1,3 +1,4 @@
+import { logger } from '../../../../utils/logger.js';
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { uploadImageBuffer } from '../../../../services/cloudinary.service.js';
@@ -592,7 +593,7 @@ const notifyAdminsAboutRestaurantLocationUpdate = async (restaurantId, restauran
             }
         });
     } catch (e) {
-        console.error('Failed to notify admins of restaurant location update:', e);
+        logger.error('Failed to notify admins of restaurant location update:', e);
     }
 };
 
@@ -609,7 +610,7 @@ const notifyAdminsAboutRestaurantProfileReview = async (restaurantId, restaurant
             }
         });
     } catch (e) {
-        console.error('Failed to notify admins of restaurant profile resubmission:', e);
+        logger.error('Failed to notify admins of restaurant profile resubmission:', e);
     }
 };
 
@@ -785,7 +786,7 @@ export const registerRestaurant = async (payload, files) => {
                 ? preUploadedMenuImages
                 : (typeof preUploadedMenuImages === 'string' ? JSON.parse(preUploadedMenuImages) : []);
         } catch (e) {
-            console.error('Error parsing preUploadedMenuImages:', e);
+            logger.error('Error parsing preUploadedMenuImages:', e);
         }
     }
 
@@ -826,11 +827,7 @@ export const registerRestaurant = async (payload, files) => {
 
     // Wait for all uploads to complete in parallel
     if (uploadTasks.length > 0) {
-        console.log(`[ONBOARDING] Starting upload of ${uploadTasks.length} image tasks...`);
-        console.time('ImageUploadTotal');
         await Promise.all(uploadTasks);
-        console.timeEnd('ImageUploadTotal');
-        console.log('[ONBOARDING] All image uploads completed.');
     }
 
     Object.assign(images, imageMap);
@@ -989,7 +986,7 @@ export const registerRestaurant = async (payload, files) => {
                 },
             });
         } catch (e) {
-            console.error('Failed to notify admins of new restaurant registration:', e);
+            logger.error('Failed to notify admins of new restaurant registration:', e);
         }
 
         return toRestaurant(restaurant);

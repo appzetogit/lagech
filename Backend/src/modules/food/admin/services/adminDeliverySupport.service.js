@@ -3,6 +3,7 @@ import { isId } from '../../../../utils/helpers.js';
 import { sendNotificationToOwner } from '../../../../core/notifications/firebase.service.js';
 import { getRestaurantSubscriptionSettings } from './adminSettings.service.js';
 import { getAdminRestaurantSubscriptionHistory as historyFromRestaurant } from '../../restaurant/services/subscriptionHistory.service.js';
+import { logger } from '../../../../utils/logger.js';
 
 /**
  * Rider support tickets, bonus history, reviews and the subscription pricing
@@ -146,7 +147,7 @@ export async function updateDeliverySupportTicket(id, body = {}) {
                     metadata: { ticketId: ticket.id },
                 },
             })
-            .catch((err) => console.error('Error creating delivery support notification:', err));
+            .catch((err) => logger.error('Error creating delivery support notification:', err));
 
         await sendNotificationToOwner({
             ownerType: 'DELIVERY_PARTNER',
@@ -156,7 +157,7 @@ export async function updateDeliverySupportTicket(id, body = {}) {
                 body: message,
                 data: { type: 'SUPPORT_RESPONSE', ticketId: ticket.id },
             },
-        }).catch((err) => console.error('Error sending delivery support push notification:', err));
+        }).catch((err) => logger.error('Error sending delivery support push notification:', err));
     }
 
     return serializeTicket(ticket);

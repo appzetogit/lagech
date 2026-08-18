@@ -1,3 +1,4 @@
+import { logger } from '../../../../utils/logger.js';
 import { sendResponse } from '../../../../utils/response.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import {
@@ -13,12 +14,12 @@ export const getPublicPageController = async (req, res, next) => {
     try {
         const key = parseKeyFromParam(req);
         const module = req.query.module || 'ALL';
-        console.log(`[CMS] Public Request - Key: ${key}, Module: ${module}`);
+        logger.info(`[CMS] Public Request - Key: ${key}, Module: ${module}`);
         const result = await getPublicPageByKey(key, module);
-        console.log(`[CMS] Result found: ${!!result.data}`);
+        logger.info(`[CMS] Result found: ${!!result.data}`);
         return sendResponse(res, 200, 'Page fetched successfully', result.data);
     } catch (error) {
-        console.error(`[CMS] Error:`, error);
+        logger.error(`[CMS] Error:`, error);
         next(error);
     }
 };

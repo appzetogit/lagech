@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { CANCELLED_ORDER_STATUSES } from '../../orders/services/order.helpers.js';
+import { logger } from '../../../../utils/logger.js';
 
 /**
  * The admin dashboard: headline totals, a twelve-month trend, and the badge
@@ -351,7 +352,7 @@ export async function getSidebarBadges() {
             restaurantComplaints: pendingRestaurantComplaints,
         };
     } catch (error) {
-        console.error('Error fetching sidebar badges:', error);
+        logger.error('Error fetching sidebar badges:', error);
         return {};
     }
 }

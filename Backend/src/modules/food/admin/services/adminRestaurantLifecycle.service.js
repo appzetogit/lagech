@@ -2,6 +2,7 @@ import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { fromRestaurantLocation, toRestaurant } from '../../restaurant/restaurant.mapper.js';
+import { logger } from '../../../../utils/logger.js';
 
 /**
  * Restaurant approval and lifecycle, extracted from admin.service.js.
@@ -210,7 +211,7 @@ export async function approveRestaurant(id) {
             },
         );
     } catch (e) {
-        console.error('Failed to send restaurant approval notification:', e);
+        logger.error('Failed to send restaurant approval notification:', e);
     }
 
     return toRestaurant(updated);
@@ -268,7 +269,7 @@ export async function rejectRestaurant(id, reason) {
             },
         );
     } catch (e) {
-        console.error('Failed to send restaurant rejection notification:', e);
+        logger.error('Failed to send restaurant rejection notification:', e);
     }
 
     return toRestaurant(updated);

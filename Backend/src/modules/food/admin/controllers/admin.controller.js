@@ -1194,7 +1194,6 @@ export async function getFeeSettings(req, res, next) {
 
 export async function createOrUpdateFeeSettings(req, res, next) {
     try {
-        console.log('[DEBUG] req.body:', JSON.stringify(req.body, null, 2));
         const body = validateFeeSettingsUpsertDto(req.body || {});
         const feeSettings = await adminService.upsertFeeSettings(body);
         res.status(200).json({ success: true, message: 'Fee settings saved successfully', data: { feeSettings } });

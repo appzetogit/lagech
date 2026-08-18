@@ -390,18 +390,15 @@ export const listOwnerTokens = async ({ ownerType, ownerId, platform }) => {
 export const upsertFirebaseDeviceToken = async ({ ownerType, ownerId, token, platform = 'web' }) => {
     const normalizedToken = sanitizeString(token);
     const normalizedPlatform = normalizePlatform(platform);
-    console.log(
-        `[FCM-DEBUG] upsertFirebaseDeviceToken: ownerType=${ownerType}, ownerId=${ownerId}, platform=${normalizedPlatform}, tokenPreview=${normalizedToken?.slice(0, 10)}...`
-    );
 
     if (!ownerType || !ownerId || !normalizedToken) {
-        console.error('[FCM-DEBUG] upsert - Missing required fields');
+        logger.error('FCM upsert - Missing required fields');
         throw new Error('ownerType, ownerId, and token are required.');
     }
 
     const table = getOwnerTable(ownerType);
     if (!table) {
-        console.error(`[FCM-DEBUG] upsert - Unsupported owner type: ${ownerType}`);
+        logger.error(`FCM upsert - Unsupported owner type: ${ownerType}`);
         throw new Error(`Unsupported owner type: ${ownerType}`);
     }
 
@@ -437,11 +434,10 @@ export const upsertFirebaseDeviceToken = async ({ ownerType, ownerId, token, pla
     );
 
     if (!result) {
-        console.error(`[FCM-DEBUG] upsert - Owner profile not found for id ${ownerId}`);
+        logger.error(`FCM upsert - Owner profile not found for id ${ownerId}`);
         throw new Error('Owner profile not found.');
     }
 
-    console.log('[FCM-DEBUG] upsert - Token list updated atomically.');
     return { success: true };
 };
 
@@ -586,7 +582,6 @@ export const sendNotificationToOwner = async ({ ownerType, ownerId, payload, pla
         return { successCount: 0, failureCount: 0, results: [] };
     }
     try {
-        console.log(`[FCM] Sending to ${ownerType}:${ownerId}. Title: "${enrichedPayload.title || 'Data Only'}"`);
         const response = await sendPushNotification(tokens, enrichedPayload);
         const invalidTokens = (response.results || [])
 

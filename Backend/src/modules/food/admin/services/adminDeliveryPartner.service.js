@@ -1,6 +1,7 @@
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { NotFoundError, ValidationError } from '../../../../core/auth/errors.js';
+import { logger } from '../../../../utils/logger.js';
 
 /**
  * The admin delivery-partner list and its money summary, extracted from
@@ -319,7 +320,7 @@ export async function approveDeliveryPartner(id) {
             },
         );
     } catch (e) {
-        console.error('Failed to send delivery partner approval notification:', e);
+        logger.error('Failed to send delivery partner approval notification:', e);
     }
 
     // Referral crediting deliberately does NOT happen here. Approval alone does
@@ -356,7 +357,7 @@ export async function rejectDeliveryPartner(id, reason) {
             },
         );
     } catch (e) {
-        console.error('Failed to send delivery partner rejection notification:', e);
+        logger.error('Failed to send delivery partner rejection notification:', e);
     }
 
     return partner;

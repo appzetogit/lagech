@@ -1,6 +1,7 @@
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { sendNotificationToOwner } from '../../../../core/notifications/firebase.service.js';
+import { logger } from '../../../../utils/logger.js';
 
 /**
  * The admin support inbox, extracted from admin.service.js.
@@ -312,7 +313,7 @@ export async function updateSupportTicket(id, body = {}) {
                         metadata: { ticketId: updated.id, source },
                     },
                 })
-                .catch((err) => console.error('Error creating support notification:', err));
+                .catch((err) => logger.error('Error creating support notification:', err));
 
             await sendNotificationToOwner({
                 ownerType,
@@ -322,7 +323,7 @@ export async function updateSupportTicket(id, body = {}) {
                     body: message,
                     data: { type: 'SUPPORT_RESPONSE', ticketId: String(updated.id), source },
                 },
-            }).catch((err) => console.error('Error sending support push notification:', err));
+            }).catch((err) => logger.error('Error sending support push notification:', err));
         }
     }
 

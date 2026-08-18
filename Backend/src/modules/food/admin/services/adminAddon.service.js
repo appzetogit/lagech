@@ -1,6 +1,7 @@
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
+import { logger } from '../../../../utils/logger.js';
 
 /**
  * Add-on approval, extracted from admin.service.js.
@@ -191,7 +192,7 @@ export async function approveRestaurantAddon(addonId) {
             },
         );
     } catch (e) {
-        console.error('Failed to send addon approval notification:', e);
+        logger.error('Failed to send addon approval notification:', e);
     }
 
     return serializeAddon(updated);
@@ -232,7 +233,7 @@ export async function rejectRestaurantAddon(addonId, reason) {
             },
         );
     } catch (e) {
-        console.error('Failed to send addon rejection notification:', e);
+        logger.error('Failed to send addon rejection notification:', e);
     }
 
     return serializeAddon(updated);

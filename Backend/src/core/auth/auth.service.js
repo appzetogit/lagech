@@ -106,9 +106,6 @@ export const verifyUserOtpAndLogin = async (
   platform,
   name,
 ) => {
-  console.log(
-    `[FCM-LOGIN] User login platform received: rawPlatform=${String(platform ?? "") || "<empty>"}, hasToken=${Boolean(fcmToken)}`,
-  );
   const result = await verifyOtp(phone, otp);
 
   if (!result.valid) {
@@ -337,9 +334,6 @@ export const requestRestaurantOtp = async (phone) => {
 };
 
 export const verifyRestaurantOtpAndLogin = async (phone, otp, fcmToken, platform) => {
-  console.log(
-    `[FCM-LOGIN] Restaurant login platform received: rawPlatform=${String(platform ?? "") || "<empty>"}, hasToken=${Boolean(fcmToken)}`,
-  );
   const result = await verifyOtp(phone, otp);
   if (!result.valid) {
     throw new AuthError(result.reason || "OTP verification failed");
@@ -357,7 +351,6 @@ export const verifyRestaurantOtpAndLogin = async (phone, otp, fcmToken, platform
     ...(last10 ? [{ [field]: { endsWith: last10 } }] : []),
   ];
 
-  console.log(`[AUTH] Verifying OTP for restaurant phone: ${phone}`);
   const restaurant = await prisma.foodRestaurant.findFirst({
     where: {
       OR: [
@@ -367,10 +360,8 @@ export const verifyRestaurantOtpAndLogin = async (phone, otp, fcmToken, platform
     },
   });
 
-  console.log(`[AUTH] Restaurant lookup result:`, restaurant ? { id: restaurant.id, status: restaurant.status, name: restaurant.restaurantName } : "NOT FOUND");
 
   if (!restaurant) {
-    console.log(`[AUTH] No restaurant found. Returning needsRegistration: true`);
     // Phone has been successfully verified, but no restaurant exists yet.
     // Frontend will use this to redirect into registration/onboarding.
     return {
@@ -459,9 +450,6 @@ const normalizePhoneForDelivery = (phone) => {
 };
 
 export const verifyDeliveryOtpAndLogin = async (phone, otp, fcmToken, platform) => {
-  console.log(
-    `[FCM-LOGIN] Delivery login platform received: rawPlatform=${String(platform ?? "") || "<empty>"}, hasToken=${Boolean(fcmToken)}`,
-  );
   const result = await verifyOtp(phone, otp);
   if (!result.valid) {
     throw new AuthError(result.reason || "OTP verification failed");
@@ -542,10 +530,8 @@ export const logout = async (refreshToken, fcmToken, platform) => {
 
   // 1. Remove specific FCM token from ALL collections if provided
   if (fcmToken) {
-    console.log(`[FCM-Logout] Starting logout-driven token removal: platform=${platform}, tokenPreview=${fcmToken?.slice(0, 10)}...`);
     try {
       await detachFirebaseDeviceTokenEverywhere(fcmToken);
-      console.log("[FCM-Logout] Token removed from all collections successfully");
     } catch (err) {
       logger.warn({ err }, "Failed to remove FCM token from all collections during logout");
     }
@@ -822,7 +808,7 @@ export const changeAdminPassword = async (
       }
     });
   } catch (e) {
-    console.error("Failed to notify admins of password change:", e);
+    logger.error("Failed to notify admins of password change:", e);
   }
 
   return { success: true };
@@ -931,7 +917,7 @@ export const resetAdminPasswordWithOtp = async (email, otp, newPassword) => {
       }
     });
   } catch (e) {
-    console.error("Failed to notify admins of password reset:", e);
+    logger.error("Failed to notify admins of password reset:", e);
   }
 
   return { success: true, message: "Password reset successfully." };

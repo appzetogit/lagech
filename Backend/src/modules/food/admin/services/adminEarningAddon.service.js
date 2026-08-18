@@ -1,5 +1,6 @@
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
+import { logger } from '../../../../utils/logger.js';
 
 /**
  * Rider incentives ("earning addons"), extracted from admin.service.js.
@@ -227,7 +228,7 @@ export async function creditEarningAddonHistory(historyId, notes) {
                 },
             );
         } catch (e) {
-            console.error('Failed to send incentive credited notification:', e);
+            logger.error('Failed to send incentive credited notification:', e);
         }
     }
 
@@ -263,7 +264,7 @@ export async function cancelEarningAddonHistory(historyId, reason) {
                 },
             );
         } catch (e) {
-            console.error('Failed to send incentive rejection notification:', e);
+            logger.error('Failed to send incentive rejection notification:', e);
         }
     }
 

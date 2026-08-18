@@ -1,6 +1,7 @@
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
+import { logger } from '../../../../utils/logger.js';
 
 /**
  * Admin-created coupons, extracted from admin.service.js.
@@ -155,7 +156,7 @@ export async function createAdminOffer(body = {}) {
                 },
             );
         } catch (e) {
-            console.error('Failed to send campaign invitation notification:', e);
+            logger.error('Failed to send campaign invitation notification:', e);
         }
     }
 
