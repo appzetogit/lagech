@@ -170,5 +170,13 @@ export async function listRefunds({ status, page = 1, limit = 20 } = {}) {
         prisma.refund.count({ where })
     ]);
 
-    return { refunds, total, page: currentPage, limit, totalPages: Math.ceil(total / limit) };
+    // Number() for the same reason as listSettlements: the finance summary
+    // sums these amounts, and a Decimal concatenates instead of adding.
+    return {
+        refunds: refunds.map((r) => ({ ...r, amount: Number(r.amount) })),
+        total,
+        page: currentPage,
+        limit,
+        totalPages: Math.ceil(total / limit),
+    };
 }

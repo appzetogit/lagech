@@ -296,4 +296,10 @@ test('refunds can be listed by order and by status', async () => {
     assert.ok(total >= 1);
     assert.ok(refunds.every((r) => r.status === 'processed'), 'the status filter holds');
     assert.equal(totalPages, Math.ceil(total / 5));
+
+    // The finance summary adds these up. As a raw Decimal each one
+    // concatenates instead of adding, so the total came out as every pending
+    // refund's digits run together.
+    assert.ok(refunds.every((r) => typeof r.amount === 'number'));
+    assert.equal(typeof refunds.reduce((sum, r) => sum + r.amount, 0), 'number');
 });

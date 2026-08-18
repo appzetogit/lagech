@@ -113,7 +113,17 @@ export async function listSettlements({ entityType, entityId, status, page = 1, 
         prisma.settlement.count({ where })
     ]);
 
-    return { settlements, total, page: currentPage, limit, totalPages: Math.ceil(total / limit) };
+    return {
+        // Number(), not the raw column. amount is a Decimal, and a Decimal
+        // coerces to a string in arithmetic — the admin finance summary sums
+        // these with a reduce, so a raw column made the pending-payout total
+        // read "0300500": every amount concatenated rather than added.
+        settlements: settlements.map((s) => ({ ...s, amount: Number(s.amount) })),
+        total,
+        page: currentPage,
+        limit,
+        totalPages: Math.ceil(total / limit),
+    };
 }
 
 /**
