@@ -25,6 +25,13 @@ export const config = {
         process.env.REFERRAL_LINK_BASE_URL || process.env.FRONTEND_URL || ''
     ).trim().replace(/\/+$/, ''),
 
+    /**
+     * Secret for the /api/deploy webhook. Optional: when it is absent the route
+     * is not mounted at all, because that endpoint runs a shell script and
+     * "no secret" must never degrade to "no check".
+     */
+    deploySecret: process.env.DEPLOY_SECRET,
+
     // Database
     databaseUrl: process.env.DATABASE_URL,
 
