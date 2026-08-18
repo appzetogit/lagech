@@ -301,6 +301,26 @@ const checkData = (block, modelName, file, line) => {
     }
 };
 
+/** Keys Prisma allows in an orderBy that are not columns. */
+const ORDER_META = new Set(['_count', '_relevance', '_avg', '_sum', '_min', '_max']);
+
+/**
+ * Ordering by a column that does not exist.
+ *
+ * Keys only — the values are 'asc'/'desc', and a relation ordering such as
+ * `{ restaurant: { name: 'asc' } }` stops at the relation rather than
+ * recursing. Shallow, but it catches the case this was written for:
+ * FoodTransactionHistory stamps its rows `at`, not `createdAt`, and ordering
+ * on the wrong one throws at execution like every other Prisma mistake here.
+ */
+const checkOrderBy = (block, modelName, file, line) => {
+    const def = models.get(modelName);
+    if (!def) return;
+    for (const { key } of entries(block)) {
+        if (!ORDER_META.has(key) && !def.fields.has(key)) report(file, line, modelName, key);
+    }
+};
+
 /** Check one select/include block against `model`, following relations. */
 const checkBlock = (block, modelName, file, line, seen = 0, src = '') => {
     const def = models.get(modelName);
@@ -358,6 +378,8 @@ for (const file of sourceFiles) {
                 checkWhere(resolved, def.name, file, line);
             } else if (key === 'data' || key === 'create' || key === 'update') {
                 checkData(resolved, def.name, file, line);
+            } else if (key === 'orderBy') {
+                checkOrderBy(resolved, def.name, file, line);
             }
         }
     }
