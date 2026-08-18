@@ -24,8 +24,30 @@ const schema = fs.readFileSync(path.join(root, 'prisma', 'schema.prisma'), 'utf8
 const delegateOf = (model) => model.charAt(0).toLowerCase() + model.slice(1);
 
 // ── schema: model → { fields, relations } ────────────────────────────────────
-const models = new Map();       // model name → { fields:Set, relations:Map<field, model> }
+const models = new Map();       // model name → { fields:Set, relations:Map<field, model>, enums:Map<field, enum> }
 const modelNames = new Set();
+
+/**
+ * enum name → the members code must use.
+ *
+ * The Prisma name is what a query passes, not the database value: a member
+ * written `in_progress @map("in-progress")` is `in_progress` in code. Filtering
+ * on a value that is not a member throws at execution — Mongo simply matched
+ * nothing, so several such filters survived the migration and read as an empty
+ * result rather than an error.
+ */
+/** Schema files may arrive with either line ending. */
+const SPLIT_LINES = /\r?\n/;
+const enums = new Map();
+for (const match of schema.matchAll(/^enum\s+(\w+)\s*\{([\s\S]*?)^\}/gm)) {
+    const [, name, body] = match;
+    const members = new Set();
+    for (const line of body.split(SPLIT_LINES)) {
+        const member = line.trim().match(/^(\w+)/);
+        if (member && !line.trim().startsWith('//')) members.add(member[1]);
+    }
+    enums.set(name, members);
+}
 
 for (const match of schema.matchAll(/^model\s+(\w+)\s*\{/gm)) modelNames.add(match[1]);
 
@@ -33,6 +55,7 @@ for (const match of schema.matchAll(/^model\s+(\w+)\s*\{([\s\S]*?)^\}/gm)) {
     const [, model, body] = match;
     const fields = new Set();
     const relations = new Map();
+    const enumFields = new Map();
 
     // `@@unique([a, b])` and `@@id([a, b])` are addressable in a `where` under
     // the joined name Prisma generates for them, e.g. `entityType_entityId`.
@@ -51,9 +74,10 @@ for (const match of schema.matchAll(/^model\s+(\w+)\s*\{([\s\S]*?)^\}/gm)) {
         fields.add(name);
         // A field typed as another model is a relation we can follow.
         if (modelNames.has(type)) relations.set(name, type);
+        if (enums.has(type)) enumFields.set(name, type);
     }
 
-    models.set(model, { fields, relations });
+    models.set(model, { fields, relations, enums: enumFields });
 }
 
 const byDelegate = new Map([...models].map(([name, def]) => [delegateOf(name), { name, ...def }]));
@@ -85,8 +109,31 @@ const readBlock = (text, open) => {
     return '';
 };
 
+/**
+ * Blanks out whole-line comments, preserving length so every offset still lines
+ * up with the original block.
+ *
+ * Without this the "a key follows `{` or `,`" rule below reads the last
+ * character of a comment line as the predecessor, and silently skips the key
+ * after it. That is a false negative rather than a false positive, so it hid
+ * rather than shouted: `paymentStatus: { in: [...] }` sat directly under a
+ * comment and went unchecked, including the invalid enum member in it.
+ *
+ * Only full-line comments are removed. A `//` inside a string — a URL, say — is
+ * left alone.
+ */
+const blankLineComments = (block) => block
+    .split(SPLIT_LINES)
+    .map((line) => {
+        const trimmed = line.trimStart();
+        const isComment = trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*');
+        return isComment ? ' '.repeat(line.length) : line;
+    })
+    .join('\n');
+
 /** Top-level `key:` entries of an object literal, with each value's block. */
-const entries = (block) => {
+const entries = (rawBlock) => {
+    const block = blankLineComments(rawBlock);
     const found = [];
     let depth = 0;
     for (let i = 0; i < block.length; i += 1) {
@@ -115,7 +162,7 @@ const entries = (block) => {
         const ident = brace ? null : block.slice(after).match(/^\s*(\w+)\s*[,}]/);
         found.push({
             key: key[1],
-            block: brace ? readBlock(block, after + brace[0].length - 1) : '',
+            block: brace ? readBlock(rawBlock, after + brace[0].length - 1) : '',
             ident: ident ? ident[1] : '',
         });
     }
@@ -141,6 +188,35 @@ const problems = [];
 
 const report = (file, line, modelName, key) =>
     problems.push(`${path.relative(root, file)}:${line}  ${modelName} has no field "${key}"`);
+
+/**
+ * Enum values a `where` filters on must be members of that enum.
+ *
+ * Prisma rejects the query outright; Mongo matched nothing. So a filter naming
+ * a status that never existed used to read as "no results" and now reads as a
+ * 500 — which is how `paymentStatus: { in: ["created", "pending", "failed"] }`
+ * survived, `pending` not being an OrderPaymentStatus. Four filters of this
+ * shape were found by hand during the migration before this check existed.
+ *
+ * Only literal strings are checked. A value built at runtime is skipped rather
+ * than guessed at.
+ */
+const LITERAL = /^\s*(['"])([\w-]+)\1\s*[,}\]]/;
+const VALUE_OPS = new Set(['equals', 'not', 'in', 'notIn']);
+
+const checkEnumValue = (raw, enumName, file, line, modelName, field) => {
+    const members = enums.get(enumName);
+    if (!members) return;
+    for (const match of raw.matchAll(/(['"])([\w-]+)\1/g)) {
+        const value = match[2];
+        if (!members.has(value)) {
+            problems.push(
+                `${path.relative(root, file)}:${line}  ${modelName}.${field} is ${enumName};`
+                + ` "${value}" is not one of ${[...members].join(', ')}`,
+            );
+        }
+    }
+};
 
 /** Keys of a `where` that combine conditions rather than name a column. */
 const LOGICAL = new Set(['AND', 'OR', 'NOT']);
@@ -169,14 +245,41 @@ const checkWhere = (block, modelName, file, line, seen = 0) => {
             continue;
         }
 
+        // An enum column: the value has to be a member of that enum.
+        const enumName = def.enums.get(key);
+        if (enumName) {
+            const after = block.slice(block.indexOf(key + ':') + key.length + 1);
+            if (nested) {
+                // `{ status: { in: [...] } }` — check only the value operators;
+                // `mode`, `gte` and friends carry no enum member.
+                for (const op of entries(nested)) {
+                    if (VALUE_OPS.has(op.key)) {
+                        const seg = nested.slice(nested.indexOf(op.key + ':') + op.key.length + 1);
+                        checkEnumValue(seg.split(/[,}]/)[0] + (op.block || ''), enumName, file, line, modelName, key);
+                    }
+                }
+                const arrays = nested.match(/\b(?:in|notIn)\s*:\s*\[[^\]]*\]/g) || [];
+                for (const arr of arrays) checkEnumValue(arr, enumName, file, line, modelName, key);
+            } else {
+                const literal = after.match(LITERAL);
+                if (literal) checkEnumValue(literal[0], enumName, file, line, modelName, key);
+            }
+            continue;
+        }
+
         const related = def.relations.get(key);
         if (!related || !nested) continue;
 
         // `{ restaurant: { name: … } }` and `{ items: { some: { name: … } } }`
         // both describe the related model; the second is one level deeper.
-        const wrapped = entries(nested).filter((e) => RELATION_OPS.has(e.key) && e.block);
+        // `{ is: null }` and `{ none: {} }` are operators on the relation, not
+        // columns of it. Recursing into them as a field list reports the
+        // operator itself as an unknown field.
+        const wrapped = entries(nested).filter((e) => RELATION_OPS.has(e.key));
         if (wrapped.length) {
-            for (const w of wrapped) checkWhere(w.block, related, file, line, seen + 1);
+            for (const w of wrapped) {
+                if (w.block) checkWhere(w.block, related, file, line, seen + 1);
+            }
         } else {
             checkWhere(nested, related, file, line, seen + 1);
         }
