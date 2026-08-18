@@ -65,17 +65,5 @@ module.exports = {
         NODE_ENV: 'production'
       }
     },
-    {
-      name: 'switcheats-worker-maintenance',
-      cwd: './Backend',
-      script: 'src/queues/workers/maintenance.worker.js',
-      instances: 1,
-      exec_mode: 'fork',
-      autorestart: true,
-      max_memory_restart: '250M',
-      env: {
-        NODE_ENV: 'production'
-      }
-    }
   ]
 };
