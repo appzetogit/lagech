@@ -71,12 +71,33 @@ export const findConfigProblems = (cfg = config) => {
 };
 
 /**
+ * Things worth saying at boot that should not stop it.
+ *
+ * Open CORS in production is the one so far. It is a warning rather than a
+ * refusal because it does not affect the mobile apps at all — they send no
+ * Origin — and an operator who has not set it should still be able to bring
+ * the API up. It should still not be silent.
+ */
+export const findConfigWarnings = (cfg = config) => {
+    const warnings = [];
+    if (cfg.nodeEnv === 'production' && !(cfg.corsOrigins || []).length) {
+        warnings.push(
+            'CORS_ORIGINS is not set: any website can call the API and open a socket from a'
+            + ' browser. Set it to the admin panel origin.',
+        );
+    }
+    return warnings;
+};
+
+/**
  * Validates configuration at startup, and refuses to serve traffic without it.
  *
  * Exiting is the point. A server that boots missing a payment secret looks
  * healthy to a load balancer and fails one customer at a time.
  */
 export const validateConfig = () => {
+    for (const warning of findConfigWarnings()) logger.warn(warning);
+
     const problems = findConfigProblems();
     if (problems.length === 0) return;
 

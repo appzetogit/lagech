@@ -9,7 +9,6 @@
     "dev": "nodemon server.js",
     "worker:order": "node src/queues/workers/order.worker.js",
     "worker:tracking": "node src/queues/workers/tracking.worker.js",
-    "worker:maintenance": "node src/queues/workers/maintenance.worker.js",
     "test": "node scripts/require-db.mjs && node scripts/check-prisma-fields.mjs && node --import ./scripts/test-env.mjs --test --test-concurrency=3 \"src/**/*.test.js\"",
     "db:migrate": "prisma migrate deploy && node prisma/apply-constraints.mjs && prisma generate",
     "db:generate": "prisma generate",

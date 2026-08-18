@@ -185,7 +185,7 @@ export async function deleteAdminOffer(id) {
     return count ? { id: String(id) } : null;
 }
 
-/** Sweep coupons whose end date has passed. Called by the maintenance worker. */
+/** Sweep coupons whose end date has passed. Run by scripts/run-scheduled-jobs.js. */
 export async function expireExpiredOffers() {
     const { count } = await prisma.foodOffer.updateMany({
         where: { status: 'active', endDate: { lte: new Date() } },

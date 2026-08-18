@@ -127,5 +127,5 @@ export const getQueueStats = async () => {
     return stats;
 };
 
-export { ORDER_QUEUE, TRACKING_QUEUE, MAINTENANCE_QUEUE, QUEUE_NAMES } from './queue.constants.js';
+export { ORDER_QUEUE, TRACKING_QUEUE, QUEUE_NAMES } from './queue.constants.js';
 export { getBullMQConnection, closeBullMQConnection } from './connection.js';

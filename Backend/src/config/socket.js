@@ -45,7 +45,8 @@ const roomNames = {
 export const initSocket = async (server) => {
     io = new Server(server, {
         cors: {
-            origin: config.socketCorsOrigin,
+            // Same list as the HTTP API. Empty means any origin.
+            origin: config.corsOrigins.length ? config.corsOrigins : '*',
             methods: ['GET', 'POST']
         }
     });

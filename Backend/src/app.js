@@ -45,7 +45,10 @@ app.use(helmet({
     noSniff: true,
     referrerPolicy: { policy: 'strict-origin-when-cross-origin' }
 }));
-app.use(cors());
+// An empty list is any origin — the mobile apps send no Origin header, so
+// nothing else would work for them. Set CORS_ORIGINS in production for the
+// admin panel; validateEnv warns when it is unset there.
+app.use(cors(config.corsOrigins.length ? { origin: config.corsOrigins } : undefined));
 
 // Every request except the health probes above, which a load balancer hits
 // constantly and which are registered before this on purpose.

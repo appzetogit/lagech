@@ -126,8 +126,20 @@ export const config = {
         process.env.VITE_GOOGLE_MAPS_API_KEY ||
         '',
 
-    // Socket.io
-    socketCorsOrigin: process.env.SOCKET_CORS_ORIGIN || '*',
+    /**
+     * Browser origins allowed to call the API and open a socket. Comma-separated.
+     *
+     * Empty means any origin. That is right for the mobile apps, which send no
+     * Origin header at all, and wrong for the admin panel in production — set
+     * this to its origin there. Native apps are unaffected by CORS either way,
+     * so this only ever restricts browsers.
+     *
+     * SOCKET_CORS_ORIGIN is the older name for the same list and is still read.
+     */
+    corsOrigins: String(process.env.CORS_ORIGINS || process.env.SOCKET_CORS_ORIGIN || '')
+        .split(',')
+        .map((origin) => origin.trim().replace(/\/+$/, ''))
+        .filter((origin) => origin && origin !== '*'),
 
     // Razorpay (payments)
     razorpayKeyId: process.env.RAZORPAY_KEY_ID,

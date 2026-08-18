@@ -90,3 +90,19 @@ test('a dependency that is switched on has to be configured', () => {
     assert.equal(noRedis.length, 1);
     assert.match(noRedis[0], /BULLMQ_ENABLED/);
 });
+
+test('open CORS in production is warned about, not refused', async () => {
+    const { findConfigWarnings } = await import('./validateEnv.js');
+
+    // A warning, because it does not affect the mobile apps and an operator
+    // should still be able to bring the API up — but not silence.
+    const open = findConfigWarnings(complete({ corsOrigins: [] }));
+    assert.equal(open.length, 1);
+    assert.match(open[0], /CORS_ORIGINS/);
+
+    assert.deepEqual(findConfigWarnings(complete({ corsOrigins: ['https://admin.example.com'] })), []);
+    assert.deepEqual(findConfigWarnings({ nodeEnv: 'development', corsOrigins: [] }), []);
+
+    // And it is only ever a warning: the same configuration is fit to run.
+    assert.deepEqual(findConfigProblems(complete({ corsOrigins: [] })), []);
+});
