@@ -8,6 +8,53 @@ import { logger } from '../../utils/logger.js';
  * - wallet refunds credit the customer immediately
  * - gateway refunds create a pending record for processGatewayRefund()
  */
+/**
+ * Pay a pending refund into the customer's wallet and close it out.
+ *
+ * Shared by both entry points. The gateway fallback used to call
+ * initiateRefund() instead, which opens a *new* refund row — so one refund
+ * request became two rows, and the one the admin was looking at stayed pending
+ * for ever while the money went out against its replacement.
+ *
+ * The refund row id is the idempotency key. Mongo credited the ledger here AND
+ * again through a legacy embedded-wallet writer, so every wallet refund paid
+ * out twice; there is now exactly one credit path.
+ */
+async function settleToWallet(refund, payment) {
+    try {
+        await creditWallet({
+            entityType: 'user',
+            entityId: refund.userId,
+            amount: Number(refund.amount),
+            description: 'Refund for order',
+            category: 'order_refund',
+            orderId: refund.orderId,
+            paymentId: payment.id,
+            idempotencyKey: `order_refund:${refund.id}`,
+            metadata: { refundId: refund.id, reason: refund.reason }
+        });
+
+        const [processed] = await prisma.$transaction([
+            prisma.refund.update({
+                where: { id: refund.id },
+                // refundTo as well as status: a request that fell back to the
+                // wallet should not still read as a gateway refund.
+                data: { status: 'processed', refundTo: 'wallet', processedAt: new Date() }
+            }),
+            prisma.payment.update({ where: { id: payment.id }, data: { status: 'refunded' } })
+        ]);
+
+        logger.info(`Refund processed (wallet): ${refund.id} amount=${refund.amount}`);
+        return processed;
+    } catch (err) {
+        await prisma.refund.update({
+            where: { id: refund.id },
+            data: { status: 'failed', metadata: { error: err.message } }
+        });
+        throw err;
+    }
+}
+
 export async function initiateRefund({ paymentId, orderId, userId, amount, reason = '', refundTo }) {
     const payment = await prisma.payment.findUnique({ where: { id: String(paymentId) } });
     if (!payment) throw new Error('Payment not found');
@@ -32,39 +79,7 @@ export async function initiateRefund({ paymentId, orderId, userId, amount, reaso
 
     if (to !== 'wallet') return refund;
 
-    try {
-        // The refund row id is the idempotency key. Mongo credited the ledger here
-        // AND again through a legacy embedded-wallet writer, so every wallet refund
-        // paid out twice; there is now exactly one credit path.
-        await creditWallet({
-            entityType: 'user',
-            entityId: refund.userId,
-            amount: Number(refund.amount),
-            description: 'Refund for order',
-            category: 'order_refund',
-            orderId: refund.orderId,
-            paymentId: payment.id,
-            idempotencyKey: `order_refund:${refund.id}`,
-            metadata: { refundId: refund.id, reason }
-        });
-
-        const [processed] = await prisma.$transaction([
-            prisma.refund.update({
-                where: { id: refund.id },
-                data: { status: 'processed', processedAt: new Date() }
-            }),
-            prisma.payment.update({ where: { id: payment.id }, data: { status: 'refunded' } })
-        ]);
-
-        logger.info(`Refund processed (wallet): ${refund.id} amount=${refund.amount}`);
-        return processed;
-    } catch (err) {
-        await prisma.refund.update({
-            where: { id: refund.id },
-            data: { status: 'failed', metadata: { error: err.message } }
-        });
-        throw err;
-    }
+    return settleToWallet(refund, payment);
 }
 
 /**
@@ -81,17 +96,9 @@ export async function processGatewayRefund(refundId) {
     const viaGateway =
         payment.gateway === 'razorpay' && payment.gatewayPaymentId && isRazorpayConfigured();
 
-    if (!viaGateway) {
-        // Fall back to a wallet refund.
-        return initiateRefund({
-            paymentId: payment.id,
-            orderId: refund.orderId,
-            userId: refund.userId,
-            amount: Number(refund.amount),
-            reason: refund.reason,
-            refundTo: 'wallet'
-        });
-    }
+    // No gateway to refund through — settle this request against the wallet
+    // rather than opening a second one for the same money.
+    if (!viaGateway) return settleToWallet(refund, payment);
 
     try {
         const instance = getRazorpayInstance();
