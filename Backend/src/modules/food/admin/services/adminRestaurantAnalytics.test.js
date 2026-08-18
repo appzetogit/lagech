@@ -12,8 +12,6 @@ import { getRestaurantAnalytics } from './adminRestaurantAnalytics.service.js';
  * is one, but a delivered order without a transaction row must still count —
  * dropping it would understate what the restaurant is owed.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const created = { restaurants: [], users: [], orders: [], commissions: [], invoices: [] };
 let restaurantId = null;
 let userId = null;
@@ -48,7 +46,6 @@ const makeOrder = async (over = {}) => {
 };
 
 test.before(async () => {
-    if (!live) return;
     const r = await prisma.foodRestaurant.create({
         data: {
             restaurantName: `Analytics ${uniqueTag('R')}`,
@@ -71,7 +68,6 @@ test.before(async () => {
 });
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodSubscriptionInvoice.deleteMany({ where: { restaurantId: { in: created.restaurants } } });
     await prisma.foodRestaurantCommission.deleteMany({ where: { restaurantId: { in: created.restaurants } } });
     await prisma.foodTransaction.deleteMany({ where: { orderId: { in: created.orders } } });
@@ -81,7 +77,7 @@ test.after(async () => {
     await prisma.$disconnect();
 });
 
-test('order counts come from one grouped query', { skip: !live }, async () => {
+test('order counts come from one grouped query', async () => {
     await makeOrder();
     await makeOrder();
     await makeOrder({ orderStatus: 'preparing' });
@@ -107,7 +103,7 @@ test('order counts come from one grouped query', { skip: !live }, async () => {
     assert.equal(analytics.status, 'active');
 });
 
-test('a delivered order with no transaction still counts', { skip: !live }, async () => {
+test('a delivered order with no transaction still counts', async () => {
     const { analytics, paymentSummary } = await getRestaurantAnalytics(restaurantId);
 
     // Two delivered orders, neither with a ledger row: the money comes from
@@ -128,7 +124,7 @@ test('a delivered order with no transaction still counts', { skip: !live }, asyn
     assert.equal(paymentSummary.currency, 'INR');
 });
 
-test('the ledger wins over the order columns', { skip: !live }, async () => {
+test('the ledger wins over the order columns', async () => {
     const order = await makeOrder();
     await prisma.foodTransaction.create({
         data: {
@@ -157,7 +153,7 @@ test('the ledger wins over the order columns', { skip: !live }, async () => {
     assert.equal(paymentSummary.platformNetProfit, 130 + 33);
 });
 
-test('customers are counted once, repeats separately', { skip: !live }, async () => {
+test('customers are counted once, repeats separately', async () => {
     await makeOrder({ userId: otherUserId });
 
     const { analytics } = await getRestaurantAnalytics(restaurantId);
@@ -166,7 +162,7 @@ test('customers are counted once, repeats separately', { skip: !live }, async ()
     assert.equal(analytics.repeatCustomers, 1);
 });
 
-test('a flat commission is expressed as a percentage of what was sold', { skip: !live }, async () => {
+test('a flat commission is expressed as a percentage of what was sold', async () => {
     const flat = await prisma.foodRestaurantCommission.create({
         data: { restaurantId, commissionType: 'amount', commissionValue: 50, status: true },
     });
@@ -195,7 +191,7 @@ test('a flat commission is expressed as a percentage of what was sold', { skip: 
     );
 });
 
-test('the subscription summary reads the invoices', { skip: !live }, async () => {
+test('the subscription summary reads the invoices', async () => {
     const empty = await getRestaurantAnalytics(restaurantId);
     assert.equal(empty.subscriptionSummary.planLabel, 'Not billed yet');
     assert.equal(empty.subscriptionSummary.status, 'paid', 'nothing billed is nothing owed');
@@ -241,7 +237,7 @@ test('the subscription summary reads the invoices', { skip: !live }, async () =>
     assert.equal(subscriptionSummary.invoices[0].billingMonthLabel, 'Pre-migration balance');
 });
 
-test('an unknown restaurant reads back as nothing', { skip: !live }, async () => {
+test('an unknown restaurant reads back as nothing', async () => {
     assert.equal(await getRestaurantAnalytics('not-an-id'), null);
     assert.equal(await getRestaurantAnalytics('a'.repeat(24)), null);
 });

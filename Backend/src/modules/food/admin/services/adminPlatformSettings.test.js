@@ -19,13 +19,10 @@ import { uniquePhone } from '../../../../utils/testIds.js';
  * singleton and the bands are a shared table, and node runs test files in
  * parallel, so the two suites have to live in the file that owns those rows.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const created = { users: [], reports: [] };
 const stamp = () => `${Date.now()}${Math.floor(performance.now() * 1000) % 1000}`;
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodSafetyEmergencyReport.deleteMany({ where: { id: { in: created.reports } } });
     await prisma.foodUser.deleteMany({ where: { id: { in: created.users } } });
     await prisma.$disconnect();
@@ -50,7 +47,7 @@ const makeReport = async (data = {}) => {
     return report;
 };
 
-test('referral settings create then update one row', { skip: !live }, async () => {
+test('referral settings create then update one row', async () => {
     const first = await upsertReferralSettings({ referralRewardUser: 50, referralLimitUser: 5 });
     assert.equal(first.referralRewardUser, 50);
 
@@ -66,13 +63,13 @@ test('referral settings create then update one row', { skip: !live }, async () =
     assert.equal(count, 1, 'editing settings must not accumulate rows');
 });
 
-test('a negative referral reward is clamped to zero', { skip: !live }, async () => {
+test('a negative referral reward is clamped to zero', async () => {
     const saved = await upsertReferralSettings({ referralRewardUser: -100, referralLimitUser: -3 });
     assert.equal(saved.referralRewardUser, 0, 'a referral cannot cost the user money');
     assert.equal(saved.referralLimitUser, 0);
 });
 
-test('safety reports filter by status, priority and text', { skip: !live }, async () => {
+test('safety reports filter by status, priority and text', async () => {
     const unique = `Urgent${stamp()}`;
     const urgent = await makeReport({ status: 'urgent', priority: 'critical', userName: unique });
     await makeReport({ status: 'read', priority: 'low' });
@@ -92,7 +89,7 @@ test('safety reports filter by status, priority and text', { skip: !live }, asyn
     assert.ok(bogus.pagination.total >= 2);
 });
 
-test('a safety report changes status and priority, and deletes', { skip: !live }, async () => {
+test('a safety report changes status and priority, and deletes', async () => {
     const report = await makeReport();
 
     assert.equal((await updateSafetyEmergencyStatus(report.id, 'resolved')).status, 'resolved');

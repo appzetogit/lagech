@@ -15,12 +15,9 @@ import {
  * `userId` is polymorphic, so the author lookup is the part worth pinning: a
  * restaurant's name lives in a different column from a customer's.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const created = { feedback: [], users: [], restaurants: [], partners: [] };
 
 test.after(async () => {
-    if (!live) return;
     await prisma.feedbackExperience.deleteMany({ where: { id: { in: created.feedback } } });
     await prisma.foodRestaurant.deleteMany({ where: { id: { in: created.restaurants } } });
     await prisma.foodDeliveryPartner.deleteMany({ where: { id: { in: created.partners } } });
@@ -28,7 +25,7 @@ test.after(async () => {
     await prisma.$disconnect();
 });
 
-test('the author is resolved from whichever table it lives in', { skip: !live }, async () => {
+test('the author is resolved from whichever table it lives in', async () => {
     const tag = uniqueTag('Fx');
 
     const user = await prisma.foodUser.create({
@@ -80,7 +77,7 @@ test('the author is resolved from whichever table it lives in', { skip: !live },
     assert.equal(asRider.userName, `${tag} Rider`);
 });
 
-test('a rating outside the scale is refused', { skip: !live }, async () => {
+test('a rating outside the scale is refused', async () => {
     const user = await prisma.foodUser.create({ data: { phone: uniquePhone('5') } });
     created.users.push(user.id);
     const who = { userId: user.id, role: 'USER' };
@@ -109,7 +106,7 @@ test('a rating outside the scale is refused', { skip: !live }, async () => {
     );
 });
 
-test('statistics are reported out of ten', { skip: !live }, async () => {
+test('statistics are reported out of ten', async () => {
     const user = await prisma.foodUser.create({ data: { phone: uniquePhone('5') } });
     created.users.push(user.id);
 
@@ -134,7 +131,7 @@ test('statistics are reported out of ten', { skip: !live }, async () => {
     assert.equal(statistics.maxRating, 10);
 });
 
-test('the filters halve the displayed rating back to the stored one', { skip: !live }, async () => {
+test('the filters halve the displayed rating back to the stored one', async () => {
     const user = await prisma.foodUser.create({ data: { phone: uniquePhone('5') } });
     created.users.push(user.id);
 
@@ -161,7 +158,7 @@ test('the filters halve the displayed rating back to the stored one', { skip: !l
     assert.equal(unknown.pagination.total, 2);
 });
 
-test('deleting reports whether anything went', { skip: !live }, async () => {
+test('deleting reports whether anything went', async () => {
     const user = await prisma.foodUser.create({ data: { phone: uniquePhone('5') } });
     created.users.push(user.id);
     const fb = await createFeedbackExperience(

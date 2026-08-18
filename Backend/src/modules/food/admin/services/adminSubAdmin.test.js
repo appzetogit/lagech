@@ -22,8 +22,6 @@ import { getZones, getZoneById, createZone, updateZone, deleteZone } from './adm
  * hook that went with the model, so a straight port would have stored what the
  * admin typed.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const created = { admins: [], zones: [] };
 const stamp = () => `${Date.now()}${Math.floor(performance.now() * 1000) % 1000}`;
 
@@ -39,13 +37,12 @@ const makeSubAdmin = async (payload = {}) => {
 };
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodAdmin.deleteMany({ where: { id: { in: created.admins } } });
     await prisma.foodZone.deleteMany({ where: { id: { in: created.zones } } });
     await prisma.$disconnect();
 });
 
-test('a sub-admin password is stored hashed, never in the clear', { skip: !live }, async () => {
+test('a sub-admin password is stored hashed, never in the clear', async () => {
     const admin = await makeSubAdmin({ password: 'plaintext-secret' });
 
     const row = await prisma.foodAdmin.findUnique({ where: { id: admin.id } });
@@ -55,7 +52,7 @@ test('a sub-admin password is stored hashed, never in the clear', { skip: !live 
     assert.equal(await compareAdminPassword('wrong', row.password), false);
 });
 
-test('no read returns the password column', { skip: !live }, async () => {
+test('no read returns the password column', async () => {
     const admin = await makeSubAdmin();
     assert.equal(admin.password, undefined, 'not from create');
     assert.equal((await getSubAdminById(admin.id)).password, undefined, 'not from a read');
@@ -67,7 +64,7 @@ test('no read returns the password column', { skip: !live }, async () => {
     assert.equal(updated.password, undefined, 'not from a write');
 });
 
-test('a duplicate email is refused', { skip: !live }, async () => {
+test('a duplicate email is refused', async () => {
     const email = `dupe${stamp()}@test.local`;
     await makeSubAdmin({ email });
 
@@ -77,14 +74,14 @@ test('a duplicate email is refused', { skip: !live }, async () => {
     );
 });
 
-test('a new sub-admin starts with no permissions', { skip: !live }, async () => {
+test('a new sub-admin starts with no permissions', async () => {
     const admin = await makeSubAdmin();
     assert.deepEqual(admin.permissions, {}, 'granted explicitly, never by default');
     assert.equal(admin.adminType, 'sub_admin');
     assert.equal(admin.isActive, true);
 });
 
-test('permissions are normalised before being stored', { skip: !live }, async () => {
+test('permissions are normalised before being stored', async () => {
     const admin = await makeSubAdmin();
 
     const updated = await updateSubAdminPermissions(admin.id, {
@@ -99,7 +96,7 @@ test('permissions are normalised before being stored', { skip: !live }, async ()
     assert.deepEqual(updated.permissions.food_management, []);
 });
 
-test('an unknown section or action is rejected, not quietly dropped', { skip: !live }, async () => {
+test('an unknown section or action is rejected, not quietly dropped', async () => {
     const admin = await makeSubAdmin();
 
     // Validation runs before sanitisation deliberately: a payload naming
@@ -118,7 +115,7 @@ test('an unknown section or action is rejected, not quietly dropped', { skip: !l
     assert.deepEqual(untouched.permissions, {}, 'a rejected payload changes nothing');
 });
 
-test('an invalid permissions payload is refused outright', { skip: !live }, async () => {
+test('an invalid permissions payload is refused outright', async () => {
     const admin = await makeSubAdmin();
     await assert.rejects(
         () => updateSubAdminPermissions(admin.id, { restaurants: 'view' }),
@@ -126,7 +123,7 @@ test('an invalid permissions payload is refused outright', { skip: !live }, asyn
     );
 });
 
-test('these endpoints cannot reach a super admin', { skip: !live }, async () => {
+test('these endpoints cannot reach a super admin', async () => {
     const superAdmin = await prisma.foodAdmin.create({
         data: {
             email: `super${stamp()}@test.local`,
@@ -150,7 +147,7 @@ test('these endpoints cannot reach a super admin', { skip: !live }, async () => 
     assert.equal(untouched.isDeleted, false);
 });
 
-test('deleting a sub-admin is a soft delete', { skip: !live }, async () => {
+test('deleting a sub-admin is a soft delete', async () => {
     const admin = await makeSubAdmin();
 
     const deleted = await deleteSubAdmin(admin.id);
@@ -168,7 +165,7 @@ test('deleting a sub-admin is a soft delete', { skip: !live }, async () => {
     await assert.rejects(() => updateSubAdminStatus(admin.id, true), /not found/);
 });
 
-test('sub-admins can be searched and filtered by status', { skip: !live }, async () => {
+test('sub-admins can be searched and filtered by status', async () => {
     const unique = `Findme${stamp()}`;
     const admin = await makeSubAdmin({ name: `${unique} Person` });
 
@@ -181,7 +178,7 @@ test('sub-admins can be searched and filtered by status', { skip: !live }, async
     assert.equal((await getSubAdmins({ search: unique, status: 'inactive' })).items.length, 1);
 });
 
-test('a zone needs a name and at least three points', { skip: !live }, async () => {
+test('a zone needs a name and at least three points', async () => {
     assert.deepEqual(await createZone({ coordinates: [] }), { error: 'Zone name is required' });
 
     const tooFew = await createZone({
@@ -192,7 +189,7 @@ test('a zone needs a name and at least three points', { skip: !live }, async () 
     assert.match(tooFew.error, /3 coordinates/);
 });
 
-test('a created zone gets its derived boundary', { skip: !live }, async () => {
+test('a created zone gets its derived boundary', async () => {
     const { zone } = await createZone({
         name: `Zone ${stamp()}`,
         coordinates: [
@@ -215,7 +212,7 @@ test('a created zone gets its derived boundary', { skip: !live }, async () => {
     assert.equal(row.hasBoundary, true, 'the trigger built the polygon');
 });
 
-test('editing the ring re-derives the boundary, a short ring is ignored', { skip: !live }, async () => {
+test('editing the ring re-derives the boundary, a short ring is ignored', async () => {
     const { zone } = await createZone({
         name: `Editable ${stamp()}`,
         coordinates: [
@@ -243,7 +240,7 @@ test('editing the ring re-derives the boundary, a short ring is ignored', { skip
     assert.equal(ignored.zone.coordinates.length, 4, 'the usable ring survives');
 });
 
-test('zones list, filter, and delete cleanly', { skip: !live }, async () => {
+test('zones list, filter, and delete cleanly', async () => {
     const name = `Listed ${stamp()}`;
     const { zone } = await createZone({
         name,

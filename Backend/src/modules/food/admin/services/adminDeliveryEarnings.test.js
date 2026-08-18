@@ -12,8 +12,6 @@ import { getDeliveryEarnings } from './adminDeliveryEarnings.service.js';
  * `riderEarning` was recorded is paid at the delivery fee, and the page total
  * has to apply that per order rather than to the columns as a whole.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const created = { restaurants: [], users: [], partners: [], orders: [] };
 let restaurantId = null;
 let userId = null;
@@ -45,7 +43,6 @@ const makeOrder = async (over = {}) => {
 };
 
 test.before(async () => {
-    if (!live) return;
     tag = uniqueTag('Earn');
 
     const r = await prisma.foodRestaurant.create({
@@ -75,7 +72,6 @@ test.before(async () => {
 });
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodOrder.deleteMany({ where: { id: { in: created.orders } } });
     await prisma.foodUser.deleteMany({ where: { id: { in: created.users } } });
     await prisma.foodDeliveryPartner.deleteMany({ where: { id: { in: created.partners } } });
@@ -83,7 +79,7 @@ test.after(async () => {
     await prisma.$disconnect();
 });
 
-test('a row names the rider, the restaurant and the amount', { skip: !live }, async () => {
+test('a row names the rider, the restaurant and the amount', async () => {
     const order = await makeOrder();
 
     const { earnings, summary } = await getDeliveryEarnings({ search: order.orderId });
@@ -103,7 +99,7 @@ test('a row names the rider, the restaurant and the amount', { skip: !live }, as
     assert.equal(summary.totalDeliveryPartners, 1);
 });
 
-test('an order with no recorded earning is paid at the delivery fee', { skip: !live }, async () => {
+test('an order with no recorded earning is paid at the delivery fee', async () => {
     const legacy = await makeOrder({ riderEarning: 0 });
 
     const single = await getDeliveryEarnings({ search: legacy.orderId });
@@ -117,14 +113,14 @@ test('an order with no recorded earning is paid at the delivery fee', { skip: !l
     assert.equal(both.summary.totalEarnings, 75, '35 recorded plus 40 fallen back');
 });
 
-test('only dispatched orders appear', { skip: !live }, async () => {
+test('only dispatched orders appear', async () => {
     const undispatched = await makeOrder({ dispatchDeliveryPartnerId: null });
 
     const { earnings } = await getDeliveryEarnings({ search: tag, limit: 100 });
     assert.ok(!earnings.some((e) => e.orderId === undispatched.orderId), 'no rider, nothing owed');
 });
 
-test('the rider count is distinct', { skip: !live }, async () => {
+test('the rider count is distinct', async () => {
     await makeOrder({ dispatchDeliveryPartnerId: otherRiderId });
     await makeOrder({ dispatchDeliveryPartnerId: otherRiderId });
 
@@ -133,7 +129,7 @@ test('the rider count is distinct', { skip: !live }, async () => {
     assert.equal(summary.totalOrders, 4);
 });
 
-test('search reaches the rider and the restaurant', { skip: !live }, async () => {
+test('search reaches the rider and the restaurant', async () => {
     const byRider = await getDeliveryEarnings({ search: 'Rider Two', limit: 100 });
     assert.ok(byRider.earnings.length >= 2);
     assert.ok(byRider.earnings.every((e) => e.deliveryPartnerId === otherRiderId));
@@ -146,7 +142,7 @@ test('search reaches the rider and the restaurant', { skip: !live }, async () =>
     assert.equal(nothing.summary.totalEarnings, 0);
 });
 
-test('a date range narrows it, and paging is reported', { skip: !live }, async () => {
+test('a date range narrows it, and paging is reported', async () => {
     const old = await makeOrder({ createdAt: new Date('2033-08-15T20:00:00') });
 
     const sameDay = await getDeliveryEarnings({

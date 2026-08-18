@@ -18,8 +18,6 @@ import {
  * An admin may file a dish under any category and what they create is approved
  * on the spot — both differ from the restaurant-facing path, so both are pinned.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const created = { restaurants: [], categories: [], foods: [], addons: [] };
 
 const makeRestaurant = async (over = {}) => {
@@ -55,7 +53,6 @@ const track = (food) => {
 };
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodAddon.deleteMany({ where: { id: { in: created.addons } } });
     await prisma.foodItem.deleteMany({ where: { restaurantId: { in: created.restaurants } } });
     await prisma.foodCategory.deleteMany({ where: { id: { in: created.categories } } });
@@ -63,7 +60,7 @@ test.after(async () => {
     await prisma.$disconnect();
 });
 
-test('an admin-created dish is approved immediately', { skip: !live }, async () => {
+test('an admin-created dish is approved immediately', async () => {
     const restaurant = await makeRestaurant();
     const category = await makeCategory();
 
@@ -82,7 +79,7 @@ test('an admin-created dish is approved immediately', { skip: !live }, async () 
     assert.equal(food.foodType, 'Veg');
 });
 
-test('a dish with sizes is priced from its cheapest', { skip: !live }, async () => {
+test('a dish with sizes is priced from its cheapest', async () => {
     const restaurant = await makeRestaurant();
     const category = await makeCategory();
 
@@ -100,7 +97,7 @@ test('a dish with sizes is priced from its cheapest', { skip: !live }, async () 
     assert.equal(Number(food.price), 249);
 });
 
-test('editing variants keeps the ids of the ones that stayed', { skip: !live }, async () => {
+test('editing variants keeps the ids of the ones that stayed', async () => {
     const restaurant = await makeRestaurant();
     const category = await makeCategory();
 
@@ -128,7 +125,7 @@ test('editing variants keeps the ids of the ones that stayed', { skip: !live }, 
     assert.equal(Number(updated.price), 159, 'repriced to the new cheapest');
 });
 
-test('a price is required and must be positive', { skip: !live }, async () => {
+test('a price is required and must be positive', async () => {
     const restaurant = await makeRestaurant();
     const category = await makeCategory();
 
@@ -143,7 +140,7 @@ test('a price is required and must be positive', { skip: !live }, async () => {
     );
 });
 
-test('a base price cannot be edited on a dish that has sizes', { skip: !live }, async () => {
+test('a base price cannot be edited on a dish that has sizes', async () => {
     const restaurant = await makeRestaurant();
     const category = await makeCategory();
 
@@ -169,7 +166,7 @@ test('a base price cannot be edited on a dish that has sizes', { skip: !live }, 
     assert.equal(Number(flattened.price), 149);
 });
 
-test('a pure veg restaurant cannot be given a non-veg dish', { skip: !live }, async () => {
+test('a pure veg restaurant cannot be given a non-veg dish', async () => {
     const veg = await makeRestaurant({ pureVegRestaurant: true });
     // The rule is strict: a pure-veg restaurant may only use Veg-scoped
     // categories, not even a 'Both' one.
@@ -202,7 +199,7 @@ test('a pure veg restaurant cannot be given a non-veg dish', { skip: !live }, as
     await assert.rejects(() => updateFood(ok.id, { foodType: 'Non-Veg' }), /only use veg foods/);
 });
 
-test('a category that rejects the diet is refused', { skip: !live }, async () => {
+test('a category that rejects the diet is refused', async () => {
     const restaurant = await makeRestaurant();
     const vegOnly = await makeCategory({ foodTypeScope: 'Veg' });
 
@@ -227,7 +224,7 @@ test('a category that rejects the diet is refused', { skip: !live }, async () =>
     );
 });
 
-test('the list joins the restaurant name and filters', { skip: !live }, async () => {
+test('the list joins the restaurant name and filters', async () => {
     const restaurant = await makeRestaurant();
     const category = await makeCategory();
     const unique = uniqueTag('Dish');
@@ -250,7 +247,7 @@ test('the list joins the restaurant name and filters', { skip: !live }, async ()
     assert.equal(byStatus.total, 0, 'admin-created dishes are already approved');
 });
 
-test('bulk delete honours the current search when selecting all', { skip: !live }, async () => {
+test('bulk delete honours the current search when selecting all', async () => {
     const restaurant = await makeRestaurant();
     const category = await makeCategory();
     const unique = uniqueTag('Bulk');
@@ -277,7 +274,7 @@ test('bulk delete honours the current search when selecting all', { skip: !live 
     );
 });
 
-test('deleting a dish takes its variants with it', { skip: !live }, async () => {
+test('deleting a dish takes its variants with it', async () => {
     const restaurant = await makeRestaurant();
     const category = await makeCategory();
 
@@ -295,7 +292,7 @@ test('deleting a dish takes its variants with it', { skip: !live }, async () => 
     assert.equal(await deleteFood('not-an-id'), null);
 });
 
-test('bulk approve clears the queue for dishes and add-ons alike', { skip: !live }, async () => {
+test('bulk approve clears the queue for dishes and add-ons alike', async () => {
     const restaurant = await makeRestaurant();
     const category = await makeCategory();
 
@@ -333,7 +330,7 @@ test('bulk approve clears the queue for dishes and add-ons alike', { skip: !live
     assert.deepEqual(approvedAddon.published, approvedAddon.draft);
 });
 
-test('bulk approve leaves soft-deleted add-ons alone', { skip: !live }, async () => {
+test('bulk approve leaves soft-deleted add-ons alone', async () => {
     const restaurant = await makeRestaurant();
 
     const deleted = await prisma.foodAddon.create({

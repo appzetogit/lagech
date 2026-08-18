@@ -19,8 +19,6 @@ import {
  * points at a customer, a restaurant or a delivery partner depending on
  * userModel — so it cannot be a join.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const created = {
     users: [], restaurants: [], partners: [], orders: [],
     tickets: [], feedback: [], categories: [], foods: [], addons: [],
@@ -67,7 +65,6 @@ const makeOrder = async (user, restaurant, over = {}) => {
 };
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodSupportTicket.deleteMany({ where: { id: { in: created.tickets } } });
     await prisma.feedbackExperience.deleteMany({ where: { id: { in: created.feedback } } });
     await prisma.foodAddon.deleteMany({ where: { id: { in: created.addons } } });
@@ -80,7 +77,7 @@ test.after(async () => {
     await prisma.$disconnect();
 });
 
-test('complaints search through their relations', { skip: !live }, async () => {
+test('complaints search through their relations', async () => {
     const tag = uniqueTag('Cx');
     const user = await makeUser(`${tag} Customer`);
     const restaurant = await makeRestaurant(`${tag} Diner`);
@@ -110,7 +107,7 @@ test('complaints search through their relations', { skip: !live }, async () => {
     assert.equal(row.restaurant.name ?? row.restaurant.restaurantName, `${tag} Diner`);
 });
 
-test('a complaint updates and reports the API status spelling', { skip: !live }, async () => {
+test('a complaint updates and reports the API status spelling', async () => {
     const user = await makeUser(uniqueTag('U'));
     const ticket = await prisma.foodSupportTicket.create({
         data: { userId: user.id, type: 'order', issueType: 'Late', description: 'x' },
@@ -139,7 +136,7 @@ test('a complaint updates and reports the API status spelling', { skip: !live },
     await assert.rejects(() => updateRestaurantComplaint('bad', {}), /Invalid complaint ID/);
 });
 
-test('reviews come from the rating columns, not a subdocument', { skip: !live }, async () => {
+test('reviews come from the rating columns, not a subdocument', async () => {
     const tag = uniqueTag('Rev');
     const user = await makeUser(`${tag} Rater`);
     const restaurant = await makeRestaurant(`${tag} Place`);
@@ -161,7 +158,7 @@ test('reviews come from the rating columns, not a subdocument', { skip: !live },
     assert.equal(reviews[0].orderId, `${tag}-rated`);
 });
 
-test('feedback resolves its author across three tables', { skip: !live }, async () => {
+test('feedback resolves its author across three tables', async () => {
     const tag = uniqueTag('Fb');
 
     const user = await makeUser(`${tag} Eater`);
@@ -192,7 +189,7 @@ test('feedback resolves its author across three tables', { skip: !live }, async 
     assert.ok(reviews.every((r) => r.customer.phone !== 'N/A'));
 });
 
-test('feedback filters by rating', { skip: !live }, async () => {
+test('feedback filters by rating', async () => {
     const tag = uniqueTag('Rate');
     const user = await makeUser(`${tag} Person`);
 
@@ -210,7 +207,7 @@ test('feedback filters by rating', { skip: !live }, async () => {
     assert.equal((await getContactMessages({ search: tag, rating: '1' })).pagination.total, 1);
 });
 
-test('global search reaches every kind of record', { skip: !live }, async () => {
+test('global search reaches every kind of record', async () => {
     const tag = uniqueTag('Gs');
 
     const user = await makeUser(`${tag} Person`);

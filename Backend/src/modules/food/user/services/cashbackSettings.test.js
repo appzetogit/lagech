@@ -8,12 +8,9 @@ import { getActiveCashbackSettings, upsertCashbackSettings } from './cashback.se
  * The admin panel's cashback rules. These decide real money paid to customers,
  * so a partial form post must not zero the fields it did not send.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 let snapshot = null;
 
 test.before(async () => {
-    if (!live) return;
     snapshot = await prisma.foodCashbackSettings.findFirst({
         where: { isActive: true },
         orderBy: { createdAt: 'desc' },
@@ -21,7 +18,6 @@ test.before(async () => {
 });
 
 test.after(async () => {
-    if (!live) return;
     if (snapshot) {
         const { id, _id, createdAt, updatedAt, ...values } = snapshot;
         // Restored by id, not updated by it: these tables hold one row, and a
@@ -35,14 +31,14 @@ test.after(async () => {
     await prisma.$disconnect();
 });
 
-test('with nothing saved the reader hands back safe defaults', { skip: !live }, async () => {
+test('with nothing saved the reader hands back safe defaults', async () => {
     await prisma.foodCashbackSettings.deleteMany({});
     const settings = await getActiveCashbackSettings();
     assert.equal(settings.isEnabled, false, 'cashback is off until someone turns it on');
     assert.equal(settings.cashbackValue, 0);
 });
 
-test('an edit touches only the keys that were sent', { skip: !live }, async () => {
+test('an edit touches only the keys that were sent', async () => {
     await upsertCashbackSettings({
         isEnabled: true,
         cashbackType: 'percentage',
@@ -60,7 +56,7 @@ test('an edit touches only the keys that were sent', { skip: !live }, async () =
     assert.equal(after.perUserLimit, 3);
 });
 
-test('negative amounts are clamped and an unknown type falls back', { skip: !live }, async () => {
+test('negative amounts are clamped and an unknown type falls back', async () => {
     const saved = await upsertCashbackSettings({
         cashbackValue: -5,
         maxCashback: -100,
@@ -77,7 +73,7 @@ test('negative amounts are clamped and an unknown type falls back', { skip: !liv
     assert.equal((await upsertCashbackSettings({ cashbackType: 'flat' })).cashbackType, 'flat');
 });
 
-test('the second save updates the row rather than adding another', { skip: !live }, async () => {
+test('the second save updates the row rather than adding another', async () => {
     await prisma.foodCashbackSettings.deleteMany({});
     await upsertCashbackSettings({ isEnabled: true });
     await upsertCashbackSettings({ isEnabled: false });

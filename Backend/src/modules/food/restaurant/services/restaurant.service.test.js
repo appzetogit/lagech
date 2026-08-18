@@ -25,8 +25,6 @@ import { uniquePhone } from '../../../../utils/testIds.js';
  * Prisma equivalent: $geoNear became an indexed ST_DWithin, and the "not yet
  * used up" offer clause was a $expr comparing two fields.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 // This file's own patch of the map, and a point far outside it. Zone lookup
 // searches every zone in the database, so overlapping another test file's zone
 // makes both of them flaky.
@@ -59,7 +57,6 @@ const makeOffer = async (data) => {
 };
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodSubscriptionInvoice.deleteMany({ where: { id: { in: created.invoices } } });
     await prisma.foodOffer.deleteMany({ where: { id: { in: created.offers } } });
     await prisma.foodRestaurantOutletTimings.deleteMany({
@@ -70,7 +67,7 @@ test.after(async () => {
     await prisma.$disconnect();
 });
 
-test('the feed lists approved restaurants and hides the rest', { skip: !live }, async () => {
+test('the feed lists approved restaurants and hides the rest', async () => {
     const open = await makeRestaurant();
     const pending = await makeRestaurant({ status: 'pending' });
 
@@ -81,7 +78,7 @@ test('the feed lists approved restaurants and hides the rest', { skip: !live }, 
     assert.ok(!ids.has(pending.id), 'an unapproved restaurant is not public');
 });
 
-test('a radius search returns only what is inside it, with a distance', { skip: !live }, async () => {
+test('a radius search returns only what is inside it, with a distance', async () => {
     const near = await makeRestaurant({ latitude: HERE.lat, longitude: HERE.lng });
     const far = await makeRestaurant({ latitude: FAR.lat, longitude: FAR.lng });
 
@@ -99,7 +96,7 @@ test('a radius search returns only what is inside it, with a distance', { skip: 
     assert.ok(row.distanceInKm < 5, `expected a short distance, got ${row.distanceInKm}`);
 });
 
-test('a restaurant with no coordinates still shows in the default feed', { skip: !live }, async () => {
+test('a restaurant with no coordinates still shows in the default feed', async () => {
     const noGeo = await makeRestaurant();
 
     // No radius and no nearest sort, so the geo path must not run — otherwise a
@@ -108,7 +105,7 @@ test('a restaurant with no coordinates still shows in the default feed', { skip:
     assert.ok(new Set(restaurants.map((r) => r.id)).has(noGeo.id));
 });
 
-test('searching matches the name', { skip: !live }, async () => {
+test('searching matches the name', async () => {
     const unique = `Zqx${stamp()}`;
     const match = await makeRestaurant({ restaurantName: `${unique} Kitchen` });
     await makeRestaurant();
@@ -118,7 +115,7 @@ test('searching matches the name', { skip: !live }, async () => {
     assert.equal(restaurants[0].id, match.id);
 });
 
-test('a restaurant resolves by id and by slug', { skip: !live }, async () => {
+test('a restaurant resolves by id and by slug', async () => {
     const name = `Slugged ${stamp()}`;
     const r = await makeRestaurant({
         restaurantName: name,
@@ -134,7 +131,7 @@ test('a restaurant resolves by id and by slug', { skip: !live }, async () => {
     assert.equal(await getApprovedRestaurantByIdOrSlug('no-such-restaurant'), null);
 });
 
-test('an offer that has been used up is not offered again', { skip: !live }, async () => {
+test('an offer that has been used up is not offered again', async () => {
     const live1 = await makeOffer({ usageLimit: 5, usedCount: 2 });
     const exhausted = await makeOffer({ usageLimit: 5, usedCount: 5 });
     const unlimited = await makeOffer({ usageLimit: null, usedCount: 999 });
@@ -151,7 +148,7 @@ test('an offer that has been used up is not offered again', { skip: !live }, asy
     assert.ok(ids.has(zeroMeansUnlimited.id), '0 means unlimited, not exhausted');
 });
 
-test('an expired offer is not listed, one ending today still is', { skip: !live }, async () => {
+test('an expired offer is not listed, one ending today still is', async () => {
     const expired = await makeOffer({ endDate: new Date(Date.now() - 86400000) });
     const endsToday = await makeOffer({ endDate: new Date() });
     const notStarted = await makeOffer({ startDate: new Date(Date.now() + 86400000) });
@@ -165,7 +162,7 @@ test('an expired offer is not listed, one ending today still is', { skip: !live 
     assert.ok(!ids.has(notStarted.id));
 });
 
-test('a restaurant-scoped offer only surfaces for that restaurant', { skip: !live }, async () => {
+test('a restaurant-scoped offer only surfaces for that restaurant', async () => {
     const mine = await makeRestaurant();
     const other = await makeRestaurant();
 
@@ -182,7 +179,7 @@ test('a restaurant-scoped offer only surfaces for that restaurant', { skip: !liv
     assert.ok(!forOther.has(listed.id));
 });
 
-test('a duplicate coupon code is refused', { skip: !live }, async () => {
+test('a duplicate coupon code is refused', async () => {
     const r = await makeRestaurant();
     const code = `DUP${stamp()}`;
 
@@ -200,7 +197,7 @@ test('a duplicate coupon code is refused', { skip: !live }, async () => {
     );
 });
 
-test('a restaurant cannot touch another restaurant\'s offer', { skip: !live }, async () => {
+test('a restaurant cannot touch another restaurant\'s offer', async () => {
     const mine = await makeRestaurant();
     const other = await makeRestaurant();
 
@@ -224,7 +221,7 @@ test('a restaurant cannot touch another restaurant\'s offer', { skip: !live }, a
     assert.equal(await deleteRestaurantOffer(mine.id, offer.id), true);
 });
 
-test('the first location goes live, a later move needs approval', { skip: !live }, async () => {
+test('the first location goes live, a later move needs approval', async () => {
     const zone = await prisma.foodZone.create({
         data: {
             name: `Test Zone ${stamp()}`,
@@ -260,7 +257,7 @@ test('the first location goes live, a later move needs approval', { skip: !live 
     assert.equal(afterSecond.pendingZoneId, zone.id);
 });
 
-test('a pin outside every zone is refused', { skip: !live }, async () => {
+test('a pin outside every zone is refused', async () => {
     const r = await makeRestaurant();
     await assert.rejects(
         () => updateRestaurantProfile(r.id, { location: { latitude: 1.5, longitude: 1.5 } }),
@@ -268,7 +265,7 @@ test('a pin outside every zone is refused', { skip: !live }, async () => {
     );
 });
 
-test('editing a reviewable field clears the previous decision', { skip: !live }, async () => {
+test('editing a reviewable field clears the previous decision', async () => {
     const r = await makeRestaurant({ status: 'approved', approvedAt: new Date(), rejectionReason: 'old' });
 
     const updated = await updateRestaurantProfile(r.id, { restaurantName: `Renamed ${stamp()}` });
@@ -280,7 +277,7 @@ test('editing a reviewable field clears the previous decision', { skip: !live },
     assert.equal(row.rejectionReason, '');
 });
 
-test('going online clears the manual offline override', { skip: !live }, async () => {
+test('going online clears the manual offline override', async () => {
     const r = await makeRestaurant({ isAcceptingOrders: false, outsideHoursOverride: true });
 
     const profile = await updateRestaurantAcceptingOrders(r.id, true);
@@ -290,7 +287,7 @@ test('going online clears the manual offline override', { skip: !live }, async (
     assert.equal(row.outsideHoursOverride, false);
 });
 
-test('the profile does not leak auth fields', { skip: !live }, async () => {
+test('the profile does not leak auth fields', async () => {
     const r = await makeRestaurant();
     const profile = await getCurrentRestaurantProfile(r.id);
 
@@ -299,7 +296,7 @@ test('the profile does not leak auth fields', { skip: !live }, async () => {
     assert.equal(profile.tokenVersion, undefined);
 });
 
-test('a restaurant that has billed cannot be deleted', { skip: !live }, async () => {
+test('a restaurant that has billed cannot be deleted', async () => {
     const r = await makeRestaurant();
 
     const invoice = await prisma.foodSubscriptionInvoice.create({
@@ -318,7 +315,7 @@ test('a restaurant that has billed cannot be deleted', { skip: !live }, async ()
     await assert.rejects(() => deleteCurrentRestaurantAccount(r.id), /cannot be deleted/);
 });
 
-test('a restaurant that never traded deletes, taking its dishes with it', { skip: !live }, async () => {
+test('a restaurant that never traded deletes, taking its dishes with it', async () => {
     const r = await makeRestaurant();
     const food = await prisma.foodItem.create({
         data: { restaurantId: r.id, name: 'Doomed Dish', price: 100 },

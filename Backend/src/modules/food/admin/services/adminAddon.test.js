@@ -17,8 +17,6 @@ import {
  * customer app serves `published`, and approving copies one over the other. An
  * edit to a live add-on must not reach customers before an admin sees it.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const created = { addons: [], restaurants: [] };
 
 const makeRestaurant = async () => {
@@ -48,13 +46,12 @@ const makeAddon = async (restaurant, over = {}) => {
 };
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodAddon.deleteMany({ where: { id: { in: created.addons } } });
     await prisma.foodRestaurant.deleteMany({ where: { id: { in: created.restaurants } } });
     await prisma.$disconnect();
 });
 
-test('approving copies the draft over to published', { skip: !live }, async () => {
+test('approving copies the draft over to published', async () => {
     const restaurant = await makeRestaurant();
     const addon = await makeAddon(restaurant);
 
@@ -68,7 +65,7 @@ test('approving copies the draft over to published', { skip: !live }, async () =
     assert.ok(approved.approvedAt);
 });
 
-test('approving after a rejection clears the old reason', { skip: !live }, async () => {
+test('approving after a rejection clears the old reason', async () => {
     const restaurant = await makeRestaurant();
     const addon = await makeAddon(restaurant);
 
@@ -82,7 +79,7 @@ test('approving after a rejection clears the old reason', { skip: !live }, async
     assert.equal(approved.rejectedAt, null);
 });
 
-test('a rejection needs a reason the restaurant can act on', { skip: !live }, async () => {
+test('a rejection needs a reason the restaurant can act on', async () => {
     const restaurant = await makeRestaurant();
     const addon = await makeAddon(restaurant);
 
@@ -94,7 +91,7 @@ test('a rejection needs a reason the restaurant can act on', { skip: !live }, as
     assert.equal(row.approvalStatus, 'pending');
 });
 
-test('editing a pending add-on touches only the draft', { skip: !live }, async () => {
+test('editing a pending add-on touches only the draft', async () => {
     const restaurant = await makeRestaurant();
     const addon = await makeAddon(restaurant);
 
@@ -108,7 +105,7 @@ test('editing a pending add-on touches only the draft', { skip: !live }, async (
     assert.equal(updated.published, null, 'nothing is live yet');
 });
 
-test('editing a live add-on updates what customers see too', { skip: !live }, async () => {
+test('editing a live add-on updates what customers see too', async () => {
     const restaurant = await makeRestaurant();
     const addon = await makeAddon(restaurant);
     await approveRestaurantAddon(addon.id);
@@ -122,7 +119,7 @@ test('editing a live add-on updates what customers see too', { skip: !live }, as
     assert.equal(updated.published.name, 'Extra Cheese', 'other fields are untouched');
 });
 
-test('add-on edits are validated', { skip: !live }, async () => {
+test('add-on edits are validated', async () => {
     const restaurant = await makeRestaurant();
     const addon = await makeAddon(restaurant);
 
@@ -140,7 +137,7 @@ test('add-on edits are validated', { skip: !live }, async () => {
     );
 });
 
-test('a single image is mirrored into the images list', { skip: !live }, async () => {
+test('a single image is mirrored into the images list', async () => {
     const restaurant = await makeRestaurant();
     const addon = await makeAddon(restaurant);
 
@@ -154,7 +151,7 @@ test('a single image is mirrored into the images list', { skip: !live }, async (
     assert.deepEqual(many.draft.images, ['https://cdn/b.png', 'https://cdn/c.png']);
 });
 
-test('the queue filters by status, restaurant and search', { skip: !live }, async () => {
+test('the queue filters by status, restaurant and search', async () => {
     const restaurant = await makeRestaurant();
     const other = await makeRestaurant();
 
@@ -183,7 +180,7 @@ test('the queue filters by status, restaurant and search', { skip: !live }, asyn
     assert.equal(approved.total, 1);
 });
 
-test('a soft-deleted add-on is invisible to every path', { skip: !live }, async () => {
+test('a soft-deleted add-on is invisible to every path', async () => {
     const restaurant = await makeRestaurant();
     const addon = await makeAddon(restaurant);
 
@@ -198,7 +195,7 @@ test('a soft-deleted add-on is invisible to every path', { skip: !live }, async 
     assert.equal(await updateRestaurantAddonAdmin(addon.id, { price: 1 }), null);
 });
 
-test('an unknown add-on id returns null', { skip: !live }, async () => {
+test('an unknown add-on id returns null', async () => {
     assert.equal(await approveRestaurantAddon('a'.repeat(24)), null);
     assert.equal(await approveRestaurantAddon('not-an-id'), null);
     assert.equal(await rejectRestaurantAddon('a'.repeat(24), 'why'), null);

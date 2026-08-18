@@ -20,8 +20,6 @@ import { getTaxReport } from '../admin/services/adminTaxReport.service.js';
  * silently drifting apart would misstate what a restaurant is owed. These tests
  * exist to make that drift impossible to merge.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const created = { restaurants: [], users: [], orders: [] };
 let restaurantId = null;
 let userId = null;
@@ -85,7 +83,6 @@ const payoutInNode = async () => {
 };
 
 test.before(async () => {
-    if (!live) return;
     tag = uniqueTag('Sql');
 
     const r = await prisma.foodRestaurant.create({
@@ -105,7 +102,6 @@ test.before(async () => {
 });
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodTransaction.deleteMany({ where: { restaurantId: { in: created.restaurants } } });
     await prisma.foodOrder.deleteMany({ where: { restaurantId: { in: created.restaurants } } });
     await prisma.foodUser.deleteMany({ where: { id: { in: created.users } } });
@@ -113,7 +109,7 @@ test.after(async () => {
     await prisma.$disconnect();
 });
 
-test('SQL and JS agree across every shape of order', { skip: !live }, async () => {
+test('SQL and JS agree across every shape of order', async () => {
     // With a ledger row: the recorded share wins.
     await makeTransaction(await makeOrder());
     // Without one: reconstructed from the order's own columns.
@@ -144,7 +140,7 @@ test('SQL and JS agree across every shape of order', { skip: !live }, async () =
     assert.equal(mine.totalIncome, `₹${expected.toFixed(2)}`);
 });
 
-test('an order count is the earned orders, not every row', { skip: !live }, async () => {
+test('an order count is the earned orders, not every row', async () => {
     const { wallet } = await getRestaurantFinance(restaurantId);
     const { analytics } = await getRestaurantAnalytics(restaurantId);
 
@@ -154,7 +150,7 @@ test('an order count is the earned orders, not every row', { skip: !live }, asyn
     assert.equal(analytics.completedOrders, 4, 'delivered by status');
 });
 
-test('a discount with no ledger row is corrected, not over-counted', { skip: !live }, async () => {
+test('a discount with no ledger row is corrected, not over-counted', async () => {
     // The one case SQL cannot settle on its own: no transaction, so no recorded
     // split, so how much of the discount the restaurant bore has to be worked
     // out by matching the offer. SQL alone would credit the restaurant the
@@ -169,7 +165,7 @@ test('a discount with no ledger row is corrected, not over-counted', { skip: !li
     assert.equal(analytics.restaurantEarning, expected);
 });
 
-test('the page is a page, and the totals cover everything', { skip: !live }, async () => {
+test('the page is a page, and the totals cover everything', async () => {
     const first = await getRestaurantFinance(restaurantId, { ordersLimit: 2, ordersPage: 1 });
     const second = await getRestaurantFinance(restaurantId, { ordersLimit: 2, ordersPage: 2 });
 
@@ -188,7 +184,7 @@ test('the page is a page, and the totals cover everything', { skip: !live }, asy
     assert.equal(first.invoiceSummary.count, first.wallet.totalOrders);
 });
 
-test('reading a page does not scale with the table', { skip: !live }, async () => {
+test('reading a page does not scale with the table', async () => {
     const { wallet: baseline } = await getRestaurantFinance(restaurantId, { ordersLimit: 1 });
 
     // Enough rows that loading them all would show up.

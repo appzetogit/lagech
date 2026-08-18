@@ -18,8 +18,6 @@ import {
  * The bands are the one with teeth: they decide which monthly plan a
  * restaurant lands on, so a gap or an overlap prices someone wrongly.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const created = {
     partners: [], restaurants: [], users: [], orders: [],
     tickets: [], bonuses: [], notifications: [],
@@ -37,12 +35,10 @@ const makePartner = async (name) => {
 };
 
 test.before(async () => {
-    if (!live) return;
     settingsSnapshot = await prisma.foodRestaurantSubscriptionSettings.findFirst();
 });
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodNotification.deleteMany({ where: { ownerId: { in: created.partners } } });
     await prisma.deliverySupportTicket.deleteMany({ where: { id: { in: created.tickets } } });
     await prisma.deliveryBonusTransaction.deleteMany({ where: { id: { in: created.bonuses } } });
@@ -65,7 +61,7 @@ test.after(async () => {
     await prisma.$disconnect();
 });
 
-test('rider tickets filter and join their partner', { skip: !live }, async () => {
+test('rider tickets filter and join their partner', async () => {
     const tag = uniqueTag('Tk');
     const partner = await makePartner(`${tag} Rider`);
 
@@ -95,7 +91,7 @@ test('rider tickets filter and join their partner', { skip: !live }, async () =>
     assert.equal(bogus.pagination.total, 1);
 });
 
-test('replying to a rider ticket stamps and notifies', { skip: !live }, async () => {
+test('replying to a rider ticket stamps and notifies', async () => {
     const partner = await makePartner(uniqueTag('R'));
     const ticket = await prisma.deliverySupportTicket.create({
         data: {
@@ -131,7 +127,7 @@ test('replying to a rider ticket stamps and notifies', { skip: !live }, async ()
     assert.equal(await updateDeliverySupportTicket('not-an-id', {}), null);
 });
 
-test('ticket stats add up', { skip: !live }, async () => {
+test('ticket stats add up', async () => {
     const stats = await getSupportTicketStats();
     assert.equal(
         stats.total,
@@ -139,7 +135,7 @@ test('ticket stats add up', { skip: !live }, async () => {
     );
 });
 
-test('the GMV bands stay ordered and contiguous', { skip: !live }, async () => {
+test('the GMV bands stay ordered and contiguous', async () => {
     // Deliberately inconsistent: growth starts below where starter ends, and
     // premium starts below where growth ends.
     const saved = await updateRestaurantSubscriptionSettings({
@@ -158,7 +154,7 @@ test('the GMV bands stay ordered and contiguous', { skip: !live }, async () => {
     assert.ok(saved.premiumMinGmv >= saved.growthMaxGmv);
 });
 
-test('a negative subscription price is clamped', { skip: !live }, async () => {
+test('a negative subscription price is clamped', async () => {
     await updateRestaurantSubscriptionSettings({ starterPrice: -100 });
 
     // Asserted on the row, not the reader: the reader treats a price of 0 as
@@ -169,7 +165,7 @@ test('a negative subscription price is clamped', { skip: !live }, async () => {
     assert.equal(Number(row.starterPrice), 0);
 });
 
-test('bonus history searches by rider or reference', { skip: !live }, async () => {
+test('bonus history searches by rider or reference', async () => {
     const tag = uniqueTag('Bn');
     const partner = await makePartner(`${tag} Bonus Rider`);
 
@@ -196,7 +192,7 @@ test('bonus history searches by rider or reference', { skip: !live }, async () =
     assert.equal(byTxn.pagination.total, 1);
 });
 
-test('rider reviews come from the rating columns', { skip: !live }, async () => {
+test('rider reviews come from the rating columns', async () => {
     const tag = uniqueTag('Rv');
     const partner = await makePartner(`${tag} Reviewed`);
 

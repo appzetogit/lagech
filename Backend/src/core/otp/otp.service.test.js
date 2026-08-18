@@ -16,8 +16,6 @@ import { uniquePhone } from '../../utils/testIds.js';
  *
  * Assumes USE_DEFAULT_OTP so no SMS is sent; the code is then '1234'.
  */
-const live = Boolean(process.env.DATABASE_URL) && process.env.USE_DEFAULT_OTP === 'true';
-
 const phone = () => uniquePhone('55');
 const created = [];
 
@@ -27,7 +25,6 @@ const issue = async (p) => {
 };
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodOtp.deleteMany({ where: { phone: { in: created } } });
     await prisma.foodUser.deleteMany({ where: { phone: { in: created } } });
     await prisma.$disconnect();
@@ -48,7 +45,7 @@ test('comparing against a missing hash fails cleanly', async () => {
     assert.equal(await compareAdminPassword('', 'somehash'), false);
 });
 
-test('issuing an OTP twice keeps exactly one row', { skip: !live }, async () => {
+test('issuing an OTP twice keeps exactly one row', async () => {
     const p = phone();
     await issue(p);
     await createOrUpdateOtp(p);
@@ -58,7 +55,7 @@ test('issuing an OTP twice keeps exactly one row', { skip: !live }, async () => 
     assert.equal(rows[0].requestCount, 2, 'the quota counter accumulates');
 });
 
-test('re-issuing resets the attempt counter', { skip: !live }, async () => {
+test('re-issuing resets the attempt counter', async () => {
     const p = phone();
     await issue(p);
     await verifyOtp(p, '9999');
@@ -71,7 +68,7 @@ test('re-issuing resets the attempt counter', { skip: !live }, async () => {
     assert.equal(row.attempts, 0, 'a fresh code starts with a fresh allowance');
 });
 
-test('a wrong code is counted, a right one is consumed', { skip: !live }, async () => {
+test('a wrong code is counted, a right one is consumed', async () => {
     const p = phone();
     const code = await issue(p);
 
@@ -86,7 +83,7 @@ test('a wrong code is counted, a right one is consumed', { skip: !live }, async 
     );
 });
 
-test('parallel wrong guesses each cost an attempt', { skip: !live }, async () => {
+test('parallel wrong guesses each cost an attempt', async () => {
     const p = phone();
     await issue(p);
 
@@ -98,11 +95,11 @@ test('parallel wrong guesses each cost an attempt', { skip: !live }, async () =>
     assert.equal(row.attempts, 3);
 });
 
-test('verifying an unknown phone is not an error', { skip: !live }, async () => {
+test('verifying an unknown phone is not an error', async () => {
     assert.deepEqual(await verifyOtp('00000000000', '1234'), { valid: false, reason: 'OTP not found' });
 });
 
-test('an expired code is refused', { skip: !live }, async () => {
+test('an expired code is refused', async () => {
     const p = phone();
     const code = await issue(p);
     await prisma.foodOtp.update({
@@ -113,7 +110,7 @@ test('an expired code is refused', { skip: !live }, async () => {
     assert.deepEqual(await verifyOtp(p, code), { valid: false, reason: 'OTP expired' });
 });
 
-test('finding a customer by phone is idempotent under concurrency', { skip: !live }, async () => {
+test('finding a customer by phone is idempotent under concurrency', async () => {
     const p = phone();
     created.push(p);
 

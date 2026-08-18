@@ -13,8 +13,6 @@ import { getDashboardStats, getSidebarBadges } from './adminDashboard.service.js
  * one is given — a zone filter that leaked would show an admin another city's
  * revenue.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const HERE = testPatch(5);
 const created = { zones: [], restaurants: [], users: [], orders: [] };
 let zoneId = null;
@@ -49,7 +47,6 @@ const makeOrder = async (over = {}) => {
 };
 
 test.before(async () => {
-    if (!live) return;
 
     const zone = await prisma.foodZone.create({
         data: { name: `Dash Zone ${uniqueTag('Z')}`, coordinates: HERE.ring },
@@ -80,7 +77,6 @@ test.before(async () => {
 });
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodOrder.deleteMany({ where: { id: { in: created.orders } } });
     await prisma.foodUser.deleteMany({ where: { id: { in: created.users } } });
     await prisma.foodRestaurant.deleteMany({ where: { id: { in: created.restaurants } } });
@@ -88,7 +84,7 @@ test.after(async () => {
     await prisma.$disconnect();
 });
 
-test('only orders that represent money are counted', { skip: !live }, async () => {
+test('only orders that represent money are counted', async () => {
     await makeOrder();
     await makeOrder({ orderStatus: 'preparing' });
     await makeOrder({ orderStatus: 'cancelled_by_user' });
@@ -116,7 +112,7 @@ test('only orders that represent money are counted', { skip: !live }, async () =
     assert.equal(stats.deliveryProfit, -60, '60 profit less 100 commission less 20 fee');
 });
 
-test('a zone filter reaches the dish counts too', { skip: !live }, async () => {
+test('a zone filter reaches the dish counts too', async () => {
     const inZone = await prisma.foodItem.create({
         data: { restaurantId, name: uniqueTag('Dish'), price: 100, approvalStatus: 'approved' },
     });
@@ -139,7 +135,7 @@ test('a zone filter reaches the dish counts too', { skip: !live }, async () => {
     await prisma.foodItem.deleteMany({ where: { id: { in: [inZone.id, outside.id] } } });
 });
 
-test('the customer count follows the zone', { skip: !live }, async () => {
+test('the customer count follows the zone', async () => {
     const zoned = await getDashboardStats({ zoneId });
     // Zoned: customers who ordered here. There is one, with several orders.
     assert.equal(zoned.customers.total, 1);
@@ -148,7 +144,7 @@ test('the customer count follows the zone', { skip: !live }, async () => {
     assert.ok(everywhere.customers.total >= 1);
 });
 
-test('the trend always has twelve months, oldest first', { skip: !live }, async () => {
+test('the trend always has twelve months, oldest first', async () => {
     const { monthlyData } = await getDashboardStats({ zoneId });
 
     assert.equal(monthlyData.length, 12);
@@ -162,7 +158,7 @@ test('the trend always has twelve months, oldest first', { skip: !live }, async 
     assert.equal(thisMonth.commission, 60, 'platform profit, not the fee');
 });
 
-test('a period narrows the window', { skip: !live }, async () => {
+test('a period narrows the window', async () => {
     // Backdated well outside every period the picker offers.
     await makeOrder({ createdAt: new Date('2022-03-04') });
 
@@ -177,7 +173,7 @@ test('a period narrows the window', { skip: !live }, async () => {
     assert.equal(nonsense.orders.total, 4);
 });
 
-test('the live feed is newest first and capped', { skip: !live }, async () => {
+test('the live feed is newest first and capped', async () => {
     const { liveSignals } = await getDashboardStats({ zoneId });
 
     assert.ok(liveSignals.length <= 15);
@@ -186,7 +182,7 @@ test('the live feed is newest first and capped', { skip: !live }, async () => {
     assert.ok(liveSignals.every((s) => typeof s.time === 'string' && s.time.endsWith('ago')));
 });
 
-test('the sidebar badges count real statuses', { skip: !live }, async () => {
+test('the sidebar badges count real statuses', async () => {
     const badges = await getSidebarBadges();
 
     // These three filtered on values that were not in any enum, so they always

@@ -12,8 +12,6 @@ import { getTaxReport, getTaxReportDetail } from './adminTaxReport.service.js';
  * report at a rate other than the one charged, and the answer has to come from
  * the taxable base rather than the stored figure.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const created = { restaurants: [], users: [], orders: [], offers: [] };
 let restaurantId = null;
 let otherRestaurantId = null;
@@ -45,7 +43,6 @@ const makeOrder = async (over = {}) => {
 };
 
 test.before(async () => {
-    if (!live) return;
     tag = uniqueTag('Tax');
 
     const make = async () => {
@@ -69,7 +66,6 @@ test.before(async () => {
 });
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodOffer.deleteMany({ where: { id: { in: created.offers } } });
     await prisma.foodTransaction.deleteMany({ where: { orderId: { in: created.orders } } });
     await prisma.foodOrder.deleteMany({ where: { id: { in: created.orders } } });
@@ -78,7 +74,7 @@ test.after(async () => {
     await prisma.$disconnect();
 });
 
-test('only earned orders are taxed, grouped per restaurant', { skip: !live }, async () => {
+test('only earned orders are taxed, grouped per restaurant', async () => {
     await makeOrder();
     await makeOrder({ restaurantId: otherRestaurantId, tax: 25 });
     // Not delivered, so nothing was earned and nothing is owed.
@@ -103,7 +99,7 @@ test('only earned orders are taxed, grouped per restaurant', { skip: !live }, as
     assert.equal(stats.totalIncome, '₹1800.00');
 });
 
-test('the rate override recomputes from the taxable base', { skip: !live }, async () => {
+test('the rate override recomputes from the taxable base', async () => {
     const order = await makeOrder({ subtotal: 2000, discount: 500, tax: 7, restaurantCommission: 0 });
 
     const asCharged = await getTaxReportDetail(restaurantId, {});
@@ -124,7 +120,7 @@ test('the rate override recomputes from the taxable base', { skip: !live }, asyn
     assert.equal(zero.orders.find((o) => o.orderId === order.orderId).taxAmount, '₹7.00');
 });
 
-test('a discount reduces the taxable base, never below zero', { skip: !live }, async () => {
+test('a discount reduces the taxable base, never below zero', async () => {
     const order = await makeOrder({ subtotal: 100, discount: 500, tax: 0, restaurantCommission: 0 });
 
     const { orders } = await getTaxReportDetail(restaurantId, {
@@ -135,7 +131,7 @@ test('a discount reduces the taxable base, never below zero', { skip: !live }, a
     assert.equal(orders.find((o) => o.orderId === order.orderId).taxAmount, '₹0.00');
 });
 
-test('the date range covers the whole closing day', { skip: !live }, async () => {
+test('the date range covers the whole closing day', async () => {
     const late = await makeOrder({ createdAt: new Date('2032-04-10T22:45:00') });
 
     const sameDay = await getTaxReportDetail(restaurantId, {
@@ -152,7 +148,7 @@ test('the date range covers the whole closing day', { skip: !live }, async () =>
     assert.ok(!dayBefore.orders.some((o) => o.orderId === late.orderId));
 });
 
-test('the transaction snapshot wins for the restaurant share', { skip: !live }, async () => {
+test('the transaction snapshot wins for the restaurant share', async () => {
     const order = await makeOrder({ createdAt: new Date('2032-06-01') });
     await prisma.foodTransaction.create({
         data: {
@@ -179,7 +175,7 @@ test('the transaction snapshot wins for the restaurant share', { skip: !live }, 
     assert.equal(orders[0].totalAmount, '₹777.00', 'not the 900 the columns would imply');
 });
 
-test('the detail view needs a real restaurant', { skip: !live }, async () => {
+test('the detail view needs a real restaurant', async () => {
     await assert.rejects(() => getTaxReportDetail('not-an-id'), /Invalid restaurant ID/);
 
     const missing = await getTaxReportDetail('a'.repeat(24));

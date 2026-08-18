@@ -18,8 +18,6 @@ import { resolveOrderCartItems } from '../../orders/helpers/order-cart-items.hel
  * The pure serialize/display helpers work on plain objects and need no database.
  * The constraint and checkout tests do.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 // ── pure helpers: the read contract must survive the storage change ──
 
 test('rows from the variants relation serialize like the old Json entries', () => {
@@ -62,7 +60,6 @@ let restaurantId;
 let foodId;
 
 test.before(async () => {
-    if (!live) return;
     const restaurant = await prisma.foodRestaurant.create({
         data: { restaurantName: 'Variant Test Co', ownerName: 'Owner', status: 'approved' },
     });
@@ -87,14 +84,13 @@ test.before(async () => {
 });
 
 test.after(async () => {
-    if (!live) return;
     if (restaurantId) {
         await prisma.foodRestaurant.delete({ where: { id: restaurantId } }).catch(() => {});
     }
     await prisma.$disconnect();
 });
 
-test('a variant priced at or below zero is rejected', { skip: !live }, async () => {
+test('a variant priced at or below zero is rejected', async () => {
     // normalizeFoodVariantsInput enforced this, but it was the only thing that
     // did — the bulk uploader and admin scripts wrote straight past it.
     await assert.rejects(
@@ -103,7 +99,7 @@ test('a variant priced at or below zero is rejected', { skip: !live }, async () 
     );
 });
 
-test('two variants cannot share a name on one dish', { skip: !live }, async () => {
+test('two variants cannot share a name on one dish', async () => {
     // The size picker gives the customer no way to tell them apart.
     await assert.rejects(
         () => prisma.foodItemVariant.create({ data: { foodItemId: foodId, name: 'Large', price: 350 } }),
@@ -111,7 +107,7 @@ test('two variants cannot share a name on one dish', { skip: !live }, async () =
     );
 });
 
-test('deleting the dish removes its variants', { skip: !live }, async () => {
+test('deleting the dish removes its variants', async () => {
     const throwaway = await prisma.foodItem.create({
         data: {
             restaurantId,
@@ -126,7 +122,7 @@ test('deleting the dish removes its variants', { skip: !live }, async () => {
     assert.equal(orphans, 0);
 });
 
-test('checkout prices the chosen variant, not the base price', { skip: !live }, async () => {
+test('checkout prices the chosen variant, not the base price', async () => {
     const large = await prisma.foodItemVariant.findFirst({ where: { foodItemId: foodId, name: 'Large' } });
 
     const [line] = await resolveOrderCartItems(restaurantId, [
@@ -138,14 +134,14 @@ test('checkout prices the chosen variant, not the base price', { skip: !live }, 
     assert.equal(line.variantId, large.id);
 });
 
-test('checkout refuses a dish with sizes when none was chosen', { skip: !live }, async () => {
+test('checkout refuses a dish with sizes when none was chosen', async () => {
     await assert.rejects(
         () => resolveOrderCartItems(restaurantId, [{ itemId: foodId, quantity: 1 }]),
         /Please select a size/,
     );
 });
 
-test('checkout refuses a variant that no longer exists', { skip: !live }, async () => {
+test('checkout refuses a variant that no longer exists', async () => {
     await assert.rejects(
         () => resolveOrderCartItems(restaurantId, [
             { itemId: foodId, variantId: 'ffffffffffffffffffffffff', quantity: 1 },

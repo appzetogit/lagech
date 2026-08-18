@@ -17,8 +17,6 @@ import { uniquePhone } from '../../../../utils/testIds.js';
  * Rider wallets, cash settlements, and the two writes that change who can log
  * in as a rider.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const created = { partners: [], restaurants: [], users: [], orders: [], deposits: [], limits: [] };
 const stamp = () => `${Date.now()}${Math.floor(performance.now() * 1000) % 1000}`;
 
@@ -70,7 +68,6 @@ const makeCodOrders = async (partner, totals) => {
 };
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodDeliveryCashDeposit.deleteMany({ where: { id: { in: created.deposits } } });
     await prisma.foodOrder.deleteMany({ where: { id: { in: created.orders } } });
     await prisma.wallet.deleteMany({ where: { entityId: { in: created.partners } } });
@@ -81,7 +78,7 @@ test.after(async () => {
     await prisma.$disconnect();
 });
 
-test('remaining cash limit is the cap less what the rider holds', { skip: !live }, async () => {
+test('remaining cash limit is the cap less what the rider holds', async () => {
     await prisma.foodDeliveryCashLimit.updateMany({ where: {}, data: { isActive: false } });
     const limit = await prisma.foodDeliveryCashLimit.create({
         data: { deliveryCashLimit: 3000, isActive: true },
@@ -106,7 +103,7 @@ test('remaining cash limit is the cap less what the rider holds', { skip: !live 
     assert.equal(row.totalOrders, 2);
 });
 
-test('a rider over the cap has no remaining limit, never a negative one', { skip: !live }, async () => {
+test('a rider over the cap has no remaining limit, never a negative one', async () => {
     await prisma.foodDeliveryCashLimit.updateMany({ where: {}, data: { isActive: false } });
     const limit = await prisma.foodDeliveryCashLimit.create({
         data: { deliveryCashLimit: 500, isActive: true },
@@ -123,7 +120,7 @@ test('a rider over the cap has no remaining limit, never a negative one', { skip
     assert.equal(row.remainingCashLimit, 0, 'clamped, so the UI never shows a negative allowance');
 });
 
-test('a manual wallet adjustment creates the row if there is none', { skip: !live }, async () => {
+test('a manual wallet adjustment creates the row if there is none', async () => {
     const partner = await makePartner();
 
     const created1 = await updateDeliveryBoyWallet({
@@ -144,7 +141,7 @@ test('a manual wallet adjustment creates the row if there is none', { skip: !liv
     assert.equal(count, 1);
 });
 
-test('a wallet adjustment for an unknown rider is refused', { skip: !live }, async () => {
+test('a wallet adjustment for an unknown rider is refused', async () => {
     await assert.rejects(
         () => updateDeliveryBoyWallet({ deliveryId: 'a'.repeat(24), pocketBalance: 10 }),
         /not found/,
@@ -155,7 +152,7 @@ test('a wallet adjustment for an unknown rider is refused', { skip: !live }, asy
     );
 });
 
-test('settlements search by gateway reference or by rider', { skip: !live }, async () => {
+test('settlements search by gateway reference or by rider', async () => {
     const partner = await makePartner();
     const reference = `pay_${stamp()}`;
 
@@ -181,7 +178,7 @@ test('settlements search by gateway reference or by rider', { skip: !live }, asy
     assert.equal(byRider.transactions[0].id, deposit.id);
 });
 
-test('changing a rider phone ends their sessions', { skip: !live }, async () => {
+test('changing a rider phone ends their sessions', async () => {
     const partner = await makePartner();
     const before = partner.tokenVersion;
 
@@ -196,7 +193,7 @@ test('changing a rider phone ends their sessions', { skip: !live }, async () => 
     assert.equal(renamed.tokenVersion, updated.tokenVersion);
 });
 
-test('a rider phone must be ten digits and unused', { skip: !live }, async () => {
+test('a rider phone must be ten digits and unused', async () => {
     const partner = await makePartner();
     const other = await makePartner({ name: 'Existing Rider' });
 
@@ -216,7 +213,7 @@ test('a rider phone must be ten digits and unused', { skip: !live }, async () =>
     );
 });
 
-test('a deactivated rider keeps their number but loses their session', { skip: !live }, async () => {
+test('a deactivated rider keeps their number but loses their session', async () => {
     const partner = await makePartner({ availabilityStatus: 'online' });
 
     const deactivated = await deleteDeliveryPartner(partner.id);
@@ -235,7 +232,7 @@ test('a deactivated rider keeps their number but loses their session', { skip: !
     );
 });
 
-test('deactivating an unknown rider is an error, not a silent pass', { skip: !live }, async () => {
+test('deactivating an unknown rider is an error, not a silent pass', async () => {
     await assert.rejects(() => deleteDeliveryPartner('a'.repeat(24)), /not found/);
     await assert.rejects(() => deleteDeliveryPartner('not-an-id'), /not found/);
 });

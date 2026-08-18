@@ -23,8 +23,6 @@ import { uniquePhone } from '../../../../utils/testIds.js';
  * Both decide what money moves, so the interesting assertions are the ones
  * about what the database refuses rather than what the happy path returns.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const created = { restaurants: [], commissions: [], rules: [] };
 const stamp = () => `${Date.now()}${Math.floor(performance.now() * 1000) % 1000}`;
 
@@ -54,14 +52,13 @@ const clearRules = async () => {
 };
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodRestaurantCommission.deleteMany({ where: { id: { in: created.commissions } } });
     await prisma.foodDeliveryCommissionRule.deleteMany({ where: { id: { in: created.rules } } });
     await prisma.foodRestaurant.deleteMany({ where: { id: { in: created.restaurants } } });
     await prisma.$disconnect();
 });
 
-test('a commission round-trips through its nested shape', { skip: !live }, async () => {
+test('a commission round-trips through its nested shape', async () => {
     const restaurant = await makeRestaurant();
 
     const created1 = await createRestaurantCommission({
@@ -84,7 +81,7 @@ test('a commission round-trips through its nested shape', { skip: !live }, async
     assert.deepEqual(fetched.defaultCommission, { type: 'percentage', value: 18.5 });
 });
 
-test('one commission per restaurant', { skip: !live }, async () => {
+test('one commission per restaurant', async () => {
     const restaurant = await makeRestaurant();
 
     const first = await createRestaurantCommission({
@@ -103,7 +100,7 @@ test('one commission per restaurant', { skip: !live }, async () => {
     );
 });
 
-test('a nonsensical commission value is refused', { skip: !live }, async () => {
+test('a nonsensical commission value is refused', async () => {
     const restaurant = await makeRestaurant();
 
     await assert.rejects(
@@ -124,7 +121,7 @@ test('a nonsensical commission value is refused', { skip: !live }, async () => {
     );
 });
 
-test('a commission for an unknown restaurant is refused', { skip: !live }, async () => {
+test('a commission for an unknown restaurant is refused', async () => {
     await assert.rejects(
         () => createRestaurantCommission({
             restaurantId: 'a'.repeat(24),
@@ -135,7 +132,7 @@ test('a commission for an unknown restaurant is refused', { skip: !live }, async
     );
 });
 
-test('a commission updates, toggles and deletes', { skip: !live }, async () => {
+test('a commission updates, toggles and deletes', async () => {
     const restaurant = await makeRestaurant();
     const commission = await createRestaurantCommission({
         restaurantId: restaurant.id,
@@ -164,7 +161,7 @@ test('a commission updates, toggles and deletes', { skip: !live }, async () => {
     created.commissions = created.commissions.filter((id) => id !== commission.id);
 });
 
-test('the slab ladder needs exactly one base slab', { skip: !live }, async () => {
+test('the slab ladder needs exactly one base slab', async () => {
     await clearRules();
 
     await assert.rejects(
@@ -183,7 +180,7 @@ test('the slab ladder needs exactly one base slab', { skip: !live }, async () =>
     );
 });
 
-test('slabs that sit flush are accepted, overlapping ones are not', { skip: !live }, async () => {
+test('slabs that sit flush are accepted, overlapping ones are not', async () => {
     await clearRules();
 
     await makeRule({ minDistance: 0, maxDistance: 3, commissionPerKm: 0, basePayout: 30 });
@@ -202,7 +199,7 @@ test('slabs that sit flush are accepted, overlapping ones are not', { skip: !liv
     );
 });
 
-test('the database refuses an overlap the JS check never saw', { skip: !live }, async () => {
+test('the database refuses an overlap the JS check never saw', async () => {
     await clearRules();
     await makeRule({ minDistance: 0, maxDistance: 5, commissionPerKm: 0, basePayout: 30 });
 
@@ -217,7 +214,7 @@ test('the database refuses an overlap the JS check never saw', { skip: !live }, 
     );
 });
 
-test('an inactive slab may sit under a live one', { skip: !live }, async () => {
+test('an inactive slab may sit under a live one', async () => {
     await clearRules();
     await makeRule({ minDistance: 0, maxDistance: 5, commissionPerKm: 0, basePayout: 30 });
 
@@ -237,7 +234,7 @@ test('an inactive slab may sit under a live one', { skip: !live }, async () => {
     );
 });
 
-test('an inverted slab is refused', { skip: !live }, async () => {
+test('an inverted slab is refused', async () => {
     await clearRules();
     await makeRule({ minDistance: 0, maxDistance: 5, commissionPerKm: 0, basePayout: 30 });
 
@@ -247,7 +244,7 @@ test('an inverted slab is refused', { skip: !live }, async () => {
     );
 });
 
-test('slabs list, update and delete', { skip: !live }, async () => {
+test('slabs list, update and delete', async () => {
     await clearRules();
     const base = await makeRule({ minDistance: 0, maxDistance: 4, commissionPerKm: 0, basePayout: 30 });
     await makeRule({ minDistance: 4, maxDistance: null, commissionPerKm: 7, basePayout: 0 });

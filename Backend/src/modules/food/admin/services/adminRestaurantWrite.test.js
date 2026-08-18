@@ -13,8 +13,6 @@ import { createRestaurantByAdmin, updateRestaurantById } from './adminRestaurant
  * phone is how its owner signs in — and the outlet timings, because a
  * restaurant with no timings row reads as closed every day.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const HERE = testPatch(3);
 
 const created = { restaurants: [], zones: [], users: [] };
@@ -33,7 +31,6 @@ const track = async (body) => {
 };
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodRestaurantOutletTimings.deleteMany({
         where: { restaurantId: { in: created.restaurants } },
     });
@@ -43,7 +40,7 @@ test.after(async () => {
     await prisma.$disconnect();
 });
 
-test('an admin-created restaurant is approved and open', { skip: !live }, async () => {
+test('an admin-created restaurant is approved and open', async () => {
     const r = await track(baseBody({ openingTime: '10:00', closingTime: '23:00' }));
 
     // An admin creating it is the approval.
@@ -61,13 +58,13 @@ test('an admin-created restaurant is approved and open', { skip: !live }, async 
     assert.ok(timings.timings.every((t) => t.openingTime === '10:00' || !t.isOpen));
 });
 
-test('opening hours default when not supplied', { skip: !live }, async () => {
+test('opening hours default when not supplied', async () => {
     const r = await track(baseBody());
     assert.equal(r.openingTime, '09:00');
     assert.equal(r.closingTime, '22:00');
 });
 
-test('times are normalised and validated', { skip: !live }, async () => {
+test('times are normalised and validated', async () => {
     // 12-hour input is accepted and stored as 24-hour.
     const r = await track(baseBody({ openingTime: '9:30 AM', closingTime: '11:00 PM' }));
     assert.equal(r.openingTime, '09:30');
@@ -83,7 +80,7 @@ test('times are normalised and validated', { skip: !live }, async () => {
     );
 });
 
-test('a restaurant needs a name, an owner and a number', { skip: !live }, async () => {
+test('a restaurant needs a name, an owner and a number', async () => {
     await assert.rejects(
         () => createRestaurantByAdmin({ ownerName: 'X', ownerPhone: uniquePhone('9') }),
         /name and owner name are required/,
@@ -94,7 +91,7 @@ test('a restaurant needs a name, an owner and a number', { skip: !live }, async 
     );
 });
 
-test('the same phone cannot reach two restaurants', { skip: !live }, async () => {
+test('the same phone cannot reach two restaurants', async () => {
     const phone = uniquePhone('9');
     await track(baseBody({ ownerPhone: phone }));
 
@@ -122,7 +119,7 @@ test('the same phone cannot reach two restaurants', { skip: !live }, async () =>
     );
 });
 
-test('the nested location input becomes flat columns', { skip: !live }, async () => {
+test('the nested location input becomes flat columns', async () => {
     const zone = await prisma.foodZone.create({
         data: {
             name: `Write Zone ${uniqueTag('Z')}`,
@@ -157,7 +154,7 @@ test('the nested location input becomes flat columns', { skip: !live }, async ()
     );
 });
 
-test('dining settings become three columns', { skip: !live }, async () => {
+test('dining settings become three columns', async () => {
     const r = await track(baseBody({
         diningSettings: { isEnabled: true, maxGuests: 8, diningType: 'fine-dining' },
     }));
@@ -171,7 +168,7 @@ test('dining settings become three columns', { skip: !live }, async () => {
     assert.equal(clamped.diningMaxGuests, 6);
 });
 
-test('editing applies only the fields that were sent', { skip: !live }, async () => {
+test('editing applies only the fields that were sent', async () => {
     const r = await track(baseBody({ ownerEmail: 'owner@test.local', offer: '20% off' }));
 
     const updated = await updateRestaurantById(r.id, { restaurantName: 'Renamed Kitchen' });
@@ -186,7 +183,7 @@ test('editing applies only the fields that were sent', { skip: !live }, async ()
     assert.equal(await updateRestaurantById('a'.repeat(24), { offer: 'x' }), null);
 });
 
-test('cuisines accept a list or a comma-separated string', { skip: !live }, async () => {
+test('cuisines accept a list or a comma-separated string', async () => {
     const r = await track(baseBody());
 
     const asList = await updateRestaurantById(r.id, { cuisines: ['Indian', 'Chinese'] });
@@ -201,7 +198,7 @@ test('cuisines accept a list or a comma-separated string', { skip: !live }, asyn
     );
 });
 
-test('editing the cover and gallery images works', { skip: !live }, async () => {
+test('editing the cover and gallery images works', async () => {
     const r = await track(baseBody());
 
     // These were missing from the admin edit path, so an admin could change a
@@ -217,7 +214,7 @@ test('editing the cover and gallery images works', { skip: !live }, async () => 
     assert.deepEqual(updated.galleryImages, ['https://cdn/g.png']);
 });
 
-test('changing the hours rewrites the timings, keeping closed days closed', { skip: !live }, async () => {
+test('changing the hours rewrites the timings, keeping closed days closed', async () => {
     const r = await track(baseBody({ openingTime: '09:00', closingTime: '21:00' }));
 
     // Close Sunday by hand, as a restaurant would.

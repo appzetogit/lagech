@@ -12,13 +12,10 @@ import { listMyWithdrawals } from './restaurantWithdrawal.service.js';
 /**
  * A restaurant's own support tickets and withdrawal history.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const created = { restaurants: [], tickets: [], withdrawals: [] };
 let restaurantId = null;
 
 test.before(async () => {
-    if (!live) return;
     const r = await prisma.foodRestaurant.create({
         data: {
             restaurantName: `Ticket ${uniqueTag('R')}`,
@@ -32,14 +29,13 @@ test.before(async () => {
 });
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodRestaurantSupportTicket.deleteMany({ where: { restaurantId: { in: created.restaurants } } });
     await prisma.foodRestaurantWithdrawal.deleteMany({ where: { restaurantId: { in: created.restaurants } } });
     await prisma.foodRestaurant.deleteMany({ where: { id: { in: created.restaurants } } });
     await prisma.$disconnect();
 });
 
-test('a ticket needs a known category, a type and a known priority', { skip: !live }, async () => {
+test('a ticket needs a known category, a type and a known priority', async () => {
     const base = { category: 'payments', issueType: 'Payout delayed' };
 
     await assert.rejects(
@@ -63,7 +59,7 @@ test('a ticket needs a known category, a type and a known priority', { skip: !li
     assert.equal(ticket.status, 'open');
 });
 
-test('orderId is accepted as an alias for orderRef', { skip: !live }, async () => {
+test('orderId is accepted as an alias for orderRef', async () => {
     const ticket = await createRestaurantSupportTicket(restaurantId, {
         category: 'orders',
         issueType: 'Wrong item',
@@ -73,7 +69,7 @@ test('orderId is accepted as an alias for orderRef', { skip: !live }, async () =
     assert.equal(ticket.orderRef, 'FOD-12345');
 });
 
-test('the in-progress filter maps to the enum name', { skip: !live }, async () => {
+test('the in-progress filter maps to the enum name', async () => {
     const tag = uniqueTag('IP');
     const ticket = await createRestaurantSupportTicket(restaurantId, {
         category: 'technical',
@@ -99,7 +95,7 @@ test('the in-progress filter maps to the enum name', { skip: !live }, async () =
     assert.equal(all.total, 1);
 });
 
-test('search covers subject, type, description and order reference', { skip: !live }, async () => {
+test('search covers subject, type, description and order reference', async () => {
     const tag = uniqueTag('S');
     const ticket = await createRestaurantSupportTicket(restaurantId, {
         category: 'menu',
@@ -114,7 +110,7 @@ test('search covers subject, type, description and order reference', { skip: !li
     assert.equal(found.tickets[0].id, ticket.id);
 });
 
-test('a restaurant sees only its own tickets', { skip: !live }, async () => {
+test('a restaurant sees only its own tickets', async () => {
     const other = await prisma.foodRestaurant.create({
         data: {
             restaurantName: `Other ${uniqueTag('R')}`,
@@ -131,7 +127,7 @@ test('a restaurant sees only its own tickets', { skip: !live }, async () => {
     assert.equal(theirs.total, 0);
 });
 
-test('withdrawals come back newest first, with numeric amounts', { skip: !live }, async () => {
+test('withdrawals come back newest first, with numeric amounts', async () => {
     const older = await prisma.foodRestaurantWithdrawal.create({
         data: { restaurantId, amount: 500, createdAt: new Date('2026-01-01') },
     });

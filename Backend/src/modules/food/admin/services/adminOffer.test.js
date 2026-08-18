@@ -17,8 +17,6 @@ import {
  * A coupon names its restaurants either singly or as a list, and both forms
  * exist in the data — so both are exercised here.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const created = { offers: [], restaurants: [], users: [] };
 const DAY = 86400000;
 
@@ -49,7 +47,6 @@ const makeOffer = async (body = {}) => {
 };
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodOfferUsage.deleteMany({ where: { offerId: { in: created.offers } } });
     await prisma.foodOffer.deleteMany({ where: { id: { in: created.offers } } });
     await prisma.foodUser.deleteMany({ where: { id: { in: created.users } } });
@@ -57,7 +54,7 @@ test.after(async () => {
     await prisma.$disconnect();
 });
 
-test('an admin coupon is platform-funded by default', { skip: !live }, async () => {
+test('an admin coupon is platform-funded by default', async () => {
     const offer = await makeOffer();
 
     assert.equal(offer.createdByRole, 'ADMIN');
@@ -66,7 +63,7 @@ test('an admin coupon is platform-funded by default', { skip: !live }, async () 
     assert.equal(offer.status, 'active');
 });
 
-test('a duplicate coupon code is refused', { skip: !live }, async () => {
+test('a duplicate coupon code is refused', async () => {
     const code = uniqueTag('DUP').toUpperCase();
     await makeOffer({ couponCode: code });
 
@@ -74,7 +71,7 @@ test('a duplicate coupon code is refused', { skip: !live }, async () => {
     await assert.rejects(() => makeOffer({ couponCode: code }), /already exists/);
 });
 
-test('a coupon created already expired starts inactive', { skip: !live }, async () => {
+test('a coupon created already expired starts inactive', async () => {
     const offer = await makeOffer({ endDate: new Date(Date.now() - DAY) });
     // Otherwise it reads live until a sweep happens to notice.
     assert.equal(offer.status, 'inactive');
@@ -83,7 +80,7 @@ test('a coupon created already expired starts inactive', { skip: !live }, async 
     assert.equal(future.status, 'active');
 });
 
-test('the list names every restaurant a coupon covers', { skip: !live }, async () => {
+test('the list names every restaurant a coupon covers', async () => {
     const a = await makeRestaurant();
     const b = await makeRestaurant();
 
@@ -111,7 +108,7 @@ test('the list names every restaurant a coupon covers', { skip: !live }, async (
     assert.equal(offers.find((o) => o.offerId === global.id).restaurantName, 'All Restaurants');
 });
 
-test('the list derives expiry rather than trusting the status', { skip: !live }, async () => {
+test('the list derives expiry rather than trusting the status', async () => {
     // Written straight to the table so the status column still says active
     // while the end date has passed.
     const stale = await prisma.foodOffer.create({
@@ -134,7 +131,7 @@ test('the list derives expiry rather than trusting the status', { skip: !live },
     assert.equal(row.status, 'inactive');
 });
 
-test('enum names are translated for the admin UI', { skip: !live }, async () => {
+test('enum names are translated for the admin UI', async () => {
     const firstTime = await makeOffer({ customerScope: 'first_time' });
     const flat = await makeOffer({ discountType: 'flat_price', discountValue: 75 });
 
@@ -152,7 +149,7 @@ test('enum names are translated for the admin UI', { skip: !live }, async () => 
     assert.equal(pctRow.discountPercentage, 20);
 });
 
-test('cart visibility toggles', { skip: !live }, async () => {
+test('cart visibility toggles', async () => {
     const offer = await makeOffer();
     assert.equal(offer.showInCart, true);
 
@@ -164,7 +161,7 @@ test('cart visibility toggles', { skip: !live }, async () => {
     assert.equal(await updateAdminOfferCartVisibility(offer.id, '', false), null);
 });
 
-test('deleting a coupon takes its usage records with it', { skip: !live }, async () => {
+test('deleting a coupon takes its usage records with it', async () => {
     const offer = await makeOffer();
 
     const user = await prisma.foodUser.create({ data: { phone: uniquePhone('5') } });
@@ -186,7 +183,7 @@ test('deleting a coupon takes its usage records with it', { skip: !live }, async
     created.offers = created.offers.filter((id) => id !== offer.id);
 });
 
-test('a campaign invitation does not block creation if push fails', { skip: !live }, async () => {
+test('a campaign invitation does not block creation if push fails', async () => {
     const restaurant = await makeRestaurant();
 
     // notifyOwnersSafely is best-effort; the coupon must exist regardless.

@@ -12,8 +12,6 @@ import {
 /**
  * The admin approval queue for dishes and add-ons.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const created = { restaurants: [], foods: [], addons: [] };
 let restaurantId = null;
 let restaurantName = null;
@@ -34,7 +32,6 @@ const makeFood = async (over = {}) => {
 };
 
 test.before(async () => {
-    if (!live) return;
     restaurantName = `Approvals ${uniqueTag('R')}`;
     const r = await prisma.foodRestaurant.create({
         data: {
@@ -49,7 +46,6 @@ test.before(async () => {
 });
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodItemVariant.deleteMany({ where: { foodItemId: { in: created.foods } } });
     await prisma.foodItem.deleteMany({ where: { id: { in: created.foods } } });
     await prisma.foodAddon.deleteMany({ where: { id: { in: created.addons } } });
@@ -57,7 +53,7 @@ test.after(async () => {
     await prisma.$disconnect();
 });
 
-test('the queue merges dishes and add-ons', { skip: !live }, async () => {
+test('the queue merges dishes and add-ons', async () => {
     const food = await makeFood({ categoryName: 'Starters', foodType: 'NonVeg' });
     const addon = await prisma.foodAddon.create({
         data: {
@@ -89,7 +85,7 @@ test('the queue merges dishes and add-ons', { skip: !live }, async () => {
     assert.ok(total >= 2);
 });
 
-test('the queue is searchable by dish and category', { skip: !live }, async () => {
+test('the queue is searchable by dish and category', async () => {
     const tag = uniqueTag('Q');
     const food = await makeFood({ name: `${tag} Paneer Tikka`, categoryName: 'Grill' });
 
@@ -100,7 +96,7 @@ test('the queue is searchable by dish and category', { skip: !live }, async () =
     assert.ok(!byOther.requests.some((r) => r.id === food.id));
 });
 
-test('approving stamps the dish and clears any old rejection', { skip: !live }, async () => {
+test('approving stamps the dish and clears any old rejection', async () => {
     const food = await makeFood({
         approvalStatus: 'pending',
         rejectionReason: 'Blurry photo',
@@ -114,7 +110,7 @@ test('approving stamps the dish and clears any old rejection', { skip: !live }, 
     assert.equal(approved.rejectedAt, null);
 });
 
-test('a dish can only be decided once', { skip: !live }, async () => {
+test('a dish can only be decided once', async () => {
     const food = await makeFood();
 
     assert.ok(await approveFoodItem(food.id));
@@ -127,7 +123,7 @@ test('a dish can only be decided once', { skip: !live }, async () => {
     assert.equal(after.approvalStatus, 'approved');
 });
 
-test('a rejection needs a reason and drops out of the queue', { skip: !live }, async () => {
+test('a rejection needs a reason and drops out of the queue', async () => {
     const food = await makeFood();
 
     await assert.rejects(() => rejectFoodItem(food.id, '   '), /Rejection reason is required/);

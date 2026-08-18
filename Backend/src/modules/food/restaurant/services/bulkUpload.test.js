@@ -12,8 +12,6 @@ import { generateBulkMenuTemplate, processBulkMenuUpload } from './bulkUpload.se
  * The template this service generates is the input, so a template change that
  * broke the reader would fail here rather than in a restaurant's inbox.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const created = { restaurants: [], categories: [] };
 let restaurantId = null;
 
@@ -38,7 +36,6 @@ const row = (over = {}) => ({
 });
 
 test.before(async () => {
-    if (!live) return;
     const r = await prisma.foodRestaurant.create({
         data: {
             restaurantName: `Bulk ${uniqueTag('R')}`,
@@ -52,7 +49,6 @@ test.before(async () => {
 });
 
 test.after(async () => {
-    if (!live) return;
     const foods = await prisma.foodItem.findMany({
         where: { restaurantId: { in: created.restaurants } },
         select: { id: true },
@@ -66,7 +62,7 @@ test.after(async () => {
     await prisma.$disconnect();
 });
 
-test('a sheet becomes dishes, categories and variant rows', { skip: !live }, async () => {
+test('a sheet becomes dishes, categories and variant rows', async () => {
     const tag = uniqueTag('Cat');
     const plain = row({ category: tag, name: `${tag} Soup` });
     const sized = row({
@@ -113,7 +109,7 @@ test('a sheet becomes dishes, categories and variant rows', { skip: !live }, asy
     assert.equal(soup.approvedAt, null);
 });
 
-test('re-uploading updates the dish instead of duplicating it', { skip: !live }, async () => {
+test('re-uploading updates the dish instead of duplicating it', async () => {
     const name = `Repeat ${uniqueTag('U')}`;
 
     await processBulkMenuUpload(restaurantId, await sheetFrom([
@@ -140,7 +136,7 @@ test('re-uploading updates the dish instead of duplicating it', { skip: !live },
     assert.equal(found[0].requestedAt, null);
 });
 
-test('the same dish twice in one sheet writes one row', { skip: !live }, async () => {
+test('the same dish twice in one sheet writes one row', async () => {
     const name = `Twice ${uniqueTag('T')}`;
 
     const result = await processBulkMenuUpload(restaurantId, await sheetFrom([
@@ -154,7 +150,7 @@ test('the same dish twice in one sheet writes one row', { skip: !live }, async (
     assert.equal(Number(found[0].price), 250, 'last one wins');
 });
 
-test('a bad row is reported without losing the good ones', { skip: !live }, async () => {
+test('a bad row is reported without losing the good ones', async () => {
     const good = `Good ${uniqueTag('G')}`;
 
     const result = await processBulkMenuUpload(restaurantId, await sheetFrom([
@@ -171,7 +167,7 @@ test('a bad row is reported without losing the good ones', { skip: !live }, asyn
     assert.ok(await prisma.foodItem.findFirst({ where: { restaurantId, name: good } }));
 });
 
-test('a veg-only category refuses a non-veg row', { skip: !live }, async () => {
+test('a veg-only category refuses a non-veg row', async () => {
     const tag = uniqueTag('Veg');
     const category = await prisma.foodCategory.create({
         data: { name: tag, restaurantId, foodTypeScope: 'Veg', approvalStatus: 'approved' },
@@ -188,7 +184,7 @@ test('a veg-only category refuses a non-veg row', { skip: !live }, async () => {
     assert.match(result.details[0].error, /allows only Veg items/);
 });
 
-test('the sheet must have the template columns', { skip: !live }, async () => {
+test('the sheet must have the template columns', async () => {
     const workbook = new ExcelJS.Workbook();
     workbook.addWorksheet('Wrong').addRow(['Name', 'Price']);
     const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
@@ -215,7 +211,7 @@ test('the sheet must have the template columns', { skip: !live }, async () => {
     );
 });
 
-test('the old template\'s sample row is skipped', { skip: !live }, async () => {
+test('the old template\'s sample row is skipped', async () => {
     // Early templates shipped with Paneer Tikka pre-filled, and restaurants
     // uploaded it back untouched.
     const sampleOnly = await sheetFrom([{

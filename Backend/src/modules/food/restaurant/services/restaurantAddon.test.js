@@ -17,8 +17,6 @@ import {
  * erases the keys it does not mention; and the linked menu items must belong to
  * the restaurant doing the linking.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const created = { restaurants: [], foods: [], addons: [] };
 let restaurantId = null;
 let otherRestaurantId = null;
@@ -51,20 +49,18 @@ const track = async (body) => {
 };
 
 test.before(async () => {
-    if (!live) return;
     restaurantId = await makeRestaurant();
     otherRestaurantId = await makeRestaurant();
 });
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodAddon.deleteMany({ where: { restaurantId: { in: created.restaurants } } });
     await prisma.foodItem.deleteMany({ where: { id: { in: created.foods } } });
     await prisma.foodRestaurant.deleteMany({ where: { id: { in: created.restaurants } } });
     await prisma.$disconnect();
 });
 
-test('a new add-on starts as an unpublished draft', { skip: !live }, async () => {
+test('a new add-on starts as an unpublished draft', async () => {
     const addon = await track({
         name: `Extra Cheese ${uniqueTag('A')}`,
         description: 'A generous slice',
@@ -85,7 +81,7 @@ test('a new add-on starts as an unpublished draft', { skip: !live }, async () =>
     assert.equal(addon.group.maxSelect, 1);
 });
 
-test('the name is unique per restaurant, ignoring case', { skip: !live }, async () => {
+test('the name is unique per restaurant, ignoring case', async () => {
     const name = `Paneer ${uniqueTag('N')}`;
     await track({ name });
 
@@ -110,7 +106,7 @@ test('the name is unique per restaurant, ignoring case', { skip: !live }, async 
     await assert.rejects(() => createRestaurantAddon('not-an-id', { name }), /Invalid restaurant id/);
 });
 
-test('add-ons can only link to this restaurant\'s own dishes', { skip: !live }, async () => {
+test('add-ons can only link to this restaurant\'s own dishes', async () => {
     const mine = await makeFood(restaurantId);
     const theirs = await makeFood(otherRestaurantId);
 
@@ -130,7 +126,7 @@ test('add-ons can only link to this restaurant\'s own dishes', { skip: !live }, 
     );
 });
 
-test('editing the draft keeps the fields it did not mention', { skip: !live }, async () => {
+test('editing the draft keeps the fields it did not mention', async () => {
     const addon = await track({
         name: `Merge ${uniqueTag('M')}`,
         description: 'Original text',
@@ -156,7 +152,7 @@ test('editing the draft keeps the fields it did not mention', { skip: !live }, a
     assert.equal(updated.approvedAt, null);
 });
 
-test('availability and grouping do not force re-approval', { skip: !live }, async () => {
+test('availability and grouping do not force re-approval', async () => {
     const addon = await track({ name: `Group ${uniqueTag('G')}` });
     await prisma.foodAddon.update({
         where: { id: addon.id },
@@ -175,7 +171,7 @@ test('availability and grouping do not force re-approval', { skip: !live }, asyn
     assert.equal(updated.approvalStatus, 'approved');
 });
 
-test('a draft edit is validated', { skip: !live }, async () => {
+test('a draft edit is validated', async () => {
     const addon = await track({ name: `Valid ${uniqueTag('V')}` });
 
     await assert.rejects(
@@ -203,7 +199,7 @@ test('a draft edit is validated', { skip: !live }, async () => {
     assert.equal(await updateRestaurantAddon(otherRestaurantId, addon.id, { isAvailable: false }), null);
 });
 
-test('deleting is a soft delete that only works once', { skip: !live }, async () => {
+test('deleting is a soft delete that only works once', async () => {
     const addon = await track({ name: `Gone ${uniqueTag('D')}` });
 
     assert.deepEqual(await deleteRestaurantAddon(restaurantId, addon.id), { id: addon.id });
@@ -221,7 +217,7 @@ test('deleting is a soft delete that only works once', { skip: !live }, async ()
     assert.ok(reused.id);
 });
 
-test('the list filters by status and searches the draft name', { skip: !live }, async () => {
+test('the list filters by status and searches the draft name', async () => {
     const tag = uniqueTag('Srch');
     const addon = await track({ name: `${tag} Mayo Dip` });
 

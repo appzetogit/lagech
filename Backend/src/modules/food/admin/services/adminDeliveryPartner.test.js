@@ -20,8 +20,6 @@ import { uniquePhone } from '../../../../utils/testIds.js';
  * derived from five separate tables, and getting one of them wrong shows an
  * admin the wrong figure for what a rider is owed or holds.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const created = { partners: [], restaurants: [], users: [], orders: [] };
 const stamp = () => `${Date.now()}${Math.floor(performance.now() * 1000) % 1000}`;
 
@@ -73,7 +71,6 @@ const makeOrders = async (partner, rows) => {
 };
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodDeliveryWithdrawal.deleteMany({
         where: { deliveryPartnerId: { in: created.partners } },
     });
@@ -90,7 +87,7 @@ test.after(async () => {
     await prisma.$disconnect();
 });
 
-test('pocket balance is earnings plus bonus, less paid and claimed', { skip: !live }, async () => {
+test('pocket balance is earnings plus bonus, less paid and claimed', async () => {
     const partner = await makePartner();
 
     await makeOrders(partner, [
@@ -125,7 +122,7 @@ test('pocket balance is earnings plus bonus, less paid and claimed', { skip: !li
     assert.equal(stats.pocketBalance, 100);
 });
 
-test('cash in hand is what was collected less what was handed in', { skip: !live }, async () => {
+test('cash in hand is what was collected less what was handed in', async () => {
     const partner = await makePartner();
 
     await makeOrders(partner, [
@@ -149,7 +146,7 @@ test('cash in hand is what was collected less what was handed in', { skip: !live
     assert.equal(stats.cashInHand, 300);
 });
 
-test('a rider with no activity reports zeroes', { skip: !live }, async () => {
+test('a rider with no activity reports zeroes', async () => {
     const partner = await makePartner();
     const stats = (await getBulkDeliveryPartnerStats([partner.id])).get(partner.id);
 
@@ -161,7 +158,7 @@ test('a rider with no activity reports zeroes', { skip: !live }, async () => {
     assert.equal((await getBulkDeliveryPartnerStats([])).size, 0);
 });
 
-test('the list flags riders dispatch cannot actually reach', { skip: !live }, async () => {
+test('the list flags riders dispatch cannot actually reach', async () => {
     const reachable = await makePartner({ availabilityStatus: 'online', fcmTokenMobile: ['tok-1'] });
     const stranded = await makePartner({ availabilityStatus: 'online' });
 
@@ -177,7 +174,7 @@ test('the list flags riders dispatch cannot actually reach', { skip: !live }, as
     assert.equal(b.hasPushToken, false);
 });
 
-test('a rider location is exposed in both shapes', { skip: !live }, async () => {
+test('a rider location is exposed in both shapes', async () => {
     const partner = await makePartner({
         lastLat: 22.7196,
         lastLng: 75.8577,
@@ -198,7 +195,7 @@ test('a rider location is exposed in both shapes', { skip: !live }, async () => 
     assert.equal(await getDeliveryPartnerById('not-an-id'), null);
 });
 
-test('the partner list searches and excludes unapproved riders', { skip: !live }, async () => {
+test('the partner list searches and excludes unapproved riders', async () => {
     const unique = `Findable${stamp()}`;
     const approved = await makePartner({ name: `${unique} Approved` });
     const pending = await makePartner({ name: `${unique} Pending`, status: 'pending' });
@@ -213,7 +210,7 @@ test('the partner list searches and excludes unapproved riders', { skip: !live }
     assert.equal(requests[0]._id, pending.id);
 });
 
-test('join requests report a rejection as denied', { skip: !live }, async () => {
+test('join requests report a rejection as denied', async () => {
     const partner = await makePartner({ status: 'pending' });
 
     const rejected = await rejectDeliveryPartner(partner.id, 'Documents unreadable');
@@ -227,7 +224,7 @@ test('join requests report a rejection as denied', { skip: !live }, async () => 
     assert.equal(row.rejectionReason, 'Documents unreadable');
 });
 
-test('a rejected applicant can still be approved later', { skip: !live }, async () => {
+test('a rejected applicant can still be approved later', async () => {
     const partner = await makePartner({ status: 'pending' });
 
     await rejectDeliveryPartner(partner.id, 'Blurry licence');
@@ -242,13 +239,13 @@ test('a rejected applicant can still be approved later', { skip: !live }, async 
     assert.equal(approved.rejectionReason, '');
 });
 
-test('deciding an unknown application returns null', { skip: !live }, async () => {
+test('deciding an unknown application returns null', async () => {
     assert.equal(await approveDeliveryPartner('a'.repeat(24)), null);
     assert.equal(await rejectDeliveryPartner('a'.repeat(24), 'x'), null);
     assert.equal(await approveDeliveryPartner('not-an-id'), null);
 });
 
-test('a rider profile edit trims the name and rejects a blank one', { skip: !live }, async () => {
+test('a rider profile edit trims the name and rejects a blank one', async () => {
     const partner = await makePartner();
 
     const renamed = await updateDeliveryPartnerProfile(partner.id, { name: '  Renamed  ' });

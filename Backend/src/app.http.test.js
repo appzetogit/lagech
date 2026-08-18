@@ -15,8 +15,6 @@ import { uniquePhone, uniqueTag } from './utils/testIds.js';
  * does not exist, and a startup check demanding MONGO_URI long after the last
  * Mongoose model was deleted. Both were found by running the app by hand.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const ADMIN_BASE = '/api/v1/food/admin';
 
 let http = null;
@@ -27,7 +25,6 @@ let tag = null;
 const created = { admins: [], restaurants: [], users: [], orders: [] };
 
 test.before(async () => {
-    if (!live) return;
     http = await startTestServer();
     tag = uniqueTag('Http');
 
@@ -74,7 +71,6 @@ test.before(async () => {
 });
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodOrder.deleteMany({ where: { id: { in: created.orders } } });
     await prisma.foodUser.deleteMany({ where: { id: { in: created.users } } });
     await prisma.foodRestaurant.deleteMany({ where: { id: { in: created.restaurants } } });
@@ -83,7 +79,7 @@ test.after(async () => {
     await prisma.$disconnect();
 });
 
-test('the app serves and reports its dependencies', { skip: !live }, async () => {
+test('the app serves and reports its dependencies', async () => {
     const { status, body } = await http.get('/health');
     assert.equal(status, 200);
     assert.equal(body.status, 'UP');
@@ -92,12 +88,12 @@ test('the app serves and reports its dependencies', { skip: !live }, async () =>
     assert.equal(body.postgres, 'connected');
 });
 
-test('an unrouted path is a 404, not a hang or a 500', { skip: !live }, async () => {
+test('an unrouted path is a 404, not a hang or a 500', async () => {
     assert.equal((await http.get(`${ADMIN_BASE}/no-such-endpoint`, { token: adminToken })).status, 404);
     assert.equal((await http.get('/not-an-api-path')).status, 404);
 });
 
-test('a protected route refuses an absent, malformed or wrong-role token', { skip: !live }, async () => {
+test('a protected route refuses an absent, malformed or wrong-role token', async () => {
     const path = `${ADMIN_BASE}/dashboard-stats`;
 
     const anonymous = await http.get(path);
@@ -114,7 +110,7 @@ test('a protected route refuses an absent, malformed or wrong-role token', { ski
     assert.equal((await http.get(path, { token: adminToken })).status, 200);
 });
 
-test('a successful response has the envelope the clients parse', { skip: !live }, async () => {
+test('a successful response has the envelope the clients parse', async () => {
     const { status, body } = await http.get(`${ADMIN_BASE}/dashboard-stats`, { token: adminToken });
 
     assert.equal(status, 200);
@@ -126,7 +122,7 @@ test('a successful response has the envelope the clients parse', { skip: !live }
     assert.equal(typeof body.data.revenue.total, 'number');
 });
 
-test('every report route ported in this migration is reachable', { skip: !live }, async () => {
+test('every report route ported in this migration is reachable', async () => {
     // The regression net: a route renamed, unmounted, or pointed at a function
     // that no longer exists fails here and nowhere else.
     const paths = [
@@ -157,7 +153,7 @@ test('every report route ported in this migration is reachable', { skip: !live }
     assert.deepEqual(failures, [], `unreachable: ${failures.join(', ')}`);
 });
 
-test('query parameters reach the service', { skip: !live }, async () => {
+test('query parameters reach the service', async () => {
     // Pagination is plumbed through the controller, so a controller that reads
     // the wrong key silently returns a default-sized page.
     const one = await http.get(`${ADMIN_BASE}/reports/transactions?limit=1`, { token: adminToken });
@@ -172,7 +168,7 @@ test('query parameters reach the service', { skip: !live }, async () => {
     assert.equal(searched.body.data.restaurants[0].restaurantName, `${tag} Kitchen`);
 });
 
-test('a thrown error becomes its own status, not a 500', { skip: !live }, async () => {
+test('a thrown error becomes its own status, not a 500', async () => {
     // NotFoundError -> 404, through the error handler.
     const missing = await http.post(
         `${ADMIN_BASE}/restaurant-subscriptions/invoices/${'a'.repeat(24)}/waive`,
@@ -191,7 +187,7 @@ test('a thrown error becomes its own status, not a 500', { skip: !live }, async 
     assert.match(badId.body.message, /Invalid invoice id/);
 });
 
-test('a controller guard answers before the service is asked', { skip: !live }, async () => {
+test('a controller guard answers before the service is asked', async () => {
     const bad = await http.get(`${ADMIN_BASE}/restaurants/not-an-id/analytics`, { token: adminToken });
     assert.equal(bad.status, 400);
 
@@ -203,7 +199,7 @@ test('a controller guard answers before the service is asked', { skip: !live }, 
     assert.equal(real.body.data.analytics.totalOrders, 3);
 });
 
-test('the public endpoints stay public', { skip: !live }, async () => {
+test('the public endpoints stay public', async () => {
     // These are read by the apps before anyone signs in; putting them behind the
     // admin guard would break the launch screen.
     for (const path of [

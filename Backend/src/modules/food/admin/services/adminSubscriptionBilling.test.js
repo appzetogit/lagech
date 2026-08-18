@@ -14,15 +14,12 @@ import { getRestaurantFinance, getWalletSummaries } from '../../restaurant/servi
  * every restaurant on it. These tests pin the batching, and pin that the number
  * a restaurant sees and the number an admin sees are the same number.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const RESTAURANTS = 12;
 const created = { restaurants: [], users: [], orders: [], invoices: [] };
 let userId = null;
 let tag = null;
 
 test.before(async () => {
-    if (!live) return;
     tag = uniqueTag('Inv');
 
     const u = await prisma.foodUser.create({ data: { phone: uniquePhone('5') } });
@@ -74,7 +71,6 @@ test.before(async () => {
 });
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodSubscriptionInvoice.deleteMany({ where: { restaurantId: { in: created.restaurants } } });
     await prisma.foodRestaurantWithdrawal.deleteMany({ where: { restaurantId: { in: created.restaurants } } });
     await prisma.foodOrder.deleteMany({ where: { id: { in: created.orders } } });
@@ -83,7 +79,7 @@ test.after(async () => {
     await prisma.$disconnect();
 });
 
-test('the wallet column costs the same whether the page has 1 row or 12', { skip: !live }, async () => {
+test('the wallet column costs the same whether the page has 1 row or 12', async () => {
     // Count the queries the batch actually issues. A regression to per-row
     // would make this grow with the number of restaurants, which is the whole
     // failure mode being guarded against.
@@ -114,7 +110,7 @@ test('the wallet column costs the same whether the page has 1 row or 12', { skip
     );
 });
 
-test('every restaurant on the page gets its own correct figures', { skip: !live }, async () => {
+test('every restaurant on the page gets its own correct figures', async () => {
     const summaries = await getWalletSummaries(created.restaurants);
 
     assert.equal(summaries.size, RESTAURANTS);
@@ -137,7 +133,7 @@ test('every restaurant on the page gets its own correct figures', { skip: !live 
     assert.equal(settled.netAvailable, 2700);
 });
 
-test('an unknown restaurant reads as zero, not as missing', { skip: !live }, async () => {
+test('an unknown restaurant reads as zero, not as missing', async () => {
     const summaries = await getWalletSummaries(['a'.repeat(24), created.restaurants[0]]);
 
     // A restaurant with no orders still needs a row, or the table renders a gap.
@@ -149,7 +145,7 @@ test('an unknown restaurant reads as zero, not as missing', { skip: !live }, asy
     assert.equal((await getWalletSummaries()).size, 0);
 });
 
-test('the admin and the restaurant are shown the same balance', { skip: !live }, async () => {
+test('the admin and the restaurant are shown the same balance', async () => {
     const id = created.restaurants[0];
 
     const { invoices } = await listSubscriptionInvoicesAdmin({ search: tag, limit: 100 });
@@ -165,7 +161,7 @@ test('the admin and the restaurant are shown the same balance', { skip: !live },
     assert.equal(row.wallet.netAvailable, 2200);
 });
 
-test('a withdrawal moves both views together', { skip: !live }, async () => {
+test('a withdrawal moves both views together', async () => {
     const id = created.restaurants[1];
     const withdrawal = await prisma.foodRestaurantWithdrawal.create({
         data: { restaurantId: id, amount: 700, status: 'pending' },
@@ -182,7 +178,7 @@ test('a withdrawal moves both views together', { skip: !live }, async () => {
     await prisma.foodRestaurantWithdrawal.delete({ where: { id: withdrawal.id } });
 });
 
-test('the invoice list still sorts and filters on the wallet balance', { skip: !live }, async () => {
+test('the invoice list still sorts and filters on the wallet balance', async () => {
     const byWallet = await listSubscriptionInvoicesAdmin({
         search: tag, sortBy: 'wallet', sortOrder: 'desc', limit: 100,
     });

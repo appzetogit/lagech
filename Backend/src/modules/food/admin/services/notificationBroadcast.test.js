@@ -16,13 +16,10 @@ import {
  * restaurant or a rider who was never approved, and deleting one has to take
  * its inbox rows with it.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const created = { admins: [], users: [], restaurants: [], partners: [], broadcasts: [] };
 let adminId = null;
 
 test.before(async () => {
-    if (!live) return;
     const admin = await prisma.foodAdmin.create({
         data: {
             name: `Broadcaster ${uniqueTag('A')}`,
@@ -35,7 +32,6 @@ test.before(async () => {
 });
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodNotification.deleteMany({ where: { broadcastId: { in: created.broadcasts } } });
     await prisma.notificationBroadcast.deleteMany({ where: { id: { in: created.broadcasts } } });
     await prisma.foodUser.deleteMany({ where: { id: { in: created.users } } });
@@ -51,7 +47,7 @@ const send = async (body) => {
     return { broadcast, targetPreview };
 };
 
-test('a restaurant broadcast skips restaurants that are not approved', { skip: !live }, async () => {
+test('a restaurant broadcast skips restaurants that are not approved', async () => {
     const tag = uniqueTag('B');
     const approved = await prisma.foodRestaurant.create({
         data: {
@@ -99,7 +95,7 @@ test('a restaurant broadcast skips restaurants that are not approved', { skip: !
     assert.equal(inbox.metadata.ownerLabel, `${tag} Open`);
 });
 
-test('a custom broadcast records exactly the ids it was given', { skip: !live }, async () => {
+test('a custom broadcast records exactly the ids it was given', async () => {
     const tag = uniqueTag('C');
     const one = await prisma.foodUser.create({ data: { name: `${tag} One`, phone: uniquePhone('5') } });
     const two = await prisma.foodUser.create({ data: { name: `${tag} Two`, phone: uniquePhone('5') } });
@@ -128,7 +124,7 @@ test('a custom broadcast records exactly the ids it was given', { skip: !live },
     );
 });
 
-test('an explicit target list wins over ids, and duplicates collapse', { skip: !live }, async () => {
+test('an explicit target list wins over ids, and duplicates collapse', async () => {
     const tag = uniqueTag('E');
     const user = await prisma.foodUser.create({ data: { name: `${tag} Pick`, phone: uniquePhone('5') } });
     created.users.push(user.id);
@@ -148,7 +144,7 @@ test('an explicit target list wins over ids, and duplicates collapse', { skip: !
     assert.equal(targetPreview[0].label, 'Second', 'the later entry wins');
 });
 
-test('the input is validated before anyone is contacted', { skip: !live }, async () => {
+test('the input is validated before anyone is contacted', async () => {
     const body = { title: 'T', message: 'M', targetType: 'USER' };
 
     await assert.rejects(
@@ -169,7 +165,7 @@ test('the input is validated before anyone is contacted', { skip: !live }, async
     );
 });
 
-test('the history labels its audience and pages', { skip: !live }, async () => {
+test('the history labels its audience and pages', async () => {
     const { items, pagination } = await getBroadcastNotifications({ page: 1, limit: 5 });
 
     assert.ok(items.length <= 5);
@@ -183,7 +179,7 @@ test('the history labels its audience and pages', { skip: !live }, async () => {
     assert.equal(restaurants.targetLabel, 'Restaurants');
 });
 
-test('deleting a broadcast takes its inbox rows with it', { skip: !live }, async () => {
+test('deleting a broadcast takes its inbox rows with it', async () => {
     const user = await prisma.foodUser.create({ data: { phone: uniquePhone('5') } });
     created.users.push(user.id);
 

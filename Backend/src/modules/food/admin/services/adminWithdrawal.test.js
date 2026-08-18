@@ -18,8 +18,6 @@ import { uniquePhone } from '../../../../utils/testIds.js';
  * change as separate statements. The tests that matter here are the concurrent
  * ones: two admins approving at the same moment must pay once.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const created = { partners: [], restaurants: [], withdrawals: [], rWithdrawals: [] };
 const stamp = () => `${Date.now()}${Math.floor(performance.now() * 1000) % 1000}`;
 
@@ -53,7 +51,6 @@ const walletOf = (partnerId) =>
     });
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodDeliveryWithdrawal.deleteMany({ where: { id: { in: created.withdrawals } } });
     await prisma.foodRestaurantWithdrawal.deleteMany({ where: { id: { in: created.rWithdrawals } } });
     await prisma.wallet.deleteMany({ where: { entityId: { in: created.partners } } });
@@ -62,7 +59,7 @@ test.after(async () => {
     await prisma.$disconnect();
 });
 
-test('approving a payout debits the wallet once', { skip: !live }, async () => {
+test('approving a payout debits the wallet once', async () => {
     const partner = await makePartner(1000, 200);
     const w = await makeWithdrawal(partner, 200);
 
@@ -79,7 +76,7 @@ test('approving a payout debits the wallet once', { skip: !live }, async () => {
     assert.equal(Number(wallet.lockedAmount), 0, 'the reservation is released');
 });
 
-test('two admins approving at once pay only once', { skip: !live }, async () => {
+test('two admins approving at once pay only once', async () => {
     const partner = await makePartner(500);
     const w = await makeWithdrawal(partner, 500);
 
@@ -102,7 +99,7 @@ test('two admins approving at once pay only once', { skip: !live }, async () => 
     assert.equal(ledgerRow.status, 'approved');
 });
 
-test('a payout larger than the balance is refused and moves nothing', { skip: !live }, async () => {
+test('a payout larger than the balance is refused and moves nothing', async () => {
     const partner = await makePartner(100);
     const w = await makeWithdrawal(partner, 250);
 
@@ -120,7 +117,7 @@ test('a payout larger than the balance is refused and moves nothing', { skip: !l
     assert.equal(after.status, 'pending', 'no approval without a payout');
 });
 
-test('rejecting releases the reservation without paying', { skip: !live }, async () => {
+test('rejecting releases the reservation without paying', async () => {
     const partner = await makePartner(600, 150);
     const w = await makeWithdrawal(partner, 150);
 
@@ -135,7 +132,7 @@ test('rejecting releases the reservation without paying', { skip: !live }, async
     assert.equal(Number(wallet.lockedAmount), 0, 'but the hold is lifted');
 });
 
-test('an already-decided request cannot be changed', { skip: !live }, async () => {
+test('an already-decided request cannot be changed', async () => {
     const partner = await makePartner(400);
     const w = await makeWithdrawal(partner, 100);
 
@@ -154,7 +151,7 @@ test('an already-decided request cannot be changed', { skip: !live }, async () =
     assert.equal(Number(wallet.balance), 300, 'still debited exactly once');
 });
 
-test('an unknown id or status is refused', { skip: !live }, async () => {
+test('an unknown id or status is refused', async () => {
     await assert.rejects(
         () => updateDeliveryWithdrawalStatus('bad-id', { status: 'approved' }),
         /Invalid withdrawal ID/,
@@ -169,7 +166,7 @@ test('an unknown id or status is refused', { skip: !live }, async () => {
     );
 });
 
-test('delivery payouts list with their partner details', { skip: !live }, async () => {
+test('delivery payouts list with their partner details', async () => {
     const partner = await makePartner(900);
     const w = await makeWithdrawal(partner, 321);
 
@@ -187,7 +184,7 @@ test('delivery payouts list with their partner details', { skip: !live }, async 
     assert.ok(byAmount.requests.some((r) => r.id === w.id));
 });
 
-test('a restaurant payout is decided once', { skip: !live }, async () => {
+test('a restaurant payout is decided once', async () => {
     const restaurant = await prisma.foodRestaurant.create({
         data: {
             restaurantName: `Payout Rest ${stamp()}`,

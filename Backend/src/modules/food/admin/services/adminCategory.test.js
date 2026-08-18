@@ -22,8 +22,6 @@ import { uniquePhone } from '../../../../utils/testIds.js';
  * promotes it: restaurantId is cleared so everyone can use it, but
  * createdByRestaurantId survives so there is still a record of who proposed it.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const created = { categories: [], restaurants: [], zones: [], foods: [] };
 const stamp = () => `${Date.now()}${Math.floor(performance.now() * 1000) % 1000}`;
 
@@ -47,7 +45,6 @@ const makeCategory = async (data) => {
 };
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodItem.deleteMany({ where: { id: { in: created.foods } } });
     await prisma.foodCategory.deleteMany({ where: { id: { in: created.categories } } });
     await prisma.foodRestaurant.deleteMany({ where: { id: { in: created.restaurants } } });
@@ -55,7 +52,7 @@ test.after(async () => {
     await prisma.$disconnect();
 });
 
-test('an admin-created category is global and live at once', { skip: !live }, async () => {
+test('an admin-created category is global and live at once', async () => {
     const category = await createCategory({ name: `Desserts ${stamp()}` });
     created.categories.push(category.id);
 
@@ -73,7 +70,7 @@ test('an admin-created category is global and live at once', { skip: !live }, as
     );
 });
 
-test('a category can be scoped to one zone, or explicitly global', { skip: !live }, async () => {
+test('a category can be scoped to one zone, or explicitly global', async () => {
     const zone = await prisma.foodZone.create({
         data: {
             name: `Cat Zone ${stamp()}`,
@@ -100,7 +97,7 @@ test('a category can be scoped to one zone, or explicitly global', { skip: !live
     assert.ok(!onlyGlobal.categories.some((c) => c._id === zoned.id));
 });
 
-test('approving a category clears the previous rejection', { skip: !live }, async () => {
+test('approving a category clears the previous rejection', async () => {
     const restaurant = await makeRestaurant();
     const category = await makeCategory({
         name: `Pending ${stamp()}`,
@@ -122,7 +119,7 @@ test('approving a category clears the previous rejection', { skip: !live }, asyn
     assert.equal(approved.rejectionReason, '');
 });
 
-test('a global category cannot be rejected', { skip: !live }, async () => {
+test('a global category cannot be rejected', async () => {
     const category = await createCategory({ name: `Platform ${stamp()}` });
     created.categories.push(category.id);
 
@@ -133,7 +130,7 @@ test('a global category cannot be rejected', { skip: !live }, async () => {
     );
 });
 
-test('promoting a category keeps the proposer and drops the owner', { skip: !live }, async () => {
+test('promoting a category keeps the proposer and drops the owner', async () => {
     const restaurant = await makeRestaurant();
     const category = await makeCategory({
         name: `Promotable ${stamp()}`,
@@ -154,7 +151,7 @@ test('promoting a category keeps the proposer and drops the owner', { skip: !liv
     assert.equal(again.id, global.id);
 });
 
-test('an unapproved category cannot be promoted', { skip: !live }, async () => {
+test('an unapproved category cannot be promoted', async () => {
     const restaurant = await makeRestaurant();
     const category = await makeCategory({
         name: `Unapproved ${stamp()}`,
@@ -166,7 +163,7 @@ test('an unapproved category cannot be promoted', { skip: !live }, async () => {
     await assert.rejects(() => makeCategoryGlobal(category.id), /Only approved categories/);
 });
 
-test('narrowing the diet scope is refused while dishes conflict', { skip: !live }, async () => {
+test('narrowing the diet scope is refused while dishes conflict', async () => {
     const restaurant = await makeRestaurant();
     const category = await makeCategory({ name: `Mixed ${stamp()}`, foodTypeScope: 'Both' });
 
@@ -191,7 +188,7 @@ test('narrowing the diet scope is refused while dishes conflict', { skip: !live 
     assert.equal(widened.foodTypeScope, 'Both');
 });
 
-test('deleting a category detaches its dishes rather than orphaning them', { skip: !live }, async () => {
+test('deleting a category detaches its dishes rather than orphaning them', async () => {
     const restaurant = await makeRestaurant();
     const category = await makeCategory({ name: `Doomed ${stamp()}` });
 
@@ -218,7 +215,7 @@ test('deleting a category detaches its dishes rather than orphaning them', { ski
     created.categories = created.categories.filter((id) => id !== category.id);
 });
 
-test('the list filters by approval status and search', { skip: !live }, async () => {
+test('the list filters by approval status and search', async () => {
     const restaurant = await makeRestaurant();
     const unique = `Filt${stamp()}`;
 
@@ -248,7 +245,7 @@ test('the list filters by approval status and search', { skip: !live }, async ()
     assert.equal(byFlag.categories[0]._id, approved.id);
 });
 
-test('toggling a category flips its visibility', { skip: !live }, async () => {
+test('toggling a category flips its visibility', async () => {
     const category = await createCategory({ name: `Toggle ${stamp()}` });
     created.categories.push(category.id);
 

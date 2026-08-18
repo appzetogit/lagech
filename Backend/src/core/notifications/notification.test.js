@@ -26,14 +26,11 @@ import { uniquePhone } from '../../utils/testIds.js';
  * device silently stops receiving pushes. It is a raw array_append_capped,
  * which only a real database can exercise.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 let userId;
 let otherUserId;
 let broadcastId;
 
 test.before(async () => {
-    if (!live) return;
     const [user, other, admin] = await Promise.all([
         prisma.foodUser.create({ data: { phone: uniquePhone('91') } }),
         prisma.foodUser.create({ data: { phone: uniquePhone('92') } }),
@@ -51,7 +48,6 @@ test.before(async () => {
 });
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodNotification.deleteMany({ where: { ownerId: { in: [userId, otherUserId] } } });
     await prisma.notificationBroadcast.deleteMany({ where: { id: broadcastId } });
     await prisma.foodAdmin.deleteMany({ where: { email: { contains: '@test.local' } } });
@@ -61,7 +57,7 @@ test.after(async () => {
 
 // ── inbox ──
 
-test('a broadcast fan-out is idempotent', { skip: !live }, async () => {
+test('a broadcast fan-out is idempotent', async () => {
     const payload = {
         notifications: [
             { ownerType: 'USER', ownerId: userId, title: 'Offer', message: '50% off', broadcastId },
@@ -77,7 +73,7 @@ test('a broadcast fan-out is idempotent', { skip: !live }, async () => {
     assert.equal(items.length, 1);
 });
 
-test('re-sending resurfaces a dismissed notification', { skip: !live }, async () => {
+test('re-sending resurfaces a dismissed notification', async () => {
     const { items } = await getInboxNotifications({ ownerType: 'USER', ownerId: userId });
     await dismissNotification({ notificationId: items[0].id, ownerType: 'USER', ownerId: userId });
 
@@ -94,7 +90,7 @@ test('re-sending resurfaces a dismissed notification', { skip: !live }, async ()
     assert.equal(after.items.length, 1);
 });
 
-test('a resurfaced notification stays read', { skip: !live }, async () => {
+test('a resurfaced notification stays read', async () => {
     // isRead is only ever set on insert (the old bulkWrite used $setOnInsert), so
     // re-sending a broadcast the recipient already read and dismissed brings it
     // back to the inbox without pretending it is new.
@@ -104,7 +100,7 @@ test('a resurfaced notification stays read', { skip: !live }, async () => {
     assert.equal(inbox.unreadCount, 0);
 });
 
-test('a genuinely new notification is unread, and reading it clears the count', { skip: !live }, async () => {
+test('a genuinely new notification is unread, and reading it clears the count', async () => {
     await createInboxNotifications({
         notifications: [
             { ownerType: 'USER', ownerId: userId, title: 'Fresh', message: 'Brand new' },
@@ -122,7 +118,7 @@ test('a genuinely new notification is unread, and reading it clears the count', 
     assert.equal(after.items.length, before.items.length, 'reading does not remove it from the inbox');
 });
 
-test('another owner cannot read or dismiss your notification', { skip: !live }, async () => {
+test('another owner cannot read or dismiss your notification', async () => {
     const { items } = await getInboxNotifications({ ownerType: 'USER', ownerId: userId });
     assert.ok(items.length > 0);
 
@@ -134,7 +130,7 @@ test('another owner cannot read or dismiss your notification', { skip: !live }, 
     );
 });
 
-test('dismissAll empties the inbox and reports how many moved', { skip: !live }, async () => {
+test('dismissAll empties the inbox and reports how many moved', async () => {
     await createInboxNotifications({
         notifications: [
             { ownerType: 'USER', ownerId: userId, title: 'Second', message: 'Another one' },
@@ -152,7 +148,7 @@ test('dismissAll empties the inbox and reports how many moved', { skip: !live },
 
 const owner = () => ({ ownerType: 'USER', ownerId: userId, platform: 'mobile' });
 
-test('registering a token twice does not duplicate it', { skip: !live }, async () => {
+test('registering a token twice does not duplicate it', async () => {
     await upsertFirebaseDeviceToken({ ...owner(), token: 'tok-A' });
     await upsertFirebaseDeviceToken({ ...owner(), token: 'tok-A' });
 
@@ -160,7 +156,7 @@ test('registering a token twice does not duplicate it', { skip: !live }, async (
     assert.deepEqual(tokens, ['tok-A']);
 });
 
-test('the token list is capped, evicting the oldest device', { skip: !live }, async () => {
+test('the token list is capped, evicting the oldest device', async () => {
     for (const t of ['tok-B', 'tok-C', 'tok-D']) {
         await upsertFirebaseDeviceToken({ ...owner(), token: t });
     }
@@ -171,14 +167,14 @@ test('the token list is capped, evicting the oldest device', { skip: !live }, as
     assert.deepEqual(tokens, ['tok-B', 'tok-C', 'tok-D']);
 });
 
-test('re-registering an existing token moves it to newest', { skip: !live }, async () => {
+test('re-registering an existing token moves it to newest', async () => {
     // Otherwise a device in daily use could be evicted ahead of one that has not
     // checked in for weeks.
     await upsertFirebaseDeviceToken({ ...owner(), token: 'tok-B' });
     assert.deepEqual(await listOwnerTokens(owner()), ['tok-C', 'tok-D', 'tok-B']);
 });
 
-test('concurrent registrations do not lose any token', { skip: !live }, async () => {
+test('concurrent registrations do not lose any token', async () => {
     await removeFirebaseDeviceToken({ ownerType: 'USER', ownerId: userId });
 
     // The real failure mode: login, app resume and token refresh all register at
@@ -191,7 +187,7 @@ test('concurrent registrations do not lose any token', { skip: !live }, async ()
     assert.deepEqual([...tokens].sort(), ['c1', 'c2', 'c3']);
 });
 
-test('a token can only belong to one owner', { skip: !live }, async () => {
+test('a token can only belong to one owner', async () => {
     await upsertFirebaseDeviceToken({ ownerType: 'USER', ownerId: userId, token: 'shared', platform: 'mobile' });
     // Same handset, different account: the previous owner must lose it, or both
     // accounts get every push.
@@ -201,7 +197,7 @@ test('a token can only belong to one owner', { skip: !live }, async () => {
     assert.ok((await listOwnerTokens({ ownerType: 'USER', ownerId: otherUserId, platform: 'mobile' })).includes('shared'));
 });
 
-test('a token never sits in both platform buckets', { skip: !live }, async () => {
+test('a token never sits in both platform buckets', async () => {
     await upsertFirebaseDeviceToken({ ownerType: 'USER', ownerId: userId, token: 'dual', platform: 'web' });
     await upsertFirebaseDeviceToken({ ownerType: 'USER', ownerId: userId, token: 'dual', platform: 'mobile' });
 
@@ -211,14 +207,14 @@ test('a token never sits in both platform buckets', { skip: !live }, async () =>
     assert.ok(mobile.includes('dual'));
 });
 
-test('replace makes a token the only one, for single-device roles', { skip: !live }, async () => {
+test('replace makes a token the only one, for single-device roles', async () => {
     await replaceFirebaseDeviceToken({ ownerType: 'USER', ownerId: userId, token: 'only-one', platform: 'mobile' });
 
     const all = await listOwnerTokens({ ownerType: 'USER', ownerId: userId });
     assert.deepEqual(all, ['only-one'], 'signing in elsewhere must silence the old handset');
 });
 
-test('logout with no token clears the whole list', { skip: !live }, async () => {
+test('logout with no token clears the whole list', async () => {
     // The apps call this with an empty body on logout; it used to throw, so the
     // token stayed attached and a signed-out rider kept getting order alerts.
     const result = await removeFirebaseDeviceToken({ ownerType: 'USER', ownerId: userId });
@@ -226,7 +222,7 @@ test('logout with no token clears the whole list', { skip: !live }, async () => 
     assert.deepEqual(await listOwnerTokens({ ownerType: 'USER', ownerId: userId }), []);
 });
 
-test('detaching an unknown token is a no-op, not an error', { skip: !live }, async () => {
+test('detaching an unknown token is a no-op, not an error', async () => {
     const result = await detachFirebaseDeviceTokenEverywhere('never-registered');
     assert.equal(result.success, true);
 });

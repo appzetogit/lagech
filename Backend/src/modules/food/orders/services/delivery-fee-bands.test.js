@@ -17,8 +17,6 @@ import {
  * exclusion constraints and CHECKs are the thing under test, so a mock would
  * assert nothing.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 let settingsId;
 
 const band = (over) => ({
@@ -30,7 +28,6 @@ const band = (over) => ({
 });
 
 test.before(async () => {
-    if (!live) return;
     const settings = await prisma.foodFeeSettings.create({
         data: { deliveryFee: 99, platformFee: 10, gstRate: 5, isActive: false },
     });
@@ -38,12 +35,11 @@ test.before(async () => {
 });
 
 test.after(async () => {
-    if (!live) return;
     if (settingsId) await prisma.foodFeeSettings.delete({ where: { id: settingsId } }).catch(() => {});
     await prisma.$disconnect();
 });
 
-test('bands that sit flush are accepted', { skip: !live }, async () => {
+test('bands that sit flush are accepted', async () => {
     await prisma.deliveryFeeBand.create({ data: band({ deliveryBoyBasePay: 15 }) });
     await prisma.deliveryFeeBand.create({
         data: band({ minDistanceKm: 3, maxDistanceKm: 7, fee: 40, deliveryBoyPerKm: 8 }),
@@ -53,7 +49,7 @@ test('bands that sit flush are accepted', { skip: !live }, async () => {
     assert.equal(count, 2);
 });
 
-test('an overlapping band is rejected by the database', { skip: !live }, async () => {
+test('an overlapping band is rejected by the database', async () => {
     // [5,9) overlaps the existing [3,7). Both would match a 6 km trip, and which
     // one priced it came down to array order.
     await assert.rejects(
@@ -62,7 +58,7 @@ test('an overlapping band is rejected by the database', { skip: !live }, async (
     );
 });
 
-test('basePay and perKm cannot both be set', { skip: !live }, async () => {
+test('basePay and perKm cannot both be set', async () => {
     // calculateRiderEarning treats a non-zero basePay as the winner, so a row
     // carrying both has one value that silently does nothing.
     await assert.rejects(
@@ -73,21 +69,21 @@ test('basePay and perKm cannot both be set', { skip: !live }, async () => {
     );
 });
 
-test('an inverted range is rejected', { skip: !live }, async () => {
+test('an inverted range is rejected', async () => {
     await assert.rejects(
         () => prisma.deliveryFeeBand.create({ data: band({ minDistanceKm: 12, maxDistanceKm: 8 }) }),
         /delivery_fee_band_range_valid/,
     );
 });
 
-test('a negative fee is rejected', { skip: !live }, async () => {
+test('a negative fee is rejected', async () => {
     await assert.rejects(
         () => prisma.deliveryFeeBand.create({ data: band({ minDistanceKm: 20, maxDistanceKm: 25, fee: -1 }) }),
         /delivery_fee_band_amounts_non_negative/,
     );
 });
 
-test('loadActiveFeeSettings still returns the legacy deliveryFeeRanges shape', { skip: !live }, async () => {
+test('loadActiveFeeSettings still returns the legacy deliveryFeeRanges shape', async () => {
     // The pricing functions read bands as feeSettings.deliveryFeeRanges. Storage
     // was normalised; that contract must not have moved.
     await prisma.foodFeeSettings.update({ where: { id: settingsId }, data: { isActive: true } });
@@ -106,7 +102,7 @@ test('loadActiveFeeSettings still returns the legacy deliveryFeeRanges shape', {
     await prisma.foodFeeSettings.update({ where: { id: settingsId }, data: { isActive: false } });
 });
 
-test('deleting the settings row cascades to its bands', { skip: !live }, async () => {
+test('deleting the settings row cascades to its bands', async () => {
     const throwaway = await prisma.foodFeeSettings.create({ data: { isActive: false } });
     await prisma.deliveryFeeBand.create({
         data: { feeSettingsId: throwaway.id, minDistanceKm: 0, maxDistanceKm: 5, fee: 30 },
@@ -127,7 +123,7 @@ test('deleting the settings row cascades to its bands', { skip: !live }, async (
  * owns these tables.
  */
 
-test('saving fees stores bands as rows and reads them back nested', { skip: !live }, async () => {
+test('saving fees stores bands as rows and reads them back nested', async () => {
     const saved = await upsertFeeSettings({
         platformFee: 5,
         gstRate: 18,
@@ -146,7 +142,7 @@ test('saving fees stores bands as rows and reads them back nested', { skip: !liv
     assert.equal(bands, 2);
 });
 
-test('an unrelated edit leaves the bands alone', { skip: !live }, async () => {
+test('an unrelated edit leaves the bands alone', async () => {
     const before = (await getFeeSettings()).feeSettings.deliveryFeeRanges.length;
     assert.ok(before > 0);
 
@@ -156,7 +152,7 @@ test('an unrelated edit leaves the bands alone', { skip: !live }, async () => {
     assert.equal(saved.deliveryFeeRanges.length, before);
 });
 
-test('null clears a fee, absent leaves it', { skip: !live }, async () => {
+test('null clears a fee, absent leaves it', async () => {
     await upsertFeeSettings({ quickDeliveryFee: 15, gstRate: 18 });
     assert.equal((await getFeeSettings()).feeSettings.quickDeliveryFee, 15);
 
@@ -167,7 +163,7 @@ test('null clears a fee, absent leaves it', { skip: !live }, async () => {
     assert.equal(cleared.gstRate, 18, 'an unmentioned fee is untouched');
 });
 
-test('a rejected band save leaves the previous ladder intact', { skip: !live }, async () => {
+test('a rejected band save leaves the previous ladder intact', async () => {
     const before = (await getFeeSettings()).feeSettings.deliveryFeeRanges;
 
     await assert.rejects(
@@ -187,7 +183,7 @@ test('a rejected band save leaves the previous ladder intact', { skip: !live }, 
     assert.ok(!after.some((r) => r.min === 3 && r.max === 9), 'no half-applied band');
 });
 
-test('a band setting both pay types is refused with a usable message', { skip: !live }, async () => {
+test('a band setting both pay types is refused with a usable message', async () => {
     await assert.rejects(
         () => upsertFeeSettings({
             deliveryFeeRanges: [

@@ -12,8 +12,6 @@ import { getTransactionReport, getRestaurantReport } from './adminFinanceReport.
  * The filters are what carry risk: one that names a zone or restaurant that
  * does not exist must return nothing, not everything.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const HERE = testPatch(6);
 const created = { zones: [], restaurants: [], users: [], orders: [], commissions: [] };
 let zoneId = null;
@@ -75,7 +73,6 @@ const makeTransaction = (order, over = {}) => prisma.foodTransaction.create({
 });
 
 test.before(async () => {
-    if (!live) return;
     tag = uniqueTag('Fin');
 
     const zone = await prisma.foodZone.create({
@@ -109,7 +106,6 @@ test.before(async () => {
 });
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodRestaurantCommission.deleteMany({ where: { id: { in: created.commissions } } });
     await prisma.foodTransaction.deleteMany({ where: { orderId: { in: created.orders } } });
     await prisma.foodItem.deleteMany({ where: { restaurantId: { in: created.restaurants } } });
@@ -120,7 +116,7 @@ test.after(async () => {
     await prisma.$disconnect();
 });
 
-test('a transaction row carries the money and the names', { skip: !live }, async () => {
+test('a transaction row carries the money and the names', async () => {
     const order = await makeOrder();
     await makeTransaction(order);
 
@@ -146,7 +142,7 @@ test('a transaction row carries the money and the names', { skip: !live }, async
     assert.equal(summary.deliverymanEarning, 50);
 });
 
-test('the platform fee is derived when it was never stored', { skip: !live }, async () => {
+test('the platform fee is derived when it was never stored', async () => {
     // An order written before the fee column existed: the totals only add up
     // with a fee of 30, so that is what the report shows.
     const legacy = await makeOrder();
@@ -164,7 +160,7 @@ test('the platform fee is derived when it was never stored', { skip: !live }, as
     assert.equal(zero.transactions[0].platformFee, 0);
 });
 
-test('a refund is summarised separately', { skip: !live }, async () => {
+test('a refund is summarised separately', async () => {
     const order = await makeOrder({ orderStatus: 'cancelled_by_admin' });
     await makeTransaction(order, { status: 'refunded' });
 
@@ -173,7 +169,7 @@ test('a refund is summarised separately', { skip: !live }, async () => {
     assert.equal(summary.completedTransaction, 0, 'a refund is not a completed sale');
 });
 
-test('a filter naming something that does not exist returns nothing', { skip: !live }, async () => {
+test('a filter naming something that does not exist returns nothing', async () => {
     const order = await makeOrder();
     await makeTransaction(order);
 
@@ -194,7 +190,7 @@ test('a filter naming something that does not exist returns nothing', { skip: !l
     assert.ok(all.transactions.length >= 1);
 });
 
-test('the restaurant report rolls orders up per restaurant', { skip: !live }, async () => {
+test('the restaurant report rolls orders up per restaurant', async () => {
     await prisma.foodItem.create({
         data: { restaurantId, name: uniqueTag('D'), price: 100, approvalStatus: 'approved' },
     });
@@ -219,7 +215,7 @@ test('the restaurant report rolls orders up per restaurant', { skip: !live }, as
     assert.equal(mine.totalAdminCommission, expected);
 });
 
-test('the report filters by status, zone and commission', { skip: !live }, async () => {
+test('the report filters by status, zone and commission', async () => {
     const active = await getRestaurantReport({ search: tag, all: 'active' });
     assert.equal(active.total, 1);
     assert.equal(active.restaurants[0]._id, restaurantId);
@@ -241,7 +237,7 @@ test('the report filters by status, zone and commission', { skip: !live }, async
     assert.ok(!commission.restaurants.some((r) => r._id === restaurantId));
 });
 
-test('a time range narrows the order roll-up, not the restaurant list', { skip: !live }, async () => {
+test('a time range narrows the order roll-up, not the restaurant list', async () => {
     await makeOrder({ createdAt: new Date('2022-06-01') });
 
     const today = await getRestaurantReport({ search: tag, time: 'today' });

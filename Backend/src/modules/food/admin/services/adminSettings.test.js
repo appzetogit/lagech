@@ -18,12 +18,9 @@ import { uniquePhone } from '../../../../utils/testIds.js';
  * four already-migrated modules read them. The bonus path is the interesting
  * one: it used to increment the wallet balance directly.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const created = { partners: [], settings: [], emergency: [] };
 
 test.after(async () => {
-    if (!live) return;
     // Through the service, not a bare deleteMany: seven tables reference a
     // partner with ON DELETE RESTRICT, so a plain delete fails.
     for (const id of created.partners) {
@@ -34,7 +31,7 @@ test.after(async () => {
     await prisma.$disconnect();
 });
 
-test('cash limits fall back to sane defaults when unconfigured', { skip: !live }, async () => {
+test('cash limits fall back to sane defaults when unconfigured', async () => {
     await prisma.foodDeliveryCashLimit.updateMany({ where: {}, data: { isActive: false } });
 
     const settings = await getDeliveryCashLimitSettings();
@@ -42,7 +39,7 @@ test('cash limits fall back to sane defaults when unconfigured', { skip: !live }
     assert.equal(settings.deliveryWithdrawalLimit, 100);
 });
 
-test('saving cash limits creates then updates one row', { skip: !live }, async () => {
+test('saving cash limits creates then updates one row', async () => {
     const first = await upsertDeliveryCashLimitSettings({ deliveryCashLimit: 3000 });
     assert.equal(first.deliveryCashLimit, 3000);
     // The unspecified field keeps its default rather than being zeroed.
@@ -59,13 +56,13 @@ test('saving cash limits creates then updates one row', { skip: !live }, async (
     assert.equal(count, 1, 'editing settings must not accumulate rows');
 });
 
-test('a negative cash limit is clamped to zero', { skip: !live }, async () => {
+test('a negative cash limit is clamped to zero', async () => {
     const saved = await upsertDeliveryCashLimitSettings({ deliveryCashLimit: -500 });
     assert.equal(saved.deliveryCashLimit, 0);
     await upsertDeliveryCashLimitSettings({ deliveryCashLimit: 3000 });
 });
 
-test('emergency numbers fall back to the Indian defaults', { skip: !live }, async () => {
+test('emergency numbers fall back to the Indian defaults', async () => {
     await prisma.foodDeliveryEmergencyHelp.updateMany({ where: {}, data: { isActive: false } });
 
     const help = await getDeliveryEmergencyHelp();
@@ -74,7 +71,7 @@ test('emergency numbers fall back to the Indian defaults', { skip: !live }, asyn
     assert.equal(help.contactPolice, '100');
 });
 
-test('a configured emergency number replaces the default', { skip: !live }, async () => {
+test('a configured emergency number replaces the default', async () => {
     await upsertDeliveryEmergencyHelp({ contactPolice: '1091' });
     const row = await prisma.foodDeliveryEmergencyHelp.findFirst({ where: { isActive: true } });
     created.emergency.push(row.id);
@@ -85,7 +82,7 @@ test('a configured emergency number replaces the default', { skip: !live }, asyn
     assert.equal(help.medicalEmergency, '102');
 });
 
-test('an admin bonus goes through the ledger, not a direct balance write', { skip: !live }, async () => {
+test('an admin bonus goes through the ledger, not a direct balance write', async () => {
     const partner = await prisma.foodDeliveryPartner.create({
         data: { name: 'Bonus Rider', phone: uniquePhone('7'), status: 'approved' },
     });
@@ -113,7 +110,7 @@ test('an admin bonus goes through the ledger, not a direct balance write', { ski
     assert.equal(Number(wallet.totalBonus), 250, 'lifetime bonus counter tracks alongside the ledger');
 });
 
-test('a bonus is refused for an unapproved partner', { skip: !live }, async () => {
+test('a bonus is refused for an unapproved partner', async () => {
     const pending = await prisma.foodDeliveryPartner.create({
         data: { name: 'Pending Rider', phone: uniquePhone('6'), status: 'pending' },
     });
@@ -125,7 +122,7 @@ test('a bonus is refused for an unapproved partner', { skip: !live }, async () =
     );
 });
 
-test('a zero or negative bonus is refused', { skip: !live }, async () => {
+test('a zero or negative bonus is refused', async () => {
     const [partnerId] = created.partners;
     await assert.rejects(
         () => addDeliveryPartnerBonus({ deliveryPartnerId: partnerId, amount: 0 }, null),
@@ -133,7 +130,7 @@ test('a zero or negative bonus is refused', { skip: !live }, async () => {
     );
 });
 
-test('feature flags default to on and survive being switched off', { skip: !live }, async () => {
+test('feature flags default to on and survive being switched off', async () => {
     const list = await listFeatureSettings();
     assert.ok(list.length >= 4, 'the defaults are seeded on first read');
     assert.equal(await isFeatureEnabled(FEATURE_KEYS.RESTAURANT_SUBSCRIPTION), true);
@@ -148,7 +145,7 @@ test('feature flags default to on and survive being switched off', { skip: !live
     await updateFeatureSetting(FEATURE_KEYS.RESTAURANT_SUBSCRIPTION, { isEnabled: true });
 });
 
-test('an unknown feature key returns the caller fallback', { skip: !live }, async () => {
+test('an unknown feature key returns the caller fallback', async () => {
     assert.equal(await isFeatureEnabled('no_such_flag', true), true);
     assert.equal(await isFeatureEnabled('no_such_flag', false), false);
     assert.equal(await updateFeatureSetting('no_such_flag', { isEnabled: true }), null);

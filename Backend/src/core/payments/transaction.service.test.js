@@ -11,8 +11,6 @@ import { recordTransaction, getBalance } from './transaction.service.js';
  *
  *   DATABASE_URL=postgresql://... npm test
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 /** A fresh 24-hex id per case, so runs never collide. */
 let seq = 0;
 const newUserId = () => (Date.now().toString(16) + (seq++).toString(16).padStart(8, '0')).slice(-24).padStart(24, '0');
@@ -22,7 +20,7 @@ const credit = (entityId, amount, extra = {}) =>
 const debit = (entityId, amount, extra = {}) =>
     recordTransaction({ entityType: 'user', entityId, type: 'debit', amount, ...extra });
 
-test('rupees add up exactly — no float drift', { skip: !live }, async () => {
+test('rupees add up exactly — no float drift', async () => {
     const user = newUserId();
     await credit(user, 0.1);
     await credit(user, 0.2);
@@ -32,7 +30,7 @@ test('rupees add up exactly — no float drift', { skip: !live }, async () => {
     assert.equal(balance, 0.3);
 });
 
-test('a debit past the balance is rejected and moves nothing', { skip: !live }, async () => {
+test('a debit past the balance is rejected and moves nothing', async () => {
     const user = newUserId();
     await credit(user, 100);
 
@@ -42,7 +40,7 @@ test('a debit past the balance is rejected and moves nothing', { skip: !live }, 
     assert.equal(balance, 100);
 });
 
-test('replaying an idempotency key returns the original, credits once', { skip: !live }, async () => {
+test('replaying an idempotency key returns the original, credits once', async () => {
     const user = newUserId();
     const key = `test:${user}`;
 
@@ -54,7 +52,7 @@ test('replaying an idempotency key returns the original, credits once', { skip: 
     assert.equal(balance, 250);
 });
 
-test('concurrent credits do not lose updates', { skip: !live }, async () => {
+test('concurrent credits do not lose updates', async () => {
     const user = newUserId();
     await Promise.all(Array.from({ length: 20 }, () => credit(user, 5)));
 
@@ -63,7 +61,7 @@ test('concurrent credits do not lose updates', { skip: !live }, async () => {
     assert.equal(balance, 100);
 });
 
-test('concurrent debits cannot overdraw', { skip: !live }, async () => {
+test('concurrent debits cannot overdraw', async () => {
     const user = newUserId();
     await credit(user, 100);
 
@@ -78,7 +76,7 @@ test('concurrent debits cannot overdraw', { skip: !live }, async () => {
     assert.equal(balance, 0);
 });
 
-test('the ledger balance matches the wallet balance', { skip: !live }, async () => {
+test('the ledger balance matches the wallet balance', async () => {
     const user = newUserId();
     await credit(user, 500);
     await debit(user, 125.5);
@@ -96,5 +94,5 @@ test('the ledger balance matches the wallet balance', { skip: !live }, async () 
 });
 
 test.after(async () => {
-    if (live) await prisma.$disconnect();
+    await prisma.$disconnect();
 });

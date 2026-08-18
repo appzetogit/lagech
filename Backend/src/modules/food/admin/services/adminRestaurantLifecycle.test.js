@@ -23,8 +23,6 @@ import {
  * to act on whichever is outstanding — rejecting a move must not close the
  * restaurant.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const created = { restaurants: [], zones: [], unregistered: [], users: [], invoices: [] };
 
 const HERE = testPatch(2);
@@ -56,7 +54,6 @@ const makeRestaurant = async (over = {}) => {
 };
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodSubscriptionInvoice.deleteMany({ where: { id: { in: created.invoices } } });
     await prisma.foodUnregisteredRestaurant.deleteMany({ where: { id: { in: created.unregistered } } });
     await prisma.foodRestaurant.deleteMany({ where: { id: { in: created.restaurants } } });
@@ -65,7 +62,7 @@ test.after(async () => {
     await prisma.$disconnect();
 });
 
-test('approving a registration clears any earlier rejection', { skip: !live }, async () => {
+test('approving a registration clears any earlier rejection', async () => {
     const restaurant = await makeRestaurant();
 
     const rejected = await rejectRestaurant(restaurant.id, 'Licence expired');
@@ -80,7 +77,7 @@ test('approving a registration clears any earlier rejection', { skip: !live }, a
     assert.equal(approved.rejectionReason, '');
 });
 
-test('approving publishes a pending move', { skip: !live }, async () => {
+test('approving publishes a pending move', async () => {
     const zone = await makeZone();
     const restaurant = await makeRestaurant({
         status: 'approved',
@@ -107,7 +104,7 @@ test('approving publishes a pending move', { skip: !live }, async () => {
     assert.equal(approved.pendingZoneId, null);
 });
 
-test('rejecting a move leaves the restaurant trading', { skip: !live }, async () => {
+test('rejecting a move leaves the restaurant trading', async () => {
     const restaurant = await makeRestaurant({
         status: 'approved',
         latitude: HERE.lat,
@@ -128,7 +125,7 @@ test('rejecting a move leaves the restaurant trading', { skip: !live }, async ()
     assert.equal(rejected.pendingLatitude, null);
 });
 
-test('the queue holds registrations and moves alike', { skip: !live }, async () => {
+test('the queue holds registrations and moves alike', async () => {
     const zone = await makeZone();
     const waiting = await makeRestaurant({ status: 'pending' });
     const moving = await makeRestaurant({
@@ -154,7 +151,7 @@ test('the queue holds registrations and moves alike', { skip: !live }, async () 
     assert.equal(movingRow.pendingZone, 'Central');
 });
 
-test('status accepts a name or a boolean-ish toggle', { skip: !live }, async () => {
+test('status accepts a name or a boolean-ish toggle', async () => {
     const restaurant = await makeRestaurant();
 
     assert.equal((await updateRestaurantStatus(restaurant.id, { status: 'approved' })).status, 'approved');
@@ -175,7 +172,7 @@ test('status accepts a name or a boolean-ish toggle', { skip: !live }, async () 
     assert.equal(await updateRestaurantStatus('a'.repeat(24), { status: 'approved' }), null);
 });
 
-test('an admin location edit applies at once', { skip: !live }, async () => {
+test('an admin location edit applies at once', async () => {
     const zone = await makeZone();
     const restaurant = await makeRestaurant({ status: 'approved' });
 
@@ -206,7 +203,7 @@ test('an admin location edit applies at once', { skip: !live }, async () => {
     assert.equal(await updateRestaurantLocation('a'.repeat(24), {}), null);
 });
 
-test('a restaurant that has billed cannot be deleted', { skip: !live }, async () => {
+test('a restaurant that has billed cannot be deleted', async () => {
     const restaurant = await makeRestaurant({ status: 'approved' });
 
     const invoice = await prisma.foodSubscriptionInvoice.create({
@@ -225,7 +222,7 @@ test('a restaurant that has billed cannot be deleted', { skip: !live }, async ()
     await assert.rejects(() => deleteRestaurant(restaurant.id), /cannot be deleted/);
 });
 
-test('deleting a clean restaurant removes its owner login too', { skip: !live }, async () => {
+test('deleting a clean restaurant removes its owner login too', async () => {
     const restaurant = await makeRestaurant();
 
     const owner = await prisma.foodUser.create({
@@ -245,7 +242,7 @@ test('deleting a clean restaurant removes its owner login too', { skip: !live },
     created.restaurants = created.restaurants.filter((id) => id !== restaurant.id);
 });
 
-test('deleting a restaurant keeps a category it only proposed', { skip: !live }, async () => {
+test('deleting a restaurant keeps a category it only proposed', async () => {
     const restaurant = await makeRestaurant();
 
     const owned = await prisma.foodCategory.create({
@@ -269,7 +266,7 @@ test('deleting a restaurant keeps a category it only proposed', { skip: !live },
     created.restaurants = created.restaurants.filter((id) => id !== restaurant.id);
 });
 
-test('unregistered leads list and delete', { skip: !live }, async () => {
+test('unregistered leads list and delete', async () => {
     const lead = await prisma.foodUnregisteredRestaurant.create({
         data: {
             ownerName: 'Prospect',

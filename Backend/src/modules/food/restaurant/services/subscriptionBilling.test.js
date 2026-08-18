@@ -24,8 +24,6 @@ import { getRestaurantFinance } from './restaurantFinance.service.js';
  * outstanding balance can only move through a recorded transaction, and that
  * two admins settling the same invoice cannot both succeed.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const created = { restaurants: [], users: [], orders: [], invoices: [] };
 let restaurantId = null;
 let userId = null;
@@ -77,7 +75,6 @@ const makeInvoice = async (over = {}) => {
 const admin = { id: 'a'.repeat(24), name: 'Test Admin' };
 
 test.before(async () => {
-    if (!live) return;
     const r = await prisma.foodRestaurant.create({
         data: {
             restaurantName: `Billing ${uniqueTag('R')}`,
@@ -95,7 +92,6 @@ test.before(async () => {
 });
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodSubscriptionTransaction.deleteMany({ where: { restaurantId: { in: created.restaurants } } });
     await prisma.foodSubscriptionInvoice.deleteMany({ where: { restaurantId: { in: created.restaurants } } });
     await prisma.foodNotification.deleteMany({ where: { ownerId: { in: created.restaurants } } });
@@ -107,7 +103,7 @@ test.after(async () => {
     await prisma.$disconnect();
 });
 
-test('a billing month labels and bounds itself', { skip: !live }, async () => {
+test('a billing month labels and bounds itself', async () => {
     assert.equal(billingMonthLabel('2031-05'), 'May 2031');
     assert.equal(billingMonthLabel('legacy'), 'Pre-migration balance');
 
@@ -121,7 +117,7 @@ test('a billing month labels and bounds itself', { skip: !live }, async () => {
     assert.match(previousBillingMonth(new Date('2031-01-15')), /^2030-12$/);
 });
 
-test('GMV counts only delivered orders, at the restaurant\'s share', { skip: !live }, async () => {
+test('GMV counts only delivered orders, at the restaurant\'s share', async () => {
     await makeOrder({ subtotal: 1000, packagingFee: 50, restaurantCommission: 200 });
     // Not delivered: not earned.
     await makeOrder({ orderStatus: 'preparing' });
@@ -139,7 +135,7 @@ test('GMV counts only delivered orders, at the restaurant\'s share', { skip: !li
     );
 });
 
-test('the transaction snapshot wins over the order\'s own columns', { skip: !live }, async () => {
+test('the transaction snapshot wins over the order\'s own columns', async () => {
     const order = await makeOrder({ subtotal: 500, restaurantCommission: 0 });
     await prisma.foodTransaction.create({
         data: {
@@ -163,7 +159,7 @@ test('the transaction snapshot wins over the order\'s own columns', { skip: !liv
     assert.equal(gmv, 961);
 });
 
-test('an invoice is generated once, from the month\'s GMV', { skip: !live }, async () => {
+test('an invoice is generated once, from the month\'s GMV', async () => {
     const restaurant = { id: restaurantId, restaurantName: 'Billing' };
     const settings = { starterPrice: 999, starterMaxGmv: 30000 };
 
@@ -199,7 +195,7 @@ test('an invoice is generated once, from the month\'s GMV', { skip: !live }, asy
     );
 });
 
-test('outstanding invoices are what locks the wallet', { skip: !live }, async () => {
+test('outstanding invoices are what locks the wallet', async () => {
     const open = await makeInvoice({ billingMonth: '2031-06', outstandingAmount: 500 });
     await makeInvoice({
         billingMonth: '2031-07',
@@ -222,7 +218,7 @@ test('outstanding invoices are what locks the wallet', { skip: !live }, async ()
     );
 });
 
-test('a part payment leaves the invoice partially settled', { skip: !live }, async () => {
+test('a part payment leaves the invoice partially settled', async () => {
     const invoice = await makeInvoice({ billingMonth: '2031-08' });
 
     const { invoice: after, transaction } = await applyManualPayment(invoice.id, 180, admin, 'Cash at office');
@@ -241,7 +237,7 @@ test('a part payment leaves the invoice partially settled', { skip: !live }, asy
     await assert.rejects(() => applyManualPayment(invoice.id, 1, admin, 'Again'), /exceeds outstanding/);
 });
 
-test('a settlement cannot exceed the due, or skip its reason', { skip: !live }, async () => {
+test('a settlement cannot exceed the due, or skip its reason', async () => {
     const invoice = await makeInvoice({ billingMonth: '2031-09' });
 
     await assert.rejects(() => applyManualPayment(invoice.id, 5000, admin, 'Too much'), /exceeds outstanding/);
@@ -259,7 +255,7 @@ test('a settlement cannot exceed the due, or skip its reason', { skip: !live }, 
     );
 });
 
-test('waiving clears the due and releases the lock', { skip: !live }, async () => {
+test('waiving clears the due and releases the lock', async () => {
     const invoice = await makeInvoice({ billingMonth: '2031-10' });
 
     const { invoice: after } = await applyWaiver(invoice.id, admin, 'Goodwill');
@@ -270,7 +266,7 @@ test('waiving clears the due and releases the lock', { skip: !live }, async () =
     await assert.rejects(() => applyWaiver(invoice.id, admin, 'Again'), /no outstanding amount/);
 });
 
-test('an adjustment is signed, and cannot drive the due negative', { skip: !live }, async () => {
+test('an adjustment is signed, and cannot drive the due negative', async () => {
     const invoice = await makeInvoice({ billingMonth: '2031-11' });
 
     const up = await applyAdjustment(invoice.id, 100, admin, 'Late fee');
@@ -286,7 +282,7 @@ test('an adjustment is signed, and cannot drive the due negative', { skip: !live
     assert.equal(Number(down.transaction.amount), -1280);
 });
 
-test('two admins settling the same invoice: only one wins', { skip: !live }, async () => {
+test('two admins settling the same invoice: only one wins', async () => {
     const invoice = await makeInvoice({ billingMonth: '2031-12', outstandingAmount: 1000, totalAmount: 1000 });
 
     const results = await Promise.allSettled([
@@ -302,7 +298,7 @@ test('two admins settling the same invoice: only one wins', { skip: !live }, asy
     assert.equal(Number(after.paidAmount), 1000, 'not 2000');
 });
 
-test('the finance balance nets off withdrawals and deductions', { skip: !live }, async () => {
+test('the finance balance nets off withdrawals and deductions', async () => {
     const finance = await getRestaurantFinance(restaurantId);
 
     // Lifetime, not month-scoped: the three delivered orders are 850, the 111

@@ -16,8 +16,6 @@ import { uniquePhone } from '../../../../utils/testIds.js';
  * with "exactly one default per customer" enforced by a partial unique index
  * rather than by whatever the last save happened to leave true.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 let userId;
 
 const address = (over = {}) => ({
@@ -31,7 +29,6 @@ const address = (over = {}) => ({
 });
 
 test.before(async () => {
-    if (!live) return;
     const user = await prisma.foodUser.create({
         data: { phone: uniquePhone('9') },
     });
@@ -39,24 +36,23 @@ test.before(async () => {
 });
 
 test.after(async () => {
-    if (!live) return;
     if (userId) await prisma.foodUser.delete({ where: { id: userId } }).catch(() => {});
     await prisma.$disconnect();
 });
 
-test('the first address saved becomes the default', { skip: !live }, async () => {
+test('the first address saved becomes the default', async () => {
     const { address: first } = await addAddress(userId, address());
     assert.equal(first.isDefault, true);
     assert.equal(first.label, 'Home', 'label is normalised to the enum casing');
 });
 
-test('later addresses do not steal the default', { skip: !live }, async () => {
+test('later addresses do not steal the default', async () => {
     const { address: second } = await addAddress(userId, address({ label: 'work', street: '9 AB Road' }));
     assert.equal(second.isDefault, false);
     assert.equal(second.label, 'Office', '"work" maps to Office');
 });
 
-test('adding a second address of the same label keeps both', { skip: !live }, async () => {
+test('adding a second address of the same label keeps both', async () => {
     // Adding used to overwrite any address sharing a label, which capped a
     // customer at three and destroyed the old one silently.
     await addAddress(userId, address({ label: 'other', street: 'First Other' }));
@@ -67,14 +63,14 @@ test('adding a second address of the same label keeps both', { skip: !live }, as
     assert.equal(others.length, 2);
 });
 
-test('coordinates come back as a usable point', { skip: !live }, async () => {
+test('coordinates come back as a usable point', async () => {
     const { addresses } = await listAddresses(userId);
     const [first] = addresses;
     assert.equal(first.latitude, 22.7196);
     assert.deepEqual(first.location.coordinates, [75.8577, 22.7196]);
 });
 
-test('the database rejects a second default outright', { skip: !live }, async () => {
+test('the database rejects a second default outright', async () => {
     const { addresses } = await listAddresses(userId);
     const notDefault = addresses.find((a) => !a.isDefault);
 
@@ -86,7 +82,7 @@ test('the database rejects a second default outright', { skip: !live }, async ()
     );
 });
 
-test('setting a default clears the previous one', { skip: !live }, async () => {
+test('setting a default clears the previous one', async () => {
     const before = await listAddresses(userId);
     const target = before.addresses.find((a) => !a.isDefault);
 
@@ -98,7 +94,7 @@ test('setting a default clears the previous one', { skip: !live }, async () => {
     assert.equal(defaults[0].id, target.id);
 });
 
-test('another user cannot touch this address', { skip: !live }, async () => {
+test('another user cannot touch this address', async () => {
     const stranger = await prisma.foodUser.create({
         data: { phone: uniquePhone('8') },
     });
@@ -114,7 +110,7 @@ test('another user cannot touch this address', { skip: !live }, async () => {
     await prisma.foodUser.delete({ where: { id: stranger.id } });
 });
 
-test('deleting the default promotes the newest survivor', { skip: !live }, async () => {
+test('deleting the default promotes the newest survivor', async () => {
     const before = await listAddresses(userId);
     const currentDefault = before.addresses.find((a) => a.isDefault);
 
@@ -126,7 +122,7 @@ test('deleting the default promotes the newest survivor', { skip: !live }, async
     assert.notEqual(defaults[0].id, currentDefault.id);
 });
 
-test('deleting every address leaves none, and does not throw', { skip: !live }, async () => {
+test('deleting every address leaves none, and does not throw', async () => {
     const { addresses } = await listAddresses(userId);
     for (const a of addresses) await deleteAddress(userId, a.id);
 

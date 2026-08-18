@@ -8,17 +8,13 @@ import * as settings from './businessSettings.service.js';
  * The platform's own identity row. It is a singleton, so every test here shares
  * one row and restores it afterwards.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 let snapshot = null;
 
 test.before(async () => {
-    if (!live) return;
     snapshot = await prisma.foodBusinessSettings.findFirst();
 });
 
 test.after(async () => {
-    if (!live) return;
     if (snapshot) {
         const { id, _id, createdAt, updatedAt, ...values } = snapshot;
         // Restored by id, not updated by it: these tables hold one row, and a
@@ -38,7 +34,7 @@ const valid = {
     phoneNumber: '9876543210',
 };
 
-test('the row is created on first read, with usable defaults', { skip: !live }, async () => {
+test('the row is created on first read, with usable defaults', async () => {
     await prisma.foodBusinessSettings.deleteMany({});
 
     const first = await settings.getBusinessSettings();
@@ -57,7 +53,7 @@ test('the row is created on first read, with usable defaults', { skip: !live }, 
     assert.equal(await prisma.foodBusinessSettings.count(), 1);
 });
 
-test('a theme edit keeps what it did not mention', { skip: !live }, async () => {
+test('a theme edit keeps what it did not mention', async () => {
     await settings.updatePowerScanningSettings({
         user: { themeColor: '#ff0000', fontFamily: 'Inter' },
         restaurant: { themeColor: '#00FF00', fontFamily: 'Roboto' },
@@ -73,7 +69,7 @@ test('a theme edit keeps what it did not mention', { skip: !live }, async () => 
     assert.equal(after.restaurant.fontFamily, 'Roboto');
 });
 
-test('an unusable colour or font falls back instead of being stored', { skip: !live }, async () => {
+test('an unusable colour or font falls back instead of being stored', async () => {
     await settings.updatePowerScanningSettings({ delivery: { themeColor: '#123456', fontFamily: 'Lato' } });
 
     const after = await settings.updatePowerScanningSettings({
@@ -87,7 +83,7 @@ test('an unusable colour or font falls back instead of being stored', { skip: !l
     assert.equal(bare.delivery.themeColor, '#ABCDEF');
 });
 
-test('the acceptance window is bounded', { skip: !live }, async () => {
+test('the acceptance window is bounded', async () => {
     const saved = await settings.updateOrderAcceptanceSettings('7');
     assert.equal(saved.orderAcceptanceTimeMinutes, 7);
     assert.equal(saved.acceptanceWindowSeconds, 420);
@@ -103,7 +99,7 @@ test('the acceptance window is bounded', { skip: !live }, async () => {
     assert.equal((await settings.updateOrderAcceptanceSettings(5.4)).orderAcceptanceTimeMinutes, 5);
 });
 
-test('the company details are validated', { skip: !live }, async () => {
+test('the company details are validated', async () => {
     await assert.rejects(
         () => settings.updateBusinessSettings({ ...valid, companyName: 'A' }),
         /between 2 and 50/,
@@ -126,7 +122,7 @@ test('the company details are validated', { skip: !live }, async () => {
     );
 });
 
-test('saving the company details leaves the branding alone', { skip: !live }, async () => {
+test('saving the company details leaves the branding alone', async () => {
     await settings.updatePowerScanningSettings({ user: { themeColor: '#AABBCC' } });
 
     const saved = await settings.updateBusinessSettings({

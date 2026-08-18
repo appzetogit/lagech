@@ -17,8 +17,6 @@ import {
  * isActive column and never did, so in Mongo the filter matched everything and
  * both dashboard counts equalled the total.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const created = { restaurants: [], zones: [], categories: [], foods: [] };
 
 const makeRestaurant = async (over = {}) => {
@@ -36,7 +34,6 @@ const makeRestaurant = async (over = {}) => {
 };
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodItem.deleteMany({ where: { id: { in: created.foods } } });
     await prisma.foodCategory.deleteMany({ where: { id: { in: created.categories } } });
     await prisma.foodRestaurant.deleteMany({ where: { id: { in: created.restaurants } } });
@@ -44,7 +41,7 @@ test.after(async () => {
     await prisma.$disconnect();
 });
 
-test('the active filter means approved', { skip: !live }, async () => {
+test('the active filter means approved', async () => {
     const tag = uniqueTag('Active');
     const open = await makeRestaurant({ restaurantName: `${tag} Open`, status: 'approved' });
     const waiting = await makeRestaurant({ restaurantName: `${tag} Waiting`, status: 'pending' });
@@ -63,7 +60,7 @@ test('the active filter means approved', { skip: !live }, async () => {
     assert.equal(all.total, 2);
 });
 
-test('the header counts add up', { skip: !live }, async () => {
+test('the header counts add up', async () => {
     const { stats } = await getRestaurants({ includeStats: 'true', limit: 1 });
 
     assert.ok(stats.total >= 1);
@@ -76,7 +73,7 @@ test('the header counts add up', { skip: !live }, async () => {
     assert.equal(scoped.stats.inactive, scoped.stats.total);
 });
 
-test('search matches a name, an owner, or a partial phone', { skip: !live }, async () => {
+test('search matches a name, an owner, or a partial phone', async () => {
     const tag = uniqueTag('Findable');
     const phone = uniquePhone('9');
     const r = await makeRestaurant({
@@ -95,7 +92,7 @@ test('search matches a name, an owner, or a partial phone', { skip: !live }, asy
     assert.ok(byPhone.restaurants.some((x) => x.id === r.id));
 });
 
-test('sorting is applied by the database', { skip: !live }, async () => {
+test('sorting is applied by the database', async () => {
     const tag = uniqueTag('Sorted');
     await makeRestaurant({ restaurantName: `${tag} Bravo`, rating: 2 });
     await makeRestaurant({ restaurantName: `${tag} Alpha`, rating: 5 });
@@ -111,7 +108,7 @@ test('sorting is applied by the database', { skip: !live }, async () => {
     assert.equal(fallback.total, 2);
 });
 
-test('a restaurant reads back with its zone and nested location', { skip: !live }, async () => {
+test('a restaurant reads back with its zone and nested location', async () => {
     const zone = await prisma.foodZone.create({
         data: {
             name: `Dir Zone ${uniqueTag('Z')}`,
@@ -144,7 +141,7 @@ test('a restaurant reads back with its zone and nested location', { skip: !live 
     assert.equal(await getRestaurantById('not-an-id'), null);
 });
 
-test('the menu is generated from dishes, not stored', { skip: !live }, async () => {
+test('the menu is generated from dishes, not stored', async () => {
     const restaurant = await makeRestaurant();
     const category = await prisma.foodCategory.create({
         data: { name: `Starters ${uniqueTag('C')}`, approvalStatus: 'approved', isApproved: true },

@@ -10,8 +10,6 @@ import { findZoneForPoint, findZonesForPoint, backfillZoneBoundaries } from './z
  * and the spatial query are the things under test, so these need a real
  * Postgres — a mock would be testing nothing but itself.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 /** A rectangle, given as the ring the admin UI sends: unclosed, lat/lng objects. */
 const rect = (minLat, minLng, maxLat, maxLng) => [
     { latitude: minLat, longitude: minLng },
@@ -29,12 +27,11 @@ const makeZone = async (name, coordinates, isActive = true) => {
 };
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodZone.deleteMany({ where: { id: { in: created } } });
     await prisma.$disconnect();
 });
 
-test('an unclosed ring still becomes a valid polygon', { skip: !live }, async () => {
+test('an unclosed ring still becomes a valid polygon', async () => {
     // The admin UI never repeats the first point; the trigger has to close it.
     const zone = await makeZone('Test Outer', rect(22.70, 75.83, 22.76, 75.90));
 
@@ -49,17 +46,17 @@ test('an unclosed ring still becomes a valid polygon', { skip: !live }, async ()
     assert.equal(row.valid, true);
 });
 
-test('a point inside resolves to its zone', { skip: !live }, async () => {
+test('a point inside resolves to its zone', async () => {
     const match = await findZoneForPoint(22.72, 75.85);
     assert.ok(match, 'expected a zone match');
     assert.equal(match.name, 'Test Outer');
 });
 
-test('a point outside every zone resolves to nothing', { skip: !live }, async () => {
+test('a point outside every zone resolves to nothing', async () => {
     assert.equal(await findZoneForPoint(23.50, 80.00), null);
 });
 
-test('an inactive zone never matches', { skip: !live }, async () => {
+test('an inactive zone never matches', async () => {
     const zone = await makeZone('Test Inactive', rect(10.0, 10.0, 11.0, 11.0), false);
     assert.equal(await findZoneForPoint(10.5, 10.5), null);
 
@@ -67,7 +64,7 @@ test('an inactive zone never matches', { skip: !live }, async () => {
     assert.equal((await findZoneForPoint(10.5, 10.5))?.name, 'Test Inactive');
 });
 
-test('the tightest zone wins when zones overlap', { skip: !live }, async () => {
+test('the tightest zone wins when zones overlap', async () => {
     // Overlap is an admin mistake rather than something the schema forbids, so
     // the resolution has to be deterministic instead of whichever row came back
     // first — which is exactly what the old array scan did.
@@ -79,7 +76,7 @@ test('the tightest zone wins when zones overlap', { skip: !live }, async () => {
     assert.equal((await findZoneForPoint(22.72, 75.85)).name, 'Test Inner');
 });
 
-test('a ring with fewer than 3 points is refused outright', { skip: !live }, async () => {
+test('a ring with fewer than 3 points is refused outright', async () => {
     // zone_polygon_min_points catches this before the trigger runs, which is the
     // stronger outcome: the admin is told, rather than getting a saved zone that
     // silently matches nothing.
@@ -92,7 +89,7 @@ test('a ring with fewer than 3 points is refused outright', { skip: !live }, asy
     );
 });
 
-test('a ring with unusable coordinates yields no boundary, and does not throw', { skip: !live }, async () => {
+test('a ring with unusable coordinates yields no boundary, and does not throw', async () => {
     // Three entries satisfies the CHECK, so this reaches the trigger. Missing
     // lat/lng collapses the line — it must fail closed (no boundary, matches
     // nothing) rather than error the write or store a broken geometry.
@@ -108,7 +105,7 @@ test('a ring with unusable coordinates yields no boundary, and does not throw', 
     assert.equal(row.isNull, true);
 });
 
-test('editing the ring re-derives the boundary', { skip: !live }, async () => {
+test('editing the ring re-derives the boundary', async () => {
     const zone = await makeZone('Test Moving', rect(30.0, 30.0, 31.0, 31.0));
     assert.equal((await findZoneForPoint(30.5, 30.5))?.name, 'Test Moving');
 
@@ -121,7 +118,7 @@ test('editing the ring re-derives the boundary', { skip: !live }, async () => {
     assert.equal((await findZoneForPoint(40.5, 40.5))?.name, 'Test Moving');
 });
 
-test('backfill rebuilds boundaries for rows written before the trigger', { skip: !live }, async () => {
+test('backfill rebuilds boundaries for rows written before the trigger', async () => {
     const zone = await makeZone('Test Backfill', rect(50.0, 50.0, 51.0, 51.0));
     // Simulate a pre-trigger row.
     await prisma.$executeRaw`UPDATE "food_zones" SET boundary = NULL WHERE id = ${zone.id}`;

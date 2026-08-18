@@ -22,8 +22,6 @@ import { uniquePhone } from '../../../../utils/testIds.js';
  * granting one in the first place. Each used to be a check followed by a
  * separate write.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const created = { partners: [], restaurants: [], orders: [], addons: [], history: [] };
 const stamp = () => `${Date.now()}${Math.floor(performance.now() * 1000) % 1000}`;
 
@@ -105,7 +103,6 @@ const walletOf = (partnerId) =>
     });
 
 test.after(async () => {
-    if (!live) return;
     await prisma.deliveryBonusTransaction.deleteMany({
         where: { deliveryPartnerId: { in: created.partners } },
     });
@@ -118,7 +115,7 @@ test.after(async () => {
     await prisma.$disconnect();
 });
 
-test('an addon reports expired from its dates, not its status', { skip: !live }, async () => {
+test('an addon reports expired from its dates, not its status', async () => {
     const running = await makeAddon();
     assert.equal(running.isValid, true);
     assert.equal(running.status, 'active');
@@ -135,7 +132,7 @@ test('an addon reports expired from its dates, not its status', { skip: !live },
     assert.equal(row.isValid, false);
 });
 
-test('an addon updates, toggles and deletes', { skip: !live }, async () => {
+test('an addon updates, toggles and deletes', async () => {
     const addon = await makeAddon();
 
     const updated = await updateEarningAddon(addon.id, {
@@ -153,7 +150,7 @@ test('an addon updates, toggles and deletes', { skip: !live }, async () => {
     created.addons = created.addons.filter((id) => id !== addon.id);
 });
 
-test('a qualifying partner is granted once, not once per sweep', { skip: !live }, async () => {
+test('a qualifying partner is granted once, not once per sweep', async () => {
     const partner = await makePartner();
     const addon = await makeAddon({ requiredOrders: 2 });
     await makeDeliveredOrders(partner, 3);
@@ -166,7 +163,7 @@ test('a qualifying partner is granted once, not once per sweep', { skip: !live }
     assert.equal(await grantsFor(addon.id, partner.id), 1);
 });
 
-test('concurrent sweeps cannot double-grant', { skip: !live }, async () => {
+test('concurrent sweeps cannot double-grant', async () => {
     const partner = await makePartner();
     const addon = await makeAddon({ requiredOrders: 1 });
     await makeDeliveredOrders(partner, 2);
@@ -181,7 +178,7 @@ test('concurrent sweeps cannot double-grant', { skip: !live }, async () => {
     assert.equal(await grantsFor(addon.id, partner.id), 1, 'one grant survives the race');
 });
 
-test('a partner short of the target is not granted', { skip: !live }, async () => {
+test('a partner short of the target is not granted', async () => {
     const partner = await makePartner();
     const addon = await makeAddon({ requiredOrders: 10 });
     await makeDeliveredOrders(partner, 2);
@@ -191,7 +188,7 @@ test('a partner short of the target is not granted', { skip: !live }, async () =
     assert.equal(await grantsFor(addon.id, partner.id), 0);
 });
 
-test('a capped addon stops granting once it is exhausted', { skip: !live }, async () => {
+test('a capped addon stops granting once it is exhausted', async () => {
     const addon = await makeAddon({ requiredOrders: 1, maxRedemptions: 1 });
 
     const first = await makePartner();
@@ -210,7 +207,7 @@ test('a capped addon stops granting once it is exhausted', { skip: !live }, asyn
     assert.equal(row.currentRedemptions, 1, 'the counter cannot overshoot the cap');
 });
 
-test('crediting pays the wallet and writes a ledger row', { skip: !live }, async () => {
+test('crediting pays the wallet and writes a ledger row', async () => {
     const partner = await makePartner();
     const addon = await makeAddon({ requiredOrders: 1, earningAmount: 250 });
     await makeDeliveredOrders(partner, 1);
@@ -236,7 +233,7 @@ test('crediting pays the wallet and writes a ledger row', { skip: !live }, async
     assert.equal(Number(ledger[0].amount), 250);
 });
 
-test('two admins crediting at once pay once', { skip: !live }, async () => {
+test('two admins crediting at once pay once', async () => {
     const partner = await makePartner();
     const addon = await makeAddon({ requiredOrders: 1, earningAmount: 400 });
     await makeDeliveredOrders(partner, 1);
@@ -260,7 +257,7 @@ test('two admins crediting at once pay once', { skip: !live }, async () => {
     assert.equal(ledger, 1, 'one ledger row');
 });
 
-test('an already-decided grant is not credited again', { skip: !live }, async () => {
+test('an already-decided grant is not credited again', async () => {
     const partner = await makePartner();
     const addon = await makeAddon({ requiredOrders: 1, earningAmount: 100 });
     await makeDeliveredOrders(partner, 1);
@@ -279,7 +276,7 @@ test('an already-decided grant is not credited again', { skip: !live }, async ()
     assert.equal(await walletOf(partner.id), null, 'no wallet was ever created');
 });
 
-test('a cancelled grant can be earned again', { skip: !live }, async () => {
+test('a cancelled grant can be earned again', async () => {
     const partner = await makePartner();
     const addon = await makeAddon({ requiredOrders: 1 });
     await makeDeliveredOrders(partner, 1);
@@ -300,7 +297,7 @@ test('a cancelled grant can be earned again', { skip: !live }, async () => {
     assert.ok(rows.some((r) => r.status === 'pending'));
 });
 
-test('history lists and searches by partner or offer', { skip: !live }, async () => {
+test('history lists and searches by partner or offer', async () => {
     const partner = await makePartner();
     const addon = await makeAddon({ requiredOrders: 1 });
     await makeDeliveredOrders(partner, 1);

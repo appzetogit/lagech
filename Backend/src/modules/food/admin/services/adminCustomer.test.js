@@ -17,8 +17,6 @@ import { uniquePhone } from '../../../../utils/testIds.js';
  * only, and used to come from a $lookup pipeline when sorting by them and a
  * separate $group when not.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const created = { users: [], restaurants: [], orders: [], tickets: [], rTickets: [] };
 const stamp = () => `${Date.now()}${Math.floor(performance.now() * 1000) % 1000}`;
 const tag = `T${stamp()}`;
@@ -70,7 +68,6 @@ const makeOrder = async (user, restaurant, { total, orderStatus }) => {
 };
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodSupportTicket.deleteMany({ where: { id: { in: created.tickets } } });
     await prisma.foodRestaurantSupportTicket.deleteMany({ where: { id: { in: created.rTickets } } });
     await prisma.foodNotification.deleteMany({ where: { ownerId: { in: created.users } } });
@@ -81,7 +78,7 @@ test.after(async () => {
     await prisma.$disconnect();
 });
 
-test('lifetime totals count delivered orders only', { skip: !live }, async () => {
+test('lifetime totals count delivered orders only', async () => {
     const user = await makeUser(`${tag} Buyer`);
     const restaurant = await makeRestaurant();
 
@@ -103,7 +100,7 @@ test('lifetime totals count delivered orders only', { skip: !live }, async () =>
     assert.equal(detail.totalOrderAmount, 400);
 });
 
-test('a customer with no orders reports zero, not undefined', { skip: !live }, async () => {
+test('a customer with no orders reports zero, not undefined', async () => {
     const user = await makeUser(`${tag} Quiet`);
 
     const detail = await getCustomerById(user.id);
@@ -114,7 +111,7 @@ test('a customer with no orders reports zero, not undefined', { skip: !live }, a
     assert.equal(await getCustomerById('not-an-id'), null);
 });
 
-test('sorting by order count orders the page correctly', { skip: !live }, async () => {
+test('sorting by order count orders the page correctly', async () => {
     const restaurant = await makeRestaurant();
     const busy = await makeUser(`${tag} Busy`);
     const quiet = await makeUser(`${tag} Quietest`);
@@ -141,7 +138,7 @@ test('sorting by order count orders the page correctly', { skip: !live }, async 
     assert.ok(ascPositions.indexOf(quiet.id) < ascPositions.indexOf(busy.id));
 });
 
-test('customers filter by status and search', { skip: !live }, async () => {
+test('customers filter by status and search', async () => {
     const unique = `Zed${stamp()}`;
     const user = await makeUser(`${unique} Person`);
 
@@ -153,7 +150,7 @@ test('customers filter by status and search', { skip: !live }, async () => {
     assert.equal((await getCustomers({ search: unique, status: 'inactive' })).total, 1);
 });
 
-test('blocking a customer ends their sessions', { skip: !live }, async () => {
+test('blocking a customer ends their sessions', async () => {
     const user = await makeUser(`${tag} Blocked`);
 
     await prisma.foodRefreshToken.create({
@@ -175,13 +172,13 @@ test('blocking a customer ends their sessions', { skip: !live }, async () => {
     assert.equal(await updateCustomerStatus('a'.repeat(24), false), null);
 });
 
-test('re-enabling a customer does not touch tokens', { skip: !live }, async () => {
+test('re-enabling a customer does not touch tokens', async () => {
     const user = await makeUser(`${tag} Restored`);
     const enabled = await updateCustomerStatus(user.id, true);
     assert.equal(enabled.isActive, true);
 });
 
-test('the inbox merges customer and restaurant tickets', { skip: !live }, async () => {
+test('the inbox merges customer and restaurant tickets', async () => {
     const user = await makeUser(`${tag} Complainer`);
     const restaurant = await makeRestaurant();
 
@@ -221,7 +218,7 @@ test('the inbox merges customer and restaurant tickets', { skip: !live }, async 
     assert.ok(typed.tickets.every((t) => t.source === 'user'));
 });
 
-test('the API status spelling survives the round trip', { skip: !live }, async () => {
+test('the API status spelling survives the round trip', async () => {
     const user = await makeUser(`${tag} Status`);
     const ticket = await prisma.foodSupportTicket.create({
         data: { userId: user.id, type: 'order', issueType: `${tag} late`, description: 'x' },
@@ -240,7 +237,7 @@ test('the API status spelling survives the round trip', { skip: !live }, async (
     assert.ok(stats.total >= 1);
 });
 
-test('replying to a customer ticket names the issue, not undefined', { skip: !live }, async () => {
+test('replying to a customer ticket names the issue, not undefined', async () => {
     const user = await makeUser(`${tag} Replied`);
     const ticket = await prisma.foodSupportTicket.create({
         data: {
@@ -265,7 +262,7 @@ test('replying to a customer ticket names the issue, not undefined', { skip: !li
     assert.ok(notification.message.includes('Order never arrived'));
 });
 
-test('a reply to a restaurant ticket uses its subject', { skip: !live }, async () => {
+test('a reply to a restaurant ticket uses its subject', async () => {
     const restaurant = await makeRestaurant();
     const ticket = await prisma.foodRestaurantSupportTicket.create({
         data: {
@@ -288,7 +285,7 @@ test('a reply to a restaurant ticket uses its subject', { skip: !live }, async (
     await prisma.foodNotification.deleteMany({ where: { ownerId: restaurant.id } });
 });
 
-test('an empty update changes nothing', { skip: !live }, async () => {
+test('an empty update changes nothing', async () => {
     const user = await makeUser(`${tag} Untouched`);
     const ticket = await prisma.foodSupportTicket.create({
         data: { userId: user.id, type: 'other', issueType: 'x', description: 'y' },

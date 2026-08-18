@@ -21,8 +21,6 @@ import { uniquePhone } from '../../../../utils/testIds.js';
  * (compact) additionally hides its own unapproved ones. Getting that wrong
  * leaks one restaurant's private categories into another's menu builder.
  */
-const live = Boolean(process.env.DATABASE_URL);
-
 const created = { restaurants: [], categories: [], foods: [] };
 
 const makeRestaurant = async (overrides = {}) => {
@@ -46,7 +44,6 @@ const makeCategory = async (data) => {
 };
 
 test.after(async () => {
-    if (!live) return;
     await prisma.foodItem.deleteMany({ where: { id: { in: created.foods } } });
     await prisma.foodItem.deleteMany({ where: { restaurantId: { in: created.restaurants } } });
     await prisma.foodCategory.deleteMany({ where: { id: { in: created.categories } } });
@@ -54,7 +51,7 @@ test.after(async () => {
     await prisma.$disconnect();
 });
 
-test('a restaurant sees approved global categories and its own', { skip: !live }, async () => {
+test('a restaurant sees approved global categories and its own', async () => {
     const mine = await makeRestaurant();
     const other = await makeRestaurant();
 
@@ -82,7 +79,7 @@ test('a restaurant sees approved global categories and its own', { skip: !live }
     assert.ok(!ids.has(theirs.id), "another restaurant's private category must never appear");
 });
 
-test('the compact picker hides the restaurant\'s own unapproved categories', { skip: !live }, async () => {
+test('the compact picker hides the restaurant\'s own unapproved categories', async () => {
     const mine = await makeRestaurant();
     const approved = await makeCategory({
         name: `Ready ${Date.now()}`, restaurantId: mine.id, createdByRestaurantId: mine.id,
@@ -101,7 +98,7 @@ test('the compact picker hides the restaurant\'s own unapproved categories', { s
     assert.ok(!ids.has(pending.id), 'an unapproved category is not selectable');
 });
 
-test('a pure veg restaurant cannot create a non-veg category', { skip: !live }, async () => {
+test('a pure veg restaurant cannot create a non-veg category', async () => {
     const veg = await makeRestaurant({ pureVegRestaurant: true });
 
     await assert.rejects(
@@ -114,7 +111,7 @@ test('a pure veg restaurant cannot create a non-veg category', { skip: !live }, 
     assert.equal(ok.approvalStatus, 'pending', 'a new category starts unapproved');
 });
 
-test('editing a visible field sends the category back for approval', { skip: !live }, async () => {
+test('editing a visible field sends the category back for approval', async () => {
     const mine = await makeRestaurant();
     const category = await createRestaurantCategory(mine.id, {
         name: 'Starters', foodTypeScope: 'Both',
@@ -133,7 +130,7 @@ test('editing a visible field sends the category back for approval', { skip: !li
     assert.equal(updated.approvedAt, null, 'the old approval timestamp is cleared');
 });
 
-test('a category in use cannot be deleted', { skip: !live }, async () => {
+test('a category in use cannot be deleted', async () => {
     const mine = await makeRestaurant();
     const category = await makeCategory({
         name: `Used ${Date.now()}`, restaurantId: mine.id, createdByRestaurantId: mine.id,
@@ -154,7 +151,7 @@ test('a category in use cannot be deleted', { skip: !live }, async () => {
     assert.deepEqual(await deleteRestaurantCategory(mine.id, category.id), { id: category.id });
 });
 
-test('a dish cannot be filed under a category that rejects its diet', { skip: !live }, async () => {
+test('a dish cannot be filed under a category that rejects its diet', async () => {
     const mine = await makeRestaurant();
     const vegOnly = await makeCategory({
         name: `Veg Only ${Date.now()}`, restaurantId: mine.id, createdByRestaurantId: mine.id,
@@ -169,7 +166,7 @@ test('a dish cannot be filed under a category that rejects its diet', { skip: !l
     );
 });
 
-test('editing variants keeps the ids of the ones that stayed', { skip: !live }, async () => {
+test('editing variants keeps the ids of the ones that stayed', async () => {
     const mine = await makeRestaurant();
     const food = await createRestaurantFood(mine.id, {
         name: 'Pizza',
@@ -204,7 +201,7 @@ test('editing variants keeps the ids of the ones that stayed', { skip: !live }, 
     assert.equal(Number(updated.price), 219, 'the dish reprices to the new cheapest');
 });
 
-test('changing a dish sends it back for approval', { skip: !live }, async () => {
+test('changing a dish sends it back for approval', async () => {
     const mine = await makeRestaurant();
     const food = await createRestaurantFood(mine.id, { name: 'Momos', price: 120 });
     created.foods.push(food.id);
@@ -220,7 +217,7 @@ test('changing a dish sends it back for approval', { skip: !live }, async () => 
     assert.equal(updated.rejectionReason, '');
 });
 
-test('toggling availability back on clears the scheduled restock', { skip: !live }, async () => {
+test('toggling availability back on clears the scheduled restock', async () => {
     const mine = await makeRestaurant();
     const food = await createRestaurantFood(mine.id, { name: 'Soup', price: 80 });
     created.foods.push(food.id);
@@ -241,7 +238,7 @@ test('toggling availability back on clears the scheduled restock', { skip: !live
     assert.equal(on.stockOffMode, null);
 });
 
-test('public categories only list ones with an approved dish', { skip: !live }, async () => {
+test('public categories only list ones with an approved dish', async () => {
     const mine = await makeRestaurant();
     const empty = await makeCategory({
         name: `Empty ${Date.now()}`, approvalStatus: 'approved', isApproved: true,
@@ -267,7 +264,7 @@ test('public categories only list ones with an approved dish', { skip: !live }, 
     assert.ok(!ids.has(empty.id), 'a category with no approved dish is not public');
 });
 
-test('category stats count total, veg and approved separately', { skip: !live }, async () => {
+test('category stats count total, veg and approved separately', async () => {
     const mine = await makeRestaurant();
     const category = await makeCategory({
         name: `Counted ${Date.now()}`, approvalStatus: 'approved', isApproved: true,
@@ -288,7 +285,7 @@ test('category stats count total, veg and approved separately', { skip: !live },
     assert.equal(stats.approvedFoods, 1);
 });
 
-test('an unknown category id is refused rather than silently dropped', { skip: !live }, async () => {
+test('an unknown category id is refused rather than silently dropped', async () => {
     const mine = await makeRestaurant();
     await assert.rejects(
         () => createRestaurantFood(mine.id, {
