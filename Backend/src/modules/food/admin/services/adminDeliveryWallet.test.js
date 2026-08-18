@@ -70,6 +70,9 @@ const makeCodOrders = async (partner, totals) => {
 test.after(async () => {
     await prisma.foodDeliveryCashDeposit.deleteMany({ where: { id: { in: created.deposits } } });
     await prisma.foodOrder.deleteMany({ where: { id: { in: created.orders } } });
+    // Ledger entries reference the wallet by (entityType, entityId), so the
+    // wallet cannot go first.
+    await prisma.transaction.deleteMany({ where: { entityId: { in: created.partners } } });
     await prisma.wallet.deleteMany({ where: { entityId: { in: created.partners } } });
     await prisma.foodDeliveryPartner.deleteMany({ where: { id: { in: created.partners } } });
     await prisma.foodUser.deleteMany({ where: { id: { in: created.users } } });
@@ -139,6 +142,53 @@ test('a manual wallet adjustment creates the row if there is none', async () => 
 
     const count = await prisma.wallet.count({ where: { entityId: partner.id } });
     assert.equal(count, 1);
+});
+
+test('an adjustment is posted to the ledger, not written over the balance', async () => {
+    const partner = await makePartner();
+
+    await updateDeliveryBoyWallet(
+        { deliveryId: partner.id, pocketBalance: 500, reason: 'Missed bonus for 12 Aug' },
+        'admin-id-here',
+    );
+    // Down as well as up: the correction that takes money back has to be
+    // explainable too.
+    await updateDeliveryBoyWallet({ deliveryId: partner.id, pocketBalance: 320 });
+
+    const entries = await prisma.transaction.findMany({
+        where: { entityId: partner.id, category: 'adjustment' },
+        orderBy: { createdAt: 'asc' },
+    });
+
+    assert.equal(entries.length, 2, 'every movement leaves a row behind it');
+    assert.equal(entries[0].type, 'credit');
+    assert.equal(Number(entries[0].amount), 500);
+    assert.equal(entries[0].description, 'Missed bonus for 12 Aug');
+    assert.equal(entries[0].metadata.adjustedBy, 'admin-id-here');
+
+    assert.equal(entries[1].type, 'debit');
+    assert.equal(Number(entries[1].amount), 180, '500 down to 320 is a debit of the difference');
+
+    // The whole point: the balance is what the ledger adds up to, so the two
+    // agree rather than drifting apart.
+    assert.equal(Number(entries[1].balanceAfter), 320);
+    const wallet = await prisma.wallet.findFirst({ where: { entityId: partner.id } });
+    assert.equal(Number(wallet.balance), 320);
+});
+
+test('re-submitting the same balance posts nothing', async () => {
+    const partner = await makePartner();
+
+    await updateDeliveryBoyWallet({ deliveryId: partner.id, pocketBalance: 100 });
+    await updateDeliveryBoyWallet({ deliveryId: partner.id, pocketBalance: 100, cashInHand: 40 });
+
+    // Saving the form twice is not two adjustments, and a zero-amount entry is
+    // rejected by the ledger anyway.
+    const count = await prisma.transaction.count({ where: { entityId: partner.id } });
+    assert.equal(count, 1);
+
+    const wallet = await prisma.wallet.findFirst({ where: { entityId: partner.id } });
+    assert.equal(Number(wallet.cashInHand), 40, 'cash in hand still saves');
 });
 
 test('a wallet adjustment for an unknown rider is refused', async () => {

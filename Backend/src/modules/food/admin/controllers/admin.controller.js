@@ -1665,7 +1665,9 @@ export async function getDeliveryWallets(req, res, next) {
 
 export async function updateDeliveryBoyWallet(req, res, next) {
     try {
-        const data = await adminService.updateDeliveryBoyWallet(req.body);
+        // The acting admin is recorded on the ledger entry — an adjustment
+        // nobody is named on is not much of an audit trail.
+        const data = await adminService.updateDeliveryBoyWallet(req.body, req.user?.userId);
         res.status(200).json({ success: true, message: 'Wallet updated successfully', data });
     } catch (error) {
         next(error);

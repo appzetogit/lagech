@@ -2,6 +2,7 @@ import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { getBulkDeliveryPartnerStats } from './adminDeliveryPartner.service.js';
+import { ensureWallet, recordTransaction } from '../../../../core/payments/transaction.service.js';
 
 /**
  * Rider wallets and cash settlements, extracted from admin.service.js.
@@ -63,17 +64,28 @@ export async function getDeliveryWallets(query = {}) {
     return { wallets, pagination: { total, page, limit, pages: Math.ceil(total / limit) || 1 } };
 }
 
+/** Decimal(14,2) columns, so a float subtraction has to be rounded back to paise. */
+const toPaise = (value) => Math.round(Number(value) * 100) / 100;
+
 /**
  * Manual wallet adjustment from the admin panel.
  *
- * ponytail: this writes the balance directly rather than posting to the ledger,
- * so the wallet and its transaction history disagree afterwards — the rider
- * sees a number move with nothing explaining it. Kept because the panel offers
- * it as a correction tool; the real fix is to route it through
- * recordTransaction with an 'admin_adjustment' category.
+ * The panel asks for a target balance, but the balance is not the thing that
+ * can be set — it is the running total of the ledger, and writing over it made
+ * the wallet and its own transaction history disagree. The rider saw a number
+ * move with nothing explaining it, and the difference reappeared the next time
+ * anything recomputed from the ledger.
+ *
+ * So the target is turned into the movement that reaches it, and posted like
+ * any other. recordTransaction moves the balance and writes the ledger row in
+ * one database transaction; nothing else may write Wallet.balance.
+ *
+ * cashInHand is not ledger money — it is how much physical cash the rider is
+ * holding from COD orders, reconciled against deposits rather than against the
+ * wallet — so it is still a direct write.
  */
-export async function updateDeliveryBoyWallet(data = {}) {
-    const { deliveryId, pocketBalance, cashInHand } = data;
+export async function updateDeliveryBoyWallet(data = {}, actingAdminId = null) {
+    const { deliveryId, pocketBalance, cashInHand, reason } = data;
     if (!isId(deliveryId)) throw new ValidationError('Delivery partner ID required');
 
     const partner = await prisma.foodDeliveryPartner.findUnique({
@@ -82,21 +94,49 @@ export async function updateDeliveryBoyWallet(data = {}) {
     });
     if (!partner) throw new ValidationError('Delivery partner not found');
 
-    const update = {};
-    if (pocketBalance !== undefined) update.balance = Number(pocketBalance) || 0;
-    if (cashInHand !== undefined) update.cashInHand = Number(cashInHand) || 0;
-
     // The wallet is keyed on (entityType, entityId) — riders share the table
     // with restaurants, users and the platform.
-    return prisma.wallet.upsert({
+    const wallet = await ensureWallet('deliveryBoy', partner.id);
+
+    if (pocketBalance !== undefined) {
+        const target = Number(pocketBalance);
+        if (!Number.isFinite(target) || target < 0) {
+            throw new ValidationError('Balance must be a number of zero or more');
+        }
+
+        const delta = toPaise(target - Number(wallet.balance));
+        // Submitting the form without changing the figure should not post an
+        // adjustment of zero, which recordTransaction rejects anyway.
+        if (delta !== 0) {
+            await recordTransaction({
+                entityType: 'deliveryBoy',
+                entityId: partner.id,
+                type: delta > 0 ? 'credit' : 'debit',
+                amount: Math.abs(delta),
+                category: 'adjustment',
+                description: String(reason || '').trim() || 'Manual wallet adjustment by admin',
+                metadata: {
+                    adjustedBy: actingAdminId,
+                    previousBalance: Number(wallet.balance),
+                    newBalance: target,
+                },
+            });
+        }
+    }
+
+    if (cashInHand !== undefined) {
+        const cash = Number(cashInHand);
+        if (!Number.isFinite(cash) || cash < 0) {
+            throw new ValidationError('Cash in hand must be a number of zero or more');
+        }
+        await prisma.wallet.update({
+            where: { entityType_entityId: { entityType: 'deliveryBoy', entityId: partner.id } },
+            data: { cashInHand: cash },
+        });
+    }
+
+    return prisma.wallet.findUniqueOrThrow({
         where: { entityType_entityId: { entityType: 'deliveryBoy', entityId: partner.id } },
-        create: {
-            entityType: 'deliveryBoy',
-            entityId: partner.id,
-            balance: Number(pocketBalance) || 0,
-            cashInHand: Number(cashInHand) || 0,
-        },
-        update,
     });
 }
 
