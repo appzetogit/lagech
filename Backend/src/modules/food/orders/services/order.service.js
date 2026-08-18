@@ -159,8 +159,11 @@ async function expireStalePendingPaymentOrders() {
   const stale = await prisma.foodOrder.findMany({
     where: {
       orderStatus: "pending_payment",
-      // 'failed' covers orders rejected by payment amount verification.
-      paymentStatus: { in: ["created", "pending", "failed"] },
+      // The states an unpaid order can sit in: a gateway order was created, a
+      // QR was issued, or verification rejected it. 'pending' was in this list
+      // and is not an OrderPaymentStatus — Mongo matched nothing, Postgres
+      // rejects the query, and this runs on every customer's order list.
+      paymentStatus: { in: ["created", "pending_qr", "failed"] },
       createdAt: { lte: cutoff },
     },
     select: { id: true, orderStatus: true, paymentStatus: true },
