@@ -4,13 +4,19 @@ import assert from 'node:assert/strict';
 import { prisma } from '../../../../config/prisma.js';
 import { uniquePhone, uniqueTag } from '../../../../utils/testIds.js';
 import { createInitialTransaction } from './foodTransaction.service.js';
+import { toOrder } from '../order.mapper.js';
 
 /**
- * The ledger row written for every order.
+ * The ledger row written for every order — what settlement pays against, and
+ * what every finance report reads first.
  *
- * This is what settlement pays against and what every finance report reads
- * first, so a wrong number here is wrong money for a restaurant, a rider and
- * the platform at once.
+ * Each case runs twice: once with the toOrder()-mapped object that both callers
+ * in order.service.js actually pass, and once with a raw Prisma row. The writer
+ * used to read only the mapped shape (`order.pricing.total`), so it depended on
+ * every caller remembering to map first — and silently wrote a row of zeros if
+ * one did not. Reading the columns satisfies both, and these hold it there.
+ *
+ * A transaction is unique per order, so each shape gets its own order.
  */
 const created = { restaurants: [], users: [], orders: [], partners: [] };
 let restaurantId = null;
@@ -52,7 +58,7 @@ test.after(async () => {
     await prisma.$disconnect();
 });
 
-/** A paid order, exactly as createOrder writes one. */
+/** A paid order, with the columns createOrder writes. */
 const makeOrder = async (over = {}) => {
     const order = await prisma.foodOrder.create({
         data: {
@@ -82,53 +88,69 @@ const makeOrder = async (over = {}) => {
     return order;
 };
 
-test('the ledger records what the customer actually paid', async () => {
-    const order = await makeOrder();
+/**
+ * Writes the ledger for a fresh order in the given shape.
+ * 'mapped' is what production passes; 'raw' is what a future caller might.
+ */
+const ledgerFor = async (shape, over = {}) => {
+    const order = await makeOrder(over);
+    return createInitialTransaction(shape === 'mapped' ? toOrder(order) : order);
+};
 
-    const tx = await createInitialTransaction(order);
-    assert.ok(tx, 'a transaction is written');
+for (const shape of ['mapped', 'raw']) {
+    test(`[${shape}] the ledger records what the customer actually paid`, async () => {
+        const tx = await ledgerFor(shape);
+        assert.ok(tx, 'a transaction is written');
 
-    // The single most important number: settlement, every finance report and
-    // the restaurant's own wallet all read this row.
-    assert.equal(Number(tx.totalCustomerPaid), 1047);
-    assert.equal(Number(tx.subtotal), 1000);
-    assert.equal(Number(tx.tax), 50);
-    assert.equal(Number(tx.packagingFee), 30);
-    assert.equal(Number(tx.deliveryFee), 40);
-    assert.equal(Number(tx.platformFee), 20);
-    assert.equal(Number(tx.discount), 100);
-    assert.equal(tx.couponCode, 'SAVE100');
-});
+        // Settlement, every finance report and the restaurant's own wallet all
+        // read this row. A zero here is money nobody gets paid.
+        assert.equal(Number(tx.totalCustomerPaid), 1047);
+        assert.equal(Number(tx.subtotal), 1000);
+        assert.equal(Number(tx.tax), 50);
+        assert.equal(Number(tx.packagingFee), 30);
+        assert.equal(Number(tx.deliveryFee), 40);
+        assert.equal(Number(tx.platformFee), 20);
+        assert.equal(Number(tx.discount), 100);
+        assert.equal(tx.couponCode, 'SAVE100');
+    });
 
-test('the split credits the restaurant and the rider', async () => {
-    const order = await makeOrder();
-    const tx = await createInitialTransaction(order);
+    test(`[${shape}] the split credits the restaurant and the rider`, async () => {
+        const tx = await ledgerFor(shape);
 
-    // subtotal + packaging - commission, less whatever the restaurant bore of
-    // the discount. Zero here means the restaurant is paid nothing.
-    assert.ok(
-        Number(tx.restaurantShare) > 0,
-        `restaurantShare was ${tx.restaurantShare} — the restaurant would be paid nothing`,
-    );
-    assert.equal(Number(tx.restaurantCommission), 150);
-    assert.equal(Number(tx.riderShare), 35);
-});
+        // subtotal + packaging − commission, less whatever the restaurant bore
+        // of the discount.
+        assert.ok(
+            Number(tx.restaurantShare) > 0,
+            `restaurantShare was ${tx.restaurantShare} — the restaurant would be paid nothing`,
+        );
+        assert.equal(Number(tx.restaurantCommission), 150);
+        assert.equal(Number(tx.riderShare), 35);
+    });
 
-test('the payment method and rider carry across', async () => {
-    const order = await makeOrder();
-    const tx = await createInitialTransaction(order);
+    test(`[${shape}] the payment method and rider carry across`, async () => {
+        const tx = await ledgerFor(shape);
 
-    // Defaulting to 'cash' on an online order would misreport how money arrived.
-    assert.equal(tx.paymentMethod, 'razorpay');
-    assert.equal(tx.status, 'captured', 'a paid order is captured, not pending');
-    assert.equal(tx.deliveryPartnerId, partnerId);
-});
+        // Defaulting to 'cash' on an online order misreports how money arrived.
+        assert.equal(tx.paymentMethod, 'razorpay');
+        assert.equal(tx.status, 'captured', 'a paid order is captured, not pending');
+        assert.equal(tx.deliveryPartnerId, partnerId);
+    });
 
-test('a cash order is recorded as pending, not captured', async () => {
-    const order = await makeOrder({ paymentMethod: 'cash', paymentStatus: 'cod_pending' });
-    const tx = await createInitialTransaction(order);
+    test(`[${shape}] a cash order is pending, not captured`, async () => {
+        const tx = await ledgerFor(shape, { paymentMethod: 'cash', paymentStatus: 'cod_pending' });
 
-    assert.equal(tx.paymentMethod, 'cash');
-    assert.equal(tx.status, 'pending');
-    assert.equal(Number(tx.totalCustomerPaid), 1047, 'cash is still money owed');
-});
+        assert.equal(tx.paymentMethod, 'cash');
+        assert.equal(tx.status, 'pending');
+        assert.equal(Number(tx.totalCustomerPaid), 1047, 'cash is still money owed');
+    });
+
+    test(`[${shape}] the owner ids are real ids, not the string "undefined"`, async () => {
+        const tx = await ledgerFor(shape);
+
+        // The old code read `order.userId?.id ?? order.userId`, which a
+        // populated Mongoose document needed. On either shape here the scalar
+        // is the id, and String(undefined) would have poisoned the row.
+        assert.equal(tx.userId, userId);
+        assert.equal(tx.restaurantId, restaurantId);
+    });
+}

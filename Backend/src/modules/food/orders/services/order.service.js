@@ -140,7 +140,7 @@ async function deletePendingPaymentOrder(orderLike) {
   if (!id) return false;
   if (String(orderLike.orderStatus || "").toLowerCase() !== "pending_payment") return false;
 
-  const payStatus = String(orderLike.payment?.status || orderLike.paymentStatus || "").toLowerCase();
+  const payStatus = String(orderLike.paymentStatus || "").toLowerCase();
   if (payStatus === "paid" || payStatus === "refunded") return false;
 
   await purgeOrder(id);
@@ -210,10 +210,10 @@ async function applyCancellationRefund(order, { cancelledBy = 'system', refundAm
 
   if (!order?.payment) return none({ reason: 'missing_payment' });
 
-  const paymentMethod = String(order.payment?.method || 'cash').toLowerCase();
-  const paymentStatus = String(order.payment?.status || 'cod_pending').toLowerCase();
-  const refundStatus = String(order.payment?.refund?.status || 'none').toLowerCase();
-  const amount = Number(refundAmount ?? order?.pricing?.total ?? order?.payment?.amountDue ?? 0);
+  const paymentMethod = String(order.paymentMethod || 'cash').toLowerCase();
+  const paymentStatus = String(order.paymentStatus || 'cod_pending').toLowerCase();
+  const refundStatus = String(order.refundStatus || 'none').toLowerCase();
+  const amount = Number(refundAmount ?? order?.total ?? order?.paymentAmountDue ?? 0);
 
   if (!Number.isFinite(amount) || amount <= 0) return none({ reason: 'invalid_amount' });
   if (paymentMethod === 'cash' || paymentMethod === 'cod') return none({ reason: 'cash_payment' });
@@ -226,7 +226,7 @@ async function applyCancellationRefund(order, { cancelledBy = 'system', refundAm
   }
 
   if (paymentMethod === 'razorpay') {
-    const paymentId = String(order.payment?.razorpay?.paymentId || '').trim();
+    const paymentId = String(order.razorpayPaymentId || '').trim();
     if (!paymentId) {
       return {
         attempted: true, processed: false, method: paymentMethod,
@@ -374,13 +374,13 @@ export async function calculateOrder(userId, dto) {
 // ----- Coupons -----
 
 async function incrementCouponUsageForOrder(order, userId) {
-  const couponCode = order?.pricing?.couponCode
-    ? String(order.pricing.couponCode).trim().toUpperCase()
+  const couponCode = order?.couponCode
+    ? String(order.couponCode).trim().toUpperCase()
     : "";
   if (!couponCode) return;
   // A stored code with no applied discount means the coupon was rejected at
   // pricing time — don't consume the user's/offer's usage allowance for it.
-  if (!(Number(order?.pricing?.discount) > 0)) return;
+  if (!(Number(order?.discount) > 0)) return;
 
   try {
     const offer = await prisma.foodOffer.findUnique({ where: { couponCode } });
@@ -667,7 +667,7 @@ export async function createOrder(userId, dto) {
       try {
         await userWalletService.deductWalletBalance(
           userId,
-          order.pricing.total,
+          order.total,
           `Payment for order #${order.order_id || order.id}`,
           { orderId: order.id },
         );
@@ -681,12 +681,12 @@ export async function createOrder(userId, dto) {
     if (!isAwaitingOnlinePayment) {
       try {
         const transaction = await foodTransactionService.createInitialTransaction(order);
-        if (transaction && Number.isFinite(Number(transaction.amounts?.platformNetProfit))) {
+        if (transaction && Number.isFinite(Number(transaction.platformNetProfit))) {
           await prisma.foodOrder.update({
             where: { id: order.id },
-            data: { platformProfit: Number(transaction.amounts.platformNetProfit) },
+            data: { platformProfit: Number(transaction.platformNetProfit) },
           });
-          order.platformProfit = Number(transaction.amounts.platformNetProfit);
+          order.platformProfit = Number(transaction.platformNetProfit);
         }
       } catch (err) {
         logger.error(`[CRITICAL] Initial transaction failed for order ${order.id}: ${err.message}`);
@@ -741,11 +741,11 @@ export async function verifyPayment(userId, dto) {
   if (!row) throw new NotFoundError("Order not found");
   const order = toOrder(row);
 
-  if (order.payment.status === "paid") {
+  if (order.paymentStatus === "paid") {
     return { order: normalizeOrderForClient(order), payment: order.payment };
   }
 
-  if (String(dto.razorpayOrderId) !== String(order.payment?.razorpay?.orderId || "")) {
+  if (String(dto.razorpayOrderId) !== String(order.razorpayOrderId || "")) {
     throw new ValidationError("Payment verification failed");
   }
 
@@ -767,11 +767,11 @@ export async function verifyPayment(userId, dto) {
     throw new ValidationError("Payment verification failed. Please retry in a moment.");
   }
 
-  const expectedPaise = Math.round((Number(order.pricing?.total) || 0) * 100);
+  const expectedPaise = Math.round((Number(order.total) || 0) * 100);
   const paidPaise = Number(rzPayment?.amount);
   const rzStatus = String(rzPayment?.status || "").toLowerCase();
   if (
-    String(rzPayment?.order_id || "") !== String(order.payment.razorpay.orderId) ||
+    String(rzPayment?.order_id || "") !== String(order.razorpayOrderId) ||
     !["captured", "authorized"].includes(rzStatus) ||
     !Number.isFinite(paidPaise) ||
     paidPaise !== expectedPaise
@@ -827,12 +827,12 @@ export async function verifyPayment(userId, dto) {
 
   try {
     const transaction = await foodTransactionService.createInitialTransaction(updated);
-    if (transaction && Number.isFinite(Number(transaction.amounts?.platformNetProfit))) {
+    if (transaction && Number.isFinite(Number(transaction.platformNetProfit))) {
       await prisma.foodOrder.update({
         where: { id: order.id },
-        data: { platformProfit: Number(transaction.amounts.platformNetProfit) },
+        data: { platformProfit: Number(transaction.platformNetProfit) },
       });
-      updated.platformProfit = Number(transaction.amounts.platformNetProfit);
+      updated.platformProfit = Number(transaction.platformNetProfit);
     }
   } catch (err) {
     logger.error(`[CRITICAL] Initial transaction failed for order ${order.id}: ${err.message}`);
@@ -920,7 +920,7 @@ async function buildAdminTransactionView(orderId) {
     if (!tx) return null;
     return {
       status: tx.status || null,
-      paymentMethod: tx.paymentMethod || tx.payment?.method || null,
+      paymentMethod: tx.paymentMethod || null,
       amounts: tx.amounts || null,
       settlement: tx.settlement || null,
       history: (tx.history || []).map((entry) => ({
@@ -942,35 +942,34 @@ async function buildAdminTransactionView(orderId) {
  * (platformNetProfit, riderShare, adminDiscountShare).
  */
 function buildRestaurantFinanceViewSync(order, tx = null) {
-  const pricing = order?.pricing || {};
-  const subtotal = Number(pricing.subtotal) || 0;
-  const packagingFee = Number(pricing.packagingFee) || 0;
+  const subtotal = Number(order?.subtotal) || 0;
+  const packagingFee = Number(order?.packagingFee) || 0;
 
-  if (tx?.amounts) {
+  if (tx) {
     return {
       itemTotal: subtotal,
       packagingFee,
-      commission: Number(tx.amounts.restaurantCommission) || 0,
-      restaurantDiscountShare: Number(tx.amounts.restaurantDiscountShare) || 0,
-      discount: Number(pricing.discount) || 0,
-      taxAmount: Number(tx.amounts.taxAmount ?? pricing.tax) || 0,
-      totalCustomerPaid: Number(tx.amounts.totalCustomerPaid ?? pricing.total) || 0,
-      netPayout: Number(tx.amounts.restaurantShare) || 0,
-      isSettled: Boolean(tx.settlement?.isRestaurantSettled),
-      settledAt: tx.settlement?.restaurantSettledAt || null,
+      commission: Number(tx.restaurantCommission) || 0,
+      restaurantDiscountShare: Number(tx.restaurantDiscountShare) || 0,
+      discount: Number(order?.discount) || 0,
+      taxAmount: Number(tx.taxAmount ?? order?.tax) || 0,
+      totalCustomerPaid: Number(tx.totalCustomerPaid ?? order?.total) || 0,
+      netPayout: Number(tx.restaurantShare) || 0,
+      isSettled: Boolean(tx.isRestaurantSettled),
+      settledAt: tx.restaurantSettledAt || null,
     };
   }
 
-  const commission = Number(pricing.restaurantCommission) || 0;
+  const commission = Number(order?.restaurantCommission) || 0;
   const netPayout = Math.max(0, Math.round((subtotal + packagingFee - commission) * 100) / 100);
   return {
     itemTotal: subtotal,
     packagingFee,
     commission,
     restaurantDiscountShare: 0,
-    discount: Number(pricing.discount) || 0,
-    taxAmount: Number(pricing.tax) || 0,
-    totalCustomerPaid: Number(pricing.total) || 0,
+    discount: Number(order?.discount) || 0,
+    taxAmount: Number(order?.tax) || 0,
+    totalCustomerPaid: Number(order?.total) || 0,
     netPayout,
     isSettled: false,
     settledAt: null,
@@ -1211,7 +1210,7 @@ export async function resyncState(userId, role) {
     const order = toOrder(row);
     const out = normalizeOrderForClient(order);
     if (
-      (order.deliveryState?.currentPhase === "at_drop" || order.orderStatus === "picked_up") &&
+      (order.deliveryPhase === "at_drop" || order.orderStatus === "picked_up") &&
       !order.deliveryVerification?.dropOtp?.verified &&
       order.deliveryOtp
     ) {
@@ -1252,15 +1251,15 @@ export async function cancelOrder(orderId, userId, reason) {
   }
 
   const from = order.orderStatus;
-  const paymentMethod = String(order.payment?.method || "cash").toLowerCase();
-  const paymentStatus = String(order.payment?.status || "cod_pending").toLowerCase();
+  const paymentMethod = String(order.paymentMethod || "cash").toLowerCase();
+  const paymentStatus = String(order.paymentStatus || "cod_pending").toLowerCase();
 
   let refund;
   try {
     refund = await applyCancellationRefund(order, { cancelledBy: 'user' });
   } catch (err) {
     logger.error(`Refund processing error for Order ${orderId}: ${err?.message || err}`);
-    refund = { paymentPatch: { refundStatus: "failed", refundAmount: order.pricing.total } };
+    refund = { paymentPatch: { refundStatus: "failed", refundAmount: order.total } };
   }
 
   const updated = toOrder(await prisma.foodOrder.update({
@@ -1284,8 +1283,8 @@ export async function cancelOrder(orderId, userId, reason) {
     reason: reason || "",
   });
 
-  const finalPaymentMethod = String(updated.payment?.method || paymentMethod || "cash").toLowerCase();
-  const finalPaymentStatus = String(updated.payment?.status || paymentStatus || "cod_pending").toLowerCase();
+  const finalPaymentMethod = String(updated.paymentMethod || paymentMethod || "cash").toLowerCase();
+  const finalPaymentStatus = String(updated.paymentStatus || paymentStatus || "cod_pending").toLowerCase();
   const isOnlinePaid =
     finalPaymentMethod === "razorpay" &&
     (finalPaymentStatus === "paid" || finalPaymentStatus === "refunded");
@@ -1302,7 +1301,7 @@ export async function cancelOrder(orderId, userId, reason) {
   }
 
   const refundDetail = isOnlinePaid
-    ? ` Your refund of ₹${updated.pricing.total} is being processed and will be credited to your original payment method within 5-7 working days.`
+    ? ` Your refund of ₹${updated.total} is being processed and will be credited to your original payment method within 5-7 working days.`
     : "";
 
   await notifyOwnersSafely(
@@ -1639,8 +1638,8 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
     );
   }
 
-  const normalizedPaymentMethod = String(order.payment?.method || "cash").toLowerCase();
-  const prevPaymentStatus = String(order.payment?.status || "cod_pending").toLowerCase();
+  const normalizedPaymentMethod = String(order.paymentMethod || "cash").toLowerCase();
+  const prevPaymentStatus = String(order.paymentStatus || "cod_pending").toLowerCase();
   const codBecomesPaid =
     String(orderStatus) === "delivered" &&
     normalizedPaymentMethod === "cash" &&
@@ -1695,10 +1694,10 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
     body = "Your order is ready and waiting to be picked up.";
   } else if (String(orderStatus).includes("cancel")) {
     const isOnlinePaid =
-      updated.payment.method === "razorpay" &&
-      (updated.payment.status === "paid" || updated.payment.status === "refunded");
+      updated.paymentMethod === "razorpay" &&
+      (updated.paymentStatus === "paid" || updated.paymentStatus === "refunded");
     const refundDetail = isOnlinePaid
-      ? ` Your refund of ₹${updated.pricing.total} is being processed and will be credited to your original payment method within 5-7 working days.`
+      ? ` Your refund of ₹${updated.total} is being processed and will be credited to your original payment method within 5-7 working days.`
       : "";
     title = "Order Cancelled ❌";
     body = (note && String(note).trim()) ? note : `Unfortunately, your order has been cancelled by the restaurant.${refundDetail}`;
@@ -1750,8 +1749,8 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
     if (isCancellation) {
       try {
         const isOnlinePaid =
-          updated.payment.method === "razorpay" &&
-          (updated.payment.status === "paid" || updated.payment.status === "refunded");
+          updated.paymentMethod === "razorpay" &&
+          (updated.paymentStatus === "paid" || updated.paymentStatus === "refunded");
         await foodTransactionService.updateTransactionStatus(order.id, 'cancelled_by_restaurant', {
           status: isOnlinePaid ? 'refunded' : 'failed',
           note: `Order cancelled by restaurant/admin`,
@@ -1847,7 +1846,7 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
       logger.error(`Automated refund failed for Order ${order.id} (Restaurant Cancel): ${err?.message || err}`);
       updated = toOrder(await prisma.foodOrder.update({
         where: { id: order.id },
-        data: { refundStatus: "failed", refundAmount: updated.pricing.total },
+        data: { refundStatus: "failed", refundAmount: updated.total },
         include: orderInclude,
       }));
     }
@@ -2223,8 +2222,8 @@ export async function updateOrderStatusAdmin(orderId, orderStatus, note = "", ad
   }
 
   const from = order.orderStatus;
-  const normalizedPaymentMethod = String(order.payment?.method || "cash").toLowerCase();
-  const prevPaymentStatus = String(order.payment?.status || "cod_pending").toLowerCase();
+  const normalizedPaymentMethod = String(order.paymentMethod || "cash").toLowerCase();
+  const prevPaymentStatus = String(order.paymentStatus || "cod_pending").toLowerCase();
   const codBecomesPaid =
     String(orderStatus) === "delivered" &&
     normalizedPaymentMethod === "cash" &&
@@ -2237,7 +2236,7 @@ export async function updateOrderStatusAdmin(orderId, orderStatus, note = "", ad
       refundPatch = refund.paymentPatch;
     } catch (err) {
       logger.warn(`Admin cancellation refund failed for order ${order.id}: ${err?.message || err}`);
-      refundPatch = { refundStatus: "failed", refundAmount: order.pricing?.total || 0 };
+      refundPatch = { refundStatus: "failed", refundAmount: order.total || 0 };
     }
   }
 
@@ -2351,8 +2350,8 @@ export async function markOrderDeliveredAdmin(orderId, adminId, note = "") {
     throw new ValidationError(`Cannot mark order as delivered from status '${from}'`);
   }
 
-  const normalizedPaymentMethod = String(order.payment?.method || "cash").toLowerCase();
-  const prevPaymentStatus = String(order.payment?.status || "cod_pending").toLowerCase();
+  const normalizedPaymentMethod = String(order.paymentMethod || "cash").toLowerCase();
+  const prevPaymentStatus = String(order.paymentStatus || "cod_pending").toLowerCase();
   const codBecomesPaid = normalizedPaymentMethod === "cash" && prevPaymentStatus === "cod_pending";
 
   const updated = toOrder(await prisma.foodOrder.update({
@@ -2430,7 +2429,7 @@ export async function markOrderDeliveredAdmin(orderId, adminId, note = "") {
     adminId: adminId ? String(adminId) : null,
     payMethod: normalizedPaymentMethod,
     prevPayStatus: prevPaymentStatus,
-    paymentStatus: updated.payment?.status,
+    paymentStatus: updated.paymentStatus,
     source: "admin_override",
   });
 
@@ -2443,12 +2442,12 @@ export async function processRefundAdmin(orderId, amount, adminId) {
   if (!row) throw new NotFoundError("Order not found");
   const order = toOrder(row);
 
-  const currentPaymentStatus = String(order.payment?.status || "").toLowerCase();
+  const currentPaymentStatus = String(order.paymentStatus || "").toLowerCase();
   if (currentPaymentStatus === "refunded") {
     throw new ValidationError("Order is already refunded");
   }
 
-  const refundAmount = Number(amount) || order.pricing?.total || 0;
+  const refundAmount = Number(amount) || order.total || 0;
   if (refundAmount <= 0) throw new ValidationError("Invalid refund amount");
 
   const refundResult = await applyCancellationRefund(order, { cancelledBy: 'admin', refundAmount });
