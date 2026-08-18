@@ -226,3 +226,37 @@ test('detaching an unknown token is a no-op, not an error', async () => {
     const result = await detachFirebaseDeviceTokenEverywhere('never-registered');
     assert.equal(result.success, true);
 });
+
+test('detaching takes the token off every owner and both platforms', async () => {
+    // One device, registered against two accounts and both buckets — what
+    // happens when someone signs out and a colleague signs in on the same
+    // phone. Left attached, the previous owner keeps receiving the new
+    // owner's order notifications.
+    const token = `shared-device-${Date.now()}`;
+    await Promise.all([
+        upsertFirebaseDeviceToken({ ownerType: 'USER', ownerId: userId, token, platform: 'web' }),
+        upsertFirebaseDeviceToken({ ownerType: 'USER', ownerId: userId, token, platform: 'android' }),
+        upsertFirebaseDeviceToken({ ownerType: 'USER', ownerId: otherUserId, token, platform: 'web' }),
+    ]);
+
+    const before = await prisma.foodUser.findMany({
+        where: { id: { in: [userId, otherUserId] } },
+        select: { fcmTokens: true, fcmTokenMobile: true },
+    });
+    assert.equal(
+        before.filter((u) => u.fcmTokens.includes(token) || u.fcmTokenMobile.includes(token)).length,
+        2,
+        'the fixture has to actually attach the token, or the assertion below proves nothing',
+    );
+
+    await detachFirebaseDeviceTokenEverywhere(token);
+
+    const after = await prisma.foodUser.findMany({
+        where: { id: { in: [userId, otherUserId] } },
+        select: { fcmTokens: true, fcmTokenMobile: true },
+    });
+    for (const owner of after) {
+        assert.ok(!owner.fcmTokens.includes(token), 'still attached on web');
+        assert.ok(!owner.fcmTokenMobile.includes(token), 'still attached on mobile');
+    }
+});

@@ -357,13 +357,18 @@ export const detachFirebaseDeviceTokenEverywhere = async (token) => {
     // One statement per table rather than per table-and-column: array_remove on a
     // list that does not contain the token is a no-op, so there is nothing to
     // pre-filter on.
+    //
+    // `@>` rather than `= ANY(...)`: the two ask the same question, but only
+    // containment can use a GIN index. This runs on every app launch, so as
+    // `= ANY` it was a sequential scan of all four owner tables each time.
+    // The indexes are in prisma/constraints.sql.
     await Promise.all(
         Object.values(OWNER_TABLES).map((table) =>
             prisma.$executeRawUnsafe(
                 `UPDATE "${table}"
                     SET "fcmTokens"      = array_remove(COALESCE("fcmTokens", '{}'), $1),
                         "fcmTokenMobile" = array_remove(COALESCE("fcmTokenMobile", '{}'), $1)
-                  WHERE $1 = ANY("fcmTokens") OR $1 = ANY("fcmTokenMobile")`,
+                  WHERE "fcmTokens" @> ARRAY[$1] OR "fcmTokenMobile" @> ARRAY[$1]`,
                 normalizedToken,
             ),
         ),

@@ -205,6 +205,19 @@ CREATE INDEX IF NOT EXISTS "food_chat_conversations_participants_gin"
 CREATE INDEX IF NOT EXISTS "food_admins_services_gin"         ON "food_admins"          USING GIN ("servicesAccess");
 CREATE INDEX IF NOT EXISTS "food_restaurants_cuisines_gin"    ON "food_restaurants"     USING GIN ("cuisines");
 
+-- The device-token arrays. A token belongs to at most one owner, so signing in
+-- detaches it everywhere else first — four tables, both columns, on every app
+-- launch. `= ANY(array)` cannot use an index at all, so that was eight
+-- sequential scans per launch; `@>` with these is eight index lookups.
+CREATE INDEX IF NOT EXISTS "food_users_fcm_web_gin"           ON "food_users"           USING GIN ("fcmTokens");
+CREATE INDEX IF NOT EXISTS "food_users_fcm_mobile_gin"        ON "food_users"           USING GIN ("fcmTokenMobile");
+CREATE INDEX IF NOT EXISTS "food_restaurants_fcm_web_gin"     ON "food_restaurants"     USING GIN ("fcmTokens");
+CREATE INDEX IF NOT EXISTS "food_restaurants_fcm_mobile_gin"  ON "food_restaurants"     USING GIN ("fcmTokenMobile");
+CREATE INDEX IF NOT EXISTS "food_partners_fcm_web_gin"        ON "food_delivery_partners" USING GIN ("fcmTokens");
+CREATE INDEX IF NOT EXISTS "food_partners_fcm_mobile_gin"     ON "food_delivery_partners" USING GIN ("fcmTokenMobile");
+CREATE INDEX IF NOT EXISTS "food_admins_fcm_web_gin"          ON "food_admins"          USING GIN ("fcmTokens");
+CREATE INDEX IF NOT EXISTS "food_admins_fcm_mobile_gin"       ON "food_admins"          USING GIN ("fcmTokenMobile");
+
 -- ─── geography columns are derived, never written by hand ────────────────────
 -- Application code writes plain lat/lng (Prisma Client cannot select an
 -- Unsupported column). These triggers derive the matching geography point, so the
