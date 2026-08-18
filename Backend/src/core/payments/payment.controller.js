@@ -6,12 +6,50 @@ import { getWalletBalance, getWalletWithTransactions, getUserWalletForFrontend }
 import { getRefundsByOrder, listRefunds } from './refund.service.js';
 import { createSettlement, processSettlement, listSettlements } from './settlement.service.js';
 import { logger } from '../../utils/logger.js';
+import { ForbiddenError, NotFoundError } from '../auth/errors.js';
+
+/** The token subject is the entity id for every role — user, restaurant, rider, admin. */
+const isAdmin = (req) => String(req.user?.role || '').toUpperCase() === 'ADMIN';
+
+/**
+ * The order the request may read: a customer's own, or any for an admin.
+ *
+ * Throws rather than filtering, so a customer probing another order's payment
+ * trail gets the same 404 as for an order that does not exist — no signal that
+ * the id was real.
+ */
+const assertOrderReadable = async (req, orderId) => {
+    const order = await prisma.foodOrder.findUnique({
+        where: { id: String(orderId) },
+        select: { userId: true },
+    });
+    if (!order) throw new NotFoundError('Order not found');
+    if (!isAdmin(req) && order.userId !== String(req.user?.userId)) {
+        throw new NotFoundError('Order not found');
+    }
+};
+
+/**
+ * The wallet the request may read. A restaurant or rider reads its own; the
+ * URL parameter is only honoured for an admin. It used to be honoured for
+ * everyone, and req.user carries no restaurantId, so the fallback to the URL
+ * was the only path there was.
+ */
+const ownWalletId = (req, paramName) => {
+    if (isAdmin(req)) return String(req.params[paramName]);
+    const own = String(req.user?.userId || '');
+    if (req.params[paramName] && String(req.params[paramName]) !== own) {
+        throw new ForbiddenError('Not your wallet');
+    }
+    return own;
+};
 
 // ─── User Endpoints ───
 
 export const getPaymentHistoryController = async (req, res, next) => {
     try {
         const { orderId } = req.params;
+        await assertOrderReadable(req, orderId);
         const payments = await getPaymentsByOrder(orderId);
         return sendResponse(res, 200, 'Payment history fetched', { payments });
     } catch (err) {
@@ -22,6 +60,7 @@ export const getPaymentHistoryController = async (req, res, next) => {
 export const getOrderTransactionsController = async (req, res, next) => {
     try {
         const { orderId } = req.params;
+        await assertOrderReadable(req, orderId);
         const transactions = await getTransactionsByOrder(orderId);
         return sendResponse(res, 200, 'Transactions fetched', { transactions });
     } catch (err) {
@@ -55,7 +94,7 @@ export const getUserWalletTransactionsController = async (req, res, next) => {
 
 export const getRestaurantWalletController = async (req, res, next) => {
     try {
-        const restaurantId = req.user?.restaurantId || req.params.restaurantId;
+        const restaurantId = ownWalletId(req, 'restaurantId');
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 20;
         const data = await getWalletWithTransactions('restaurant', restaurantId, { page, limit });
@@ -69,7 +108,7 @@ export const getRestaurantWalletController = async (req, res, next) => {
 
 export const getDeliveryWalletController = async (req, res, next) => {
     try {
-        const deliveryPartnerId = req.user?.deliveryPartnerId || req.params.deliveryPartnerId;
+        const deliveryPartnerId = ownWalletId(req, 'deliveryPartnerId');
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 20;
         const data = await getWalletWithTransactions('deliveryBoy', deliveryPartnerId, { page, limit });
@@ -171,6 +210,7 @@ export const listRefundsController = async (req, res, next) => {
 export const getRefundsByOrderController = async (req, res, next) => {
     try {
         const { orderId } = req.params;
+        await assertOrderReadable(req, orderId);
         const refunds = await getRefundsByOrder(orderId);
         return sendResponse(res, 200, 'Refunds fetched', { refunds });
     } catch (err) {
