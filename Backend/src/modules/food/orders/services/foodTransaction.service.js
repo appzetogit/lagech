@@ -48,8 +48,8 @@ export function computeRestaurantCommissionAmount(baseAmount, rule) {
 }
 
 export async function getRestaurantCommissionSnapshot(orderDoc) {
-  const baseAmount = Number(orderDoc?.pricing?.subtotal ?? 0) || 0;
-  const restaurantIdRaw = orderDoc?.restaurantId?.id ?? orderDoc?.restaurantId ?? null;
+  const baseAmount = Number(orderDoc?.subtotal ?? 0) || 0;
+  const restaurantIdRaw = orderDoc?.restaurantId ?? null;
 
   if (!restaurantIdRaw) {
     return { commissionAmount: 0, commissionType: 'percentage', commissionValue: 0, baseAmount };
@@ -75,24 +75,24 @@ export async function createInitialTransaction(order) {
     commissionAmount: 0,
   }));
 
-  const totalCustomerPaid = Number(order.pricing?.total) || 0;
+  const totalCustomerPaid = Number(order.total) || 0;
   const riderShare = Number(order.riderEarning) || 0;
 
   // Prefer the commission already computed and stored on the order (source of truth
   // for this order); fall back to the rule snapshot for older orders.
-  const restaurantCommissionFromOrder = Number(order.pricing?.restaurantCommission);
+  const restaurantCommissionFromOrder = Number(order.restaurantCommission);
   const restaurantCommission =
     Number.isFinite(restaurantCommissionFromOrder) && restaurantCommissionFromOrder > 0
       ? restaurantCommissionFromOrder
       : Number(commissionAmount) || 0;
 
-  const discount = Number(order.pricing?.discount) || 0;
-  const subtotal = Number(order.pricing?.subtotal) || 0;
-  const packagingFee = Number(order.pricing?.packagingFee) || 0;
-  const platformFee = Number(order.pricing?.platformFee) || 0;
-  const deliveryFee = Number(order.pricing?.deliveryFee) || 0;
-  const deliveryFeeGst = Number(order.pricing?.deliveryFeeGst) || 0;
-  const tax = Number(order.pricing?.tax) || 0;
+  const discount = Number(order.discount) || 0;
+  const subtotal = Number(order.subtotal) || 0;
+  const packagingFee = Number(order.packagingFee) || 0;
+  const platformFee = Number(order.platformFee) || 0;
+  const deliveryFee = Number(order.deliveryFee) || 0;
+  const deliveryFeeGst = Number(order.deliveryFeeGst) || 0;
+  const tax = Number(order.tax) || 0;
 
   let restaurantNet = subtotal + packagingFee - restaurantCommission;
   let platformNetProfit =
@@ -103,7 +103,7 @@ export async function createInitialTransaction(order) {
   let discountRestaurantBearPercentage = 0;
 
   // Discount attribution goes through the shared split util (single source of truth).
-  const couponCode = order.pricing?.couponCode;
+  const couponCode = order.couponCode;
   if (discount > 0 && couponCode) {
     const split = await resolveDiscountSplitByCoupon({ couponCode, discount });
     adminDiscountShare = split.adminDiscountShare;
@@ -117,26 +117,24 @@ export async function createInitialTransaction(order) {
   restaurantNet = Math.round((Number(restaurantNet) || 0) * 100) / 100;
   platformNetProfit = Math.round((Number(platformNetProfit) || 0) * 100) / 100;
 
-  const orderId = String(order._id || order.id);
+  const orderId = String(order.id);
 
   const transaction = await prisma.foodTransaction.create({
     data: {
       orderId,
-      userId: String(order.userId?.id ?? order.userId),
-      restaurantId: String(order.restaurantId?.id ?? order.restaurantId),
-      deliveryPartnerId: order.dispatch?.deliveryPartnerId
-        ? String(order.dispatch.deliveryPartnerId)
-        : null,
-      paymentMethod: order.payment?.method || 'cash',
-      status: order.payment?.status === 'paid' ? 'captured' : 'pending',
+      userId: String(order.userId),
+      restaurantId: String(order.restaurantId),
+      deliveryPartnerId: order.dispatchDeliveryPartnerId || null,
+      paymentMethod: order.paymentMethod || 'cash',
+      status: order.paymentStatus === 'paid' ? 'captured' : 'pending',
 
-      paymentStatusLabel: String(order.payment?.status || 'cod_pending'),
-      amountDue: Number(order.payment?.amountDue ?? totalCustomerPaid) || 0,
+      paymentStatusLabel: String(order.paymentStatus || 'cod_pending'),
+      amountDue: Number(order.paymentAmountDue ?? totalCustomerPaid) || 0,
       gatewayProvider: 'razorpay',
-      razorpayOrderId: order.payment?.razorpay?.orderId || null,
-      razorpayPaymentId: order.payment?.razorpay?.paymentId || null,
-      razorpaySignature: order.payment?.razorpay?.signature || null,
-      qr: order.payment?.qr || undefined,
+      razorpayOrderId: order.razorpayOrderId || null,
+      razorpayPaymentId: order.razorpayPaymentId || null,
+      razorpaySignature: order.razorpaySignature || null,
+      qr: order.qr || undefined,
 
       subtotal,
       tax,
@@ -148,7 +146,7 @@ export async function createInitialTransaction(order) {
       discount,
       couponCode: couponCode ? String(couponCode).toUpperCase() : null,
       total: totalCustomerPaid,
-      currency: String(order.pricing?.currency || order.currency || 'INR'),
+      currency: String(order.currency || 'INR'),
 
       totalCustomerPaid,
       restaurantShare: Math.max(0, restaurantNet),
