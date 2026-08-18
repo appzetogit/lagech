@@ -7,7 +7,6 @@ import { config } from './src/config/env.js';
 import { validateConfig } from './src/config/validateEnv.js';
 import { connectDB, disconnectDB } from './src/config/prisma.js';
 // Both databases run side by side until the last Mongoose model is gone.
-import { connectDB as connectPostgres, disconnectDB as disconnectPostgres } from './src/config/prisma.js';
 import { connectRedis, closeRedis } from './src/config/redis.js';
 import { initSocket } from './src/config/socket.js';
 import { initializeQueues, closeBullMQConnection } from './src/queues/index.js';
@@ -34,7 +33,6 @@ const gracefulShutdown = async (signal) => {
     server.close(async () => {
         try {
             await disconnectDB();
-            await disconnectPostgres();
             await closeRedis();
             await closeBullMQConnection();
             if (autoDeliverInterval) clearInterval(autoDeliverInterval);
@@ -109,7 +107,6 @@ const startServer = async () => {
         logger.info(`Upload storage ready at ${path.resolve(config.uploadStorageRoot)}`);
 
         await connectDB();
-        await connectPostgres();
 
         const httpServer = http.createServer(app);
 
@@ -135,7 +132,7 @@ const startServer = async () => {
 
         server = httpServer.listen(config.port, config.host, () => {
             logger.info(`Server running in ${config.nodeEnv} mode on ${config.host}:${config.port}`);
-            console.log(`Server URL http://localhost:${config.port}`);
+            logger.info(`Server URL http://localhost:${config.port}`);
         });
 
         // Fail fast instead of hanging.

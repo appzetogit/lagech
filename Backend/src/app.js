@@ -2,7 +2,6 @@ import express from 'express';
 import path from 'path';
 import cors from 'cors';
 import helmet from 'helmet';
-import morgan from 'morgan';
 import mongoSanitize from 'mongo-sanitize';
 import xssClean from 'xss-clean';
 import routes from './routes/index.js';
@@ -47,7 +46,14 @@ app.use(helmet({
     referrerPolicy: { policy: 'strict-origin-when-cross-origin' }
 }));
 app.use(cors());
-app.use(morgan('dev'));
+
+// Every request except the health probes above, which a load balancer hits
+// constantly and which are registered before this on purpose.
+//
+// This replaced morgan('dev'), which logged the same requests a second time —
+// without the request id, in raw ANSI straight to stdout, and still chattering
+// under the test runner, whose stdout is also its protocol channel.
+app.use(responseTimeLogger);
 /**
  * Requests whose authenticity is checked against the bytes we actually received.
  *
@@ -79,9 +85,6 @@ app.use(xssClean());
 
 // Global rate limiting for API routes
 app.use('/api', apiRateLimiter);
-
-// Optional: log API response time (method, path, status, duration) - no sensitive data
-app.use('/api', responseTimeLogger);
 
 // API Routes
 app.use('/api', routes);

@@ -63,7 +63,7 @@ const startSocketServer = async () => {
 
         server = httpServer.listen(config.socketPort, config.socketHost, () => {
             logger.info(`Socket server running in ${config.nodeEnv} mode on ${config.socketHost}:${config.socketPort}`);
-            console.log(`Socket server URL http://localhost:${config.socketPort}`);
+            logger.info(`Socket server URL http://localhost:${config.socketPort}`);
         });
 
         process.on('SIGINT', () => gracefulShutdown('SIGINT'));
