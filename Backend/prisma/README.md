@@ -19,6 +19,41 @@ on Windows, and it answers first, which surfaces as a confusing
 DATABASE_URL="postgresql://minto:minto@localhost:5433/minto?schema=public"
 ```
 
+### Planner tuning
+
+```sql
+ALTER DATABASE minto SET random_page_cost = 1.1;
+```
+
+Postgres defaults this to `4.0`, meaning "a random page read costs four
+sequential ones" — true of a spinning disk, wrong by roughly 4x on SSD. The
+planner therefore over-prices index access and prefers sequential scans.
+
+Measured on 50,000 orders with `EXPLAIN (ANALYZE, BUFFERS)`:
+
+| report query | 4.0 (default) | 1.1 |
+|---|---|---|
+| restaurant finance totals | 175 ms, seq scan | **43 ms, index** |
+| restaurant analytics money | 16 ms, seq scan | **4 ms, index** |
+| tax report, platform-wide | 470 ms | 334 ms |
+| tax report, one month | 29 ms | 32 ms |
+
+The per-restaurant queries are the ones that matter: a restaurant owner opening
+their finance page and an admin opening an analytics page both joined every
+order to a full sequential scan of `food_transactions`. At 1.1 the planner picks
+a nested loop over the unique index on `food_transactions.orderId` instead.
+
+Forcing the nested loop by hand gave the same plan and the same time, which is
+how we know the query was fine and the cost model was not.
+
+The wide aggregates still scan, correctly — a report that sums every restaurant
+on the platform has to read every row.
+
+Set this on production too, adjusted for the storage: 1.1 suits local and cloud
+SSD; network-attached disks sit nearer 2.0. It is a server-level setting, not
+schema, so it is not applied by `db:migrate`.
+
+
 Then:
 
 ```bash
