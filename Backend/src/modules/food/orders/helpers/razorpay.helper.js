@@ -71,6 +71,57 @@ export async function fetchRazorpayPayment(paymentId) {
 }
 
 /**
+ * Confirm a client-reported payment with Razorpay itself, and report what was
+ * actually captured, in paise.
+ *
+ * The signature covers `orderId|paymentId` and nothing else — in particular not
+ * the amount. So a caller that verifies the signature and then trusts the
+ * amount sent alongside it will credit whatever the client says: pay ₹1, claim
+ * ₹50,000, and the signature is genuine either way. The amount has to come from
+ * Razorpay, which is what this is for.
+ *
+ * Throws on any mismatch rather than returning a flag, because every caller
+ * treats failure the same way and a returned false is easy to forget to check.
+ *
+ * @param {object}  args
+ * @param {number} [args.expectedPaise] when the caller knows what it charged,
+ *   the payment must match it exactly. Omit to accept whatever was captured and
+ *   use the return value.
+ * @returns {Promise<number>} amount captured, in paise
+ */
+export async function confirmRazorpayPayment({ orderId, paymentId, signature, expectedPaise = null }) {
+    if (!verifyPaymentSignature(orderId, paymentId, signature)) {
+        throw new Error('Payment signature verification failed');
+    }
+
+    const payment = await fetchRazorpayPayment(paymentId);
+
+    if (String(payment?.order_id || '') !== String(orderId)) {
+        throw new Error('Payment does not belong to this order');
+    }
+
+    // 'authorized' means the funds are held but not captured. Accepted here for
+    // the same reason order verification accepts it: capture follows, and
+    // rejecting it strands a customer who has genuinely paid.
+    const status = String(payment?.status || '').toLowerCase();
+    if (!['captured', 'authorized'].includes(status)) {
+        throw new Error(`Payment is ${status || 'in an unknown state'}, not captured`);
+    }
+
+    const paidPaise = Number(payment?.amount);
+    if (!Number.isFinite(paidPaise) || paidPaise <= 0) {
+        throw new Error('Payment amount could not be read');
+    }
+    if (expectedPaise != null && paidPaise !== Math.round(Number(expectedPaise))) {
+        throw new Error(
+            `Payment of ${paidPaise} paise does not match the expected ${Math.round(Number(expectedPaise))}`,
+        );
+    }
+
+    return paidPaise;
+}
+
+/**
  * Fetch Razorpay payment-link to check status (used for Razorpay QR auto verification).
  * @param {string} paymentLinkId
  */

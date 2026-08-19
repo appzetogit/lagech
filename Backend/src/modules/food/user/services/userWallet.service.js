@@ -1,13 +1,14 @@
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
+import { logger } from '../../../../utils/logger.js';
 import { recordTransaction, ensureWallet } from '../../../../core/payments/transaction.service.js';
 import { getUserWalletForFrontend } from '../../../../core/payments/wallet.service.js';
 import {
+    confirmRazorpayPayment,
     createRazorpayOrder,
     getRazorpayKeyId,
-    isRazorpayConfigured,
-    verifyPaymentSignature
+    isRazorpayConfigured
 } from '../../orders/helpers/razorpay.helper.js';
 
 /**
@@ -104,11 +105,34 @@ export const verifyWalletTopupPayment = async (userId, payload) => {
 
     await ensureWallet('user', id);
 
-    // If razorpay is not configured (dev), accept and credit.
-    const ok = isRazorpayConfigured()
-        ? verifyPaymentSignature(orderId, paymentId, signature)
-        : true;
-    if (!ok) throw new ValidationError('Payment verification failed');
+    /**
+     * How much to credit — Razorpay's figure, never the caller's.
+     *
+     * The signature covers `orderId|paymentId` and not the amount, so it was
+     * possible to top up ₹1, take the genuine signature that came back, and
+     * re-send it with `amount: 50000`. Everything verified and the wallet was
+     * credited fifty thousand rupees. The claimed amount is now only checked
+     * for shape; what gets credited is what Razorpay says was captured.
+     */
+    let creditedInr;
+    if (isRazorpayConfigured()) {
+        try {
+            creditedInr = (await confirmRazorpayPayment({ orderId, paymentId, signature })) / 100;
+        } catch (err) {
+            logger.warn(`Wallet top-up rejected for user ${id}: ${err?.message || err}`);
+            throw new ValidationError('Payment verification failed');
+        }
+        // The same ceiling createWalletTopupOrder enforces. A top-up larger
+        // than that did not come from an order this server created.
+        if (creditedInr > 50000) {
+            logger.error(`Wallet top-up of ${creditedInr} exceeds the cap; user ${id}, order ${orderId}`);
+            throw new ValidationError('Payment verification failed');
+        }
+    } else {
+        // Development only. Production refuses to start without Razorpay
+        // credentials, so this branch cannot be reached there.
+        creditedInr = amount;
+    }
 
     // Credit ONLY after verification. The gateway order id is the idempotency key,
     // which replaces the previous scan of the embedded array for a matching
@@ -118,7 +142,7 @@ export const verifyWalletTopupPayment = async (userId, payload) => {
         entityType: 'user',
         entityId: id,
         type: 'credit',
-        amount,
+        amount: creditedInr,
         description: isRazorpayConfigured() ? 'Wallet top-up' : 'Wallet top-up (dev)',
         category: 'wallet_topup',
         idempotencyKey: `wallet_topup:${orderId}`,
@@ -126,7 +150,8 @@ export const verifyWalletTopupPayment = async (userId, payload) => {
             source: 'wallet_topup',
             mode: isRazorpayConfigured() ? 'razorpay' : 'dev',
             razorpayOrderId: orderId,
-            razorpayPaymentId: paymentId
+            razorpayPaymentId: paymentId,
+            claimedAmount: amount
         }
     });
 

@@ -22,7 +22,7 @@ import {
     createRazorpayOrder,
     getRazorpayKeyId,
     isRazorpayConfigured,
-    verifyPaymentSignature,
+    confirmRazorpayPayment,
 } from '../../orders/helpers/razorpay.helper.js';
 
 const normalizeName = (value) =>
@@ -866,11 +866,23 @@ export const registerRestaurant = async (payload, files) => {
         if (!orderId || !paymentId || !signature) {
             throw new ValidationError('Complete onboarding fee payment details are required');
         }
-        const verified = isRazorpayConfigured()
-            ? verifyPaymentSignature(orderId, paymentId, signature)
-            : true;
-        if (!verified) {
-            throw new ValidationError('Onboarding fee payment verification failed');
+        // Confirmed with Razorpay, not just signature-checked. The signature
+        // covers `orderId|paymentId` and not the amount, so a genuine triple
+        // from any payment on this account — a ₹1 one — used to satisfy this
+        // as long as the caller also claimed the right figure in the body.
+        // Development skips it; production refuses to start without keys.
+        if (isRazorpayConfigured()) {
+            try {
+                await confirmRazorpayPayment({
+                    orderId,
+                    paymentId,
+                    signature,
+                    expectedPaise: Math.round(requiredOnboardingFeeTotal * 100),
+                });
+            } catch (err) {
+                logger.warn(`Onboarding fee rejected for order ${orderId}: ${err?.message || err}`);
+                throw new ValidationError('Onboarding fee payment verification failed');
+            }
         }
         onboardingFeeFields = {
             onboardingFeePaid: true,
