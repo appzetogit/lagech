@@ -2,6 +2,7 @@ import express from 'express';
 import { upload } from '../../../../middleware/upload.js';
 import { authMiddleware } from '../../../../core/auth/auth.middleware.js';
 import { requireRoles } from '../../../../core/roles/role.middleware.js';
+import { uploadRateLimiter } from '../../../uploads/middleware/upload.middleware.js';
 import * as orderController from '../../orders/controllers/order.controller.js';
 import { registerDeliveryPartnerController, updateDeliveryPartnerProfileController, updateDeliveryPartnerBankDetailsController, listSupportTicketsController, createSupportTicketController, getSupportTicketByIdController, listOrderEmergencyRequestsController, createOrderEmergencyRequestController, getOrderEmergencyRequestController, updateDeliveryPartnerDetailsController, updateDeliveryPartnerProfilePhotoBase64Controller, updateAvailabilityController, getWalletController, createWithdrawalRequestController, createCashDepositOrderController, verifyCashDepositPaymentController, getEarningsController, getTripHistoryController, getPocketDetailsController, getEmergencyHelpController, getCashLimitController, getDeliveryReferralStatsController, getActiveEarningAddonsController, deleteDeliveryPartnerAccountController } from '../controllers/delivery.controller.js';
 import { getPublicFormSchemaController } from '../controllers/driverRegistrationField.controller.js';
@@ -20,7 +21,9 @@ const uploadFields = upload.fields([
 router.get('/registration-fields', getPublicFormSchemaController);
 
 // upload.any() accepts the fixed docs above AND any admin-defined document field.
-router.post('/register', upload.any(), registerDeliveryPartnerController);
+// Public signup, so the upload limiter is the only thing bounding how often
+// an unauthenticated caller can send 25MB documents.
+router.post('/register', uploadRateLimiter, upload.any(), registerDeliveryPartnerController);
 router.get('/check-vehicle/:number', async (req, res) => {
     try {
         const { prisma } = await import('../../../../config/prisma.js');

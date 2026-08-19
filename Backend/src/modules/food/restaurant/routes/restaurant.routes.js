@@ -1,5 +1,6 @@
 import express from 'express';
 import { upload } from '../../../../middleware/upload.js';
+import { imageUpload, uploadRateLimiter } from '../../../uploads/middleware/upload.middleware.js';
 import {
     registerRestaurantController,
     createOnboardingFeeOrderController,
@@ -107,10 +108,23 @@ const uploadFields = upload.fields([
     { name: 'galleryImages', maxCount: 10 }
 ]);
 
-router.post('/register', uploadFields, registerRestaurantController);
+router.post('/register', uploadRateLimiter, uploadFields, registerRestaurantController);
 router.post('/onboarding-fee/order', createOnboardingFeeOrderController);
 router.post('/unregistered', registerUnregisteredRestaurantController);
-router.post('/upload-attachment', upload.single('file'), uploadRestaurantAttachmentController);
+/**
+ * Onboarding attachments, uploaded before the restaurant has an account — so
+ * this stays public, with the same protections /v1/uploads/image already has.
+ *
+ * As `upload.single` it accepted any file type, at 25MB buffered in memory,
+ * bounded only by the global API rate limit of 2500 requests per quarter hour
+ * per IP. That is an open file drop on the internet.
+ */
+router.post(
+    '/upload-attachment',
+    uploadRateLimiter,
+    imageUpload.single('file'),
+    uploadRestaurantAttachmentController,
+);
 
 // Public: approved restaurants list (for user app)
 router.get('/restaurants', cacheResponse(300, 'restaurants'), listApprovedRestaurantsController);

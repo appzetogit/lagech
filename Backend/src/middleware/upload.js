@@ -20,9 +20,22 @@ const storage = multer.memoryStorage();
  */
 const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_BYTES) || 25 * 1024 * 1024;
 
+/**
+ * Files per request.
+ *
+ * There was no cap, and two public endpoints use this instance: restaurant and
+ * delivery-partner registration, the latter through `upload.any()` because
+ * admins can define extra document fields. Uncapped, one unauthenticated
+ * request could carry any number of 25MB files, each buffered in memory.
+ *
+ * 30 clears the largest legitimate use — restaurant onboarding sends at most
+ * 25 across its seven fields.
+ */
+const MAX_UPLOAD_FILES = Number(process.env.MAX_UPLOAD_FILES) || 30;
+
 export const upload = multer({
     storage,
-    limits: { fileSize: MAX_UPLOAD_BYTES },
+    limits: { fileSize: MAX_UPLOAD_BYTES, files: MAX_UPLOAD_FILES },
 });
 
 export const MAX_UPLOAD_MB = Math.floor(MAX_UPLOAD_BYTES / (1024 * 1024));
