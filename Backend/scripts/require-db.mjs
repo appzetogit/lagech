@@ -1,4 +1,16 @@
 /**
+ * ponytail: the suite runs one file at a time (--test-concurrency=1 in the test
+ * script). Several files configure platform singletons — the delivery cash
+ * limit, business settings, cashback settings, commission rules — which the
+ * services read globally, so two files running at once fight over one row.
+ * That produced a ~20% flake rate in CI, and a pipeline that fails at random
+ * is worse than one that takes a minute longer.
+ *
+ * The real fix is to stop those tests depending on a global row; serialising
+ * everything is the blunt version. Raise the concurrency once they are
+ * isolated.
+ */
+/**
  * Refuses to run the suite when it cannot actually test anything, with one
  * message instead of forty-five stack traces.
  *
