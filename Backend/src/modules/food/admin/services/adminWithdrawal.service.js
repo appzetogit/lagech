@@ -208,6 +208,17 @@ export async function updateDeliveryWithdrawalStatus(
         const locked = Number(wallet?.lockedAmount) || 0;
 
         if (next === 'approved') {
+            // ponytail: this moves the balance without posting to the ledger,
+            // so an approved rider withdrawal leaves the wallet lighter with
+            // nothing in the rider's transaction history explaining it — the
+            // same gap that manual wallet adjustments had. settlement.service
+            // does the equivalent through recordTransaction and gets an entry.
+            //
+            // Not fixed here because recordTransaction opens its own
+            // interactive transaction and this work is already inside one, so
+            // it needs an optional client parameter threaded through it first.
+            // Worth doing with the suite running against a real database.
+            //
             // Conditional on the balance still covering it, so the check and
             // the debit are one statement. wallet_balance_non_negative would
             // refuse an overdraw anyway; this reports it as a sentence.

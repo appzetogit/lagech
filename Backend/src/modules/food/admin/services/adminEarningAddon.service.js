@@ -170,6 +170,12 @@ export async function creditEarningAddonHistory(historyId, notes) {
         if (!count) return false;
 
         if (amount > 0) {
+            // ponytail: credits the balance without a ledger entry, so a rider
+            // paid an earning addon sees the number rise with nothing in their
+            // transaction history saying why. Same gap as the withdrawal
+            // approval in adminWithdrawal.service — both need recordTransaction
+            // to accept the surrounding transaction client first.
+            //
             // upsert, because a partner may not have a wallet row yet.
             await tx.wallet.upsert({
                 where: {

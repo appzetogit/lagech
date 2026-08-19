@@ -242,6 +242,17 @@ export const requestDeliveryWithdrawal = async (deliveryPartnerId, payload) => {
                 status: 'pending',
             },
         }),
+        // ponytail: targetLedgerBalance is max(ledger balance, derived pocket
+        // balance), so requesting a withdrawal can raise the stored balance to
+        // match a figure computed from order aggregates — money appearing from
+        // a reconciliation rather than from a transaction, with no ledger entry
+        // behind it. It only ever increases, never decreases.
+        //
+        // The root cause is that a rider's money has two sources of truth: the
+        // wallet ledger, and aggregates over orders, bonuses and deposits. This
+        // line papers over the disagreement instead of resolving it. Picking
+        // one — the ledger — is the fix, and it is a bigger change than a
+        // comment.
         prisma.wallet.upsert({
             where: walletKey(partnerId),
             create: {
