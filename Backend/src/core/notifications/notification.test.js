@@ -29,6 +29,7 @@ import { uniquePhone } from '../../utils/testIds.js';
 let userId;
 let otherUserId;
 let broadcastId;
+let adminId;
 
 test.before(async () => {
     const [user, other, admin] = await Promise.all([
@@ -40,6 +41,7 @@ test.before(async () => {
     ]);
     userId = user.id;
     otherUserId = other.id;
+    adminId = admin.id;
 
     const broadcast = await prisma.notificationBroadcast.create({
         data: { title: 'Test', message: 'Hello', targetType: 'ALL', createdById: admin.id },
@@ -50,7 +52,12 @@ test.before(async () => {
 test.after(async () => {
     await prisma.foodNotification.deleteMany({ where: { ownerId: { in: [userId, otherUserId] } } });
     await prisma.notificationBroadcast.deleteMany({ where: { id: broadcastId } });
-    await prisma.foodAdmin.deleteMany({ where: { email: { contains: '@test.local' } } });
+    // By id, not by email pattern. This deleted every admin whose address
+    // contained '@test.local' — which is how the other admin tests name theirs
+    // too, so under --test-concurrency this teardown reached into whichever
+    // file happened to be running and deleted its fixtures. adminSubAdmin's
+    // duplicate-email test is the one that notices.
+    await prisma.foodAdmin.deleteMany({ where: { id: adminId } });
     await prisma.foodUser.deleteMany({ where: { id: { in: [userId, otherUserId] } } });
     await prisma.$disconnect();
 });
