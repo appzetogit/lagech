@@ -3,6 +3,35 @@
 Postgres 16 + PostGIS. Prisma owns the schema; a few things it cannot express
 live in `constraints.sql` and are appended to the init migration.
 
+## Running the database without Docker
+
+Docker Desktop on Windows needs a service that only starts elevated, and it
+stopped itself repeatedly during this work — roughly ten times in one session,
+sometimes mid-test-run. WSL runs the same Postgres without any of that.
+
+```bash
+wsl -d Ubuntu -- sudo apt-get install -y postgresql postgis postgresql-16-postgis-3
+wsl -d Ubuntu -- sudo -u postgres psql -c "CREATE ROLE minto LOGIN PASSWORD 'minto' SUPERUSER;"
+wsl -d Ubuntu -- sudo -u postgres createdb -O minto minto
+wsl -d Ubuntu -- sudo -u postgres psql -d minto -c 'CREATE EXTENSION postgis;'
+```
+
+Then set `listen_addresses = '*'` and `port = 5434` in
+`/etc/postgresql/16/main/postgresql.conf`, add
+`host all all 0.0.0.0/0 scram-sha-256` to `pg_hba.conf`, and restart with
+`wsl -d Ubuntu -- sudo service postgresql restart`.
+
+5434 because Windows already has a native Postgres on 5432 and the Docker
+container used 5433. WSL2 forwards localhost, so from Windows:
+
+```
+DATABASE_URL="postgresql://minto:minto@localhost:5434/minto?schema=public"
+```
+
+`wsl -d Ubuntu -- sudo service postgresql start` after a reboot. The container
+in docker-compose.yml still works when Docker is behaving; this is the fallback
+that does not depend on it.
+
 ## Local setup
 
 ```bash
