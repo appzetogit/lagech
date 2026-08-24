@@ -94,7 +94,7 @@ function lifetimeTotals(entityType, type, amount) {
  *        moving the balance a second time.
  * @returns {Object} { transaction, wallet }
  */
-export async function recordTransaction(payload) {
+export async function recordTransaction(payload, { client = null } = {}) {
     const {
         entityType, entityId, type, amount,
         description = '', category = 'other',
@@ -109,15 +109,19 @@ export async function recordTransaction(payload) {
 
     const id = resolveEntityId(entityType, entityId);
 
+    // Reads before the write go through the caller's transaction when there is
+    // one, so an idempotency check cannot miss a row that transaction wrote.
+    const db = client ?? prisma;
+
     if (idempotencyKey) {
-        const replay = await prisma.transaction.findUnique({ where: { idempotencyKey } });
+        const replay = await db.transaction.findUnique({ where: { idempotencyKey } });
         if (replay) {
             logger.info(`Transaction replay ignored: ${idempotencyKey}`);
             return { transaction: replay, wallet: { balance: toNumber(replay.balanceAfter) } };
         }
     }
 
-    const result = await prisma.$transaction(async (tx) => {
+    const post = async (tx) => {
         await insertWalletIfMissing(entityType, id, tx);
 
         // The overdraw guard lives in the WHERE clause, not in a preceding read.
@@ -139,8 +143,12 @@ export async function recordTransaction(payload) {
         });
 
         if (count === 0) {
-            const { balance } = await getBalance(entityType, id);
-            throw new Error(`Insufficient balance. Current: ${balance}, Debit: ${value}`);
+            // Read through tx, not a fresh connection: inside a caller's
+            // transaction the committed balance is not the one that matters.
+            const current = await tx.wallet.findUnique({ where: walletKey(entityType, id) });
+            throw new Error(
+                `Insufficient balance. Current: ${toNumber(current?.balance)}, Debit: ${value}`,
+            );
         }
 
         const wallet = await tx.wallet.findUniqueOrThrow({ where: walletKey(entityType, entityId) });
@@ -165,7 +173,13 @@ export async function recordTransaction(payload) {
         });
 
         return { transaction, wallet: { balance: toNumber(wallet.balance) } };
-    });
+    };
+
+    // Prisma cannot nest interactive transactions, so a caller that already has
+    // one passes it in and this posts inside it — the ledger entry and whatever
+    // else that caller is doing then commit or roll back together. Without a
+    // client it opens its own, which is what every existing caller gets.
+    const result = client ? await post(client) : await prisma.$transaction(post);
 
     logger.info(
         `Transaction recorded: ${type} ${value} INR for ${entityType}:${id} → balance ${result.wallet.balance}`

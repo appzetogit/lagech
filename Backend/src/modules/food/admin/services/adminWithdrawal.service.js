@@ -1,6 +1,7 @@
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
+import { recordTransaction } from '../../../../core/payments/transaction.service.js';
 
 /**
  * Withdrawal approvals, extracted from admin.service.js.
@@ -208,36 +209,36 @@ export async function updateDeliveryWithdrawalStatus(
         const locked = Number(wallet?.lockedAmount) || 0;
 
         if (next === 'approved') {
-            // ponytail: this moves the balance without posting to the ledger,
-            // so an approved rider withdrawal leaves the wallet lighter with
-            // nothing in the rider's transaction history explaining it — the
-            // same gap that manual wallet adjustments had. settlement.service
-            // does the equivalent through recordTransaction and gets an entry.
-            //
-            // Not fixed here because recordTransaction opens its own
-            // interactive transaction and this work is already inside one, so
-            // it needs an optional client parameter threaded through it first.
-            // Worth doing with the suite running against a real database.
-            //
-            // Conditional on the balance still covering it, so the check and
-            // the debit are one statement. wallet_balance_non_negative would
-            // refuse an overdraw anyway; this reports it as a sentence.
-            const { count: debited } = await tx.wallet.updateMany({
-                where: {
-                    entityType: 'deliveryBoy',
-                    entityId: claimed.deliveryPartnerId,
-                    balance: { gte: amount },
-                },
-                data: {
-                    balance: { decrement: amount },
-                    totalSettled: { increment: amount },
-                    lockedAmount: { decrement: Math.min(locked, amount) },
-                },
-            });
-
-            if (!debited) {
-                throw new ValidationError('Delivery wallet balance is lower than the requested amount');
+            // The debit and its ledger entry share this transaction, so an
+            // approved withdrawal always leaves a matching row in the rider's
+            // transaction history. recordTransaction's own WHERE-clause guard
+            // (balance >= amount, checked inside the same statement as the
+            // decrement) is what rejects an overdraw — not a preceding read.
+            try {
+                await recordTransaction(
+                    {
+                        entityType: 'deliveryBoy',
+                        entityId: claimed.deliveryPartnerId,
+                        type: 'debit',
+                        amount,
+                        description: `Withdrawal payout #${String(id).slice(-6)}`,
+                        category: 'withdrawal_payout',
+                        idempotencyKey: `delivery_withdrawal:${id}`,
+                        metadata: { withdrawalId: String(id) },
+                    },
+                    { client: tx },
+                );
+            } catch (err) {
+                if (/Insufficient balance/i.test(err.message)) {
+                    throw new ValidationError('Delivery wallet balance is lower than the requested amount');
+                }
+                throw err;
             }
+
+            await tx.wallet.updateMany({
+                where: { entityType: 'deliveryBoy', entityId: claimed.deliveryPartnerId },
+                data: { totalSettled: { increment: amount }, lockedAmount: { decrement: Math.min(locked, amount) } },
+            });
         }
 
         // Rejecting releases whatever the request had reserved.

@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { prisma } from '../../../config/prisma.js';
-import * as foodTransactionService from '../../../modules/food/orders/services/foodTransaction.service.js';
+import { finalizeOrderPayment } from '../../../modules/food/orders/services/order.service.js';
 import { config } from '../../../config/env.js';
 import { logger } from '../../../utils/logger.js';
 
@@ -87,17 +87,22 @@ export const handleRazorpayWebhook = async (req, res) => {
                     select: { id: true, orderId: true },
                 });
 
-                // The ledger write must not fail the webhook — Razorpay would
-                // retry, and the retry would find the order already paid and
-                // never reach this line again.
+                // Everything that used to happen only in verifyPayment — moving
+                // the order out of pending_payment, the acceptance deadline, the
+                // ledger entry, the restaurant push — has to happen here too. A
+                // customer who pays and then closes the browser before the app
+                // gets a chance to poll never calls verifyPayment; the webhook is
+                // the only caller left. finalizeOrderPayment guards on
+                // orderStatus itself, so it does not matter if verifyPayment
+                // already ran for this order — this just returns null then.
+                //
+                // Must not fail the webhook response — Razorpay would retry, and
+                // the retry would find paymentStatus already 'paid' and never
+                // reach this line again, leaving the order stuck mid-finalize.
                 try {
-                    await foodTransactionService.updateTransactionStatus(order.id, 'captured', {
-                        status: 'captured',
-                        razorpayPaymentId: rzPaymentId,
-                        note: 'Payment status synced via Webhook (payment.captured)',
-                    });
-                } catch (ledgerErr) {
-                    logger.error(`Webhook Ledger Error (Order ${order.orderId}): ${ledgerErr.message}`);
+                    await finalizeOrderPayment(order.id, { source: 'SYSTEM' });
+                } catch (finalizeErr) {
+                    logger.error(`Webhook finalize error (Order ${order.orderId}): ${finalizeErr.message}`);
                 }
                 logger.info(`Webhook [payment.captured]: Synced Order ${order.orderId} (Status=paid)`);
             } else {

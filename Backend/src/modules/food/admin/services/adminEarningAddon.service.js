@@ -1,6 +1,7 @@
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { logger } from '../../../../utils/logger.js';
+import { recordTransaction } from '../../../../core/payments/transaction.service.js';
 
 /**
  * Rider incentives ("earning addons"), extracted from admin.service.js.
@@ -170,33 +171,25 @@ export async function creditEarningAddonHistory(historyId, notes) {
         if (!count) return false;
 
         if (amount > 0) {
-            // ponytail: credits the balance without a ledger entry, so a rider
-            // paid an earning addon sees the number rise with nothing in their
-            // transaction history saying why. Same gap as the withdrawal
-            // approval in adminWithdrawal.service — both need recordTransaction
-            // to accept the surrounding transaction client first.
-            //
-            // upsert, because a partner may not have a wallet row yet.
-            await tx.wallet.upsert({
-                where: {
-                    entityType_entityId: {
-                        entityType: 'deliveryBoy',
-                        entityId: existing.deliveryPartnerId,
-                    },
-                },
-                create: {
+            // The credit and its ledger entry share this transaction, so a
+            // rider paid an earning addon gets a row in their transaction
+            // history explaining why the balance moved. recordTransaction
+            // creates the wallet row itself if the partner doesn't have one yet.
+            await recordTransaction(
+                {
                     entityType: 'deliveryBoy',
                     entityId: existing.deliveryPartnerId,
-                    balance: amount,
-                    totalEarnings: amount,
+                    type: 'credit',
+                    amount,
+                    description: `Earning Addon: ${existing.offer?.title || 'Offer Reward'}`,
+                    category: 'earning_addon',
+                    idempotencyKey: `earning_addon:${existing.id}`,
+                    metadata: { earningAddonHistoryId: existing.id },
                 },
-                update: {
-                    balance: { increment: amount },
-                    totalEarnings: { increment: amount },
-                },
-            });
+                { client: tx },
+            );
 
-            // The ledger row shares the transaction. It used to be a
+            // The bonus-feed row shares the transaction too. It used to be a
             // fire-and-forget create in its own try/catch, so a failure left
             // the rider's balance moving with nothing explaining it.
             await tx.deliveryBonusTransaction.create({

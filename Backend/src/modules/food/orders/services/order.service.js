@@ -792,37 +792,70 @@ export async function verifyPayment(userId, dto) {
     throw new ValidationError("Payment verification failed");
   }
 
-  const from = order.orderStatus;
-  const acceptanceWindowSeconds = await getOrderAcceptanceWindowSeconds();
-
-  const updated = toOrder(await prisma.foodOrder.update({
-    where: { id: order.id },
+  // Claim the paid transition here too, not just in the webhook: verify and
+  // the webhook can both reach this point for the same order, and without a
+  // conditional update both would run the finalize work below and double
+  // everything it does (coupon usage, restaurant notification, the ledger).
+  const { count: claimed } = await prisma.foodOrder.updateMany({
+    where: { id: order.id, paymentStatus: { not: 'paid' } },
     data: {
       paymentStatus: 'paid',
       razorpayPaymentId: dto.razorpayPaymentId,
       razorpaySignature: dto.razorpaySignature,
-      orderStatus: 'created',
-      acceptanceWindowSeconds,
-      acceptanceDeadlineAt: buildAcceptanceDeadline(new Date(), acceptanceWindowSeconds),
     },
-    include: orderInclude,
-  }));
+  });
 
-  await pushStatusHistory(order.id, {
-    byRole: "USER",
+  if (!claimed) {
+    // The webhook (or a concurrent verify call) already claimed it.
+    const fresh = toOrder(await prisma.foodOrder.findFirst({ where: { id: order.id }, include: orderInclude }));
+    return { order: normalizeOrderForClient(fresh), payment: fresh.payment };
+  }
+
+  const finalized = await finalizeOrderPayment(order.id, { source: "USER", userId });
+  const updated = finalized ?? toOrder(await prisma.foodOrder.findFirst({ where: { id: order.id }, include: orderInclude }));
+
+  return { order: normalizeOrderForClient(updated), payment: updated.payment };
+}
+
+/**
+ * Everything that has to happen once, the first time an order's payment is
+ * confirmed — whichever caller gets there first, `verifyPayment` (the user's
+ * browser polling Razorpay) or the webhook (Razorpay's own callback). Both
+ * claim `paymentStatus: 'paid'` with a conditional update before calling this,
+ * so only one of them ever passes the `orderStatus: 'pending_payment'` guard
+ * below and runs this body — a retried webhook or a duplicate verify call
+ * finds the order already moved past `pending_payment` and gets `null` back.
+ *
+ * @returns {Promise<object|null>} the finalized order, or null if some other
+ *          caller already finalized it.
+ */
+export async function finalizeOrderPayment(orderId, { source = "SYSTEM", userId = null } = {}) {
+  const acceptanceWindowSeconds = await getOrderAcceptanceWindowSeconds();
+  const acceptanceDeadlineAt = buildAcceptanceDeadline(new Date(), acceptanceWindowSeconds);
+
+  const { count } = await prisma.foodOrder.updateMany({
+    where: { id: orderId, orderStatus: 'pending_payment' },
+    data: { orderStatus: 'created', acceptanceWindowSeconds, acceptanceDeadlineAt },
+  });
+  if (!count) return null;
+
+  const updated = toOrder(await prisma.foodOrder.findFirst({ where: { id: orderId }, include: orderInclude }));
+
+  await pushStatusHistory(orderId, {
+    byRole: source,
     byId: userId,
-    from,
+    from: "pending_payment",
     to: "created",
-    note: "Payment verified, order confirmed",
+    note: source === "USER" ? "Payment verified, order confirmed" : "Payment confirmed via webhook",
   });
 
   void addOrderJob(
-    { action: "ORDER_ACCEPTANCE_TIMEOUT_CHECK", orderMongoId: order.id, orderId: order.id },
+    { action: "ORDER_ACCEPTANCE_TIMEOUT_CHECK", orderMongoId: orderId, orderId },
     {
       delay: acceptanceWindowSeconds * 1000,
       removeOnComplete: true,
       removeOnFail: true,
-      jobId: `order-accept-timeout-${order.id}`,
+      jobId: `order-accept-timeout-${orderId}`,
     },
   ).catch((err) => {
     logger.warn(`Failed to enqueue acceptance timeout check: ${err?.message || err}`);
@@ -832,29 +865,29 @@ export async function verifyPayment(userId, dto) {
     const transaction = await foodTransactionService.createInitialTransaction(updated);
     if (transaction && Number.isFinite(Number(transaction.platformNetProfit))) {
       await prisma.foodOrder.update({
-        where: { id: order.id },
+        where: { id: orderId },
         data: { platformProfit: Number(transaction.platformNetProfit) },
       });
       updated.platformProfit = Number(transaction.platformNetProfit);
     }
   } catch (err) {
-    logger.error(`[CRITICAL] Initial transaction failed for order ${order.id}: ${err.message}`);
+    logger.error(`[CRITICAL] Initial transaction failed for order ${orderId}: ${err.message}`);
   }
 
-  await incrementCouponUsageForOrder(updated, userId);
+  await incrementCouponUsageForOrder(updated, updated.userId);
 
-  await foodTransactionService.updateTransactionStatus(order.id, 'captured', {
+  await foodTransactionService.updateTransactionStatus(orderId, 'captured', {
     status: 'captured',
-    razorpayPaymentId: dto.razorpayPaymentId,
-    razorpaySignature: dto.razorpaySignature,
-    recordedByRole: "USER",
-    recordedById: String(userId),
+    razorpayPaymentId: updated.razorpayPaymentId,
+    razorpaySignature: updated.razorpaySignature,
+    recordedByRole: source,
+    recordedById: userId ? String(userId) : undefined,
   });
 
-  // Now that payment is verified, tell the restaurant about the new order.
+  // Now that payment is confirmed, tell the restaurant about the new order.
   await notifyRestaurantNewOrder(updated);
 
-  return { order: normalizeOrderForClient(updated), payment: updated.payment };
+  return updated;
 }
 
 export async function abandonOnlinePaymentOrder(userId, orderId) {
