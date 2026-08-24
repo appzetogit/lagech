@@ -10,6 +10,7 @@ import {
     fetchRazorpayPayment,
 } from '../../orders/helpers/razorpay.helper.js';
 import { logger } from '../../../../utils/logger.js';
+import { recordTransaction } from '../../../../core/payments/transaction.service.js';
 
 const num = (v) => Number(v) || 0;
 
@@ -225,8 +226,21 @@ export const requestDeliveryWithdrawal = async (deliveryPartnerId, payload) => {
         throw new ValidationError('Insufficient balance for this withdrawal');
     }
 
-    const [withdrawal] = await prisma.$transaction([
-        prisma.foodDeliveryWithdrawal.create({
+    // The rider's money still has two sources of truth here — the wallet ledger,
+    // and aggregates over orders/bonuses/deposits — because organic delivery
+    // earnings are never posted to the ledger as they happen. Reconciling that
+    // properly means crediting every delivered order to the ledger at
+    // completion time, which is a bigger change than this withdrawal path
+    // should carry.
+    //
+    // What this path controls is narrower: it must never move the stored
+    // balance without a transaction row explaining why. So instead of writing
+    // targetLedgerBalance directly, the gap between it and the ledger's current
+    // balance is posted as a real credit through recordTransaction — same
+    // number, but now with a description, a category, and an idempotency key
+    // tied to this withdrawal request, so a retry can't post it twice.
+    const withdrawal = await prisma.$transaction(async (tx) => {
+        const created = await tx.foodDeliveryWithdrawal.create({
             data: {
                 deliveryPartnerId: partnerId,
                 amount,
@@ -241,19 +255,26 @@ export const requestDeliveryWithdrawal = async (deliveryPartnerId, payload) => {
                 upiQrCode: partner.upiQrCode,
                 status: 'pending',
             },
-        }),
-        // ponytail: targetLedgerBalance is max(ledger balance, derived pocket
-        // balance), so requesting a withdrawal can raise the stored balance to
-        // match a figure computed from order aggregates — money appearing from
-        // a reconciliation rather than from a transaction, with no ledger entry
-        // behind it. It only ever increases, never decreases.
-        //
-        // The root cause is that a rider's money has two sources of truth: the
-        // wallet ledger, and aggregates over orders, bonuses and deposits. This
-        // line papers over the disagreement instead of resolving it. Picking
-        // one — the ledger — is the fix, and it is a bigger change than a
-        // comment.
-        prisma.wallet.upsert({
+        });
+
+        const syncDelta = targetLedgerBalance - currentBalance;
+        if (syncDelta > 0) {
+            await recordTransaction(
+                {
+                    entityType: 'deliveryBoy',
+                    entityId: partnerId,
+                    type: 'credit',
+                    amount: syncDelta,
+                    description: 'Delivery earnings synced to wallet ledger',
+                    category: 'earnings_sync',
+                    idempotencyKey: `earnings_sync:${created.id}`,
+                    metadata: { withdrawalId: created.id },
+                },
+                { client: tx },
+            );
+        }
+
+        await tx.wallet.upsert({
             where: walletKey(partnerId),
             create: {
                 entityType: 'deliveryBoy',
@@ -262,11 +283,12 @@ export const requestDeliveryWithdrawal = async (deliveryPartnerId, payload) => {
                 lockedAmount: effectiveLockedBefore + amount,
             },
             update: {
-                balance: targetLedgerBalance,
                 lockedAmount: effectiveLockedBefore + amount,
             },
-        }),
-    ]);
+        });
+
+        return created;
+    });
 
     return withdrawal;
 };
