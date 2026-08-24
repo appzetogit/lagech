@@ -182,7 +182,7 @@ export async function creditEarningAddonHistory(historyId, notes) {
                     type: 'credit',
                     amount,
                     description: `Earning Addon: ${existing.offer?.title || 'Offer Reward'}`,
-                    category: 'earning_addon',
+                    category: 'delivery_earning',
                     idempotencyKey: `earning_addon:${existing.id}`,
                     metadata: { earningAddonHistoryId: existing.id },
                 },

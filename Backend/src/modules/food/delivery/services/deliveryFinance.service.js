@@ -266,7 +266,7 @@ export const requestDeliveryWithdrawal = async (deliveryPartnerId, payload) => {
                     type: 'credit',
                     amount: syncDelta,
                     description: 'Delivery earnings synced to wallet ledger',
-                    category: 'earnings_sync',
+                    category: 'adjustment',
                     idempotencyKey: `earnings_sync:${created.id}`,
                     metadata: { withdrawalId: created.id },
                 },

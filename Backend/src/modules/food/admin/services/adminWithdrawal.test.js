@@ -53,6 +53,11 @@ const walletOf = (partnerId) =>
 test.after(async () => {
     await prisma.foodDeliveryWithdrawal.deleteMany({ where: { id: { in: created.withdrawals } } });
     await prisma.foodRestaurantWithdrawal.deleteMany({ where: { id: { in: created.rWithdrawals } } });
+    // Approving a withdrawal now posts a real ledger row (recordTransaction),
+    // so the wallet can't be deleted until its transactions are gone too.
+    await prisma.transaction.deleteMany({
+        where: { entityType: 'deliveryBoy', entityId: { in: created.partners } },
+    });
     await prisma.wallet.deleteMany({ where: { entityId: { in: created.partners } } });
     await prisma.foodDeliveryPartner.deleteMany({ where: { id: { in: created.partners } } });
     await prisma.foodRestaurant.deleteMany({ where: { id: { in: created.restaurants } } });

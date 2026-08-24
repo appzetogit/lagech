@@ -222,7 +222,7 @@ export async function updateDeliveryWithdrawalStatus(
                         type: 'debit',
                         amount,
                         description: `Withdrawal payout #${String(id).slice(-6)}`,
-                        category: 'withdrawal_payout',
+                        category: 'settlement_payout',
                         idempotencyKey: `delivery_withdrawal:${id}`,
                         metadata: { withdrawalId: String(id) },
                     },

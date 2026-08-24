@@ -109,6 +109,11 @@ test.after(async () => {
     await prisma.foodEarningAddonHistory.deleteMany({ where: { offerId: { in: created.addons } } });
     await prisma.foodEarningAddon.deleteMany({ where: { id: { in: created.addons } } });
     await prisma.foodOrder.deleteMany({ where: { id: { in: created.orders } } });
+    // Crediting an addon now posts a real ledger row (recordTransaction), so the
+    // wallet can't be deleted until its transactions are gone too.
+    await prisma.transaction.deleteMany({
+        where: { entityType: 'deliveryBoy', entityId: { in: created.partners } },
+    });
     await prisma.wallet.deleteMany({ where: { entityId: { in: created.partners } } });
     await prisma.foodDeliveryPartner.deleteMany({ where: { id: { in: created.partners } } });
     await prisma.foodRestaurant.deleteMany({ where: { id: { in: created.restaurants } } });
