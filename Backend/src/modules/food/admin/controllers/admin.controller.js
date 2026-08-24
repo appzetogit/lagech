@@ -1,6 +1,5 @@
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
-import { notifyOwnersSafely } from '../../../../core/notifications/firebase.service.js';
 import * as adminService from '../services/admin.service.js';
 import * as featureSettingsService from '../services/featureSettings.service.js';
 import { validateCategoryListQuery, validateCategoryRejectDto, validateCategoryUpsertDto } from '../validators/category.validator.js';
@@ -1576,45 +1575,12 @@ export async function deleteZone(req, res, next) {
     }
 }
 
-export async function processRefund(req, res, next) {
-    try {
-        const { orderId } = req.params;
-        const { refundAmount } = req.body;
-        if (!orderId || !isId(orderId)) {
-            return res.status(400).json({ success: false, message: 'Invalid order id' });
-        }
-        
-        // This is a stub for the actual refund logic.
-        // We will assume adminService.processRefund exists and handles the refund.
-        const updated = await adminService.processRefund(orderId, refundAmount);
-        
-        // Let's add the push notification here if we have access to the user ID
-        // First we need to get the order to find the user ID
-        const order = isId(orderId)
-            ? await prisma.foodOrder.findUnique({ where: { id: String(orderId) } })
-            : null;
+// Admin refund is POST /orders/:orderId/refund → orderController.processRefundAdminController
+// → orderService.processRefundAdmin, which does the real Razorpay refund + ledger
+// update. This file used to carry a second, unrouted refund handler that called
+// adminService.processRefund — a function that was never defined, so it could
+// only ever 500 if something had wired it up.
 
-        if (order && order.userId) {
-            await notifyOwnersSafely(
-                [{ ownerType: 'USER', ownerId: order.userId }],
-                {
-                    title: 'Refund Processed! 💸',
-                    body: `Your refund of ₹${refundAmount || Number(order.total) || 0} for Order #${order.orderId} has been processed successfully.`,
-                    image: 'https://i.ibb.co/5GzXz7r/Switcheats-Brand-Image.png',
-                    data: {
-                        type: 'refund_processed',
-                        orderId: String(order.orderId),
-                        orderRowId: order.id
-                    }
-                }
-            );
-        }
-        
-        res.status(200).json({ success: true, message: 'Refund processed successfully', data: updated });
-    } catch (error) {
-        next(error);
-    }
-}
 export async function getWithdrawals(req, res, next) {
     try {
         const data = await adminService.getWithdrawals(req.query || {});

@@ -2513,5 +2513,21 @@ export async function processRefundAdmin(orderId, amount, adminId) {
   const updated = toOrder(
     await prisma.foodOrder.findUnique({ where: { id: order.id }, include: orderInclude }),
   );
+
+  if (updated.userId) {
+    await notifyOwnersSafely([{ ownerType: "USER", ownerId: updated.userId }], {
+      title: "Refund Processed! 💸",
+      body: `Your refund of ₹${refundAmount} for Order #${updated.order_id || updated.id} has been processed successfully.`,
+      image: "https://i.ibb.co/5GzXz7r/Switcheats-Brand-Image.png",
+      data: {
+        type: "refund_processed",
+        orderId: String(updated.order_id || updated.id),
+        orderRowId: updated.id,
+      },
+    }).catch((err) => {
+      logger.warn(`Refund notification failed for order ${updated.id}: ${err?.message || err}`);
+    });
+  }
+
   return { success: true, order: normalizeOrderForClient(updated) };
 }
