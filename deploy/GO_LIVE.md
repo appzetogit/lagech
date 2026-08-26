@@ -73,16 +73,81 @@ Only after DNS resolves. The vhosts are HTTP-only on purpose; certbot adds the
     sudo nginx -t && sudo systemctl reload nginx
     sudo certbot renew --dry-run
 
-## 4. Database
+## 4. Database (RDS)
 
-Create the RDS instance, enable postgis, then in `/var/www/Backend/.env`:
+Instance: `database-1-instance-1.cno8qkoa4p2p.ap-south-1.rds.amazonaws.com`.
+Port 5432 is reachable from the EC2 instance.
 
-    DATABASE_URL=postgresql://USER:PASS@HOST:5432/minto?schema=public
+    DATABASE_URL=postgresql://USER:PASS@HOST:5432/minto?schema=public&sslmode=require
 
     cd /var/www/Backend && npm run db:migrate
 
+Four things that will bite otherwise:
+
+- **Use password authentication, not IAM.** The console offers an
+  `rds generate-db-auth-token` snippet; those tokens expire after 15 minutes.
+  Prisma is handed one connection URL at startup and holds a pool open for the
+  life of the process, with no hook to re-sign a password, so an IAM-auth setup
+  works for one smoke test and then fails every reconnect. Give the app a
+  password user.
+- **Run the migration as the RDS master user.** The first migration issues
+  `CREATE EXTENSION postgis`, `pgcrypto` and `btree_gist`; a plain application
+  user has no privilege to do that and the migration fails partway through.
+- **`sslmode=require` is not optional.** RDS presents a TLS certificate but
+  Prisma will not negotiate TLS unless asked, and with `rds.force_ssl` set the
+  connection is simply refused.
+- **`npm run db:migrate` is three steps, not one** -- `prisma migrate deploy`,
+  then `prisma/apply-constraints.mjs`, then `prisma generate`. The middle step
+  is not optional: the money guards, the geography sync triggers and every GIN
+  and GIST index live in `constraints.sql`, because Prisma's schema language
+  cannot express them. Running only `migrate deploy` produces a schema that
+  looks correct and silently permits negative wallet balances.
+
+The app also wants its own database rather than the default `postgres` one:
+
+    CREATE DATABASE minto;
+
+### Connection pool sizing
+
+Prisma opens one pool **per process**, and PM2 runs several, so
+`DATABASE_POOL_SIZE` is a per-process number that has to be multiplied out:
+
+    processes x DATABASE_POOL_SIZE  <  max_connections - superuser reserve
+
+With queues off that is api (one per vCPU, `instances: 'max'`) + socket +
+scheduler = 3 on this box, so 3 x 20 = 60. `max_connections` on the small RDS
+classes is lower than people expect -- about 112 on a 1 GiB `db.t4g.micro`.
+Prisma's own default of 25 across five processes is 125, which would not fit.
+
+**Recompute after any instance resize.** More vCPUs means more API workers means
+more pools, and the failure mode is an opaque `pool_timeout` rather than a
+message about running out of connections.
+
 UAT needs its own database and Razorpay **test** keys. A UAT pointed at the
 production database takes real payments during a test run.
+
+## 4a. Load balancing and redundancy: what actually exists
+
+Worth stating plainly, because "load balanced" is doing less work here than it
+sounds:
+
+- **Within the box:** PM2 cluster mode balances across API workers and nginx
+  fronts them. On the current 1 vCPU instance `instances: 'max'` resolves to
+  **one** worker, so nothing is being balanced today. It starts working on a
+  larger instance with no config change.
+- **Across boxes: none.** One EC2, one nginx, one upstream -- a single point of
+  failure. Real redundancy means an ALB in front of two instances in separate
+  availability zones.
+- **Socket.IO is deliberately a single process** and cannot be clustered as-is.
+  Multiple socket processes need the Redis adapter, or a client lands on a
+  worker that does not hold its room and quietly stops receiving events.
+- **Queue workers are off** (`BULLMQ_ENABLED` unset, no Redis). The ecosystem
+  files leave them out of the process list while queues are disabled: started
+  anyway they exit immediately, and PM2 reads a clean exit as success and
+  restarts them forever.
+
+Before adding an ALB: point health checks at `/health`; the API is JWT-based so
+it needs no stickiness, but websockets need sticky sessions or the Redis adapter.
 
 ## 5. Start
 
