@@ -1,4 +1,4 @@
-// Switcheats — full Postgres schema, translated from the 72 Mongoose models.
+// Minto Foods — full Postgres schema, translated from the 72 Mongoose models.
 //
 // Conventions applied throughout:
 //   * ids stay 24-char hex so the frontend's /^[a-f0-9]{24}$/ checks keep working
@@ -2078,8 +2078,8 @@ model DeliveryFeeBand {
 model FoodBusinessSettings {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 
-  companyName      String @default("Switcheats")
-  email            String @default("admin@switcheats.com")
+  companyName      String @default("Minto Foods")
+  email            String @default("admin@mintofood.com")
   phoneCountryCode String @default("+91") @db.VarChar(8)
   phoneNumber      String @default("") @db.VarChar(20)
 

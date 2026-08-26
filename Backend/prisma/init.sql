@@ -1080,8 +1080,8 @@ CREATE TABLE "food_fee_settings" (
 -- CreateTable
 CREATE TABLE "food_business_settings" (
     "id" VARCHAR(24) NOT NULL DEFAULT encode(gen_random_bytes(12), 'hex'),
-    "companyName" TEXT NOT NULL DEFAULT 'Switcheats',
-    "email" TEXT NOT NULL DEFAULT 'admin@switcheats.com',
+    "companyName" TEXT NOT NULL DEFAULT 'Minto Foods',
+    "email" TEXT NOT NULL DEFAULT 'admin@mintofood.com',
     "phoneCountryCode" VARCHAR(8) NOT NULL DEFAULT '+91',
     "phoneNumber" VARCHAR(20) NOT NULL DEFAULT '',
     "address" TEXT NOT NULL DEFAULT '',

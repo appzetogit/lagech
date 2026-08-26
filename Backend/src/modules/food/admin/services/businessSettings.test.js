@@ -29,8 +29,8 @@ test.after(async () => {
 });
 
 const valid = {
-    companyName: 'Switcheats',
-    email: 'admin@switcheats.com',
+    companyName: 'Minto Foods',
+    email: 'admin@mintofood.com',
     phoneNumber: '9876543210',
 };
 
@@ -38,7 +38,7 @@ test('the row is created on first read, with usable defaults', async () => {
     await prisma.foodBusinessSettings.deleteMany({});
 
     const first = await settings.getBusinessSettings();
-    assert.equal(first.companyName, 'Switcheats');
+    assert.equal(first.companyName, 'Minto Foods');
     assert.equal(first.orderAcceptanceTimeMinutes, 4);
     // Every app has a theme from the start. The Mongo version stored this as a
     // sub-document and had to repair rows that predated it.

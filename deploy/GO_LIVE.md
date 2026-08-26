@@ -5,7 +5,7 @@ ap-south-1. Ubuntu 26.04, 1 vCPU, 2 GB RAM, 8 GB EBS.
 
 | Host                      | Serves                    | Backed by                              |
 | ------------------------- | ------------------------- | -------------------------------------- |
-| `api.mintofood.com`       | prod API + socket + files | PM2 `switcheats-*`, ports 5000/5001    |
+| `api.mintofood.com`       | prod API + socket + files | PM2 `minto-*`, ports 5000/5001    |
 | `admin.mintofood.com`     | prod web app (SPA)        | static build in `/srv/minto/admin`     |
 | `uat.api.mintofood.com`   | UAT API + socket + files  | PM2 `uat-minto-*`, ports 5100/5101     |
 | `uat.admin.mintofood.com` | UAT web app (SPA)         | static build in `/srv/minto-uat/admin` |

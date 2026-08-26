@@ -1,7 +1,7 @@
 import { motion, useReducedMotion } from "framer-motion"
 import { Shield, BarChart3 } from "lucide-react"
 import { useCompanyName } from "@food/hooks/useCompanyName"
-import quickSpicyLogo from "@food/assets/switcheats-logo.png"
+import quickSpicyLogo from "@food/assets/minto-logo.png"
 
 export default function AdminAuthHero({ themeColor, logoUrl }) {
   const companyName = useCompanyName()

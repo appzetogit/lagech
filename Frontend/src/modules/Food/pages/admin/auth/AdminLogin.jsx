@@ -14,7 +14,7 @@ import { Input } from "@food/components/ui/input"
 import { Label } from "@food/components/ui/label"
 import AdminAuthHero from "@food/components/admin/auth/AdminAuthHero"
 import { Eye, EyeOff, Shield, Loader2 } from "lucide-react"
-import quickSpicyLogo from "@food/assets/switcheats-logo.png"
+import quickSpicyLogo from "@food/assets/minto-logo.png"
 
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}

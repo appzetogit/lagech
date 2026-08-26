@@ -10,9 +10,9 @@
 - Added a PM2 ecosystem file for clustered API + dedicated socket + workers.
 
 ## Recommended process layout
-- `switcheats-api`: PM2 cluster mode, `instances: max`, port `5000`
-- `switcheats-socket`: single dedicated socket server, port `5001`
-- `switcheats-scheduler`: single instance
+- `minto-api`: PM2 cluster mode, `instances: max`, port `5000`
+- `minto-socket`: single dedicated socket server, port `5001`
+- `minto-scheduler`: single instance
 - BullMQ workers: single-purpose forked processes
 
 ## Environment variables for API cluster
