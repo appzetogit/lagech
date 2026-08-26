@@ -23,6 +23,10 @@ the path, and a redeploy that touches the tree would take the uploads with it.
 - Frontend built and deployed to `/srv/minto/admin`, with
   `https://api.mintofood.com/api/v1` baked in.
 - `Backend/.env` written with generated JWT secrets, CORS, and upload paths.
+- **TLS live on all four hosts.** One Let's Encrypt certificate covering all of
+  them, expiring 2026-11-24, with http->https redirects in place. Chain
+  verifies from outside (`ssl_verify_result 0`), `certbot.timer` is armed and
+  `renew --dry-run` passes.
 
 ## Blocked
 
@@ -34,8 +38,6 @@ the path, and a redeploy that touches the tree would take the uploads with it.
   log in), Razorpay including the webhook secret (without it customers are
   charged and orders never confirm), and a Firebase service account
   (without it restaurants are never told about new orders).
-- **DNS not pointed.** The client holds Cloudflare and redirects it last, so
-  certificates cannot be issued yet.
 - **Disk.** 1.2 GB free on an 8 GB volume with no unallocated space. Grow the
   volume in the console before the database and uploads start filling it.
 
