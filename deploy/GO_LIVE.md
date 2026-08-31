@@ -191,6 +191,21 @@ sounds:
 Before adding an ALB: point health checks at `/health`; the API is JWT-based so
 it needs no stickiness, but websockets need sticky sessions or the Redis adapter.
 
+## 4b. CORS
+
+The app and the API are on different hosts, so every browser request is
+cross-origin and `CORS_ORIGINS` decides whether it is allowed. It must list
+**every** origin the SPA is served from -- the apex and the admin host serve the
+same build, so both call the same API:
+
+    CORS_ORIGINS=https://mintofood.com,https://www.mintofood.com,https://admin.mintofood.com,https://uat.admin.mintofood.com
+
+Worth knowing how this fails, because the error points somewhere else: when the
+backend is down, nginx answers with its own 502 page, and that page carries no
+`Access-Control-Allow-Origin` header. The browser reports a CORS violation. The
+actual problem is that nothing is running -- check `/health` before touching the
+CORS list.
+
 ## 5. Start
 
     cd /var/www
