@@ -64,8 +64,66 @@ function poolUrl(raw) {
     }
 }
 
+/**
+ * Aurora IAM authentication.
+ *
+ * The cluster requires IAM auth, and an IAM token lives for 15 minutes. A
+ * connection URL cannot express that: PrismaClient is handed one string at
+ * construction and holds a pool open for days, so a token embedded there works
+ * until it expires and then fails every NEW connection the pool opens -- while
+ * established ones keep working. That failure is invisible in testing and
+ * arrives under load, which is the worst shape it could take for a service
+ * taking payments.
+ *
+ * A driver adapter fixes it properly rather than working around it. node-postgres
+ * accepts `password` as a FUNCTION and calls it for every connection it opens,
+ * so each one is signed at connect time. Nothing static is ever stored.
+ *
+ * The URL still carries host, port, database and user -- one source of truth for
+ * where we connect. Only the credential comes from elsewhere.
+ */
+const iamAdapter = async (raw) => {
+    const [{ default: pg }, { PrismaPg }, { Signer }] = await Promise.all([
+        import('pg'),
+        import('@prisma/adapter-pg'),
+        import('@aws-sdk/rds-signer'),
+    ]);
+
+    const url = new URL(raw);
+    const port = Number(url.port) || 5432;
+    const username = decodeURIComponent(url.username);
+    const region = process.env.AWS_REGION || 'ap-south-1';
+
+    const signer = new Signer({ region, hostname: url.hostname, port, username });
+
+    const pool = new pg.Pool({
+        host: url.hostname,
+        port,
+        database: url.pathname.replace(/^\//, ''),
+        user: username,
+        password: () => signer.getAuthToken(),
+        // Verified against the system trust store, not the RDS private-CA
+        // bundle: this endpoint presents a publicly trusted Amazon certificate.
+        // rejectUnauthorized stays on -- without it the token is handed to
+        // whoever answers.
+        ssl: { rejectUnauthorized: true },
+        // Pooling belongs to pg here, not to Prisma's connection_limit. Still
+        // per process, so the multiplication by PM2's process count applies
+        // exactly as it did before.
+        max: Number(process.env.DATABASE_POOL_SIZE) || 20,
+    });
+
+    pool.on('error', (err) => logger.error(`Postgres pool error: ${err.message}`));
+
+    return new PrismaPg(pool);
+};
+
+const iamAuth = process.env.DATABASE_IAM_AUTH === 'true';
+
 export const prisma = new PrismaClient({
-    datasources: { db: { url: poolUrl(process.env.DATABASE_URL) } },
+    ...(iamAuth
+        ? { adapter: await iamAdapter(process.env.DATABASE_URL) }
+        : { datasources: { db: { url: poolUrl(process.env.DATABASE_URL) } } }),
     /**
      * Prisma's default interactive-transaction timeout is 5s, measured from the
      * moment the transaction opens — which includes the time it spends waiting
