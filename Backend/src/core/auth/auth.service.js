@@ -316,8 +316,11 @@ export const adminLogin = async (email, password) => {
     },
   });
 
-  const userObj = admin.toObject();
-  delete userObj.password;
+  // Prisma returns a plain object, not a Mongoose document -- toObject() was a
+  // leftover from the Mongo schema and threw on every admin login. Destructuring
+  // drops the hash rather than deleting it afterwards, so there is no window in
+  // which the response object holds it.
+  const { password: _passwordHash, ...userObj } = admin;
   userObj.effectivePermissions = effectivePermissions;
   return { accessToken, refreshToken, user: userObj };
 };
