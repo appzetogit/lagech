@@ -23,16 +23,16 @@ the path, and a redeploy that touches the tree would take the uploads with it.
 - Frontend built and deployed to `/srv/minto/admin`, with
   `https://api.mintofood.com/api/v1` baked in.
 - `Backend/.env` written with generated JWT secrets, CORS, and upload paths.
-- **TLS live on all four hosts.** One Let's Encrypt certificate covering all of
-  them, expiring 2026-11-24, with http->https redirects in place. Chain
-  verifies from outside (`ssl_verify_result 0`), `certbot.timer` is armed and
-  `renew --dry-run` passes.
+- TLS live on all four hosts, renewing over DNS-01, dry run passing.
+- Production origin refuses requests that did not come through Cloudflare.
+- Rebranded to Minto Foods; `admin.mintofood.com/` lands on `/admin`.
 
 ## Blocked
 
-- **RDS instance does not exist.** The backend stops at `DATABASE_URL` and
-  cannot start. Needs Postgres with the **postgis** extension — delivery zones
-  are polygons.
+- **No database password.** The RDS instance exists and port 5432 is reachable
+  from this box, but `DATABASE_URL` is empty, so the backend will not start.
+  The console offers an IAM auth token; those expire every 15 minutes and
+  cannot back a long-lived pool. It needs a password user. See section 4.
 - **Third-party credentials not supplied.** The server refuses to boot in
   production without them, by design: SMS India Hub (no OTP means nobody can
   log in), Razorpay including the webhook secret (without it customers are
@@ -59,21 +59,61 @@ internet into a handful of IPs. If proxied, run
 `deploy/scripts/update-cloudflare-ips.sh` and set the Cloudflare SSL/TLS mode
 to **Full (strict)** — "Flexible" leaves Cloudflare→origin as plain HTTP.
 
-## 2. Security group
+## 2. Origin access
 
-Inbound 80 and 443 from anywhere; 22 from your address only. 443 is not open
-yet — nothing is listening on it.
+Ports 80 and 443 are open to the internet at the security group; 22 is
+restricted. Production is instead restricted **in nginx**, per vhost -- see
+"Restricting the origin" below for why a security group rule cannot do this
+while UAT is DNS-only.
 
-## 3. Certificates
+## 3. Certificates -- done
 
-Only after DNS resolves. The vhosts are HTTP-only on purpose; certbot adds the
-`listen 443 ssl` blocks and the redirects itself.
+Issued 2026-08-26, reissued over DNS-01 on 2026-08-31, expiring 2026-11-29.
+One certificate covers all four names. The vhosts in this repo stay HTTP-only
+on purpose: certbot owns the `listen 443 ssl` blocks and the redirects and
+rewrites them in `/etc/nginx/sites-enabled/` on renewal, so keeping a second
+copy here would guarantee the two drift apart.
 
-    sudo certbot --nginx \
-      -d api.mintofood.com -d admin.mintofood.com \
-      -d uat.api.mintofood.com -d uat.admin.mintofood.com
-    sudo nginx -t && sudo systemctl reload nginx
-    sudo certbot renew --dry-run
+### Renewal uses DNS-01, not HTTP-01
+
+Renewal revalidates every name on the certificate. Two of them are DNS-only, so
+under HTTP-01 Let's Encrypt had to reach the origin directly for those -- meaning
+any firewall allowing only Cloudflare would fail those two challenges and, since
+it is a single certificate, take production's TLS down with them. Around sixty
+days after the lockdown, with no symptom in the meantime.
+
+DNS-01 removes the inbound dependency: validation is a TXT record.
+
+    /root/.secrets/cloudflare.ini       mode 600, Cloudflare API token
+    authenticator = dns-cloudflare      in /etc/letsencrypt/renewal/
+    renew_hook = systemctl reload nginx
+
+The hook matters: `certonly` does not install, so without it a renewed
+certificate sits on disk while nginx keeps serving the old one. Check any change
+with `sudo certbot renew --dry-run`.
+
+To rotate the token, replace it in `cloudflare.ini` and re-run the dry run.
+Nothing else refers to it.
+
+### Restricting the origin to Cloudflare
+
+A security group cannot express this. Production and UAT share one instance and
+one pair of ports, and UAT is DNS-only by request, so a rule allowing only
+Cloudflare on 443 blocks UAT as well.
+
+It is done in nginx instead. `update-cloudflare-ips.sh` emits a `geo` block
+setting `$from_cloudflare` from `$realip_remote_addr` -- the address that opened
+the connection, since `$remote_addr` has by then been rewritten to the visitor --
+plus a guard snippet returning 403. Only the two production vhosts include it,
+through a wildcard, because the variable exists only once the generator has run
+and nginx will not start on an unknown one.
+
+Verified: direct to origin 403, through Cloudflare 200/302, UAT unaffected.
+
+This is application layer, so a direct connection still completes TCP and TLS
+before being refused -- weaker than a network block. Once UAT testing finishes
+and those hosts can be proxied or limited to office addresses, move it down to
+the security group, using a managed prefix list rather than forty raw rules.
 
 ## 4. Database (RDS)
 
