@@ -61,6 +61,14 @@ const sendSmsViaIndiaHub = async (phone, otp) => {
             }
         } else if (!response.ok) {
             logger.error(`SMS API HTTP error for ${phone}: ${response.status} – ${resultText}`);
+        } else if (/^\s*(failed|error)|^\s*failed#/i.test(resultText)) {
+            // The JSON branch above only catches failures the provider chose to
+            // format as JSON. It also returns plain text like
+            // "Failed#Invalid Login" with HTTP 200, which fell through to the
+            // success branch below -- so an expired account or an exhausted
+            // balance logged "SMS sent successfully" while nobody could log in.
+            // A silent authentication outage is the worst way to learn this.
+            logger.error(`SMS India Hub rejected the message for ${phone}: ${resultText}`);
         } else {
             logger.info(`✅ SMS sent successfully to ${msisdn}`);
         }
