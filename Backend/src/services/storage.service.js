@@ -164,6 +164,56 @@ export const optimizeImageForStorage = async (inputBuffer, mimeType) => {
     };
 };
 
+/**
+ * Object storage driver.
+ *
+ * Everything above this line -- validation, the sharp pipeline, filename and
+ * folder rules -- is storage agnostic and stays that way. Only the two calls
+ * that actually touch bytes differ between disk and S3, so those are the only
+ * things that branch.
+ *
+ * Credentials come from the EC2 instance role via the default provider chain,
+ * the same way the database does. No access keys are stored anywhere.
+ */
+const useS3 = String(process.env.UPLOAD_DRIVER || '').toLowerCase() === 's3';
+
+let s3Client = null;
+const getS3 = async () => {
+    if (s3Client) return s3Client;
+    const { S3Client } = await import('@aws-sdk/client-s3');
+    s3Client = new S3Client({ region: process.env.UPLOAD_S3_REGION || process.env.AWS_REGION || 'ap-south-1' });
+    return s3Client;
+};
+
+const s3Key = (relativePath) => {
+    const prefix = String(process.env.UPLOAD_S3_PREFIX || '').replace(/^\/+|\/+$/g, '');
+    const clean = String(relativePath).replace(/^\/+/, '');
+    return prefix ? `${prefix}/${clean}` : clean;
+};
+
+const putObject = async (relativePath, buffer, mimeType) => {
+    const { PutObjectCommand } = await import('@aws-sdk/client-s3');
+    const client = await getS3();
+    await client.send(new PutObjectCommand({
+        Bucket: process.env.UPLOAD_S3_BUCKET,
+        Key: s3Key(relativePath),
+        Body: buffer,
+        ContentType: mimeType,
+        // Filenames carry a timestamp and random suffix, so a given key's bytes
+        // never change. Safe to cache for a year.
+        CacheControl: 'public, max-age=31536000, immutable',
+    }));
+};
+
+const removeObject = async (relativePath) => {
+    const { DeleteObjectCommand } = await import('@aws-sdk/client-s3');
+    const client = await getS3();
+    await client.send(new DeleteObjectCommand({
+        Bucket: process.env.UPLOAD_S3_BUCKET,
+        Key: s3Key(relativePath),
+    }));
+};
+
 /** Create upload root (and optional subfolder) if missing. */
 export const ensureUploadStorageReady = async (folder = '') => {
     const root = path.resolve(config.uploadStorageRoot);
@@ -193,8 +243,12 @@ export const saveImageFile = async (file, folder) => {
     const relativePath = path.posix.join(safeFolder, filename);
     const absolutePath = getAbsolutePath(relativePath);
 
-    await ensureUploadStorageReady(safeFolder);
-    await fs.writeFile(absolutePath, optimized.buffer);
+    if (useS3) {
+        await putObject(relativePath, optimized.buffer, optimized.mimeType);
+    } else {
+        await ensureUploadStorageReady(safeFolder);
+        await fs.writeFile(absolutePath, optimized.buffer);
+    }
 
     return {
         url: buildPublicUrl(relativePath),
@@ -219,6 +273,18 @@ export const saveImageBuffer = async (buffer, folder, options = {}) => {
 export const deleteStoredFile = async (relativePath) => {
     const safePath = String(relativePath || '').replace(/\\/g, '/').replace(/^\/+/, '');
     if (!safePath) return false;
+
+    if (useS3) {
+        try {
+            await removeObject(safePath);
+            return true;
+        } catch (error) {
+            // S3 treats deleting an absent key as success, so a NoSuchKey here
+            // means something else went wrong and should not be swallowed.
+            if (error?.name === 'NoSuchKey' || error?.$metadata?.httpStatusCode === 404) return false;
+            throw error;
+        }
+    }
 
     const absolutePath = getAbsolutePath(safePath);
     try {
