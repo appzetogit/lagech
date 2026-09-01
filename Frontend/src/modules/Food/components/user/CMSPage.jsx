@@ -74,7 +74,7 @@ export default function CMSPage({ endpoint, title: defaultTitle, module = "USER"
     return (
       <div className="min-h-screen bg-white dark:bg-[#0a0a0a] flex items-center justify-center p-6">
         <div className="flex flex-col items-center gap-4">
-          <Loader2 className="h-10 w-10 animate-spin text-[#FA0272]" />
+          <Loader2 className="h-10 w-10 animate-spin text-[#008078]" />
           <p className="text-gray-500 font-bold uppercase tracking-widest text-xs">Loading...</p>
         </div>
       </div>
@@ -112,21 +112,21 @@ export default function CMSPage({ endpoint, title: defaultTitle, module = "USER"
           {/* Support Specific Header Cards */}
           {(endpoint.includes('support') || pageData.title?.toLowerCase().includes('support')) && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-10">
-              <div className="bg-gray-50 dark:bg-gray-900/50 p-6 rounded-3xl border border-gray-100 dark:border-gray-800 flex flex-col items-center text-center group transition-all hover:border-[#FA0272]/30">
+              <div className="bg-gray-50 dark:bg-gray-900/50 p-6 rounded-3xl border border-gray-100 dark:border-gray-800 flex flex-col items-center text-center group transition-all hover:border-[#008078]/30">
                 <div className="w-12 h-12 bg-white dark:bg-gray-800 rounded-2xl flex items-center justify-center mb-4 shadow-sm group-hover:scale-110 transition-transform">
-                  <Mail className="w-6 h-6 text-[#FA0272]" />
+                  <Mail className="w-6 h-6 text-[#008078]" />
                 </div>
                 <h3 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-wider mb-2">Email Us</h3>
                 <p className="text-gray-500 dark:text-gray-400 text-sm font-medium">{pageData.email || 'support@mintofood.com'}</p>
-                <a href={`mailto:${pageData.email || 'support@mintofood.com'}`} className="mt-4 text-xs font-black text-[#FA0272] uppercase tracking-widest hover:underline">Send Message</a>
+                <a href={`mailto:${pageData.email || 'support@mintofood.com'}`} className="mt-4 text-xs font-black text-[#008078] uppercase tracking-widest hover:underline">Send Message</a>
               </div>
-              <div className="bg-gray-50 dark:bg-gray-900/50 p-6 rounded-3xl border border-gray-100 dark:border-gray-800 flex flex-col items-center text-center group transition-all hover:border-[#FA0272]/30">
+              <div className="bg-gray-50 dark:bg-gray-900/50 p-6 rounded-3xl border border-gray-100 dark:border-gray-800 flex flex-col items-center text-center group transition-all hover:border-[#008078]/30">
                 <div className="w-12 h-12 bg-white dark:bg-gray-800 rounded-2xl flex items-center justify-center mb-4 shadow-sm group-hover:scale-110 transition-transform">
-                  <Phone className="w-6 h-6 text-[#FA0272]" />
+                  <Phone className="w-6 h-6 text-[#008078]" />
                 </div>
                 <h3 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-wider mb-2">Call Us</h3>
                 <p className="text-gray-500 dark:text-gray-400 text-sm font-medium">{pageData.mobile || '+91 00000 00000'}</p>
-                <a href={`tel:${pageData.mobile}`} className="mt-4 text-xs font-black text-[#FA0272] uppercase tracking-widest hover:underline">Call Now</a>
+                <a href={`tel:${pageData.mobile}`} className="mt-4 text-xs font-black text-[#008078] uppercase tracking-widest hover:underline">Call Now</a>
               </div>
             </div>
           )}
@@ -137,7 +137,7 @@ export default function CMSPage({ endpoint, title: defaultTitle, module = "USER"
                 prose-headings:font-black prose-headings:text-gray-900 dark:prose-headings:text-white
                 prose-p:text-gray-600 dark:prose-p:text-gray-400 prose-p:leading-relaxed
                 prose-strong:text-gray-900 dark:prose-strong:text-white
-                prose-a:text-[#FA0272] dark:prose-a:text-[#EB590E]
+                prose-a:text-[#008078] dark:prose-a:text-[#EB590E]
                 prose-li:text-gray-600 dark:prose-li:text-gray-400"
               dangerouslySetInnerHTML={{ __html: pageData.content }}
             />
@@ -160,7 +160,7 @@ export default function CMSPage({ endpoint, title: defaultTitle, module = "USER"
                 ].map((faq, idx) => (
                   <div key={idx} className="space-y-2">
                     <h4 className="text-sm font-black text-gray-900 dark:text-white flex items-center gap-2">
-                      <MessageSquare className="w-4 h-4 text-[#FA0272]" /> {faq.q}
+                      <MessageSquare className="w-4 h-4 text-[#008078]" /> {faq.q}
                     </h4>
                     <p className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed pl-6">{faq.a}</p>
                   </div>
@@ -169,14 +169,14 @@ export default function CMSPage({ endpoint, title: defaultTitle, module = "USER"
 
               <div className="mt-12 grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="flex items-start gap-4 p-4 rounded-2xl bg-gray-50 dark:bg-gray-900/30">
-                  <Clock className="w-5 h-5 text-[#FA0272] mt-1" />
+                  <Clock className="w-5 h-5 text-[#008078] mt-1" />
                   <div>
                     <h4 className="text-xs font-black text-gray-900 dark:text-white uppercase tracking-widest mb-1">Operational Hours</h4>
                     <p className="text-[11px] text-gray-500 dark:text-gray-400">Available 24/7 for emergency support. General inquiries: 9 AM - 11 PM.</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-4 p-4 rounded-2xl bg-gray-50 dark:bg-gray-900/30">
-                  <ShieldCheck className="w-5 h-5 text-[#FA0272] mt-1" />
+                  <ShieldCheck className="w-5 h-5 text-[#008078] mt-1" />
                   <div>
                     <h4 className="text-xs font-black text-gray-900 dark:text-white uppercase tracking-widest mb-1">Data Privacy</h4>
                     <p className="text-[11px] text-gray-500 dark:text-gray-400">Your conversations with our support team are encrypted and secure.</p>

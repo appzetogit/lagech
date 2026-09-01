@@ -512,13 +512,13 @@ export default function Dining() {
               className="flex items-center gap-2 cursor-pointer group min-w-0"
               onClick={openLocationSelector}
             >
-            <div className="bg-[#FA0272]/10 p-2 rounded-full border border-[#FA0272]/20">
-              <MapPin className="h-[18px] w-[18px] text-[#FA0272]" />
+            <div className="bg-[#008078]/10 p-2 rounded-full border border-[#008078]/20">
+              <MapPin className="h-[18px] w-[18px] text-[#008078]" />
             </div>
             <div className="flex flex-col min-w-0">
               <div className="flex items-center gap-1 group-hover:translate-x-0.5 transition-transform">
                 <span className="text-[10px] font-bold text-gray-500 tracking-wider uppercase">Dining Location</span>
-                <ChevronDown className="h-3 w-3 text-[#FA0272]" />
+                <ChevronDown className="h-3 w-3 text-[#008078]" />
               </div>
               <span className="text-sm font-bold text-gray-900 dark:text-white truncate">
                 {displayLocation}
@@ -547,7 +547,7 @@ export default function Dining() {
           <div className="relative bg-[#f8f9fa] dark:bg-gray-800/80 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-2xl border border-gray-200/60 dark:border-gray-700/50 shadow-[inset_0_2px_4px_rgba(0,0,0,0.02)] p-1 transition-all duration-300 group">
             <div className="flex items-center gap-2">
               <div className="pl-3 py-1.5 flex-shrink-0">
-                <Search className="h-[18px] w-[18px] text-[#FA0272] transition-transform group-hover:scale-110" strokeWidth={2.5} />
+                <Search className="h-[18px] w-[18px] text-[#008078] transition-transform group-hover:scale-110" strokeWidth={2.5} />
               </div>
               <div className="flex-1 relative">
                 <Input
@@ -569,7 +569,7 @@ export default function Dining() {
                 <button
                   type="button"
                   onClick={handleSearchFocus}
-                  className="flex-shrink-0 p-2 bg-white dark:bg-gray-900 rounded-full shadow-sm hover:shadow-md transition-all active:scale-95 text-[#FA0272]"
+                  className="flex-shrink-0 p-2 bg-white dark:bg-gray-900 rounded-full shadow-sm hover:shadow-md transition-all active:scale-95 text-[#008078]"
                 >
                   <Mic className="h-4 w-4" strokeWidth={2.5} />
                 </button>

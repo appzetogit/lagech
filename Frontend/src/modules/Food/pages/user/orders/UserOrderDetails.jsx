@@ -493,7 +493,7 @@ export default function UserOrderDetails() {
                 compareAmount={compareUnit > 0 ? compareUnit * qty : 0}
                 decimals={2}
                 plainClassName="text-sm text-gray-800 dark:text-gray-200 font-medium tabular-nums"
-                saleClassName="inline-flex items-center rounded-full border border-[#FA0272] bg-[#FA0272]/10 px-2 py-0.5 text-sm font-bold text-[#FA0272] tabular-nums"
+                saleClassName="inline-flex items-center rounded-full border border-[#008078] bg-[#008078]/10 px-2 py-0.5 text-sm font-bold text-[#008078] tabular-nums"
               />
             </div>
             )
@@ -524,7 +524,7 @@ export default function UserOrderDetails() {
                 compareAmount={displayCompareItemTotal}
                 decimals={2}
                 plainClassName="text-gray-800 dark:text-gray-200 tabular-nums"
-                saleClassName="inline-flex items-center rounded-full border border-[#FA0272] bg-[#FA0272]/10 px-2 py-0.5 text-sm font-bold text-[#FA0272] tabular-nums"
+                saleClassName="inline-flex items-center rounded-full border border-[#008078] bg-[#008078]/10 px-2 py-0.5 text-sm font-bold text-[#008078] tabular-nums"
               />
             </div>
             <div className="flex justify-between">
@@ -546,8 +546,8 @@ export default function UserOrderDetails() {
             </div>
             {Number(pricing.quickDeliveryFee || 0) > 0 && (
               <div className="flex justify-between font-semibold">
-                <span className="text-[#FA0272]">Quick Mode</span>
-                <span className="text-[#FA0272]">
+                <span className="text-[#008078]">Quick Mode</span>
+                <span className="text-[#008078]">
                   ₹{Number(pricing.quickDeliveryFee).toFixed(2)}
                 </span>
               </div>
@@ -566,7 +566,7 @@ export default function UserOrderDetails() {
                 compareAmount={compareToPay}
                 decimals={2}
                 plainClassName="font-bold text-gray-800 dark:text-white tabular-nums"
-                saleClassName="inline-flex items-center rounded-full border border-[#FA0272] bg-[#FA0272]/10 px-2 py-0.5 text-sm font-bold text-[#FA0272] tabular-nums"
+                saleClassName="inline-flex items-center rounded-full border border-[#008078] bg-[#008078]/10 px-2 py-0.5 text-sm font-bold text-[#008078] tabular-nums"
               />
             </div>
           </div>

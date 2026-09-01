@@ -15,7 +15,7 @@ import {
   getModulePowerScanning,
 } from "@food/utils/businessSettings"
 
-const THEME = "#FA0272"
+const THEME = "#008078"
 
 const STEP_META = {
   1: { title: "Forgot password", subtitle: "Enter your email to receive a verification code" },

@@ -45,7 +45,7 @@ import {
   chipClass,
 } from "@food/components/restaurant/onboardingStyles"
 
-const RESTAURANT_THEME = "#FA0272"
+const RESTAURANT_THEME = "#008078"
 
 const formatMoney = (value) =>
   `₹${Number(value || 0).toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
@@ -465,7 +465,7 @@ function TimeSelector({ label, value, onChange }) {
   return (
     <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
       <div className="mb-2 flex items-center gap-2">
-        <Clock className="h-4 w-4 text-[#FA0272]" />
+        <Clock className="h-4 w-4 text-[#008078]" />
         <span className="text-sm font-medium text-gray-900">{label}</span>
       </div>
       <MobileTimePicker ampm={true}
@@ -2014,7 +2014,7 @@ export default function RestaurantOnboarding() {
               />
               {isSearchingLocation && (
                 <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                   <div className="animate-spin rounded-full h-4 w-4 border-2 border-[#FA0272] border-t-transparent" />
+                   <div className="animate-spin rounded-full h-4 w-4 border-2 border-[#008078] border-t-transparent" />
                 </div>
               )}
             </div>
@@ -3228,8 +3228,8 @@ export default function RestaurantOnboarding() {
     <div className="space-y-5">
       <section className={ONBOARDING_INFO_BOX}>
         <div className="flex items-start gap-3">
-          <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#FA0272]/10">
-            <Info className="h-5 w-5 text-[#FA0272]" />
+          <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#008078]/10">
+            <Info className="h-5 w-5 text-[#008078]" />
           </div>
           <div>
             <h2 className={ONBOARDING_SECTION_TITLE}>How subscription billing works</h2>
@@ -3263,8 +3263,8 @@ export default function RestaurantOnboarding() {
                 return (
                   <div key={plan.id} className={ONBOARDING_PLAN_CARD}>
                     <div className="flex items-start justify-between gap-3">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#FA0272]/10">
-                        <Award className="h-5 w-5 text-[#FA0272]" />
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#008078]/10">
+                        <Award className="h-5 w-5 text-[#008078]" />
                       </div>
                       <div className="text-right">
                         <p className="text-xl font-bold text-gray-900">{formatMoney(plan.basePrice)}</p>
@@ -3303,11 +3303,11 @@ export default function RestaurantOnboarding() {
       )}
 
       {requiresOnboardingFee ? (
-        <section className={`${ONBOARDING_SECTION_FULL} border-[#FA0272]/20`}>
+        <section className={`${ONBOARDING_SECTION_FULL} border-[#008078]/20`}>
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div className="flex items-start gap-3">
-              <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#FA0272]/10">
-                <Wallet className="h-5 w-5 text-[#FA0272]" />
+              <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#008078]/10">
+                <Wallet className="h-5 w-5 text-[#008078]" />
               </div>
               <div className="max-w-xl">
                 <h3 className={ONBOARDING_SECTION_TITLE}>One-time onboarding fee</h3>

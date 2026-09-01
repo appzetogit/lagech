@@ -997,13 +997,13 @@ export default function Under250() {
             className="flex items-center gap-2 cursor-pointer group max-w-[70%]"
             onClick={openLocationSelector}
           >
-            <div className="bg-[#FA0272]/10 p-2 rounded-full border border-[#FA0272]/20">
-              <MapPin className="h-[18px] w-[18px] text-[#FA0272]" />
+            <div className="bg-[#008078]/10 p-2 rounded-full border border-[#008078]/20">
+              <MapPin className="h-[18px] w-[18px] text-[#008078]" />
             </div>
             <div className="flex flex-col min-w-0">
               <div className="flex items-center gap-1 group-hover:translate-x-0.5 transition-transform">
                 <span className="text-[10px] font-bold text-gray-500 tracking-wider uppercase">Location</span>
-                <ChevronDown className="h-3 w-3 text-[#FA0272]" />
+                <ChevronDown className="h-3 w-3 text-[#008078]" />
               </div>
               <span className="text-sm font-bold text-gray-900 dark:text-white truncate">
                 {displayLocation}
@@ -1072,7 +1072,7 @@ export default function Under250() {
                   resetBannerAutoSlide()
                 }}
                 className={`transition-all duration-300 rounded-full h-1.5 ${
-                  currentBannerIndex === index ? "w-6 bg-[#FA0272]" : "w-1.5 bg-black/20"
+                  currentBannerIndex === index ? "w-6 bg-[#008078]" : "w-1.5 bg-black/20"
                 }`}
               />
             ))}
@@ -1207,13 +1207,13 @@ export default function Under250() {
                     <div
                       className="flex items-center gap-1 text-white px-1 py-1 md:px-2 md:py-1.5 lg:px-3 lg:py-2 rounded-full"
                       style={{
-                        backgroundColor: "var(--module-theme-color, #FA0272)",
-                        boxShadow: "0 6px 14px rgba(var(--module-theme-rgb, 250,2,114), 0.30)",
+                        backgroundColor: "var(--module-theme-color, #008078)",
+                        boxShadow: "0 6px 14px rgba(var(--module-theme-rgb, 0, 128, 120), 0.30)",
                       }}
                     >
                       <div
                         className="bg-white px-1 py-1 md:px-1.5 md:py-1.5 lg:px-2 lg:py-2 rounded-full"
-                        style={{ color: "var(--module-theme-color, #FA0272)" }}
+                        style={{ color: "var(--module-theme-color, #008078)" }}
                       >
                         <Star className="h-3.5 w-3.5 md:h-4 md:w-4 lg:h-5 lg:w-5 fill-current text-current" />
                       </div>

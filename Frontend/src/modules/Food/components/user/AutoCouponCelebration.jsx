@@ -15,7 +15,7 @@ function fireOfferConfetti(originY = 0.78) {
       gravity: 1,
       ticks: 90,
       origin: { x: 0.5, y: originY },
-      colors: ["#FA0272", "#ff85b3", "#16a34a", "#ffffff"],
+      colors: ["#008078", "#ff85b3", "#16a34a", "#ffffff"],
       disableForReducedMotion: true,
     })
   } catch {
@@ -66,13 +66,13 @@ export default function AutoCouponCelebration() {
         >
           <div className="relative w-full max-w-[280px] sm:max-w-sm">
             <div className="relative overflow-hidden rounded-xl sm:rounded-2xl bg-white border border-slate-200/90 shadow-[0_10px_32px_rgba(15,23,42,0.16)]">
-              <div className="absolute inset-y-0 left-0 w-1 bg-[#FA0272]" />
+              <div className="absolute inset-y-0 left-0 w-1 bg-[#008078]" />
               <div className="relative flex items-center gap-2 sm:gap-3 px-2.5 py-2 sm:px-3.5 sm:py-2.5 pl-3.5 sm:pl-4">
                 <div className="flex h-7 w-7 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white shadow-sm">
                   <Check className="h-3.5 w-3.5 sm:h-4 sm:w-4 stroke-[3]" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="text-[10px] sm:text-[11px] font-semibold text-[#FA0272] leading-none">
+                  <p className="text-[10px] sm:text-[11px] font-semibold text-[#008078] leading-none">
                     Offer applied
                   </p>
                   <p className="mt-0.5 text-[13px] sm:text-[15px] font-bold text-slate-900 leading-tight truncate">
@@ -87,7 +87,7 @@ export default function AutoCouponCelebration() {
                   </p>
                 </div>
                 {celebration.code ? (
-                  <span className="shrink-0 rounded-md bg-[#FFF0F6] border border-[#FA0272]/15 px-1.5 py-0.5 sm:px-2 sm:py-1 text-[9px] sm:text-[10px] font-bold text-[#FA0272] tracking-wide">
+                  <span className="shrink-0 rounded-md bg-[#FFF0F6] border border-[#008078]/15 px-1.5 py-0.5 sm:px-2 sm:py-1 text-[9px] sm:text-[10px] font-bold text-[#008078] tracking-wide">
                     {celebration.code}
                   </span>
                 ) : null}

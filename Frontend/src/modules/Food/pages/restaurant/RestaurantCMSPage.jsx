@@ -63,7 +63,7 @@ export default function RestaurantCMSPage({ endpoint, title: defaultTitle, modul
     return (
       <div className="min-h-screen bg-white flex items-center justify-center p-6">
         <div className="flex flex-col items-center gap-4">
-          <Loader2 className="h-10 w-10 animate-spin text-[#FA0272]" />
+          <Loader2 className="h-10 w-10 animate-spin text-[#008078]" />
           <p className="text-gray-500 font-bold uppercase tracking-widest text-xs">Loading...</p>
         </div>
       </div>
@@ -101,21 +101,21 @@ export default function RestaurantCMSPage({ endpoint, title: defaultTitle, modul
           {/* Support Specific Header Cards */}
           {(endpoint.includes('support') || pageData.title?.toLowerCase().includes('support')) && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-10">
-              <div className="bg-gray-50 p-6 rounded-2xl border border-gray-100 flex flex-col items-center text-center group transition-all hover:border-[#FA0272]/30">
+              <div className="bg-gray-50 p-6 rounded-2xl border border-gray-100 flex flex-col items-center text-center group transition-all hover:border-[#008078]/30">
                 <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center mb-4 shadow-sm group-hover:scale-110 transition-transform">
-                  <Mail className="w-6 h-6 text-[#FA0272]" />
+                  <Mail className="w-6 h-6 text-[#008078]" />
                 </div>
                 <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider mb-2">Merchant Support</h3>
                 <p className="text-gray-500 text-sm font-medium">{pageData.email || 'merchants@mintofood.com'}</p>
-                <a href={`mailto:${pageData.email || 'merchants@mintofood.com'}`} className="mt-4 text-[10px] font-black text-[#FA0272] uppercase tracking-widest hover:underline">Email Support</a>
+                <a href={`mailto:${pageData.email || 'merchants@mintofood.com'}`} className="mt-4 text-[10px] font-black text-[#008078] uppercase tracking-widest hover:underline">Email Support</a>
               </div>
-              <div className="bg-gray-50 p-6 rounded-2xl border border-gray-100 flex flex-col items-center text-center group transition-all hover:border-[#FA0272]/30">
+              <div className="bg-gray-50 p-6 rounded-2xl border border-gray-100 flex flex-col items-center text-center group transition-all hover:border-[#008078]/30">
                 <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center mb-4 shadow-sm group-hover:scale-110 transition-transform">
-                  <Phone className="w-6 h-6 text-[#FA0272]" />
+                  <Phone className="w-6 h-6 text-[#008078]" />
                 </div>
                 <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider mb-2">Merchant Helpline</h3>
                 <p className="text-gray-500 text-sm font-medium">{pageData.mobile || '+91 00000 00000'}</p>
-                <a href={`tel:${pageData.mobile}`} className="mt-4 text-[10px] font-black text-[#FA0272] uppercase tracking-widest hover:underline">Instant Call</a>
+                <a href={`tel:${pageData.mobile}`} className="mt-4 text-[10px] font-black text-[#008078] uppercase tracking-widest hover:underline">Instant Call</a>
               </div>
             </div>
           )}
@@ -126,7 +126,7 @@ export default function RestaurantCMSPage({ endpoint, title: defaultTitle, modul
                 prose-headings:font-bold prose-headings:text-gray-900
                 prose-p:text-gray-600 prose-p:leading-relaxed
                 prose-strong:text-gray-900
-                prose-a:text-[#FA0272]
+                prose-a:text-[#008078]
                 prose-li:text-gray-600"
               dangerouslySetInnerHTML={{ __html: pageData.content }}
             />
@@ -149,7 +149,7 @@ export default function RestaurantCMSPage({ endpoint, title: defaultTitle, modul
                 ].map((faq, idx) => (
                   <div key={idx} className="space-y-2">
                     <h4 className="text-sm font-bold text-gray-900 flex items-center gap-2">
-                      <MessageSquare className="w-4 h-4 text-[#FA0272]" /> {faq.q}
+                      <MessageSquare className="w-4 h-4 text-[#008078]" /> {faq.q}
                     </h4>
                     <p className="text-sm text-gray-500 leading-relaxed pl-6">{faq.a}</p>
                   </div>
@@ -158,14 +158,14 @@ export default function RestaurantCMSPage({ endpoint, title: defaultTitle, modul
 
               <div className="mt-12 grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="flex items-start gap-4 p-4 rounded-xl bg-gray-50">
-                  <Clock className="w-5 h-5 text-[#FA0272] mt-1" />
+                  <Clock className="w-5 h-5 text-[#008078] mt-1" />
                   <div>
                     <h4 className="text-[10px] font-bold text-gray-900 uppercase tracking-widest mb-1">Business Hours</h4>
                     <p className="text-[11px] text-gray-500">Merchant support is available from 8 AM to 12 AM, 7 days a week.</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-4 p-4 rounded-xl bg-gray-50">
-                  <ShieldCheck className="w-5 h-5 text-[#FA0272] mt-1" />
+                  <ShieldCheck className="w-5 h-5 text-[#008078] mt-1" />
                   <div>
                     <h4 className="text-[10px] font-bold text-gray-900 uppercase tracking-widest mb-1">Secure Support</h4>
                     <p className="text-[11px] text-gray-500">Our support staff will never ask for your password or financial credentials.</p>

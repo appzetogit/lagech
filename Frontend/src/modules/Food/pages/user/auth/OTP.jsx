@@ -288,7 +288,7 @@ export default function OTP() {
   return (
     <AnimatedPage className="min-h-[100dvh] bg-white dark:bg-[#0A0A0B] flex flex-col font-sans overflow-hidden">
       {/* Top Branding Section - 35% height */}
-      <div className="relative h-[35dvh] w-full bg-[#FA0272] overflow-hidden flex flex-col items-center justify-center">
+      <div className="relative h-[35dvh] w-full bg-[#008078] overflow-hidden flex flex-col items-center justify-center">
         <div className="absolute inset-0 opacity-20">
           <div className="absolute top-0 left-0 w-64 h-64 border border-white/20 rounded-full -ml-20 -mt-20" />
           <div className="absolute bottom-10 right-0 w-32 h-32 border border-white/10 rounded-full -mr-16" />
@@ -351,10 +351,10 @@ export default function OTP() {
                         onKeyDown={(e) => handleKeyDown(index, e)}
                         onPaste={index === 0 ? handlePaste : undefined}
                         disabled={isLoading}
-                        className="w-16 h-20 text-center text-3xl font-black bg-zinc-100 dark:bg-zinc-900 border-2 border-transparent focus:border-[#FA0272] rounded-2xl text-zinc-900 dark:text-white transition-all outline-none shadow-sm"
+                        className="w-16 h-20 text-center text-3xl font-black bg-zinc-100 dark:bg-zinc-900 border-2 border-transparent focus:border-[#008078] rounded-2xl text-zinc-900 dark:text-white transition-all outline-none shadow-sm"
                       />
                       {digit && (
-                        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 w-1.5 h-1.5 bg-[#FA0272] rounded-full" />
+                        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 w-1.5 h-1.5 bg-[#008078] rounded-full" />
                       )}
                     </motion.div>
                   ))}
@@ -364,7 +364,7 @@ export default function OTP() {
                   <motion.div
                     initial={{ opacity: 0, y: -5 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="flex items-center justify-center gap-2 text-xs font-bold text-[#FA0272] bg-[#FA0272]/5 py-4 px-4 rounded-2xl border border-[#FA0272]/10"
+                    className="flex items-center justify-center gap-2 text-xs font-bold text-[#008078] bg-[#008078]/5 py-4 px-4 rounded-2xl border border-[#008078]/10"
                   >
                     <AlertCircle className="h-4 w-4 shrink-0" />
                     <span>{error}</span>
@@ -381,7 +381,7 @@ export default function OTP() {
                       type="button"
                       onClick={handleResend}
                       disabled={isLoading}
-                      className="text-xs font-black text-[#FA0272] uppercase tracking-[0.2em] px-6 py-2 rounded-full bg-[#FA0272]/5 hover:bg-[#FA0272]/10 transition-colors"
+                      className="text-xs font-black text-[#008078] uppercase tracking-[0.2em] px-6 py-2 rounded-full bg-[#008078]/5 hover:bg-[#008078]/10 transition-colors"
                     >
                       Resend Now
                     </button>
@@ -408,7 +408,7 @@ export default function OTP() {
                     <label className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.3em] ml-1">
                       Full Name
                     </label>
-                    <div className="bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl focus-within:border-[#FA0272]/50 focus-within:ring-4 focus-within:ring-[#FA0272]/5 transition-all overflow-hidden">
+                    <div className="bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl focus-within:border-[#008078]/50 focus-within:ring-4 focus-within:ring-[#008078]/5 transition-all overflow-hidden">
                       <Input
                         type="text"
                         value={name}
@@ -427,7 +427,7 @@ export default function OTP() {
                     <motion.p
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
-                      className="text-xs font-bold text-[#FA0272] pl-2"
+                      className="text-xs font-bold text-[#008078] pl-2"
                     >
                       {nameError}
                     </motion.p>
@@ -437,7 +437,7 @@ export default function OTP() {
                 <Button
                   onClick={handleSubmitName}
                   disabled={isLoading || name.trim().length < 2}
-                  className="w-full h-16 bg-[#FA0272] hover:bg-[#D40261] text-white font-black text-base uppercase tracking-widest rounded-2xl transition-all duration-300 shadow-[0_12px_24px_rgba(250,2,114,0.3)] active:scale-[0.98]"
+                  className="w-full h-16 bg-[#008078] hover:bg-[#D40261] text-white font-black text-base uppercase tracking-widest rounded-2xl transition-all duration-300 shadow-[0_12px_24px_rgba(0, 128, 120,0.3)] active:scale-[0.98]"
                 >
                   {isLoading ? (
                     <div className="flex items-center gap-2">

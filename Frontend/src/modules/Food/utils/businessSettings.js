@@ -13,7 +13,7 @@ import {
 
 const SETTINGS_KEY = 'food_business_settings';
 const DEFAULT_MODULE_POWER_SCANNING = {
-  user: { themeColor: "#FA0272", fontFamily: "Poppins" },
+  user: { themeColor: "#008078", fontFamily: "Poppins" },
   restaurant: { themeColor: "#2563EB", fontFamily: "Poppins" },
   delivery: { themeColor: "#00B761", fontFamily: "Poppins" },
 };
@@ -37,7 +37,7 @@ const FONT_STACKS = {
 };
 
 const LEGACY_BRAND_HEXES = [
-  "#FA0272",
+  "#008078",
   "#00B761",
   "#2563EB",
   "#DC2626",
@@ -55,7 +55,7 @@ const LEGACY_BRAND_TAILWIND_COLORS = [
 const hexToRgbTuple = (hex) => {
   const raw = String(hex || "").trim();
   const normalized = raw.startsWith("#") ? raw.slice(1) : raw;
-  if (!/^[0-9A-Fa-f]{6}$/.test(normalized)) return "250,2,114";
+  if (!/^[0-9A-Fa-f]{6}$/.test(normalized)) return "0, 128, 120";
   const r = parseInt(normalized.slice(0, 2), 16);
   const g = parseInt(normalized.slice(2, 4), 16);
   const b = parseInt(normalized.slice(4, 6), 16);

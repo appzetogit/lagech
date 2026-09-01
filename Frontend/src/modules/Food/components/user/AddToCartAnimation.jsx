@@ -462,7 +462,7 @@ export default function AddToCartAnimation({
                   : 'rounded-full px-3.5 py-2 flex items-center gap-2.5'
               } ${pillClassName}`}
               style={{
-                background: 'linear-gradient(135deg, rgba(var(--module-theme-rgb,250,2,114),0.94), rgba(var(--module-theme-rgb,250,2,114),0.78))',
+                background: 'linear-gradient(135deg, rgba(var(--module-theme-rgb,0, 128, 120),0.94), rgba(var(--module-theme-rgb,0, 128, 120),0.78))',
               }}
             >
               {variant === 'bar' ? (

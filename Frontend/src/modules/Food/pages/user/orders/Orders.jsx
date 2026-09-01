@@ -936,8 +936,8 @@ Order again from this restaurant in the ${companyName} app.`
                     </div>
                     {order.quickDeliveryFee > 0 && (
                       <div className="flex justify-between text-xs font-semibold">
-                        <span className="text-[#FA0272]">Quick Mode</span>
-                        <span className="text-[#FA0272]">{"\u20B9"}{order.quickDeliveryFee.toFixed(2)}</span>
+                        <span className="text-[#008078]">Quick Mode</span>
+                        <span className="text-[#008078]">{"\u20B9"}{order.quickDeliveryFee.toFixed(2)}</span>
                       </div>
                     )}
                     <div className="flex justify-between text-xs">
@@ -1204,9 +1204,9 @@ Order again from this restaurant in the ${companyName} app.`
                 className="w-full rounded-xl text-white text-base font-bold py-3.5 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
                 style={{
                   background:
-                    "linear-gradient(135deg, rgba(var(--module-theme-rgb,250,2,114),0.94), var(--module-theme-color,#FA0272))",
+                    "linear-gradient(135deg, rgba(var(--module-theme-rgb,0, 128, 120),0.94), var(--module-theme-color,#008078))",
                   boxShadow:
-                    "0 12px 24px rgba(var(--module-theme-rgb,250,2,114),0.30)",
+                    "0 12px 24px rgba(var(--module-theme-rgb,0, 128, 120),0.30)",
                 }}
               >
                 {submittingRating ? (

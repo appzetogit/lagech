@@ -223,7 +223,7 @@ export default function HomeHeader({
   return (
     <>
       <div
-        className="relative h-[340px] w-full overflow-hidden rounded-b-[2rem] shadow-[0_10px_40px_rgba(250,2,114,0.15)] dark:shadow-[0_20px_60px_rgba(0,0,0,0.45)]"
+        className="relative h-[340px] w-full overflow-hidden rounded-b-[2rem] shadow-[0_10px_40px_rgba(0, 128, 120,0.15)] dark:shadow-[0_20px_60px_rgba(0,0,0,0.45)]"
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
@@ -244,7 +244,7 @@ export default function HomeHeader({
         ) : (
           <div
             className={`absolute inset-0 z-0 transition-opacity duration-300 ${
-              topBannersLoaded ? "bg-[#FA0272]" : "bg-gradient-to-br from-[#ff2d8d] via-[#FA0272] to-[#ff6a00] animate-pulse"
+              topBannersLoaded ? "bg-[#008078]" : "bg-gradient-to-br from-[#ff2d8d] via-[#008078] to-[#ff6a00] animate-pulse"
             }`}
           >
             <div className="absolute top-0 left-1/4 w-32 h-32 bg-white/20 blur-[60px] rounded-full pointer-events-none" />
@@ -457,7 +457,7 @@ export default function HomeHeader({
             }
           }}
         >
-          <Search className="h-5 w-5 text-gray-400 mr-3 group-hover:text-[#FA0272] transition-colors duration-300 dark:text-gray-500" strokeWidth={2.5} />
+          <Search className="h-5 w-5 text-gray-400 mr-3 group-hover:text-[#008078] transition-colors duration-300 dark:text-gray-500" strokeWidth={2.5} />
           <div className="flex-1 overflow-hidden relative h-5">
             <input
               type="text"
@@ -480,7 +480,7 @@ export default function HomeHeader({
             </AnimatePresence>
           </div>
           <div 
-            className="bg-[#FA0272]/5 dark:bg-[#FA0272]/10 p-2 rounded-full border border-[#FA0272]/10 ml-2 group-hover:bg-[#FA0272]/10 transition-all flex items-center justify-center"
+            className="bg-[#008078]/5 dark:bg-[#008078]/10 p-2 rounded-full border border-[#008078]/10 ml-2 group-hover:bg-[#008078]/10 transition-all flex items-center justify-center"
             onClick={(e) => {
               e.stopPropagation();
               navigate('/user/search?voice=true');
@@ -490,7 +490,7 @@ export default function HomeHeader({
               navigate('/user/search?voice=true');
             }}
           >
-            <Mic className="h-4 w-4 text-[#FA0272]" strokeWidth={2.5} />
+            <Mic className="h-4 w-4 text-[#008078]" strokeWidth={2.5} />
           </div>
         </div>
       </div>

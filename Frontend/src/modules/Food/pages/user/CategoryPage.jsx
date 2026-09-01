@@ -1133,8 +1133,8 @@ export default function CategoryPage() {
                           <div
                             className="absolute bottom-0 left-0 border-[4px] rounded-md border-white text-white text-[11px] md:text-xs font-bold px-1.5 py-0.5 flex items-center gap-0.5"
                             style={{
-                              backgroundColor: "var(--module-theme-color, #FA0272)",
-                              boxShadow: "0 6px 14px rgba(var(--module-theme-rgb,250,2,114),0.35)",
+                              backgroundColor: "var(--module-theme-color, #008078)",
+                              boxShadow: "0 6px 14px rgba(var(--module-theme-rgb,0, 128, 120),0.35)",
                             }}
                           >
                             {restaurant.rating}
@@ -1281,8 +1281,8 @@ export default function CategoryPage() {
                           <div
                             className="flex-shrink-0 text-white px-2 md:px-3 lg:px-4 py-1 lg:py-1.5 rounded-lg flex items-center gap-1"
                             style={{
-                              backgroundColor: "var(--module-theme-color, #FA0272)",
-                              boxShadow: "0 8px 16px rgba(var(--module-theme-rgb,250,2,114),0.28)",
+                              backgroundColor: "var(--module-theme-color, #008078)",
+                              boxShadow: "0 8px 16px rgba(var(--module-theme-rgb,0, 128, 120),0.28)",
                             }}
                           >
                             <span className="text-sm md:text-base lg:text-lg font-bold">{restaurant.rating}</span>

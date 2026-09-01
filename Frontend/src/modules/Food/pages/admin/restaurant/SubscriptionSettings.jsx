@@ -15,7 +15,7 @@ import {
   Info,
 } from "lucide-react"
 
-const THEME = "#FA0272"
+const THEME = "#008078"
 const GST_RATE = 0.18
 
 const formatMoney = (value) =>
@@ -190,7 +190,7 @@ const SubscriptionSettings = () => {
         />
         <div className="relative flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="space-y-2">
-            <div className="inline-flex items-center gap-2 rounded-full bg-pink-50 px-3 py-1 text-xs font-semibold text-[#FA0272]">
+            <div className="inline-flex items-center gap-2 rounded-full bg-pink-50 px-3 py-1 text-xs font-semibold text-[#008078]">
               <Receipt className="h-3.5 w-3.5" />
               Billing configuration
             </div>
@@ -235,7 +235,7 @@ const SubscriptionSettings = () => {
       <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
         <div
           className="border-b px-6 py-5"
-          style={{ background: `linear-gradient(135deg, rgba(250,2,114,0.08) 0%, rgba(250,2,114,0.02) 100%)` }}
+          style={{ background: `linear-gradient(135deg, rgba(0, 128, 120,0.08) 0%, rgba(0, 128, 120,0.02) 100%)` }}
         >
           <div className="flex items-start gap-4">
             <div
@@ -251,7 +251,7 @@ const SubscriptionSettings = () => {
               </p>
             </div>
             {Number(settings.onboardingFee) > 0 ? (
-              <span className="rounded-full bg-pink-50 px-3 py-1 text-xs font-semibold text-[#FA0272]">
+              <span className="rounded-full bg-pink-50 px-3 py-1 text-xs font-semibold text-[#008078]">
                 Active
               </span>
             ) : (
@@ -289,7 +289,7 @@ const SubscriptionSettings = () => {
                   <span>GST ({(GST_RATE * 100).toFixed(0)}%)</span>
                   <span className="font-medium text-gray-800">{formatMoney(onboardingFeeGst)}</span>
                 </div>
-                <div className="flex justify-between border-t border-dashed border-pink-200 pt-2 font-bold text-[#FA0272]">
+                <div className="flex justify-between border-t border-dashed border-pink-200 pt-2 font-bold text-[#008078]">
                   <span>Total collected</span>
                   <span className="text-lg">{formatMoney(onboardingFeeTotal)}</span>
                 </div>
@@ -304,7 +304,7 @@ const SubscriptionSettings = () => {
       {/* Monthly plans */}
       <section className="space-y-4">
         <div className="flex items-center gap-2 px-1">
-          <Sparkles className="h-4 w-4 text-[#FA0272]" />
+          <Sparkles className="h-4 w-4 text-[#008078]" />
           <h2 className="text-lg font-bold text-gray-900">Monthly subscription plans</h2>
         </div>
 

@@ -103,12 +103,12 @@ export default function VariantSelector({
                       </span>
                       <div className="flex items-center gap-1">
                         <span
-                          className={`inline-flex items-center rounded-full border border-[#FA0272] bg-[#FA0272]/10 px-2 py-0.5 text-sm font-bold text-[#FA0272] tabular-nums leading-none`}
+                          className={`inline-flex items-center rounded-full border border-[#008078] bg-[#008078]/10 px-2 py-0.5 text-sm font-bold text-[#008078] tabular-nums leading-none`}
                         >
                           {RUPEE_SYMBOL}{Math.round(variantPrice)}
                         </span>
                         {getFoodDiscountPercent(null, variantPrice, variant.otherPrice) > 0 ? (
-                          <span className="inline-flex items-center rounded-full bg-[#FA0272] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white tabular-nums">
+                          <span className="inline-flex items-center rounded-full bg-[#008078] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white tabular-nums">
                             {getFoodDiscountPercent(null, variantPrice, variant.otherPrice)}% OFF
                           </span>
                         ) : null}

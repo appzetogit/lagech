@@ -188,7 +188,7 @@ export default function LandingPage() {
   const rotatePhone = useTransform(scrollYProgress, [0.2, 0.4], [10, 0]);
 
   return (
-    <div ref={containerRef} className="bg-[#FCFBFA] min-h-screen w-full max-w-full text-slate-900 font-sans selection:bg-[#FA0272] selection:text-white overflow-x-hidden relative">
+    <div ref={containerRef} className="bg-[#FCFBFA] min-h-screen w-full max-w-full text-slate-900 font-sans selection:bg-[#008078] selection:text-white overflow-x-hidden relative">
 
       {/* Refined, Subtler Lighting */}
       <div className="absolute top-0 right-0 w-[40vw] h-[40vw] bg-pink-500/10 rounded-full blur-[120px] pointer-events-none z-0" />
@@ -198,28 +198,28 @@ export default function LandingPage() {
       <header className="absolute top-0 w-full z-50 px-6 py-8 md:px-12 lg:px-20 flex items-center justify-between bg-transparent">
         <div className="text-2xl font-black text-slate-900 tracking-tighter relative z-50">
           {APP_CONFIG?.NAME || "BRAND"}
-          <span className="text-[#FA0272]">.</span>
+          <span className="text-[#008078]">.</span>
         </div>
         <nav className="flex items-center gap-1.5 bg-white/50 backdrop-blur-md border border-slate-200/30 p-1 rounded-full shadow-lg shadow-slate-900/5 relative z-50">
           <a
             href="/"
-            className="group flex items-center gap-2 px-3 py-2 md:px-4 md:py-2 rounded-full text-xs font-bold text-slate-700 hover:text-[#FA0272] hover:bg-white/80 transition-all duration-300 shadow-sm hover:shadow-md hover:-translate-y-0.5"
+            className="group flex items-center gap-2 px-3 py-2 md:px-4 md:py-2 rounded-full text-xs font-bold text-slate-700 hover:text-[#008078] hover:bg-white/80 transition-all duration-300 shadow-sm hover:shadow-md hover:-translate-y-0.5"
           >
-            <Home className="w-4 h-4 md:w-3.5 md:h-3.5 text-slate-500 group-hover:text-[#FA0272] transition-colors" />
+            <Home className="w-4 h-4 md:w-3.5 md:h-3.5 text-slate-500 group-hover:text-[#008078] transition-colors" />
             <span className="hidden md:inline">Home</span>
           </a>
           <button
             onClick={() => setIsRestaurantOpen(true)}
-            className="group flex items-center gap-2 px-3 py-2 md:px-4 md:py-2 rounded-full text-xs font-bold text-slate-700 hover:text-[#FA0272] hover:bg-white/80 transition-all duration-300 shadow-sm hover:shadow-md hover:-translate-y-0.5 cursor-pointer"
+            className="group flex items-center gap-2 px-3 py-2 md:px-4 md:py-2 rounded-full text-xs font-bold text-slate-700 hover:text-[#008078] hover:bg-white/80 transition-all duration-300 shadow-sm hover:shadow-md hover:-translate-y-0.5 cursor-pointer"
           >
-            <Store className="w-4 h-4 md:w-3.5 md:h-3.5 text-slate-500 group-hover:text-[#FA0272] transition-colors" />
+            <Store className="w-4 h-4 md:w-3.5 md:h-3.5 text-slate-500 group-hover:text-[#008078] transition-colors" />
             <span className="hidden md:inline">Restaurant Partner</span>
           </button>
           <button
             onClick={() => setIsDeliveryOpen(true)}
-            className="group flex items-center gap-2 px-3 py-2 md:px-4 md:py-2 rounded-full text-xs font-bold text-slate-700 hover:text-[#FA0272] hover:bg-white/80 transition-all duration-300 shadow-sm hover:shadow-md hover:-translate-y-0.5 cursor-pointer"
+            className="group flex items-center gap-2 px-3 py-2 md:px-4 md:py-2 rounded-full text-xs font-bold text-slate-700 hover:text-[#008078] hover:bg-white/80 transition-all duration-300 shadow-sm hover:shadow-md hover:-translate-y-0.5 cursor-pointer"
           >
-            <Bike className="w-4 h-4 md:w-3.5 md:h-3.5 text-slate-500 group-hover:text-[#FA0272] transition-colors" />
+            <Bike className="w-4 h-4 md:w-3.5 md:h-3.5 text-slate-500 group-hover:text-[#008078] transition-colors" />
             <span className="hidden md:inline">Delivery Partner</span>
           </button>
         </nav>
@@ -234,7 +234,7 @@ export default function LandingPage() {
           <div className="col-span-1 flex flex-col justify-center z-20 h-full relative">
 
             <div className="overflow-hidden mb-6">
-              <motion.div custom={0} initial="hidden" animate="visible" variants={textReveal} className="inline-flex items-center gap-2 text-[#FA0272] font-bold tracking-widest uppercase text-xs bg-[#FA0272]/10 px-4 py-2 rounded-full">
+              <motion.div custom={0} initial="hidden" animate="visible" variants={textReveal} className="inline-flex items-center gap-2 text-[#008078] font-bold tracking-widest uppercase text-xs bg-[#008078]/10 px-4 py-2 rounded-full">
                 <Award className="w-4 h-4" /> Michelin-Level Experience at Home
               </motion.div>
             </div>
@@ -247,7 +247,7 @@ export default function LandingPage() {
               </div>
               <div className="overflow-hidden pb-4">
                 <motion.div custom={2} initial="hidden" animate="visible" variants={textReveal} className="flex items-center gap-4 lg:gap-8">
-                  <span className="text-transparent bg-clip-text bg-gradient-to-br from-[#FA0272] to-pink-600">MINTO FOODS?</span>
+                  <span className="text-transparent bg-clip-text bg-gradient-to-br from-[#008078] to-pink-600">MINTO FOODS?</span>
                 </motion.div>
               </div>
             </h1>
@@ -262,7 +262,7 @@ export default function LandingPage() {
               <motion.div custom={4} initial="hidden" animate="visible" variants={textReveal}>
                 <button
                   onClick={() => setIsAboutOpen(true)}
-                  className="group flex items-center gap-3 bg-slate-900 hover:bg-[#FA0272] text-white px-8 py-4 rounded-full font-bold text-sm transition-all duration-500 hover:shadow-xl hover:shadow-[#FA0272]/20 cursor-pointer"
+                  className="group flex items-center gap-3 bg-slate-900 hover:bg-[#008078] text-white px-8 py-4 rounded-full font-bold text-sm transition-all duration-500 hover:shadow-xl hover:shadow-[#008078]/20 cursor-pointer"
                 >
                   Learn More About Our Mission
                   <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
@@ -316,7 +316,7 @@ export default function LandingPage() {
         <div className="grid lg:grid-cols-2 gap-20 items-center">
 
           <div className="space-y-8">
-            <span className="inline-block text-xs font-black tracking-[0.3em] text-[#FA0272] uppercase bg-pink-50 border border-pink-100 rounded-full px-3 py-1">
+            <span className="inline-block text-xs font-black tracking-[0.3em] text-[#008078] uppercase bg-pink-50 border border-pink-100 rounded-full px-3 py-1">
               About Minto Foods
             </span>
             <h3 className="text-5xl lg:text-7xl font-black leading-[1.1] tracking-tight text-slate-900">
@@ -328,7 +328,7 @@ export default function LandingPage() {
             <div className="pt-2">
               <button
                 onClick={() => setIsAboutOpen(true)}
-                className="group inline-flex items-center gap-2.5 text-slate-900 hover:text-[#FA0272] font-bold text-sm tracking-wide uppercase transition-colors"
+                className="group inline-flex items-center gap-2.5 text-slate-900 hover:text-[#008078] font-bold text-sm tracking-wide uppercase transition-colors"
               >
                 Read Our Story <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
               </button>
@@ -346,7 +346,7 @@ export default function LandingPage() {
           </div>
 
           <div className="relative h-[400px] lg:h-[600px] rounded-[2.5rem] overflow-hidden group shadow-2xl border-4 border-white">
-            <div className="absolute inset-0 bg-[#FA0272] mix-blend-overlay opacity-10 z-10 group-hover:opacity-0 transition-opacity duration-700" />
+            <div className="absolute inset-0 bg-[#008078] mix-blend-overlay opacity-10 z-10 group-hover:opacity-0 transition-opacity duration-700" />
             <img
               src="https://images.unsplash.com/photo-1577219491135-ce391730fb2c?q=80&w=1000&auto=format&fit=crop"
               alt="Chef working"
@@ -376,8 +376,8 @@ export default function LandingPage() {
                   <div className="absolute bottom-0 w-full h-[50%] bg-gradient-to-t from-white via-white to-transparent p-6 flex flex-col justify-end">
                     <div className="w-12 h-1 bg-slate-200 rounded-full mb-6 mx-auto" />
                     <h4 className="text-2xl font-black text-slate-900 mb-1">Sushi Masterclass</h4>
-                    <p className="text-slate-500 text-xs font-semibold mb-4">Japanese • 4.9 <Star className="inline w-3 h-3 text-[#FA0272] fill-[#FA0272] mb-0.5" /></p>
-                    <button className="w-full bg-slate-900 text-white py-3.5 rounded-2xl font-bold hover:bg-[#FA0272] transition-colors duration-300 text-sm shadow-md">
+                    <p className="text-slate-500 text-xs font-semibold mb-4">Japanese • 4.9 <Star className="inline w-3 h-3 text-[#008078] fill-[#008078] mb-0.5" /></p>
+                    <button className="w-full bg-slate-900 text-white py-3.5 rounded-2xl font-bold hover:bg-[#008078] transition-colors duration-300 text-sm shadow-md">
                       Track Delivery
                     </button>
                   </div>
@@ -391,7 +391,7 @@ export default function LandingPage() {
                 className="absolute -right-8 sm:-right-12 top-32 bg-white border border-slate-200/60 p-4 rounded-2xl shadow-xl flex items-center gap-3.5 z-20"
               >
                 <div className="w-10 h-10 rounded-full bg-pink-50 flex items-center justify-center shrink-0">
-                  <Clock className="w-5 h-5 text-[#FA0272]" />
+                  <Clock className="w-5 h-5 text-[#008078]" />
                 </div>
                 <div>
                   <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Arriving In</p>
@@ -403,7 +403,7 @@ export default function LandingPage() {
 
           {/* App Info Column */}
           <div className="flex-1 space-y-8 order-1 lg:order-2">
-            <span className="inline-block text-xs font-black tracking-[0.3em] text-[#FA0272] uppercase bg-pink-50 border border-pink-100 rounded-full px-3 py-1">
+            <span className="inline-block text-xs font-black tracking-[0.3em] text-[#008078] uppercase bg-pink-50 border border-pink-100 rounded-full px-3 py-1">
               Mobile Experience
             </span>
             <h3 className="text-5xl lg:text-7xl font-black leading-[1.1] tracking-tight text-slate-900">
@@ -417,7 +417,7 @@ export default function LandingPage() {
                 href="https://apps.apple.com/in/app/switcheats/id6766444150"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center justify-center gap-3 bg-slate-900 text-white hover:bg-[#FA0272] px-8 py-4 rounded-2xl font-bold transition-all duration-300 text-sm shadow-md shadow-slate-900/10 cursor-pointer"
+                className="flex items-center justify-center gap-3 bg-slate-900 text-white hover:bg-[#008078] px-8 py-4 rounded-2xl font-bold transition-all duration-300 text-sm shadow-md shadow-slate-900/10 cursor-pointer"
               >
                 <Apple className="w-5 h-5" /> App Store
               </a>
@@ -442,7 +442,7 @@ export default function LandingPage() {
           className="absolute inset-0 transition-all duration-1000 ease-out pointer-events-none opacity-40 blur-[150px]"
           style={{
             background: `radial-gradient(circle at 50% 50%, ${
-              activeCraving === 0 ? '#FA0272' : activeCraving === 1 ? '#EB590E' : '#EAB308'
+              activeCraving === 0 ? '#008078' : activeCraving === 1 ? '#EB590E' : '#EAB308'
             } 0%, transparent 60%)`
           }}
         />
@@ -454,12 +454,12 @@ export default function LandingPage() {
           
           {/* Section Header */}
           <div className="text-center mb-24">
-            <span className="inline-flex items-center gap-2 text-[10px] font-black tracking-[0.35em] text-[#FA0272] uppercase bg-[#FA0272]/10 border border-[#FA0272]/30 rounded-full px-4 py-2 mb-6">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#FA0272] animate-ping" />
+            <span className="inline-flex items-center gap-2 text-[10px] font-black tracking-[0.35em] text-[#008078] uppercase bg-[#008078]/10 border border-[#008078]/30 rounded-full px-4 py-2 mb-6">
+              <span className="h-1.5 w-1.5 rounded-full bg-[#008078] animate-ping" />
               Midnight Gastronomy
             </span>
             <h3 className="text-5xl md:text-7xl lg:text-8xl font-black tracking-tight text-white mb-6">
-              Late Night <span className="text-transparent bg-clip-text bg-gradient-to-r from-slate-200 via-slate-400 to-[#FA0272] italic font-light">Cravings.</span>
+              Late Night <span className="text-transparent bg-clip-text bg-gradient-to-r from-slate-200 via-slate-400 to-[#008078] italic font-light">Cravings.</span>
             </h3>
             <p className="text-slate-400 max-w-xl mx-auto text-sm md:text-base font-light leading-relaxed">
               Curated epicurean experiences crafted for the midnight hours. Fully active between 11:00 PM and 4:00 AM.
@@ -478,7 +478,7 @@ export default function LandingPage() {
                   num: "01",
                   time: "15-20 min", 
                   desc: "Double-patty dry-aged Wagyu beef, aged cheddar melt, caramelized onion jam, and truffle aioli on toasted brioche.",
-                  color: "#FA0272",
+                  color: "#008078",
                   ingredients: ["🧀 Cheddar", "🧅 Onion Jam", "🍞 Brioche", "🍄 Truffle"]
                 },
                 { 
@@ -577,7 +577,7 @@ export default function LandingPage() {
               <div 
                 className="absolute bottom-12 w-[350px] md:w-[480px] h-[35px] rounded-full blur-[40px] opacity-40 transition-all duration-1000 ease-out"
                 style={{
-                  background: activeCraving === 0 ? '#FA0272' : activeCraving === 1 ? '#EB590E' : '#EAB308'
+                  background: activeCraving === 0 ? '#008078' : activeCraving === 1 ? '#EB590E' : '#EAB308'
                 }}
               />
 
@@ -643,7 +643,7 @@ export default function LandingPage() {
         {/* Section Header */}
         <div className="mb-12 md:mb-16 flex flex-col md:flex-row md:items-end justify-between gap-8">
           <div>
-            <span className="inline-block text-xs font-black tracking-[0.3em] text-[#FA0272] uppercase bg-[#FA0272]/10 border border-[#FA0272]/20 rounded-full px-4 py-1.5 mb-6">
+            <span className="inline-block text-xs font-black tracking-[0.3em] text-[#008078] uppercase bg-[#008078]/10 border border-[#008078]/20 rounded-full px-4 py-1.5 mb-6">
               The Experience
             </span>
             <h2 className="text-4xl lg:text-6xl font-black leading-[0.95] tracking-tighter text-slate-900">
@@ -698,8 +698,8 @@ export default function LandingPage() {
               variants={gridVariants}
               className="group relative flex-1 min-h-[250px] md:min-h-0 rounded-[2rem] overflow-hidden bg-white border border-slate-200 shadow-xl shadow-slate-200/50 p-6 md:p-8 flex flex-col justify-between hover:shadow-2xl hover:-translate-y-1 transition-all duration-500"
             >
-              <div className="w-12 h-12 bg-pink-50 rounded-xl flex items-center justify-center border border-pink-100 group-hover:bg-[#FA0272] transition-colors duration-500">
-                <Map className="w-5 h-5 text-[#FA0272] group-hover:text-white transition-colors duration-500" />
+              <div className="w-12 h-12 bg-pink-50 rounded-xl flex items-center justify-center border border-pink-100 group-hover:bg-[#008078] transition-colors duration-500">
+                <Map className="w-5 h-5 text-[#008078] group-hover:text-white transition-colors duration-500" />
               </div>
               <div>
                 <h3 className="text-xl md:text-2xl font-black text-slate-900 mb-2 tracking-tight">Surgical Precision</h3>
@@ -729,7 +729,7 @@ export default function LandingPage() {
               </div>
 
               {/* Sub-card B */}
-              <div className="col-span-1 rounded-[2rem] bg-slate-900 p-5 md:p-6 flex flex-col justify-between border border-slate-800 group hover:bg-[#FA0272] transition-colors duration-500 shadow-lg">
+              <div className="col-span-1 rounded-[2rem] bg-slate-900 p-5 md:p-6 flex flex-col justify-between border border-slate-800 group hover:bg-[#008078] transition-colors duration-500 shadow-lg">
                 <div className="w-9 h-9 bg-white/10 rounded-full flex items-center justify-center">
                   <ShieldCheck className="w-5 h-5 text-white" />
                 </div>
@@ -755,7 +755,7 @@ export default function LandingPage() {
           {/* Left Column: Text Content */}
           <div className="lg:col-span-5 space-y-8">
             <div className="space-y-4">
-              <span className="inline-flex items-center gap-2 text-xs font-black tracking-[0.25em] text-[#FA0272] uppercase bg-[#FA0272]/10 border border-[#FA0272]/20 rounded-full px-4 py-2">
+              <span className="inline-flex items-center gap-2 text-xs font-black tracking-[0.25em] text-[#008078] uppercase bg-[#008078]/10 border border-[#008078]/20 rounded-full px-4 py-2">
                 <MapPin className="w-3.5 h-3.5" /> Our Geography
               </span>
               <h3 className="text-4xl md:text-6xl font-black leading-[1.05] tracking-tight text-slate-900">
@@ -770,7 +770,7 @@ export default function LandingPage() {
             {/* Features list */}
             <div className="space-y-4">
               <div className="group bg-white/70 backdrop-blur-md border border-slate-200/50 p-6 rounded-2xl hover:shadow-xl hover:shadow-pink-500/5 transition-all duration-300 flex items-start gap-4">
-                <div className="w-12 h-12 rounded-xl bg-[#FA0272]/10 flex items-center justify-center text-[#FA0272] shrink-0">
+                <div className="w-12 h-12 rounded-xl bg-[#008078]/10 flex items-center justify-center text-[#008078] shrink-0">
                   <Award className="w-6 h-6" />
                 </div>
                 <div>
@@ -811,7 +811,7 @@ export default function LandingPage() {
 
               {/* Scanner Line Overlay */}
               <motion.div
-                className="absolute left-0 right-0 h-[100px] bg-gradient-to-b from-[#FA0272]/0 via-[#FA0272]/5 to-[#FA0272]/0 pointer-events-none z-0 border-y border-[#FA0272]/5"
+                className="absolute left-0 right-0 h-[100px] bg-gradient-to-b from-[#008078]/0 via-[#008078]/5 to-[#008078]/0 pointer-events-none z-0 border-y border-[#008078]/5"
                 animate={{ top: ["-100px", "540px"] }}
                 transition={{ repeat: Infinity, duration: 6, ease: "linear" }}
               />
@@ -841,22 +841,22 @@ export default function LandingPage() {
 
                 {/* Horizontal glowing pointer connector line */}
                 <div 
-                  className="hidden lg:block absolute top-[61.5%] left-[46.8%] w-[10.2%] h-[1.5px] bg-gradient-to-r from-[#FA0272] to-[#FA0272]/40 z-20 pointer-events-none"
+                  className="hidden lg:block absolute top-[61.5%] left-[46.8%] w-[10.2%] h-[1.5px] bg-gradient-to-r from-[#008078] to-[#008078]/40 z-20 pointer-events-none"
                   style={{ transform: "translateY(-50%)" }}
                 />
 
                 {/* Animated Pulsing Pin on top of Telangana in the image */}
                 <div className="absolute top-[61.5%] left-[46.8%] -translate-x-1/2 -translate-y-1/2 z-20">
                   {/* Super tight ping beacon */}
-                  <span className="absolute inline-flex h-5 w-5 -top-2.5 -left-2.5 rounded-full bg-[#FA0272]/85 animate-ping" />
+                  <span className="absolute inline-flex h-5 w-5 -top-2.5 -left-2.5 rounded-full bg-[#008078]/85 animate-ping" />
                   
                   {/* Glowing Core center - sharp, bright, and tiny */}
-                  <span className="relative block rounded-full h-2.5 w-2.5 bg-white shadow-[0_0_8px_#fff,0_0_12px_#FA0272]" />
+                  <span className="relative block rounded-full h-2.5 w-2.5 bg-white shadow-[0_0_8px_#fff,0_0_12px_#008078]" />
                 </div>
 
                 {/* Floating Active Info Tag over the beacon, centered above it on mobile, shifted right on desktop */}
-                <div className="absolute top-[61.5%] left-[48%] lg:left-[57%] -translate-x-1/2 lg:translate-x-0 -translate-y-[280%] lg:-translate-y-1/2 bg-slate-900/95 border border-[#FA0272]/50 text-[9px] font-black text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-2xl shadow-pink-500/20 whitespace-nowrap z-30">
-                  <span className="w-2 h-2 rounded-full bg-[#FA0272] animate-ping" />
+                <div className="absolute top-[61.5%] left-[48%] lg:left-[57%] -translate-x-1/2 lg:translate-x-0 -translate-y-[280%] lg:-translate-y-1/2 bg-slate-900/95 border border-[#008078]/50 text-[9px] font-black text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-2xl shadow-pink-500/20 whitespace-nowrap z-30">
+                  <span className="w-2 h-2 rounded-full bg-[#008078] animate-ping" />
                   TELANGANA (ACTIVE HUB)
                 </div>
               </div>
@@ -879,7 +879,7 @@ export default function LandingPage() {
 
           <div className="flex-1 space-y-8">
             <div className="space-y-4">
-              <span className="inline-block text-xs font-black tracking-[0.3em] text-[#FA0272] uppercase bg-pink-50 border border-pink-100 rounded-full px-3 py-1">
+              <span className="inline-block text-xs font-black tracking-[0.3em] text-[#008078] uppercase bg-pink-50 border border-pink-100 rounded-full px-3 py-1">
                 Precision Logistics
               </span>
               <h3 className="text-5xl lg:text-7xl font-black leading-[1.1] tracking-tight text-slate-900">
@@ -915,9 +915,9 @@ export default function LandingPage() {
                   whileInView={{ opacity: 1, x: 0 }}
                   viewport={{ once: true }}
                   transition={{ delay: idx * 0.1, duration: 0.6 }}
-                  className="flex gap-4 p-4 rounded-2xl bg-slate-50/50 border border-slate-200/60 hover:bg-white hover:border-[#FA0272]/20 hover:shadow-lg transition-all duration-300 group cursor-pointer"
+                  className="flex gap-4 p-4 rounded-2xl bg-slate-50/50 border border-slate-200/60 hover:bg-white hover:border-[#008078]/20 hover:shadow-lg transition-all duration-300 group cursor-pointer"
                 >
-                  <div className="w-10 h-10 rounded-xl bg-pink-50 border border-pink-100 flex items-center justify-center text-[#FA0272] group-hover:bg-[#FA0272] group-hover:text-white transition-all duration-300 shrink-0">
+                  <div className="w-10 h-10 rounded-xl bg-pink-50 border border-pink-100 flex items-center justify-center text-[#008078] group-hover:bg-[#008078] group-hover:text-white transition-all duration-300 shrink-0">
                     <feat.icon className="w-5 h-5" />
                   </div>
                   <div>
@@ -933,7 +933,7 @@ export default function LandingPage() {
           <div className="flex-1 w-full h-[380px] sm:h-[500px] relative rounded-[2.5rem] border border-slate-200/80 bg-slate-50/50 backdrop-blur-sm overflow-hidden flex items-center justify-center shadow-xl">
 
             {/* Radar Sweep Animation Effect */}
-            <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_50%_50%,rgba(250,2,114,0.025)_0%,transparent_60%)] z-0" />
+            <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_50%_50%,rgba(0, 128, 120,0.025)_0%,transparent_60%)] z-0" />
             <div className="absolute top-[20%] left-[20%] w-[350px] h-[350px] bg-pink-100/30 rounded-full blur-[80px] opacity-40 pointer-events-none" />
 
             {/* Map Grid Dots Background */}
@@ -948,7 +948,7 @@ export default function LandingPage() {
             {/* Glass HUD 2: Rider Stats */}
             <div className="hidden sm:flex absolute sm:bottom-6 sm:left-6 bg-white/90 backdrop-blur-md border border-slate-200/50 sm:p-4 rounded-2xl flex-col gap-1 shadow-md z-20 sm:text-xs sm:w-[220px]">
               <div className="flex items-center gap-1.5 font-bold text-slate-800">
-                <Zap className="w-3.5 h-3.5 text-[#FA0272]" /> <span>Rider Telemetry</span>
+                <Zap className="w-3.5 h-3.5 text-[#008078]" /> <span>Rider Telemetry</span>
               </div>
               <div className="text-slate-500 text-[10px] font-medium font-mono leading-relaxed pt-1.5 border-t border-slate-100 mt-1">
                 Speed: 42 km/h <br />
@@ -958,7 +958,7 @@ export default function LandingPage() {
             </div>
 
             {/* Floating Location Badges */}
-            <div className="hidden sm:block absolute top-[18%] left-[10%] bg-pink-50/95 backdrop-blur-sm border border-pink-100 px-3 py-1 rounded-xl text-[9px] font-black tracking-widest text-[#FA0272] shadow-sm z-20 animate-pulse">
+            <div className="hidden sm:block absolute top-[18%] left-[10%] bg-pink-50/95 backdrop-blur-sm border border-pink-100 px-3 py-1 rounded-xl text-[9px] font-black tracking-widest text-[#008078] shadow-sm z-20 animate-pulse">
               KITCHEN PICKUP
             </div>
             <div className="hidden sm:block absolute bottom-[20%] right-[10%] bg-[#0F172A]/90 backdrop-blur-sm px-3 py-1 rounded-xl text-[9px] font-black tracking-widest text-white shadow-sm z-20 animate-pulse">
@@ -971,16 +971,16 @@ export default function LandingPage() {
               <motion.path
                 d="M 50 250 Q 150 250, 200 150 T 350 50"
                 fill="none"
-                stroke="#FA0272"
+                stroke="#008078"
                 strokeWidth="4"
                 strokeLinecap="round"
                 initial={{ pathLength: 0 }}
                 whileInView={{ pathLength: 1 }}
                 viewport={{ once: false, margin: "-100px" }}
                 transition={{ duration: 2.5, ease: "easeInOut", repeat: Infinity, repeatType: "loop", repeatDelay: 1 }}
-                style={{ filter: "drop-shadow(0px 0px 8px rgba(250,2,114,0.5))" }}
+                style={{ filter: "drop-shadow(0px 0px 8px rgba(0, 128, 120,0.5))" }}
               />
-              <circle cx="50" cy="250" r="8" fill="#FA0272" className="shadow-[0_0_10px_#FA0272]" />
+              <circle cx="50" cy="250" r="8" fill="#008078" className="shadow-[0_0_10px_#008078]" />
               <circle cx="350" cy="50" r="8" fill="#0F172A" />
             </svg>
           </div>
@@ -994,7 +994,7 @@ export default function LandingPage() {
           <div className="grid lg:grid-cols-5 gap-16 mb-24 relative z-10">
             <div className="lg:col-span-2">
               <h2 className="text-5xl font-black tracking-tighter text-slate-950 mb-6">
-                {APP_CONFIG?.NAME || "BRAND"}<span className="text-[#FA0272]">.</span>
+                {APP_CONFIG?.NAME || "BRAND"}<span className="text-[#008078]">.</span>
               </h2>
               <p className="text-slate-500 text-lg font-light leading-relaxed max-w-sm mb-8">
                 Elevating the dining experience. Premium food delivery for those who expect more.
@@ -1011,7 +1011,7 @@ export default function LandingPage() {
                     href={url} 
                     target="_blank" 
                     rel="noopener noreferrer"
-                    className="w-11 h-11 rounded-full border border-slate-200 flex items-center justify-center hover:bg-[#FA0272] hover:border-[#FA0272] hover:text-white cursor-pointer transition-all duration-300 text-slate-700 bg-white shadow-sm"
+                    className="w-11 h-11 rounded-full border border-slate-200 flex items-center justify-center hover:bg-[#008078] hover:border-[#008078] hover:text-white cursor-pointer transition-all duration-300 text-slate-700 bg-white shadow-sm"
                   >
                     <Icon className="w-4.5 h-4.5" />
                   </a>
@@ -1025,7 +1025,7 @@ export default function LandingPage() {
                 href="https://admin.mintofood.com/food/user/profile/privacy" 
                 target="_blank" 
                 rel="noopener noreferrer" 
-                className="hover:text-[#FA0272] transition-colors"
+                className="hover:text-[#008078] transition-colors"
               >
                 Privacy Policy
               </a>
@@ -1033,7 +1033,7 @@ export default function LandingPage() {
                 href="https://admin.mintofood.com/food/user/profile/terms" 
                 target="_blank" 
                 rel="noopener noreferrer" 
-                className="hover:text-[#FA0272] transition-colors"
+                className="hover:text-[#008078] transition-colors"
               >
                 Terms of Service
               </a>
@@ -1045,7 +1045,7 @@ export default function LandingPage() {
                 href="https://admin.mintofood.com/food/user/profile/about" 
                 target="_blank" 
                 rel="noopener noreferrer" 
-                className="hover:text-[#FA0272] transition-colors"
+                className="hover:text-[#008078] transition-colors"
               >
                 About Us
               </a>
@@ -1053,7 +1053,7 @@ export default function LandingPage() {
                 href="https://admin.mintofood.com/food/user/profile/help-content" 
                 target="_blank" 
                 rel="noopener noreferrer" 
-                className="hover:text-[#FA0272] transition-colors"
+                className="hover:text-[#008078] transition-colors"
               >
                 Support
               </a>
@@ -1061,8 +1061,8 @@ export default function LandingPage() {
 
             <div className="flex flex-col gap-5 text-sm font-medium">
               <h4 className="text-slate-900 font-bold tracking-widest text-xs uppercase mb-1">Contact</h4>
-              <a href={`mailto:${supportContact.email}`} className="hover:text-[#FA0272] transition-colors">{supportContact.email}</a>
-              <a href={`tel:${supportContact.mobile}`} className="hover:text-[#FA0272] transition-colors">{supportContact.mobile}</a>
+              <a href={`mailto:${supportContact.email}`} className="hover:text-[#008078] transition-colors">{supportContact.email}</a>
+              <a href={`tel:${supportContact.mobile}`} className="hover:text-[#008078] transition-colors">{supportContact.mobile}</a>
               <p className="text-slate-400 text-xs mt-3 leading-relaxed">Available 24/7 for premium members.</p>
             </div>
           </div>
@@ -1085,7 +1085,7 @@ export default function LandingPage() {
             exit={{ x: "100%" }}
             transition={{ type: "spring", damping: 28, stiffness: 220 }}
             data-lenis-prevent
-            className="fixed inset-0 z-[100] w-screen h-screen bg-[#FCFBFA] overflow-y-auto flex flex-col selection:bg-[#FA0272] selection:text-white"
+            className="fixed inset-0 z-[100] w-screen h-screen bg-[#FCFBFA] overflow-y-auto flex flex-col selection:bg-[#008078] selection:text-white"
           >
             {/* Ambient Background Lights */}
             <div className="absolute top-0 right-0 w-[50vw] h-[50vw] bg-pink-500/10 rounded-full blur-[140px] pointer-events-none z-0" />
@@ -1095,11 +1095,11 @@ export default function LandingPage() {
             <header className="sticky top-0 w-full z-50 px-6 py-6 md:px-12 lg:px-20 flex items-center justify-between bg-[#FCFBFA]/80 backdrop-blur-md border-b border-slate-200/40 shrink-0">
               <div className="text-2xl font-black text-slate-900 tracking-tighter">
                 {APP_CONFIG?.NAME || "Minto Foods"}
-                <span className="text-[#FA0272]">.</span>
+                <span className="text-[#008078]">.</span>
               </div>
               <button
                 onClick={() => setIsAboutOpen(false)}
-                className="group flex items-center gap-2 bg-slate-900 text-white px-5 py-2.5 rounded-full text-xs font-bold hover:bg-[#FA0272] transition-all duration-300 shadow-md hover:shadow-lg shadow-slate-900/10 cursor-pointer"
+                className="group flex items-center gap-2 bg-slate-900 text-white px-5 py-2.5 rounded-full text-xs font-bold hover:bg-[#008078] transition-all duration-300 shadow-md hover:shadow-lg shadow-slate-900/10 cursor-pointer"
               >
                 <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
                 Back to Home
@@ -1111,7 +1111,7 @@ export default function LandingPage() {
 
               {/* Cinematic Page Title */}
               <div className="max-w-3xl space-y-6">
-                <span className="inline-flex items-center gap-2 text-[#FA0272] font-bold tracking-widest uppercase text-xs bg-[#FA0272]/10 px-4 py-2 rounded-full">
+                <span className="inline-flex items-center gap-2 text-[#008078] font-bold tracking-widest uppercase text-xs bg-[#008078]/10 px-4 py-2 rounded-full">
                   <Sparkles className="w-4 h-4" /> The Movement
                 </span>
                 <h1 className="text-5xl md:text-7xl font-black leading-[1.05] tracking-tight text-slate-900">
@@ -1125,12 +1125,12 @@ export default function LandingPage() {
 
               {/* Central Blockquote Quote Banner */}
               <div className="bg-slate-900 text-white rounded-[2.5rem] p-8 md:p-14 relative overflow-hidden shadow-2xl shrink-0">
-                <div className="absolute top-[-50%] right-[-10%] w-[350px] h-[350px] bg-[#FA0272]/20 rounded-full blur-[90px] pointer-events-none" />
+                <div className="absolute top-[-50%] right-[-10%] w-[350px] h-[350px] bg-[#008078]/20 rounded-full blur-[90px] pointer-events-none" />
                 <div className="relative z-10 space-y-6">
                   <p className="text-2xl md:text-3xl lg:text-4xl font-light leading-relaxed italic text-slate-100 max-w-4xl">
                     "Minto Foods isn’t just a food delivery app—it’s a movement towards fair business, trust, and transparency."
                   </p>
-                  <div className="w-16 h-1 bg-[#FA0272] rounded-full" />
+                  <div className="w-16 h-1 bg-[#008078] rounded-full" />
                   <p className="text-xs uppercase tracking-widest font-bold text-slate-400">Our Core Philosophy</p>
                 </div>
               </div>
@@ -1141,7 +1141,7 @@ export default function LandingPage() {
                 {/* Story Card 1: 0% Commission */}
                 <div className="group bg-white border border-slate-200/60 rounded-[2rem] p-8 lg:p-10 hover:shadow-2xl hover:shadow-pink-500/5 hover:-translate-y-1 transition-all duration-500 flex flex-col justify-between">
                   <div>
-                    <div className="w-14 h-14 rounded-2xl bg-[#FA0272]/10 flex items-center justify-center text-[#FA0272] mb-6 group-hover:scale-110 transition-transform">
+                    <div className="w-14 h-14 rounded-2xl bg-[#008078]/10 flex items-center justify-center text-[#008078] mb-6 group-hover:scale-110 transition-transform">
                       <Percent className="w-7 h-7" />
                     </div>
                     <h3 className="text-2xl font-black text-slate-900 mb-3 tracking-tight">Lifetime 0% Commission</h3>
@@ -1150,7 +1150,7 @@ export default function LandingPage() {
                     </p>
                   </div>
                   <div className="mt-8 pt-6 border-t border-slate-100 flex items-center gap-3">
-                    <Zap className="w-4 h-4 text-[#FA0272]" />
+                    <Zap className="w-4 h-4 text-[#008078]" />
                     <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">No Hidden Partner Fees</span>
                   </div>
                 </div>
@@ -1217,7 +1217,7 @@ export default function LandingPage() {
                 <div className="flex gap-4 mt-2">
                   <button
                     onClick={() => setIsAboutOpen(false)}
-                    className="bg-slate-900 text-white hover:bg-[#FA0272] px-8 py-4 rounded-full font-bold text-sm transition-all duration-300 shadow-md shadow-slate-900/10 cursor-pointer"
+                    className="bg-slate-900 text-white hover:bg-[#008078] px-8 py-4 rounded-full font-bold text-sm transition-all duration-300 shadow-md shadow-slate-900/10 cursor-pointer"
                   >
                     Return to Homepage
                   </button>
@@ -1240,22 +1240,22 @@ export default function LandingPage() {
             exit={{ x: "100%" }}
             transition={{ type: "spring", damping: 28, stiffness: 220 }}
             data-lenis-prevent
-            className="fixed inset-0 z-[100] w-screen h-screen bg-[#FAF7F2] overflow-y-auto flex flex-col selection:bg-[#FA0272] selection:text-white"
+            className="fixed inset-0 z-[100] w-screen h-screen bg-[#FAF7F2] overflow-y-auto flex flex-col selection:bg-[#008078] selection:text-white"
           >
             {/* Ambient Background Lights - Signature Pink and Warm Amber */}
-            <div className="absolute top-0 right-0 w-[50vw] h-[50vw] bg-[#FA0272]/5 rounded-full blur-[140px] pointer-events-none z-0" />
+            <div className="absolute top-0 right-0 w-[50vw] h-[50vw] bg-[#008078]/5 rounded-full blur-[140px] pointer-events-none z-0" />
             <div className="absolute bottom-0 left-0 w-[40vw] h-[40vw] bg-orange-400/5 rounded-full blur-[120px] pointer-events-none z-0" />
 
             {/* Sticky Header */}
             <header className="sticky top-0 w-full z-50 px-4 py-4 md:px-12 lg:px-20 flex items-center justify-between bg-[#FAF7F2]/90 backdrop-blur-md border-b border-slate-200/40 shrink-0">
               <div className="text-xl md:text-2xl font-black text-slate-900 tracking-tighter">
                 {APP_CONFIG?.NAME || "Minto Foods"}
-                <span className="text-[#FA0272]">.</span>
+                <span className="text-[#008078]">.</span>
               </div>
               <div className="flex items-center gap-2 sm:gap-3">
                 <button
                   onClick={() => document.getElementById("partner-lead-form")?.scrollIntoView({ behavior: "smooth" })}
-                  className="group flex items-center gap-1.5 sm:gap-2 bg-[#FA0272]/10 hover:bg-[#FA0272] text-[#FA0272] hover:text-white px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-full text-xs font-bold transition-all duration-300 border border-[#FA0272]/20 cursor-pointer shadow-sm"
+                  className="group flex items-center gap-1.5 sm:gap-2 bg-[#008078]/10 hover:bg-[#008078] text-[#008078] hover:text-white px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-full text-xs font-bold transition-all duration-300 border border-[#008078]/20 cursor-pointer shadow-sm"
                 >
                   <Sparkles className="w-3.5 h-3.5" />
                   <span className="hidden sm:inline">Become a Partner</span>
@@ -1263,7 +1263,7 @@ export default function LandingPage() {
                 </button>
                 <button
                   onClick={() => setIsRestaurantOpen(false)}
-                  className="group flex items-center gap-1.5 sm:gap-2 bg-slate-900 text-white px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-full text-xs font-bold hover:bg-[#FA0272] transition-all duration-300 shadow-md hover:shadow-lg cursor-pointer"
+                  className="group flex items-center gap-1.5 sm:gap-2 bg-slate-900 text-white px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-full text-xs font-bold hover:bg-[#008078] transition-all duration-300 shadow-md hover:shadow-lg cursor-pointer"
                 >
                   <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
                   <span className="hidden sm:inline">Back to Home</span>
@@ -1277,12 +1277,12 @@ export default function LandingPage() {
 
               {/* Cinematic Page Title - Centered Elegant Culinary Accent */}
               <div className="max-w-4xl space-y-6 text-center mx-auto mb-4">
-                <span className="inline-flex items-center gap-2 text-[#FA0272] font-black tracking-widest uppercase text-xs bg-[#FA0272]/10 border border-[#FA0272]/20 px-4 py-2 rounded-full">
-                  <Store className="w-4 h-4 text-[#FA0272]" /> Restaurant Empowerment Initiative
+                <span className="inline-flex items-center gap-2 text-[#008078] font-black tracking-widest uppercase text-xs bg-[#008078]/10 border border-[#008078]/20 px-4 py-2 rounded-full">
+                  <Store className="w-4 h-4 text-[#008078]" /> Restaurant Empowerment Initiative
                 </span>
                 <h1 className="text-5xl md:text-7xl font-black leading-[1.05] tracking-tight text-slate-900">
                   Earn Commission-Free. <br />
-                  <span className="text-transparent bg-clip-text bg-gradient-to-br from-[#FA0272] to-[#E02477] font-extrabold italic font-light">Reclaim 100% of Your Revenue.</span>
+                  <span className="text-transparent bg-clip-text bg-gradient-to-br from-[#008078] to-[#E02477] font-extrabold italic font-light">Reclaim 100% of Your Revenue.</span>
                 </h1>
                 <p className="text-xl text-slate-700 font-light leading-relaxed max-w-3xl mx-auto">
                   Say goodbye to standard 25%-30% commissions that wipe out restaurant profit margins. With Minto Foods, you gain access to a powerful digital ordering system on a <strong>lifetime 0% commission model</strong>.
@@ -1291,10 +1291,10 @@ export default function LandingPage() {
 
               {/* Download CTA Block - Customized as a POS Tablet Terminal Layout */}
               <div className="bg-slate-900 text-white rounded-[2.5rem] p-8 md:p-14 relative overflow-hidden shadow-2xl shrink-0 flex flex-col lg:flex-row items-center gap-12 border border-slate-800">
-                <div className="absolute top-[-50%] right-[-10%] w-[350px] h-[350px] bg-[#FA0272]/10 rounded-full blur-[90px] pointer-events-none" />
+                <div className="absolute top-[-50%] right-[-10%] w-[350px] h-[350px] bg-[#008078]/10 rounded-full blur-[90px] pointer-events-none" />
 
                 <div className="flex-1 space-y-6 relative z-10">
-                  <div className="inline-block text-[10px] uppercase tracking-widest font-black text-pink-500 bg-[#FA0272]/10 border border-[#FA0272]/20 px-3 py-1.5 rounded-full">
+                  <div className="inline-block text-[10px] uppercase tracking-widest font-black text-pink-500 bg-[#008078]/10 border border-[#008078]/20 px-3 py-1.5 rounded-full">
                     Active Operations: Telangana Region
                   </div>
                   <h2 className="text-3xl md:text-4xl font-black leading-tight tracking-tight">Setup Your Live Digital Kitchen</h2>
@@ -1307,7 +1307,7 @@ export default function LandingPage() {
                       href="https://apps.apple.com/in/app/switcheats-partner/id6766466794"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex items-center justify-center gap-3 bg-white text-slate-950 hover:bg-[#FA0272] hover:text-white px-8 py-4 rounded-2xl font-bold transition-all duration-300 text-sm shadow-md cursor-pointer text-center"
+                      className="flex items-center justify-center gap-3 bg-white text-slate-950 hover:bg-[#008078] hover:text-white px-8 py-4 rounded-2xl font-bold transition-all duration-300 text-sm shadow-md cursor-pointer text-center"
                     >
                       <Apple className="w-5 h-5" /> iOS App Store
                     </a>
@@ -1315,7 +1315,7 @@ export default function LandingPage() {
                       href="https://play.google.com/store/apps/details?id=com.switcheats.restaurant1"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex items-center justify-center gap-3 bg-slate-800 border border-slate-700 text-white hover:bg-[#FA0272] hover:border-[#FA0272] px-8 py-4 rounded-2xl font-bold transition-all duration-300 text-sm shadow-md cursor-pointer text-center"
+                      className="flex items-center justify-center gap-3 bg-slate-800 border border-slate-700 text-white hover:bg-[#008078] hover:border-[#008078] px-8 py-4 rounded-2xl font-bold transition-all duration-300 text-sm shadow-md cursor-pointer text-center"
                     >
                       <Play className="w-5 h-5" /> Android Play Store
                     </a>
@@ -1331,28 +1331,28 @@ export default function LandingPage() {
                     {/* POS Header */}
                     <div className="flex items-center justify-between border-b border-slate-800 pb-2 shrink-0 mt-1">
                       <div className="flex items-center gap-2">
-                        <Store className="w-4 h-4 text-[#FA0272]" />
+                        <Store className="w-4 h-4 text-[#008078]" />
                         <span className="text-[10px] text-white font-bold tracking-wider uppercase">Live POS Terminal</span>
                       </div>
-                      <span className="text-[8px] bg-pink-500/10 text-[#FA0272] px-2 py-0.5 rounded-full font-bold uppercase">Online</span>
+                      <span className="text-[8px] bg-pink-500/10 text-[#008078] px-2 py-0.5 rounded-full font-bold uppercase">Online</span>
                     </div>
 
                     {/* Middle: Comparison metric */}
                     <div className="grid grid-cols-2 gap-3 py-2 flex-1 items-center">
                       <div className="bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-center">
                         <div className="text-[8px] text-slate-500 font-bold uppercase tracking-wider">With Minto Foods</div>
-                        <div className="text-sm font-black text-[#FA0272] mt-0.5">₹18,450.00</div>
+                        <div className="text-sm font-black text-[#008078] mt-0.5">₹18,450.00</div>
                         <div className="text-[7px] text-slate-400 mt-0.5">0% Commission Paid</div>
                       </div>
                       <div className="bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-center relative opacity-80">
                         <div className="text-[8px] text-slate-500 font-bold uppercase tracking-wider">Traditional Apps</div>
                         <div className="text-sm font-black text-slate-400 mt-0.5 line-through">₹12,915.00</div>
-                        <div className="text-[7px] text-[#FA0272] mt-0.5 font-bold">30% Aggregator Cut</div>
+                        <div className="text-[7px] text-[#008078] mt-0.5 font-bold">30% Aggregator Cut</div>
                       </div>
                     </div>
 
                     {/* POS Footer bar */}
-                    <div className="bg-[#FA0272] text-white text-[9px] font-black text-center py-2 rounded-lg uppercase tracking-widest shrink-0">
+                    <div className="bg-[#008078] text-white text-[9px] font-black text-center py-2 rounded-lg uppercase tracking-widest shrink-0">
                       Saving ₹5,535.00 Today
                     </div>
                   </div>
@@ -1363,9 +1363,9 @@ export default function LandingPage() {
               <div className="grid md:grid-cols-2 gap-8 lg:gap-12 shrink-0">
 
                 {/* Benefit 1 */}
-                <div className="group bg-white/80 border border-slate-200/40 rounded-[2rem] p-8 lg:p-10 hover:shadow-2xl hover:shadow-[#FA0272]/5 hover:-translate-y-1 transition-all duration-500 flex flex-col justify-between shadow-sm">
+                <div className="group bg-white/80 border border-slate-200/40 rounded-[2rem] p-8 lg:p-10 hover:shadow-2xl hover:shadow-[#008078]/5 hover:-translate-y-1 transition-all duration-500 flex flex-col justify-between shadow-sm">
                   <div>
-                    <div className="w-14 h-14 rounded-2xl bg-pink-50 border border-pink-100 flex items-center justify-center text-[#FA0272] mb-6 group-hover:scale-110 transition-transform">
+                    <div className="w-14 h-14 rounded-2xl bg-pink-50 border border-pink-100 flex items-center justify-center text-[#008078] mb-6 group-hover:scale-110 transition-transform">
                       <Percent className="w-7 h-7" />
                     </div>
                     <h3 className="text-2xl font-black text-slate-900 mb-3 tracking-tight">Lifetime 0% Commission</h3>
@@ -1374,15 +1374,15 @@ export default function LandingPage() {
                     </p>
                   </div>
                   <div className="mt-8 pt-6 border-t border-slate-200/50 flex items-center gap-3">
-                    <Zap className="w-4 h-4 text-[#FA0272]" />
+                    <Zap className="w-4 h-4 text-[#008078]" />
                     <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Empowering Culinary Businesses</span>
                   </div>
                 </div>
 
                 {/* Benefit 2 */}
-                <div className="group bg-white/80 border border-slate-200/40 rounded-[2rem] p-8 lg:p-10 hover:shadow-2xl hover:shadow-[#FA0272]/5 hover:-translate-y-1 transition-all duration-500 flex flex-col justify-between shadow-sm">
+                <div className="group bg-white/80 border border-slate-200/40 rounded-[2rem] p-8 lg:p-10 hover:shadow-2xl hover:shadow-[#008078]/5 hover:-translate-y-1 transition-all duration-500 flex flex-col justify-between shadow-sm">
                   <div>
-                    <div className="w-14 h-14 rounded-2xl bg-pink-50 border border-pink-100 flex items-center justify-center text-[#FA0272] mb-6 group-hover:scale-110 transition-transform">
+                    <div className="w-14 h-14 rounded-2xl bg-pink-50 border border-pink-100 flex items-center justify-center text-[#008078] mb-6 group-hover:scale-110 transition-transform">
                       <Clock className="w-7 h-7" />
                     </div>
                     <h3 className="text-2xl font-black text-slate-900 mb-3 tracking-tight">Instant Daily Settlements</h3>
@@ -1391,15 +1391,15 @@ export default function LandingPage() {
                     </p>
                   </div>
                   <div className="mt-8 pt-6 border-t border-slate-200/50 flex items-center gap-3">
-                    <ShieldCheck className="w-4 h-4 text-[#FA0272]" />
+                    <ShieldCheck className="w-4 h-4 text-[#008078]" />
                     <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Fast Cash Flow Cycle</span>
                   </div>
                 </div>
 
                 {/* Benefit 3 */}
-                <div className="group bg-white/80 border border-slate-200/40 rounded-[2rem] p-8 lg:p-10 hover:shadow-2xl hover:shadow-[#FA0272]/5 hover:-translate-y-1 transition-all duration-500 flex flex-col justify-between shadow-sm">
+                <div className="group bg-white/80 border border-slate-200/40 rounded-[2rem] p-8 lg:p-10 hover:shadow-2xl hover:shadow-[#008078]/5 hover:-translate-y-1 transition-all duration-500 flex flex-col justify-between shadow-sm">
                   <div>
-                    <div className="w-14 h-14 rounded-2xl bg-pink-50 border border-pink-100 flex items-center justify-center text-[#FA0272] mb-6 group-hover:scale-110 transition-transform">
+                    <div className="w-14 h-14 rounded-2xl bg-pink-50 border border-pink-100 flex items-center justify-center text-[#008078] mb-6 group-hover:scale-110 transition-transform">
                       <Sparkles className="w-7 h-7" />
                     </div>
                     <h3 className="text-2xl font-black text-slate-900 mb-3 tracking-tight">Live Menu & Pricing Control</h3>
@@ -1408,15 +1408,15 @@ export default function LandingPage() {
                     </p>
                   </div>
                   <div className="mt-8 pt-6 border-t border-slate-200/50 flex items-center gap-3">
-                    <Map className="w-4 h-4 text-[#FA0272]" />
+                    <Map className="w-4 h-4 text-[#008078]" />
                     <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Zero Lag Adjustments</span>
                   </div>
                 </div>
 
                 {/* Benefit 4 */}
-                <div className="group bg-white/80 border border-slate-200/40 rounded-[2rem] p-8 lg:p-10 hover:shadow-2xl hover:shadow-[#FA0272]/5 hover:-translate-y-1 transition-all duration-500 flex flex-col justify-between shadow-sm">
+                <div className="group bg-white/80 border border-slate-200/40 rounded-[2rem] p-8 lg:p-10 hover:shadow-2xl hover:shadow-[#008078]/5 hover:-translate-y-1 transition-all duration-500 flex flex-col justify-between shadow-sm">
                   <div>
-                    <div className="w-14 h-14 rounded-2xl bg-pink-50 border border-pink-100 flex items-center justify-center text-[#FA0272] mb-6 group-hover:scale-110 transition-transform">
+                    <div className="w-14 h-14 rounded-2xl bg-pink-50 border border-pink-100 flex items-center justify-center text-[#008078] mb-6 group-hover:scale-110 transition-transform">
                       <TrendingUp className="w-7 h-7" />
                     </div>
                     <h3 className="text-2xl font-black text-slate-900 mb-3 tracking-tight">Deep Customer Analytics</h3>
@@ -1425,7 +1425,7 @@ export default function LandingPage() {
                     </p>
                   </div>
                   <div className="mt-8 pt-6 border-t border-slate-200/50 flex items-center gap-3">
-                    <Users className="w-4 h-4 text-[#FA0272]" />
+                    <Users className="w-4 h-4 text-[#008078]" />
                     <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Data-Driven Growth</span>
                   </div>
                 </div>
@@ -1445,9 +1445,9 @@ export default function LandingPage() {
                   <motion.div 
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    className="bg-[#FA0272]/5 border border-[#FA0272]/20 rounded-3xl p-8 text-center space-y-4"
+                    className="bg-[#008078]/5 border border-[#008078]/20 rounded-3xl p-8 text-center space-y-4"
                   >
-                    <div className="w-16 h-16 bg-[#FA0272]/10 rounded-full flex items-center justify-center mx-auto text-[#FA0272]">
+                    <div className="w-16 h-16 bg-[#008078]/10 rounded-full flex items-center justify-center mx-auto text-[#008078]">
                       <Sparkles className="w-8 h-8" />
                     </div>
                     <h4 className="text-xl font-bold text-slate-900">Application Submitted Successfully!</h4>
@@ -1456,7 +1456,7 @@ export default function LandingPage() {
                     </p>
                     <button
                       onClick={() => setLeadSuccess(false)}
-                      className="px-6 py-2.5 text-xs font-bold text-[#FA0272] bg-[#FA0272]/10 hover:bg-[#FA0272]/20 transition-all rounded-full"
+                      className="px-6 py-2.5 text-xs font-bold text-[#008078] bg-[#008078]/10 hover:bg-[#008078]/20 transition-all rounded-full"
                     >
                       Submit Another Inquiry
                     </button>
@@ -1472,7 +1472,7 @@ export default function LandingPage() {
                           placeholder="Ex: John Doe"
                           value={leadForm.ownerName}
                           onChange={(e) => setLeadForm({ ...leadForm, ownerName: e.target.value })}
-                          className="w-full px-5 py-3.5 text-sm rounded-2xl border border-slate-200 bg-slate-50/50 focus:outline-none focus:ring-2 focus:ring-[#FA0272]/20 focus:border-[#FA0272] transition-all text-slate-800"
+                          className="w-full px-5 py-3.5 text-sm rounded-2xl border border-slate-200 bg-slate-50/50 focus:outline-none focus:ring-2 focus:ring-[#008078]/20 focus:border-[#008078] transition-all text-slate-800"
                         />
                       </div>
                       <div className="space-y-2">
@@ -1483,7 +1483,7 @@ export default function LandingPage() {
                           placeholder="Ex: The Culinary Hub"
                           value={leadForm.restaurantName}
                           onChange={(e) => setLeadForm({ ...leadForm, restaurantName: e.target.value })}
-                          className="w-full px-5 py-3.5 text-sm rounded-2xl border border-slate-200 bg-slate-50/50 focus:outline-none focus:ring-2 focus:ring-[#FA0272]/20 focus:border-[#FA0272] transition-all text-slate-800"
+                          className="w-full px-5 py-3.5 text-sm rounded-2xl border border-slate-200 bg-slate-50/50 focus:outline-none focus:ring-2 focus:ring-[#008078]/20 focus:border-[#008078] transition-all text-slate-800"
                         />
                       </div>
                     </div>
@@ -1497,7 +1497,7 @@ export default function LandingPage() {
                           placeholder="Ex: +91 98765 43210"
                           value={leadForm.mobileNumber}
                           onChange={(e) => setLeadForm({ ...leadForm, mobileNumber: e.target.value })}
-                          className="w-full px-5 py-3.5 text-sm rounded-2xl border border-slate-200 bg-slate-50/50 focus:outline-none focus:ring-2 focus:ring-[#FA0272]/20 focus:border-[#FA0272] transition-all text-slate-800"
+                          className="w-full px-5 py-3.5 text-sm rounded-2xl border border-slate-200 bg-slate-50/50 focus:outline-none focus:ring-2 focus:ring-[#008078]/20 focus:border-[#008078] transition-all text-slate-800"
                         />
                       </div>
                       <div className="space-y-2">
@@ -1508,7 +1508,7 @@ export default function LandingPage() {
                           placeholder="Ex: partner@domain.com"
                           value={leadForm.emailId}
                           onChange={(e) => setLeadForm({ ...leadForm, emailId: e.target.value })}
-                          className="w-full px-5 py-3.5 text-sm rounded-2xl border border-slate-200 bg-slate-50/50 focus:outline-none focus:ring-2 focus:ring-[#FA0272]/20 focus:border-[#FA0272] transition-all text-slate-800"
+                          className="w-full px-5 py-3.5 text-sm rounded-2xl border border-slate-200 bg-slate-50/50 focus:outline-none focus:ring-2 focus:ring-[#008078]/20 focus:border-[#008078] transition-all text-slate-800"
                         />
                       </div>
                     </div>
@@ -1521,7 +1521,7 @@ export default function LandingPage() {
                         placeholder="Ex: Madhapur, Hyderabad, Telangana"
                         value={leadForm.location}
                         onChange={(e) => setLeadForm({ ...leadForm, location: e.target.value })}
-                        className="w-full px-5 py-3.5 text-sm rounded-2xl border border-slate-200 bg-slate-50/50 focus:outline-none focus:ring-2 focus:ring-[#FA0272]/20 focus:border-[#FA0272] transition-all text-slate-800"
+                        className="w-full px-5 py-3.5 text-sm rounded-2xl border border-slate-200 bg-slate-50/50 focus:outline-none focus:ring-2 focus:ring-[#008078]/20 focus:border-[#008078] transition-all text-slate-800"
                       />
                     </div>
 
@@ -1529,7 +1529,7 @@ export default function LandingPage() {
                       <button
                         type="submit"
                         disabled={submittingLead}
-                        className="flex-1 bg-slate-900 text-white hover:bg-[#FA0272] px-8 py-4 rounded-2xl font-bold text-sm transition-all duration-300 shadow-md cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
+                        className="flex-1 bg-slate-900 text-white hover:bg-[#008078] px-8 py-4 rounded-2xl font-bold text-sm transition-all duration-300 shadow-md cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
                       >
                         {submittingLead ? (
                           <>
@@ -1568,21 +1568,21 @@ export default function LandingPage() {
             exit={{ x: "100%" }}
             transition={{ type: "spring", damping: 28, stiffness: 220 }}
             data-lenis-prevent
-            className="fixed inset-0 z-[100] w-screen h-screen bg-[#07080B] text-slate-100 overflow-y-auto flex flex-col selection:bg-[#FA0272] selection:text-white"
+            className="fixed inset-0 z-[100] w-screen h-screen bg-[#07080B] text-slate-100 overflow-y-auto flex flex-col selection:bg-[#008078] selection:text-white"
           >
             {/* Ambient Cyberpunk Background Lights - Electric Purple/Indigo and Hot Pink */}
-            <div className="absolute top-0 right-0 w-[50vw] h-[50vw] bg-[#FA0272]/5 rounded-full blur-[140px] pointer-events-none z-0" />
+            <div className="absolute top-0 right-0 w-[50vw] h-[50vw] bg-[#008078]/5 rounded-full blur-[140px] pointer-events-none z-0" />
             <div className="absolute bottom-0 left-0 w-[40vw] h-[40vw] bg-indigo-500/5 rounded-full blur-[120px] pointer-events-none z-0" />
 
             {/* Sticky Cyber Header */}
             <header className="sticky top-0 w-full z-50 px-6 py-6 md:px-12 lg:px-20 flex items-center justify-between bg-[#07080B]/90 backdrop-blur-md border-b border-slate-800/80 shrink-0">
               <div className="text-2xl font-black text-white tracking-tighter">
                 {APP_CONFIG?.NAME || "Minto Foods"}
-                <span className="text-[#FA0272]">.</span>
+                <span className="text-[#008078]">.</span>
               </div>
               <button
                 onClick={() => setIsDeliveryOpen(false)}
-                className="group flex items-center gap-2 bg-slate-900 border border-slate-800 text-white px-5 py-2.5 rounded-full text-xs font-bold hover:bg-[#FA0272] hover:border-[#FA0272] transition-all duration-300 shadow-md hover:shadow-lg cursor-pointer"
+                className="group flex items-center gap-2 bg-slate-900 border border-slate-800 text-white px-5 py-2.5 rounded-full text-xs font-bold hover:bg-[#008078] hover:border-[#008078] transition-all duration-300 shadow-md hover:shadow-lg cursor-pointer"
               >
                 <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
                 Back to Home
@@ -1594,12 +1594,12 @@ export default function LandingPage() {
 
               {/* Cinematic Page Title - Cyber Centered HUD Accent */}
               <div className="max-w-4xl space-y-6 text-center mx-auto mb-4">
-                <span className="inline-flex items-center gap-2 text-[#FA0272] font-black tracking-widest uppercase text-xs bg-[#FA0272]/15 border border-[#FA0272]/30 px-4 py-2 rounded-full animate-pulse">
-                  <Bike className="w-4 h-4 text-[#FA0272]" /> Active Captain HUD Dashboard
+                <span className="inline-flex items-center gap-2 text-[#008078] font-black tracking-widest uppercase text-xs bg-[#008078]/15 border border-[#008078]/30 px-4 py-2 rounded-full animate-pulse">
+                  <Bike className="w-4 h-4 text-[#008078]" /> Active Captain HUD Dashboard
                 </span>
                 <h1 className="text-5xl md:text-7xl font-black leading-[1.05] tracking-tight text-white">
                   Drive on Your Terms. <br />
-                  <span className="text-transparent bg-clip-text bg-gradient-to-br from-[#FA0272] to-indigo-400 font-extrabold italic font-light">Earn More & Cash Out Faster.</span>
+                  <span className="text-transparent bg-clip-text bg-gradient-to-br from-[#008078] to-indigo-400 font-extrabold italic font-light">Earn More & Cash Out Faster.</span>
                 </h1>
                 <p className="text-xl text-slate-400 font-light leading-relaxed max-w-3xl mx-auto">
                   Join the elite squad of Minto Foods Captains. Secure the most competitive distance-based payout structure, absolute route clarity, weekly settlements, and <strong>keep 100% of your customer tips</strong>.
@@ -1613,7 +1613,7 @@ export default function LandingPage() {
                 <div className="absolute top-[-50%] right-[-10%] w-[350px] h-[350px] bg-indigo-500/10 rounded-full blur-[90px] pointer-events-none" />
 
                 <div className="flex-1 space-y-6 relative z-10">
-                  <div className="inline-block text-[10px] uppercase tracking-widest font-black text-[#FA0272] bg-[#FA0272]/10 border border-[#FA0272]/20 px-3 py-1.5 rounded-full">
+                  <div className="inline-block text-[10px] uppercase tracking-widest font-black text-[#008078] bg-[#008078]/10 border border-[#008078]/20 px-3 py-1.5 rounded-full">
                     Squad Expanding: Telangana Core Hubs
                   </div>
                   <h2 className="text-3xl md:text-4xl font-black leading-tight tracking-tight">Join the active delivery crew</h2>
@@ -1626,7 +1626,7 @@ export default function LandingPage() {
                       href="https://apps.apple.com/in/app/switcheats-captain/id6766778164"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex items-center justify-center gap-3 bg-white text-slate-950 hover:bg-[#FA0272] hover:text-white px-8 py-4 rounded-2xl font-bold transition-all duration-300 text-sm shadow-md cursor-pointer text-center"
+                      className="flex items-center justify-center gap-3 bg-white text-slate-950 hover:bg-[#008078] hover:text-white px-8 py-4 rounded-2xl font-bold transition-all duration-300 text-sm shadow-md cursor-pointer text-center"
                     >
                       <Apple className="w-5 h-5" /> iOS App Store
                     </a>
@@ -1634,7 +1634,7 @@ export default function LandingPage() {
                       href="https://play.google.com/store/apps/details?id=com.switcheats.delivery1"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex items-center justify-center gap-3 bg-slate-800 border border-slate-800 text-white hover:bg-[#FA0272] hover:border-[#FA0272] px-8 py-4 rounded-2xl font-bold transition-all duration-300 text-sm shadow-md cursor-pointer text-center"
+                      className="flex items-center justify-center gap-3 bg-slate-800 border border-slate-800 text-white hover:bg-[#008078] hover:border-[#008078] px-8 py-4 rounded-2xl font-bold transition-all duration-300 text-sm shadow-md cursor-pointer text-center"
                     >
                       <Play className="w-5 h-5" /> Android Play Store
                     </a>
@@ -1653,7 +1653,7 @@ export default function LandingPage() {
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
                         <span className="text-[9px] font-black uppercase tracking-wider text-slate-400">Captain On-Duty</span>
                       </div>
-                      <span className="text-[8px] text-[#FA0272] font-black tracking-widest bg-[#FA0272]/15 px-2 py-0.5 rounded border border-[#FA0272]/30">GPS Active</span>
+                      <span className="text-[8px] text-[#008078] font-black tracking-widest bg-[#008078]/15 px-2 py-0.5 rounded border border-[#008078]/30">GPS Active</span>
                     </div>
 
                     {/* Compass/GPS HUD Area */}
@@ -1670,7 +1670,7 @@ export default function LandingPage() {
                           <motion.path
                             d="M10,20 C40,5 60,35 90,20"
                             fill="none"
-                            stroke="#FA0272"
+                            stroke="#008078"
                             strokeWidth="2"
                             strokeDasharray="4 4"
                             animate={{ strokeDashoffset: [0, -20] }}
@@ -1679,7 +1679,7 @@ export default function LandingPage() {
                           {/* Point A */}
                           <circle cx="10" cy="20" r="3.5" fill="#4F46E5" />
                           {/* Point B */}
-                          <circle cx="90" cy="20" r="3.5" fill="#FA0272" className="animate-pulse" />
+                          <circle cx="90" cy="20" r="3.5" fill="#008078" className="animate-pulse" />
                         </svg>
                       </div>
 
@@ -1690,7 +1690,7 @@ export default function LandingPage() {
                     </div>
 
                     {/* Accept Request button */}
-                    <div className="bg-gradient-to-r from-[#FA0272] to-indigo-600 text-white text-[10px] font-black text-center py-2.5 rounded-xl uppercase tracking-wider shrink-0 cursor-pointer shadow-lg shadow-pink-500/20">
+                    <div className="bg-gradient-to-r from-[#008078] to-indigo-600 text-white text-[10px] font-black text-center py-2.5 rounded-xl uppercase tracking-wider shrink-0 cursor-pointer shadow-lg shadow-pink-500/20">
                       Deliver Order
                     </div>
                   </div>
@@ -1703,7 +1703,7 @@ export default function LandingPage() {
                 {/* Benefit 1 */}
                 <div className="group bg-slate-900/40 border border-slate-800/80 rounded-[2rem] p-8 lg:p-10 hover:shadow-2xl hover:shadow-pink-500/5 hover:border-pink-500/30 hover:-translate-y-1 transition-all duration-500 flex flex-col justify-between">
                   <div>
-                    <div className="w-14 h-14 rounded-2xl bg-[#FA0272]/10 border border-[#FA0272]/20 flex items-center justify-center text-[#FA0272] mb-6 group-hover:scale-110 transition-transform">
+                    <div className="w-14 h-14 rounded-2xl bg-[#008078]/10 border border-[#008078]/20 flex items-center justify-center text-[#008078] mb-6 group-hover:scale-110 transition-transform">
                       <Heart className="w-7 h-7" />
                     </div>
                     <h3 className="text-2xl font-black text-white mb-3 tracking-tight">Keep 100% Customer Tips</h3>
@@ -1712,7 +1712,7 @@ export default function LandingPage() {
                     </p>
                   </div>
                   <div className="mt-8 pt-6 border-t border-slate-800/60 flex items-center gap-3">
-                    <Zap className="w-4 h-4 text-[#FA0272]" />
+                    <Zap className="w-4 h-4 text-[#008078]" />
                     <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Respecting Captain Labor</span>
                   </div>
                 </div>
@@ -1720,7 +1720,7 @@ export default function LandingPage() {
                 {/* Benefit 2 */}
                 <div className="group bg-slate-900/40 border border-slate-800/80 rounded-[2rem] p-8 lg:p-10 hover:shadow-2xl hover:shadow-pink-500/5 hover:border-pink-500/30 hover:-translate-y-1 transition-all duration-500 flex flex-col justify-between">
                   <div>
-                    <div className="w-14 h-14 rounded-2xl bg-[#FA0272]/10 border border-[#FA0272]/20 flex items-center justify-center text-[#FA0272] mb-6 group-hover:scale-110 transition-transform">
+                    <div className="w-14 h-14 rounded-2xl bg-[#008078]/10 border border-[#008078]/20 flex items-center justify-center text-[#008078] mb-6 group-hover:scale-110 transition-transform">
                       <Clock className="w-7 h-7" />
                     </div>
                     <h3 className="text-2xl font-black text-white mb-3 tracking-tight">Absolute Schedule Freedom</h3>
@@ -1729,7 +1729,7 @@ export default function LandingPage() {
                     </p>
                   </div>
                   <div className="mt-8 pt-6 border-t border-slate-800/60 flex items-center gap-3">
-                    <ShieldCheck className="w-4 h-4 text-[#FA0272]" />
+                    <ShieldCheck className="w-4 h-4 text-[#008078]" />
                     <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Flexible Lifestyle First</span>
                   </div>
                 </div>
@@ -1737,7 +1737,7 @@ export default function LandingPage() {
                 {/* Benefit 3 */}
                 <div className="group bg-slate-900/40 border border-slate-800/80 rounded-[2rem] p-8 lg:p-10 hover:shadow-2xl hover:shadow-pink-500/5 hover:border-pink-500/30 hover:-translate-y-1 transition-all duration-500 flex flex-col justify-between">
                   <div>
-                    <div className="w-14 h-14 rounded-2xl bg-[#FA0272]/10 border border-[#FA0272]/20 flex items-center justify-center text-[#FA0272] mb-6 group-hover:scale-110 transition-transform">
+                    <div className="w-14 h-14 rounded-2xl bg-[#008078]/10 border border-[#008078]/20 flex items-center justify-center text-[#008078] mb-6 group-hover:scale-110 transition-transform">
                       <TrendingUp className="w-7 h-7" />
                     </div>
                     <h3 className="text-2xl font-black text-white mb-3 tracking-tight">Fast Weekly Wallet Payouts</h3>
@@ -1746,7 +1746,7 @@ export default function LandingPage() {
                     </p>
                   </div>
                   <div className="mt-8 pt-6 border-t border-slate-800/60 flex items-center gap-3">
-                    <Map className="w-4 h-4 text-[#FA0272]" />
+                    <Map className="w-4 h-4 text-[#008078]" />
                     <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Consistent Financial Flow</span>
                   </div>
                 </div>
@@ -1754,7 +1754,7 @@ export default function LandingPage() {
                 {/* Benefit 4 */}
                 <div className="group bg-slate-900/40 border border-slate-800/80 rounded-[2rem] p-8 lg:p-10 hover:shadow-2xl hover:shadow-pink-500/5 hover:border-pink-500/30 hover:-translate-y-1 transition-all duration-500 flex flex-col justify-between">
                   <div>
-                    <div className="w-14 h-14 rounded-2xl bg-[#FA0272]/10 border border-[#FA0272]/20 flex items-center justify-center text-[#FA0272] mb-6 group-hover:scale-110 transition-transform">
+                    <div className="w-14 h-14 rounded-2xl bg-[#008078]/10 border border-[#008078]/20 flex items-center justify-center text-[#008078] mb-6 group-hover:scale-110 transition-transform">
                       <Users className="w-7 h-7" />
                     </div>
                     <h3 className="text-2xl font-black text-white mb-3 tracking-tight">Dedicated Captain Care</h3>
@@ -1763,7 +1763,7 @@ export default function LandingPage() {
                     </p>
                   </div>
                   <div className="mt-8 pt-6 border-t border-slate-800/60 flex items-center gap-3">
-                    <Users className="w-4 h-4 text-[#FA0272]" />
+                    <Users className="w-4 h-4 text-[#008078]" />
                     <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Supported Every Mile</span>
                   </div>
                 </div>
@@ -1779,7 +1779,7 @@ export default function LandingPage() {
                 <div className="flex gap-4 mt-2">
                   <button
                     onClick={() => setIsDeliveryOpen(false)}
-                    className="bg-slate-900 hover:bg-[#FA0272] text-white border border-slate-800 hover:border-[#FA0272] px-8 py-4 rounded-full font-bold text-sm transition-all duration-300 shadow-md cursor-pointer"
+                    className="bg-slate-900 hover:bg-[#008078] text-white border border-slate-800 hover:border-[#008078] px-8 py-4 rounded-full font-bold text-sm transition-all duration-300 shadow-md cursor-pointer"
                   >
                     Return to Homepage
                   </button>

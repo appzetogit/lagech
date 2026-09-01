@@ -7,7 +7,7 @@ const platterImg = "https://images.unsplash.com/photo-1544025162-d76694265947?w=
 
 export default function FestBanner() {
   return (
-    <div className="relative overflow-hidden bg-[#FA0272] min-h-[340px] sm:min-h-[420px] isolate" style={{ perspective: "1500px" }}>
+    <div className="relative overflow-hidden bg-[#008078] min-h-[340px] sm:min-h-[420px] isolate" style={{ perspective: "1500px" }}>
       {/* Premium Mesh Gradient Background */}
       <div className="absolute inset-0 z-0 overflow-hidden">
         <div className="absolute top-[-10%] left-[-10%] w-[60%] h-[60%] bg-[#ff2e8c] rounded-full blur-[120px] animate-pulse opacity-80" />
@@ -88,7 +88,7 @@ export default function FestBanner() {
             <motion.div 
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.98 }}
-              className="flex items-center gap-3 px-6 py-3 bg-white text-[#FA0272] rounded-2xl shadow-xl cursor-pointer group transition-all"
+              className="flex items-center gap-3 px-6 py-3 bg-white text-[#008078] rounded-2xl shadow-xl cursor-pointer group transition-all"
             >
               <span className="text-sm font-black uppercase tracking-wider">UPTO 60% OFF</span>
               <ArrowRightCircle className="h-5 w-5 group-hover:translate-x-1 transition-transform" />

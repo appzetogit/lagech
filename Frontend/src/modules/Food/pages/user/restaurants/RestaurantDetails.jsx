@@ -2167,8 +2167,8 @@ function RestaurantDetailsContent() {
                 <Badge
                   className="text-white mb-1 flex items-center gap-1 px-2 py-1 border-0"
                   style={{
-                    backgroundColor: "var(--module-theme-color, #FA0272)",
-                    boxShadow: "0 4px 10px rgba(var(--module-theme-rgb, 250,2,114), 0.28)",
+                    backgroundColor: "var(--module-theme-color, #008078)",
+                    boxShadow: "0 4px 10px rgba(var(--module-theme-rgb, 0, 128, 120), 0.28)",
                   }}
                 >
                   <Star className="h-3 w-3 fill-white" />
@@ -2188,8 +2188,8 @@ function RestaurantDetailsContent() {
               <Badge
                 className={`${isRestaurantOffline ? "bg-rose-600" : ""} text-white border-0`}
                 style={!isRestaurantOffline ? {
-                  backgroundColor: "var(--module-theme-color, #FA0272)",
-                  boxShadow: "0 4px 10px rgba(var(--module-theme-rgb, 250,2,114), 0.25)",
+                  backgroundColor: "var(--module-theme-color, #008078)",
+                  boxShadow: "0 4px 10px rgba(var(--module-theme-rgb, 0, 128, 120), 0.25)",
                 } : undefined}
               >
                 {isRestaurantOffline ? "Offline" : "Open now"}
@@ -2210,8 +2210,8 @@ function RestaurantDetailsContent() {
           <button
             type="button"
             onClick={() => setShowOffersSheet(true)}
-            className="mx-3 sm:mx-4 md:mx-6 lg:mx-8 xl:mx-12 mt-3 block w-[calc(100%-1.5rem)] sm:w-[calc(100%-2rem)] rounded-2xl px-4 py-3 text-left shadow-[0_6px_20px_rgba(var(--module-theme-rgb,250,2,114),0.22)]"
-            style={{ backgroundColor: "var(--module-theme-color, #FA0272)" }}
+            className="mx-3 sm:mx-4 md:mx-6 lg:mx-8 xl:mx-12 mt-3 block w-[calc(100%-1.5rem)] sm:w-[calc(100%-2rem)] rounded-2xl px-4 py-3 text-left shadow-[0_6px_20px_rgba(var(--module-theme-rgb,0, 128, 120),0.22)]"
+            style={{ backgroundColor: "var(--module-theme-color, #008078)" }}
           >
             <div className="flex items-center gap-3">
               <div className="h-9 w-9 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
@@ -2336,8 +2336,8 @@ function RestaurantDetailsContent() {
                     : "h-9 min-w-[36px] px-3 rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#141414] text-[13px] font-semibold text-gray-600 dark:text-gray-300"
                 }`}
                 style={selectedMenuCategory === "all" ? {
-                  backgroundColor: "var(--module-theme-color, #FA0272)",
-                  boxShadow: "0 4px 12px rgba(var(--module-theme-rgb, 250,2,114), 0.25)",
+                  backgroundColor: "var(--module-theme-color, #008078)",
+                  boxShadow: "0 4px 12px rgba(var(--module-theme-rgb, 0, 128, 120), 0.25)",
                 } : undefined}
               >
                 All
@@ -2514,14 +2514,14 @@ function RestaurantDetailsContent() {
                               }
                             }}
                             className={`flex gap-4 p-4 relative cursor-pointer transition-all duration-500 ${highlightedDishId === item.id
-                                ? "bg-gradient-to-r from-pink-50/80 to-white dark:from-pink-950/20 dark:to-[#1a1a1a] border-l-4 border-l-[#FA0272] shadow-[0_20px_50px_-12px_rgba(250,2,114,0.5)] scale-[1.02] z-20 rounded-3xl"
+                                ? "bg-gradient-to-r from-pink-50/80 to-white dark:from-pink-950/20 dark:to-[#1a1a1a] border-l-4 border-l-[#008078] shadow-[0_20px_50px_-12px_rgba(0, 128, 120,0.5)] scale-[1.02] z-20 rounded-3xl"
                                 : "rounded-2xl border border-gray-100 dark:border-gray-800 bg-white dark:bg-[#141414] shadow-sm"
                             }`}
                             onClick={() => handleItemClick(item)}
                           >
                             {highlightedDishId === item.id && (
                               <div className="absolute -top-2 left-4 z-30">
-                                <span className="bg-[#FA0272] text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-lg animate-bounce uppercase tracking-wider">
+                                <span className="bg-[#008078] text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-lg animate-bounce uppercase tracking-wider">
                                   Selected
                                 </span>
                               </div>
@@ -2548,7 +2548,7 @@ function RestaurantDetailsContent() {
                               {isRecommendedItem(item) && (
                                 <div className="flex items-center gap-2 mt-1">
                                   <div className="h-1.5 w-16 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                                    <div className="h-full bg-[#FA0272] w-3/4"></div>
+                                    <div className="h-full bg-[#008078] w-3/4"></div>
                                   </div>
                                   <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">Highly reordered</span>
                                 </div>
@@ -2741,14 +2741,14 @@ function RestaurantDetailsContent() {
                                         }
                                       }}
                                       className={`flex gap-4 p-4 relative cursor-pointer transition-all duration-500 ${highlightedDishId === item.id
-                                        ? "bg-gradient-to-r from-pink-50/80 to-white dark:from-pink-950/20 dark:to-[#1a1a1a] border-l-4 border-l-[#FA0272] shadow-[0_20px_50px_-12px_rgba(250,2,114,0.5)] scale-[1.02] z-20 rounded-3xl"
+                                        ? "bg-gradient-to-r from-pink-50/80 to-white dark:from-pink-950/20 dark:to-[#1a1a1a] border-l-4 border-l-[#008078] shadow-[0_20px_50px_-12px_rgba(0, 128, 120,0.5)] scale-[1.02] z-20 rounded-3xl"
                                         : "rounded-2xl border border-gray-100 dark:border-gray-800 bg-white dark:bg-[#141414] shadow-sm"
                                     }`}
                                       onClick={() => handleItemClick(item)}
                                     >
                                       {highlightedDishId === item.id && (
                                         <div className="absolute -top-2 left-4 z-30">
-                                          <span className="bg-[#FA0272] text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-lg animate-bounce uppercase tracking-wider">
+                                          <span className="bg-[#008078] text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-lg animate-bounce uppercase tracking-wider">
                                             Selected
                                           </span>
                                         </div>
