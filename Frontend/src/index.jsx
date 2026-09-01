@@ -8,6 +8,31 @@ import { setupSmoothScroll } from './shared/utils/smoothScroll.js'
 
 const NATIVE_LAST_ROUTE_KEY = 'native_last_route'
 
+// ─── Stale-deploy recovery ────────────────────────────────────────────────────
+//
+// The admin router lazy-loads 116 route chunks, and every build gives them new
+// hashed filenames. A deploy replaces the directory, so a tab that was already
+// open asks for a chunk that no longer exists: the dynamic import rejects,
+// nothing catches it, and React unmounts the whole tree. The user sees the page
+// go blank on the next click, with no clue that the cause was a deploy.
+//
+// Reloading picks up the current index.html and its current chunks. The
+// sessionStorage flag is the important half -- without it, a chunk that fails
+// for any OTHER reason (offline, a genuine 500) reloads into the same failure
+// forever. One attempt per session, then let the error surface.
+const RELOAD_FLAG = 'chunk_reload_attempted'
+
+window.addEventListener('vite:preloadError', (event) => {
+  if (sessionStorage.getItem(RELOAD_FLAG)) return   // already tried; let it fail visibly
+  event.preventDefault()
+  sessionStorage.setItem(RELOAD_FLAG, '1')
+  window.location.reload()
+})
+
+// A successful load means the app is on the current build, so the next stale
+// deploy is allowed its own single retry.
+window.addEventListener('load', () => sessionStorage.removeItem(RELOAD_FLAG))
+
 // ─── Quick-spicy Food Module Initialization ───────────────────────────────────
 
 // Load food module business settings (favicon, title) — non-critical
