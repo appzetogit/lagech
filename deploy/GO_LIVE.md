@@ -206,6 +206,29 @@ backend is down, nginx answers with its own 502 page, and that page carries no
 actual problem is that nothing is running -- check `/health` before touching the
 CORS list.
 
+## 4c. Uploads (S3)
+
+Media goes to the `minto-media` bucket in ap-south-1, written by the EC2
+instance role -- no access keys anywhere. Set in `Backend/.env`:
+
+    UPLOAD_DRIVER=s3
+    UPLOAD_S3_BUCKET=minto-media
+    UPLOAD_S3_REGION=ap-south-1
+    UPLOAD_BASE_URL=https://minto-media.s3.ap-south-1.amazonaws.com
+
+`UPLOAD_DRIVER=local` switches back to disk; the code path is still there and
+nginx still serves `/uploads/` for anything written before the move.
+
+Two separate AWS settings are needed for customers to see the images, and
+turning off only the first leaves you with a 403 that looks like a broken
+policy: **Block Public Access off** removes the veto, and a **bucket policy**
+granting `s3:GetObject` on `arn:aws:s3:::minto-media/*` is what actually
+grants the read. Neither works alone.
+
+Worth doing later: CloudFront in front of the bucket, on `cdn.mintofood.com`.
+Cheaper egress and edge caching, and it needs no application change -- only a
+different `UPLOAD_BASE_URL`.
+
 ## 5. Start
 
     cd /var/www
