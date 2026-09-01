@@ -14,7 +14,7 @@ import { Input } from "@food/components/ui/input"
 import { Label } from "@food/components/ui/label"
 import AdminAuthHero from "@food/components/admin/auth/AdminAuthHero"
 import { Eye, EyeOff, Shield, Loader2 } from "lucide-react"
-import quickSpicyLogo from "@food/assets/minto-logo.png"
+import mintoLogo from "@food/assets/minto-logo.png"
 
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
@@ -34,7 +34,7 @@ export default function AdminLogin() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState("")
   const [successMessage, setSuccessMessage] = useState("")
-  const [logoUrl, setLogoUrl] = useState(quickSpicyLogo)
+  const [logoUrl, setLogoUrl] = useState(mintoLogo)
   const [themeColor, setThemeColor] = useState(THEME)
   const submittingRef = useRef(false)
 
@@ -184,8 +184,8 @@ export default function AdminLogin() {
                     className="h-full w-full scale-[1.65] object-contain"
                     loading="lazy"
                     onError={(e) => {
-                      if (e.target.src !== quickSpicyLogo) {
-                        e.target.src = quickSpicyLogo
+                      if (e.target.src !== mintoLogo) {
+                        e.target.src = mintoLogo
                       }
                     }}
                   />

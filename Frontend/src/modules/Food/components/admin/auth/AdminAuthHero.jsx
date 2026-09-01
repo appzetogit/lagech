@@ -1,7 +1,7 @@
 import { motion, useReducedMotion } from "framer-motion"
 import { Shield, BarChart3 } from "lucide-react"
 import { useCompanyName } from "@food/hooks/useCompanyName"
-import quickSpicyLogo from "@food/assets/minto-logo.png"
+import mintoLogo from "@food/assets/minto-logo.png"
 
 export default function AdminAuthHero({ themeColor, logoUrl }) {
   const companyName = useCompanyName()
@@ -47,8 +47,8 @@ export default function AdminAuthHero({ themeColor, logoUrl }) {
               className="h-full w-full scale-[1.65] object-contain"
               loading="lazy"
               onError={(e) => {
-                if (e.target.src !== quickSpicyLogo) {
-                  e.target.src = quickSpicyLogo
+                if (e.target.src !== mintoLogo) {
+                  e.target.src = mintoLogo
                 }
               }}
             />
