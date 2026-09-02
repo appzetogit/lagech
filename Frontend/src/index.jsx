@@ -20,18 +20,20 @@ const NATIVE_LAST_ROUTE_KEY = 'native_last_route'
 // sessionStorage flag is the important half -- without it, a chunk that fails
 // for any OTHER reason (offline, a genuine 500) reloads into the same failure
 // forever. One attempt per session, then let the error surface.
-const RELOAD_FLAG = 'chunk_reload_attempted'
+const RELOAD_FLAG = 'chunk_reload_at'
+const RELOAD_COOLDOWN_MS = 15000
 
 window.addEventListener('vite:preloadError', (event) => {
-  if (sessionStorage.getItem(RELOAD_FLAG)) return   // already tried; let it fail visibly
+  // Time-based, not once-per-session. A single flag meant the SECOND stale
+  // chunk in a session was never retried -- it fell through to an uncaught
+  // error and a white page. A cooldown still refuses to loop on a chunk that
+  // is failing for some reason reloading cannot fix.
+  const last = Number(sessionStorage.getItem(RELOAD_FLAG) || 0)
+  if (Date.now() - last < RELOAD_COOLDOWN_MS) return   // let the boundary show it
   event.preventDefault()
-  sessionStorage.setItem(RELOAD_FLAG, '1')
+  sessionStorage.setItem(RELOAD_FLAG, String(Date.now()))
   window.location.reload()
 })
-
-// A successful load means the app is on the current build, so the next stale
-// deploy is allowed its own single retry.
-window.addEventListener('load', () => sessionStorage.removeItem(RELOAD_FLAG))
 
 // ─── Quick-spicy Food Module Initialization ───────────────────────────────────
 
@@ -172,12 +174,15 @@ window.addEventListener('unhandledrejection', (event) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { AppProviders } from './app/providers.jsx'
+import AppErrorBoundary from './shared/components/AppErrorBoundary.jsx'
 
 const rootElement = document.getElementById('root')
 if (!rootElement) throw new Error('Root element not found')
 
 createRoot(rootElement).render(
-  <AppProviders>
-    <App />
-  </AppProviders>
+  <AppErrorBoundary>
+    <AppProviders>
+      <App />
+    </AppProviders>
+  </AppErrorBoundary>
 )
