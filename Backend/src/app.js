@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import mongoSanitize from 'mongo-sanitize';
 import xssClean from 'xss-clean';
 import routes from './routes/index.js';
+import { signMediaResponses } from './middleware/signMedia.js';
 import shareLinksRoutes from './modules/food/public/shareLinks.routes.js';
 import errorHandler from './middleware/errorHandler.js';
 import { apiRateLimiter } from './middleware/rateLimit.js';
@@ -85,6 +86,10 @@ app.use((req, _res, next) => {
     next();
 });
 app.use(xssClean());
+
+// Signs S3 media urls on the way out. Before the routes so it wraps res.json
+// for every handler, including the ones that never touch sendResponse.
+app.use('/api', signMediaResponses);
 
 // Global rate limiting for API routes
 app.use('/api', apiRateLimiter);
