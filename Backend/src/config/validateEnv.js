@@ -53,11 +53,18 @@ export const findConfigProblems = (cfg = config) => {
     // USE_DEFAULT_OTP fixes every OTP at 1234 and returns it in the login
     // response, which hands any phone number to anyone who asks for it. It is a
     // convenience for local development and a full authentication bypass in
-    // production, so production refuses to start rather than warning about it.
-    if (isProduction && cfg.useDefaultOtp) {
+    // production.
+    //
+    // It stays a hard failure unless ALLOW_DEFAULT_OTP_IN_PRODUCTION is also
+    // set. One variable is too easy to carry over from a dev .env by accident;
+    // two, where the second says nothing except "yes, in production, on
+    // purpose", is not. With the acknowledgement present it drops to a warning
+    // on every boot -- see findConfigWarnings.
+    if (isProduction && cfg.useDefaultOtp && process.env.ALLOW_DEFAULT_OTP_IN_PRODUCTION !== 'true') {
         problems.push(
             'USE_DEFAULT_OTP is true in production. Every OTP would be 1234 and returned'
-            + ' in the login response, letting anyone sign in as any phone number.',
+            + ' in the login response, letting anyone sign in as any phone number.'
+            + ' Set ALLOW_DEFAULT_OTP_IN_PRODUCTION=true to accept that deliberately.',
         );
     }
 
@@ -80,6 +87,17 @@ export const findConfigProblems = (cfg = config) => {
  */
 export const findConfigWarnings = (cfg = config) => {
     const warnings = [];
+
+    // Deliberately enabled, and deliberately noisy: this is an authentication
+    // bypass, and the only thing standing between it and a forgotten .env line
+    // is somebody noticing it in the logs.
+    if (cfg.useDefaultOtp && process.env.NODE_ENV === 'production') {
+        warnings.push(
+            'USE_DEFAULT_OTP is ON in production. Every OTP is 1234 and is returned in the'
+            + ' login response: anyone can sign in as any phone number, including restaurant'
+            + ' owners and delivery riders. Testing only -- remove before real customers.',
+        );
+    }
     if (cfg.nodeEnv === 'production' && !(cfg.corsOrigins || []).length) {
         warnings.push(
             'CORS_ORIGINS is not set: any website can call the API and open a socket from a'
