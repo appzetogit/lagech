@@ -175,6 +175,11 @@ window.addEventListener('unhandledrejection', (event) => {
 
 import { AppProviders } from './app/providers.jsx'
 import AppErrorBoundary from './shared/components/AppErrorBoundary.jsx'
+import { installFormValidationFeedback } from './shared/utils/formValidationFeedback.js'
+
+// One listener for the whole app: forms that rely on `required` get a styled,
+// visible message instead of the browser's easily-missed native bubble.
+installFormValidationFeedback()
 
 const rootElement = document.getElementById('root')
 if (!rootElement) throw new Error('Root element not found')

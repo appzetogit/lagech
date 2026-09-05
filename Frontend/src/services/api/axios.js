@@ -7,6 +7,7 @@
  */
 
 import axios from "axios";
+import { toast } from "sonner";
 
 // Prefer explicit env. If not set, use same-origin (works with a Vite proxy).
 // This avoids hardcoding ports like 5000 that may conflict with local setups.
@@ -360,6 +361,52 @@ apiClient.interceptors.request.use(
   (err) => Promise.reject(err)
 );
 
+/**
+ * A message worth showing a person, from whatever shape the failure arrived in.
+ *
+ * Roughly two thirds of the catch blocks in the admin panel only log, so a
+ * failed save used to leave the screen looking as though nothing had happened.
+ * Surfacing it here covers every call at once rather than editing 200 of them.
+ */
+const readableApiError = (err) => {
+  if (err?.rateLimitMessage) return err.rateLimitMessage;
+
+  const data = err?.response?.data;
+  const fromBody =
+    data?.message ||
+    data?.error ||
+    (Array.isArray(data?.errors) ? data.errors[0]?.message || data.errors[0] : null);
+  if (typeof fromBody === "string" && fromBody.trim()) return fromBody.trim();
+
+  const status = err?.response?.status;
+  if (status === 401) return "Your session has expired. Please sign in again.";
+  if (status === 403) return "You do not have permission to do that.";
+  if (status === 404) return "That item no longer exists.";
+  if (status === 413) return "That file is too large.";
+  if (status >= 500) return "The server had a problem completing that. Please try again.";
+
+  if (err?.code === "ECONNABORTED") return "That request timed out. Please try again.";
+  if (err?.message === "Network Error") return "Cannot reach the server. Check your connection.";
+  return "Something went wrong. Please try again.";
+};
+
+/**
+ * One toast per distinct message. Call sites that already show their own error
+ * pass the same text, and sonner treats a repeated id as the same toast rather
+ * than stacking a second one, so nothing is announced twice.
+ */
+const notifyApiError = (err) => {
+  if (err?.config?.suppressErrorToast) return;
+  const message = readableApiError(err);
+  err.userMessage = message;
+  const id = `api-error-${message.slice(0, 60).replace(/\s+/g, "-").toLowerCase()}`;
+  try {
+    toast.error(message, { id, duration: 5000 });
+  } catch (_) {
+    // Toasts are a nicety; never let one break the request path.
+  }
+};
+
 apiClient.interceptors.response.use(
   (response) => response,
   async (err) => {
@@ -372,15 +419,20 @@ apiClient.interceptors.response.use(
       err.rateLimitMessage = retryAfter
         ? `${message} (retry in ~${retryAfter}s)`
         : message;
+      notifyApiError(err);
       return Promise.reject(err);
     }
     if (err?.response?.status !== 401 || !original || original._retry) {
+      // A 401 that has already been retried means the refresh did not help, so
+      // it belongs here too -- the person needs to know they are signed out.
+      notifyApiError(err);
       return Promise.reject(err);
     }
     const module = original.contextModule || getModuleFromUrl(original.url);
     const refreshToken = getRefreshToken(module);
     if (!refreshToken) {
       clearModuleAuth(module);
+      notifyApiError(err);
       return Promise.reject(err);
     }
 
