@@ -494,13 +494,6 @@ export default function Cart() {
     [deliveryInstructionMode, selectedDeliveryInstruction, customDeliveryInstruction],
   )
 
-  // Cash on Delivery has been removed; coerce any stale selection to online payment.
-  useEffect(() => {
-    if (selectedPaymentMethod === "cash") {
-      setSelectedPaymentMethod("razorpay")
-    }
-  }, [selectedPaymentMethod])
-
   useEffect(() => {
     const timer = setInterval(() => setAvailabilityTick(Date.now()), 60000)
     return () => clearInterval(timer)
@@ -1510,7 +1503,11 @@ export default function Cart() {
   const otherSavings = Math.max(0, savings - itemDiscountAmount)
   const compareItemTotal = getCartCompareItemTotal(cart)
   const selectedPaymentLabel =
-    selectedPaymentMethod === "wallet" ? "Wallet" : "Online Payment"
+    selectedPaymentMethod === "wallet"
+      ? "Wallet"
+      : selectedPaymentMethod === "cash"
+        ? "Cash on Delivery"
+        : "Online Payment"
 
   const headerDeliveryTime = deliveryMode === "quick" ? "20-25 mins" : (restaurantData?.estimatedDeliveryTime || "35-40 mins")
   const basicDeliveryTime = restaurantData?.estimatedDeliveryTime || "35-40 mins"
@@ -2272,6 +2269,21 @@ export default function Cart() {
         } catch (error) {
           debugError("Error refreshing wallet balance:", error)
         }
+        return
+      }
+
+      // Cash on delivery: the backend has already recorded the order as
+      // cod_pending and there is nothing to collect now, so it finishes here.
+      // Without this it falls through to the Razorpay check below and a
+      // perfectly good order reports "payment gateway is not configured".
+      if (selectedPaymentMethod === "cash") {
+        toast.success("Order placed. Pay the rider on delivery.")
+        setPlacedOrderId(order?._id || order?.orderId || order?.id || null)
+        setShowOrderSuccess(true)
+        window.dispatchEvent(new CustomEvent('order-placed', { detail: { order } }))
+        clearCart()
+        resetCartPreferences()
+        setIsPlacingOrder(false)
         return
       }
 
@@ -3172,7 +3184,9 @@ export default function Cart() {
               <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
                 {selectedPaymentMethod === "wallet"
                   ? `Balance ${RUPEE_SYMBOL}${walletBalance.toFixed(0)}`
-                  : "UPI, Cards, Netbanking"}
+                  : selectedPaymentMethod === "cash"
+                    ? "Pay the rider when your order arrives"
+                    : "UPI, Cards, Netbanking"}
               </p>
             </button>
             <button
@@ -3782,6 +3796,14 @@ export default function Cart() {
                           color: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-400',
                           selectedColor: 'bg-emerald-500 text-white',
                           badge: 'SECURE'
+                        },
+                        {
+                          id: 'cash',
+                          name: 'Cash on Delivery',
+                          description: 'Pay the rider when your order arrives',
+                          icon: <Banknote className="w-5 h-5" />,
+                          color: 'bg-amber-50 text-amber-600 dark:bg-amber-900/40 dark:text-amber-400',
+                          selectedColor: 'bg-amber-500 text-white',
                         },
                         {
                           id: 'wallet',
