@@ -569,13 +569,19 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
           availableResponse?.data?.data ||
           availableResponse?.data ||
           {};
-        const availableOrders = Array.isArray(availablePayload?.docs)
-          ? availablePayload.docs
-          : Array.isArray(availablePayload?.items)
-            ? availablePayload.items
-            : Array.isArray(availablePayload)
-              ? availablePayload
-              : [];
+        // The list endpoint answers { data: { data: [...], meta } }, so the rows
+        // live under `data`. Without that key here the fallback found nothing and
+        // silently returned [] -- a rider whose socket offer was missed sat on
+        // "Finding orders near you" while orders were waiting for them.
+        const availableOrders = Array.isArray(availablePayload?.data)
+          ? availablePayload.data
+          : Array.isArray(availablePayload?.docs)
+            ? availablePayload.docs
+            : Array.isArray(availablePayload?.items)
+              ? availablePayload.items
+              : Array.isArray(availablePayload)
+                ? availablePayload
+                : [];
 
         const nextIncomingOrder = availableOrders.find((order) => {
           const dispatchStatus = String(order?.dispatch?.status || '').toLowerCase();
