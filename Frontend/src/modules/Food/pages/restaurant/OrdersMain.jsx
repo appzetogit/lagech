@@ -1330,13 +1330,23 @@ export default function OrdersMain() {
       stopRestaurantAlert(matching);
       clearNewOrder(matching);
 
+      // The socket event carries the database id in `orderId`, so use the
+      // queued order's own number for anything shown to a person -- FOD-8690492903
+      // means something to them, c22980cf2891d2ee33e161d4 does not.
+      const displayNumber =
+        matching.orderId || matching.order_id || orderId || orderMongoId || "";
+
       if (status?.includes("cancelled") || status?.includes("rejected")) {
-        toast.info(`Order #${orderId || ""} was cancelled/rejected`, {
-          description: "Request has been removed.",
+        toast.info(`Order #${displayNumber} was cancelled`, {
+          description: "It has been removed from your queue.",
           duration: 5000,
         });
       } else if (status === "confirmed" || status === "preparing") {
-        toast.success(`Order #${orderId || ""} was accepted by Admin`, {
+        // This fires whenever the order was handled somewhere other than this
+        // screen -- another device, another staff member, or an admin. Saying
+        // "by Admin" named one of those and was usually wrong.
+        toast.success(`Order #${displayNumber} was accepted`, {
+          description: "Handled from another device or by an admin.",
           duration: 5000,
         });
       }
