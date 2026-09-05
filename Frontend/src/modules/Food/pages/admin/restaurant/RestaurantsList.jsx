@@ -11,6 +11,7 @@ import { getGoogleMapsApiKey } from "@food/utils/googleMapsApiKey"
 import locationIcon from "@food/assets/Dashboard-icons/image1.png"
 import restaurantIcon from "@food/assets/Dashboard-icons/image2.png"
 import inactiveIcon from "@food/assets/Dashboard-icons/image3.png"
+import { zoneLabel } from "@food/utils/entityLabels"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -1473,7 +1474,7 @@ export default function RestaurantsList() {
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <span className="text-sm text-slate-700">{restaurant.zone}</span>
+                          <span className="text-sm text-slate-700">{zoneLabel(restaurant.zone)}</span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex items-center gap-1.5">

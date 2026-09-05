@@ -22,6 +22,35 @@ export default class AppErrorBoundary extends Component {
         return { error }
     }
 
+    componentDidMount() {
+        // Without this the boundary is a one-way door: once it catches, it stays
+        // caught for the rest of the session and every subsequent page shows the
+        // error screen even when that page is perfectly fine. Found by sweeping
+        // the admin panel -- one broken route made the next seventeen look broken.
+        //
+        // react-router navigates with pushState, which fires no event, so the
+        // history methods are patched once to emit one.
+        if (!window.__navEventsPatched) {
+            window.__navEventsPatched = true
+            for (const name of ['pushState', 'replaceState']) {
+                const original = history[name]
+                history[name] = function patched(...args) {
+                    const result = original.apply(this, args)
+                    window.dispatchEvent(new Event('app:navigation'))
+                    return result
+                }
+            }
+        }
+        this.reset = () => this.setState((s) => (s.error ? { error: null } : s))
+        window.addEventListener('popstate', this.reset)
+        window.addEventListener('app:navigation', this.reset)
+    }
+
+    componentWillUnmount() {
+        window.removeEventListener('popstate', this.reset)
+        window.removeEventListener('app:navigation', this.reset)
+    }
+
     componentDidCatch(error, info) {
         // Left as console output on purpose: there is no error reporting service
         // wired up yet, and losing the stack entirely is worse than a log.

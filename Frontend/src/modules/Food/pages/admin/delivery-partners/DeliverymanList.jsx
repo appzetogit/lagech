@@ -4,6 +4,7 @@ import { adminAPI } from "@food/api"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
 import { toast } from "sonner"
+import { zoneLabel } from "@food/utils/entityLabels"
 const debugError = () => {}
 
 
@@ -711,7 +712,7 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
                         )}
                         {visibleColumns.zone && (
                           <td className="px-6 py-4 whitespace-nowrap">
-                            <span className="text-sm text-slate-700">{dm.zone}</span>
+                            <span className="text-sm text-slate-700">{zoneLabel(dm.zone)}</span>
                           </td>
                         )}
                         {visibleColumns.totalOrders && (

@@ -1,5 +1,6 @@
 import { Eye } from "lucide-react"
 import {
+import { restaurantLabel } from "@food/utils/entityLabels"
   Dialog,
   DialogContent,
   DialogHeader,
@@ -52,7 +53,7 @@ export default function ViewSubscriptionDialog({ isOpen, onOpenChange, order }) 
               </div>
               <div className="space-y-1">
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Restaurant</p>
-                <p className="text-sm font-medium text-slate-900">{order.restaurant}</p>
+                <p className="text-sm font-medium text-slate-900">{restaurantLabel(order.restaurant)}</p>
               </div>
               <div className="space-y-1">
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</p>

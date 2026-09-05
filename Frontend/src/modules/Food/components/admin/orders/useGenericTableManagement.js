@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react"
 import { exportToExcel, exportToPDF } from "./ordersExportUtils"
+import { restaurantLabel } from "@food/utils/entityLabels"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -97,7 +98,7 @@ export function useGenericTableManagement(data, title, searchFields = []) {
       
       const customerName = order.customerName || order.userName || sourceOrder.customerName || sourceOrder.userName || sourceOrder.userId?.name || 'N/A'
       const customerPhone = order.customerPhone || order.userNumber || sourceOrder.customerPhone || sourceOrder.userNumber || sourceOrder.userId?.phone || 'N/A'
-      const restaurantName = order.restaurant || order.restaurantName || sourceOrder.restaurantName || sourceOrder.restaurantId?.restaurantName || 'N/A'
+      const restaurantName = restaurantLabel(order.restaurant) || order.restaurantName || sourceOrder.restaurantName || sourceOrder.restaurantId?.restaurantName || 'N/A'
       const orderId = order.orderId || sourceOrder.orderId || sourceOrder._id || 'N/A'
       const items = sourceOrder.cart?.items || sourceOrder.items || []
       const totalAmount = Number(order.totalAmount || pricing.total || sourceOrder.totalAmount || 0) || 0

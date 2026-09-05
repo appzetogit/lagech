@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { ChevronRight, X } from "lucide-react";
 import { motion } from "framer-motion";
 import { getOrderKey, getOrderStatusText } from "@food/hooks/useActiveOrderTracking";
+import { restaurantLabel } from "@food/utils/entityLabels"
 
 const CookingAnimation = memo(() => (
   <div className="relative w-10 h-10 flex items-center justify-center rounded-xl bg-orange-50 border border-orange-100 overflow-visible shadow-[0_4px_12px_rgba(235,89,14,0.12)] shrink-0">
@@ -33,7 +34,7 @@ function OrderTrackingRowInner({ order, timeRemaining, onDismiss, compact = fals
   if (!order) return null;
 
   const orderId = getOrderKey(order);
-  const restaurantName = order.restaurant || order.restaurantName || "Restaurant";
+  const restaurantName = restaurantLabel(order.restaurant) || order.restaurantName || "Restaurant";
   const statusText = getOrderStatusText(order);
   const themeColor = "var(--module-theme-color, #EB590E)";
 

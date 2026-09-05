@@ -7,6 +7,7 @@ import OrderDetectDeliveryTable from "@food/components/admin/orders/OrderDetectD
 import ViewOrderDetectDeliveryDialog from "@food/components/admin/orders/ViewOrderDetectDeliveryDialog"
 import SettingsDialog from "@food/components/admin/orders/SettingsDialog"
 import { useGenericTableManagement } from "@food/components/admin/orders/useGenericTableManagement"
+import { restaurantLabel } from "@food/utils/entityLabels"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -249,7 +250,7 @@ const transformOrder = (order, index) => {
     orderId: order.orderId,
     userName: order.customerName || order.userName || user?.name || 'Unknown',
     userNumber: order.customerPhone || order.userNumber || user?.phone || order.deliveryAddress?.phone || 'N/A',
-    restaurantName: order.restaurantName || order.restaurant || restaurant?.restaurantName || 'Unknown Restaurant',
+    restaurantName: order.restaurantName || restaurantLabel(order.restaurant) || restaurant?.restaurantName || 'Unknown Restaurant',
     deliveryBoyName,
     deliveryBoyNumber,
     status: displayStatus,

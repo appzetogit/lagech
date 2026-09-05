@@ -1,3 +1,4 @@
+import { zoneLabel } from "@food/utils/entityLabels"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -98,7 +99,7 @@ export const exportJoinRequestsToPDF = (requests, filename = "join_requests") =>
           request.name || 'N/A',
           request.email || 'N/A',
           request.phone || 'N/A',
-          request.zone || 'N/A',
+          zoneLabel(request.zone, 'N/A'),
           request.jobType || 'N/A',
           request.vehicleType || 'N/A',
           request.status || 'N/A'

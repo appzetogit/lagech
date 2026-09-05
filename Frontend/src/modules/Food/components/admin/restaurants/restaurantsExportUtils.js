@@ -1,3 +1,4 @@
+import { zoneLabel } from "@food/utils/entityLabels"
 // Export utility functions for restaurants
 export const exportRestaurantsToExcel = (restaurants, filename = "restaurants") => {
   const headers = [
@@ -18,7 +19,7 @@ export const exportRestaurantsToExcel = (restaurants, filename = "restaurants") 
     restaurant.name || "N/A",
     restaurant.ownerName || "N/A",
     restaurant.ownerPhone || "N/A",
-    restaurant.zone || "N/A",
+    zoneLabel(restaurant.zone, "N/A"),
     restaurant.cuisine || "N/A",
     restaurant.isActive ? "Active" : "Inactive",
     restaurant.rating || 0
@@ -59,7 +60,7 @@ export const exportRestaurantsToPDF = (restaurants, filename = "restaurants") =>
     restaurant.name || "N/A",
     restaurant.ownerName || "N/A",
     restaurant.ownerPhone || "N/A",
-    restaurant.zone || "N/A",
+    zoneLabel(restaurant.zone, "N/A"),
     restaurant.cuisine || "N/A",
     restaurant.isActive ? "Active" : "Inactive",
     restaurant.rating || 0

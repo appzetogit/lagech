@@ -1,3 +1,4 @@
+import { restaurantLabel } from "@food/utils/entityLabels"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -127,7 +128,7 @@ export const exportToExcel = (orders, filename = "orders") => {
       `${order.date || ''}${order.time ? `, ${order.time}` : ""}`,
       order.customerName || 'N/A',
       order.customerPhone || 'N/A',
-      order.restaurant || 'N/A',
+      restaurantLabel(order.restaurant, 'N/A'),
       order.total || `Rs. ${(order.totalAmount || 0).toFixed(2)}`,
       order.paymentStatus === 'cod_pending' ? 'Cash on Delivery' : (order.paymentStatus || 'N/A'),
       order.orderStatus || 'N/A',
@@ -256,7 +257,7 @@ export const exportToPDF = async (orders, filename = "orders") => {
         order.subscriptionId || 'N/A',
         order.orderType || 'N/A',
         order.duration || 'N/A',
-        order.restaurant || 'N/A',
+        restaurantLabel(order.restaurant, 'N/A'),
         order.customerName || 'N/A',
         order.customerPhone || 'N/A',
         order.status || 'N/A',
@@ -301,7 +302,7 @@ export const exportToPDF = async (orders, filename = "orders") => {
           `${order.date || ''}${order.time ? `, ${order.time}` : ""}` || 'N/A',
           order.customerName || 'N/A',
           order.customerPhone || 'N/A',
-          order.restaurant || 'N/A',
+          restaurantLabel(order.restaurant, 'N/A'),
           amount ? `Rs. ${Number(amount).toFixed(2)}` : 'N/A',
           order.paymentStatus === 'cod_pending' ? 'Cash on Delivery' : (order.paymentStatus || 'N/A'),
           order.orderStatus || 'N/A',

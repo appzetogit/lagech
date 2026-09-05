@@ -1,3 +1,4 @@
+import { restaurantLabel } from "@food/utils/entityLabels"
 // Export utility functions for reports
 export const exportReportsToCSV = (data, headers, filename = "report") => {
   const rows = data.map((item, index) => {
@@ -251,7 +252,7 @@ export const exportTransactionReportToPDF = (transactions, filename = "transacti
             <tr>
               <td>${index + 1}</td>
               <td>${transaction.orderId}</td>
-              <td>${transaction.restaurant}</td>
+              <td>${restaurantLabel(transaction.restaurant)}</td>
               <td>${transaction.customerName}</td>
               <td>₹${transaction.totalItemAmount.toFixed(2)}</td>
               <td>₹${transaction.couponDiscount.toFixed(2)}</td>

@@ -3,6 +3,7 @@ import { Search, Filter, Eye, Check, X, Package, ArrowUpDown, FileText, FileSpre
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
+import { zoneLabel } from "@food/utils/entityLabels"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -422,7 +423,7 @@ export default function JoinRequest() {
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <span className="text-sm text-slate-700">{request.zone}</span>
+                          <span className="text-sm text-slate-700">{zoneLabel(request.zone)}</span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span className="text-sm text-slate-700">{request.vehicleType}</span>

@@ -1,3 +1,4 @@
+import { zoneLabel } from "@food/utils/entityLabels"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -101,7 +102,7 @@ export const exportDeliverymenToPDF = (deliverymen, filename = "deliverymen") =>
           dm.name || 'N/A',
           dm.phone || 'N/A',
           dm.email || 'N/A',
-          dm.zone || 'N/A',
+          zoneLabel(dm.zone, 'N/A'),
           dm.totalOrders || 0,
           dm.remainingCashLimit || 0,
           dm.cashInHand || 0,

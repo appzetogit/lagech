@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react"
 import { Eye, Printer, ArrowUpDown } from "lucide-react"
+import { restaurantLabel } from "@food/utils/entityLabels"
 
 const getStatusColor = (status) => {
   if (status === "Expired") return "bg-blue-100 text-blue-700"
@@ -136,7 +137,7 @@ export default function SubscriptionOrdersTable({ orders, visibleColumns, onView
                 )}
                 {visibleColumns.restaurant && (
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <span className="text-sm font-medium text-slate-700">{order.restaurant}</span>
+                    <span className="text-sm font-medium text-slate-700">{restaurantLabel(order.restaurant)}</span>
                   </td>
                 )}
                 {visibleColumns.customer && (

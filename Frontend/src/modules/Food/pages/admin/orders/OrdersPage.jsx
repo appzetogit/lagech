@@ -700,8 +700,15 @@ export default function OrdersPage({ statusKey = "all" }) {
 
       const customerName = order.customerName || order.userId?.name || "N/A"
       const customerPhone = order.customerPhone || order.userId?.phone || "N/A"
+      // order.restaurant is the populated relation, an object. Under Mongo this
+      // field came back as a plain string, so the || chain below took it as-is
+      // and the table rendered it into a <span> -- React error #31, which took
+      // down every order page. Take the name out of whichever shape arrives.
+      const restaurantSource = order.restaurant
       const restaurant =
-        order.restaurant ||
+        (typeof restaurantSource === "string"
+          ? restaurantSource
+          : restaurantSource?.restaurantName || restaurantSource?.name) ||
         order.restaurantName ||
         order.restaurantId?.restaurantName ||
         ""

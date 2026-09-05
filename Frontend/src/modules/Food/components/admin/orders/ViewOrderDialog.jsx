@@ -12,6 +12,7 @@ import { getTimelineStatusLabel, getTimelineRoleLabel } from "@food/utils/orderS
 import { formatDeliveryFeeBreakdownSubtext, getDeliveryFeeTotal, resolveDeliveryFeeGst } from "@food/utils/deliveryFeeDisplay"
 import { getCartCompareItemTotal, getLineCompareUnitPrice } from "@food/utils/foodVariants"
 import { DualMoney } from "@food/components/user/FoodPriceDisplay"
+import { restaurantLabel } from "@food/utils/entityLabels"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -333,7 +334,7 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
               <h3 className="text-sm font-semibold text-slate-700 mb-4">Restaurant Information</h3>
               <div className="space-y-1">
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Restaurant Name</p>
-                <p className="text-sm font-medium text-slate-900">{order.restaurant}</p>
+                <p className="text-sm font-medium text-slate-900">{restaurantLabel(order.restaurant)}</p>
               </div>
             </div>
           )}

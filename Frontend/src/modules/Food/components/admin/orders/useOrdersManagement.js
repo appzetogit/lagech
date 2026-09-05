@@ -2,6 +2,7 @@ import { useState, useMemo } from "react"
 import { exportToCSV, exportToExcel, exportToPDF, exportToJSON } from "./ordersExportUtils"
 import mintoLogo from "@food/assets/minto-logo.png"
 import { getCachedSettings, loadBusinessSettings } from "@food/utils/businessSettings"
+import { restaurantLabel } from "@food/utils/entityLabels"
 const debugError = () => {}
 
 
@@ -121,7 +122,7 @@ export function useOrdersManagement(orders, statusKey, title, options = {}) {
 
   // Get unique restaurants from orders
   const restaurants = useMemo(() => {
-    return [...new Set(orders.map(o => o.restaurant))]
+    return [...new Set(orders.map((o) => restaurantLabel(o.restaurant)).filter(Boolean))]
   }, [orders])
 
   // Apply search and filters (client-side only when serverSideFiltering is false)
@@ -147,7 +148,7 @@ export function useOrdersManagement(orders, statusKey, title, options = {}) {
           String(order.customerName || "")
             .toLowerCase()
             .includes(query) ||
-          String(order.restaurant || "")
+          restaurantLabel(order.restaurant)
             .toLowerCase()
             .includes(query) ||
           String(order.customerPhone || "").includes(query) ||
@@ -198,7 +199,7 @@ export function useOrdersManagement(orders, statusKey, title, options = {}) {
         return orderRestaurantId === String(filters.restaurantId)
       })
     } else if (filters.restaurant) {
-      result = result.filter((order) => order.restaurant === filters.restaurant)
+      result = result.filter((order) => restaurantLabel(order.restaurant) === filters.restaurant)
     }
 
     // Helper function to parse date format "16 JUL 2025"

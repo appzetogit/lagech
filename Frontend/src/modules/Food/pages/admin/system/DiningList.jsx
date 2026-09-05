@@ -4,6 +4,7 @@ import { Search, Download, ChevronDown, Eye, Settings, ArrowUpDown, Loader2, Sta
 import { adminAPI } from "@food/api"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { resolveMediaUrl } from "../../../../../shared/utils/mediaUrl.js"
+import { zoneLabel } from "@food/utils/entityLabels"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -338,7 +339,7 @@ export default function DiningList() {
                                                         </div>
                                                     </td>
                                                     <td className="px-6 py-4 whitespace-nowrap">
-                                                        <span className="text-sm text-slate-700">{restaurant.zone}</span>
+                                                        <span className="text-sm text-slate-700">{zoneLabel(restaurant.zone)}</span>
                                                     </td>
                                                     <td className="px-6 py-4 whitespace-nowrap">
                                                         <button
