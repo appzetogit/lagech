@@ -6,3 +6,10 @@ coverage/
 .DS_Store
 /backups/
 /uploads/
+
+# Service account keys and anything else with a private key in it. The Firebase
+# admin credential lives here; committing it would publish the ability to send
+# notifications as this project to anyone with repository access.
+secrets/
+*.pem
+*-service-account*.json
