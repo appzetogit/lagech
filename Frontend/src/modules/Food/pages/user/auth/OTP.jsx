@@ -322,7 +322,11 @@ export default function OTP() {
         className="flex-1 bg-white dark:bg-[#0A0A0B] rounded-t-[40px] -mt-10 relative z-20 shadow-[0_-20px_40px_rgba(0,0,0,0.05)] px-6 pt-12 pb-6 flex flex-col"
       >
         <div className="max-w-md mx-auto w-full flex flex-col h-full">
-          <AnimatePresence mode="wait">
+          {/* No mode="wait": it holds the outgoing child until its exit animation
+                completes, and here that never happened -- the OTP view stayed
+                mounted while the header had already switched, so a new user saw
+                "Tell us your name" with no name field and no way to continue. */}
+            <AnimatePresence>
             {!showNameInput ? (
               <motion.div
                 key="otp-view"
@@ -401,6 +405,7 @@ export default function OTP() {
                 key="name-view"
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
                 className="space-y-8"
               >
                 <div className="space-y-4">

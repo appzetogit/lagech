@@ -137,7 +137,7 @@ export default function SignIn() {
           </div>
           <div className="text-center">
             <h1 className="text-white font-black text-4xl tracking-tighter leading-none mb-1 italic">
-              SWITCH<span className="opacity-60">EATS</span>
+              MINTO<span className="opacity-60">FOODS</span>
             </h1>
             <div className="h-0.5 w-12 bg-white/40 mx-auto rounded-full" />
           </div>
