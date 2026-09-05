@@ -155,7 +155,7 @@ export default function Restaurants() {
 
               return (
                 <ScrollReveal key={restaurant.id} delay={index * 0.05}>
-                  <Link to={`/restaurants/${restaurant.slug}`} className="h-full flex">
+                  <Link to={`/food/user/restaurants/${restaurant.slug}`} className="h-full flex">
                     <Card className="overflow-hidden cursor-pointer border border-gray-200 dark:border-gray-800 group bg-white dark:bg-[#1a1a1a] hover:shadow-lg dark:hover:shadow-xl dark:hover:shadow-gray-900/50 pb-1 sm:pb-2 lg:pb-3 flex flex-col h-full w-full transition-all duration-300">
                       <div className="flex flex-row min-h-[120px] sm:min-h-[140px] md:min-h-[160px] lg:min-h-[180px] flex-1">
                         <CardContent className="flex-1 flex flex-col justify-between p-3 sm:p-4 md:p-5 lg:p-6 min-w-0 overflow-hidden">

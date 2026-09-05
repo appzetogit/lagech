@@ -2951,7 +2951,7 @@ export default function Home() {
                 const firstRestaurant = linkedRestaurants[0];
                 const restaurantSlug = firstRestaurant.slug || firstRestaurant.restaurantId || firstRestaurant._id;
                 captureScrollBeforeRestaurantNav();
-                navigate(`/restaurants/${restaurantSlug}`);
+                navigate(`/food/user/restaurants/${restaurantSlug}`);
               }
             }}
             aria-label={`Open hero banner ${currentBannerIndex + 1}`}
