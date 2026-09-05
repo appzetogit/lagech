@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { MapPin, Clock } from 'lucide-react';
 import { ActionSlider } from '@/modules/DeliveryV2/components/ui/ActionSlider';
-import { resolveCustomerAddress } from '@/modules/DeliveryV2/utils/orderAddress';
+import { resolveCustomerAddress, resolveRestaurantAddress } from '@/modules/DeliveryV2/utils/orderAddress';
 import { getUserRestaurantDistance, normalizeRestaurantLocation } from '@food/utils/geo';
 import { fetchDrivingDistanceKm, formatDistanceLabel } from '@food/utils/roadDistance';
 
@@ -118,7 +118,7 @@ export const NewOrderModal = ({ order, onAccept, onReject, onMinimize, swapGuard
     lockedOrder.restaurantId?.restaurantName ||
     lockedOrder.restaurantId?.name ||
     'Restaurant';
-  const restaurantAddress = lockedOrder.restaurantAddress || lockedOrder.restaurant_address || (lockedOrder.restaurantId?.location?.address) || 'Address not available';
+  const restaurantAddress = resolveRestaurantAddress(lockedOrder) || 'Address not available';
   const customerAddress = resolveCustomerAddress(lockedOrder) || 'Location not available';
   const mapsLink = customerAddress !== 'Location not available'
     ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(customerAddress)}`

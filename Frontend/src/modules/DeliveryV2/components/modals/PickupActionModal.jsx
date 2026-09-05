@@ -9,6 +9,7 @@ import { ActionSlider } from '@/modules/DeliveryV2/components/ui/ActionSlider';
 import { uploadAPI } from '@food/api';
 import { toast } from 'sonner';
 import { openCamera } from "@food/utils/imageUploadUtils";
+import { resolveRestaurantAddress } from '@/modules/DeliveryV2/utils/orderAddress';
 
 /**
  * PickupActionModal - Unified White/Green Theme with Slider Actions.
@@ -79,15 +80,7 @@ export const PickupActionModal = ({
     order.restaurantId?.restaurantName ||
     order.restaurantId?.name ||
     'Restaurant';
-  const restaurantAddress =
-    order.restaurantAddress ||
-    order.restaurant_address ||
-    order.restaurant?.addressLine1 ||
-    order.restaurant?.location?.address ||
-    order.restaurantId?.addressLine1 ||
-    order.restaurantId?.location?.address ||
-    order.restaurantLocation?.address ||
-    'Address not available';
+  const restaurantAddress = resolveRestaurantAddress(order) || 'Address not available';
   const restaurantPhone =
     order.restaurantPhone ||
     order.restaurant_phone ||
@@ -142,7 +135,13 @@ export const PickupActionModal = ({
                     ) : (
                       <div className="bg-orange-50 px-3 py-1 rounded-full border border-orange-100">
                         <span className="text-orange-600 text-[10px] font-black uppercase tracking-widest">
-                          {(distanceToTarget / 1000).toFixed(1)} km • {eta || '--'} min
+                          {/* useProximityCheck returns Infinity while the rider's GPS is
+                              unknown, and Infinity.toFixed(1) renders the literal
+                              "Infinity km" at the rider. Every other distance readout
+                              already guards this; this one did not. */}
+                          {Number.isFinite(distanceToTarget)
+                            ? (distanceToTarget / 1000).toFixed(1)
+                            : '--'} km • {eta || '--'} min
                         </span>
                       </div>
                     )}
