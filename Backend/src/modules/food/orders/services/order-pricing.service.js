@@ -229,18 +229,49 @@ const toFeeRanges = (bands = []) =>
     deliveryBoyPerKm: Number(band.deliveryBoyPerKm),
   }));
 
-export async function loadActiveFeeSettings() {
-  const feeDoc = await prisma.foodFeeSettings.findFirst({
-    where: { isActive: true },
-    orderBy: { createdAt: 'desc' },
-    include: { deliveryFeeBands: { orderBy: { minDistanceKm: 'asc' } } },
-  });
+/**
+ * Active fee settings, preferring a row scoped to the order's zone.
+ *
+ * Fees were global: one active row priced every trip in the country. A zone
+ * row overrides it, and a zone with no row of its own still falls back to the
+ * global one -- so adding zone pricing never leaves a zone unpriced, and
+ * deployments that never configure a zone keep the exact behaviour they had.
+ */
+export async function loadActiveFeeSettings(zoneId = null) {
+  const zoned = isId(zoneId)
+    ? await prisma.foodFeeSettings.findFirst({
+        where: { isActive: true, zoneId: String(zoneId) },
+        orderBy: { createdAt: 'desc' },
+        include: { deliveryFeeBands: { orderBy: { minDistanceKm: 'asc' } } },
+      })
+    : null;
+
+  const feeDoc =
+    zoned ||
+    (await prisma.foodFeeSettings.findFirst({
+      where: { isActive: true, zoneId: null },
+      orderBy: { createdAt: 'desc' },
+      include: { deliveryFeeBands: { orderBy: { minDistanceKm: 'asc' } } },
+    })) ||
+    // Deployments that predate zone scoping have a single active row with a
+    // null zoneId, which the query above already finds. This last look is for
+    // the case where every row happens to be zone-scoped and none matched.
+    (await prisma.foodFeeSettings.findFirst({
+      where: { isActive: true },
+      orderBy: { createdAt: 'desc' },
+      include: { deliveryFeeBands: { orderBy: { minDistanceKm: 'asc' } } },
+    }));
 
   if (!feeDoc) {
-    return { deliveryFee: 0, deliveryFeeRanges: [], platformFee: 0, gstRate: 0 };
+    return { deliveryFee: 0, deliveryFeeRanges: [], platformFee: 0, gstRate: 0, zoneId: null };
   }
 
-  return { ...feeDoc, deliveryFeeRanges: toFeeRanges(feeDoc.deliveryFeeBands) };
+  return {
+    ...feeDoc,
+    deliveryFeeRanges: toFeeRanges(feeDoc.deliveryFeeBands),
+    /// Which row actually priced this, so callers can report it.
+    resolvedFromZone: Boolean(zoned),
+  };
 }
 
 export function resolveUserDeliveryFee(feeSettings = {}, { subtotal = 0, distanceKm = null } = {}) {
@@ -373,7 +404,11 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
     ),
   );
 
-  const feeSettings = await loadActiveFeeSettings();
+  // Zone comes from the restaurant, matching how an order records its zone
+  // (order.service.js falls back to restaurant.zoneId), so the quote a
+  // customer sees and the price they are charged resolve the same fee row.
+  const pricingZoneId = dto?.zoneId || restaurant?.zoneId || null;
+  const feeSettings = await loadActiveFeeSettings(pricingZoneId);
 
   const packagingFee = 0;
   const platformFee = Number(feeSettings.platformFee || 0);

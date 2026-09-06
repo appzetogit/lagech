@@ -1427,6 +1427,15 @@ export async function getContactMessages(req, res, next) {
     }
 }
 
+export async function getDeliveryPartnerSessions(req, res, next) {
+    try {
+        const data = await adminService.getDeliveryPartnerSessions(req.params.id, req.query);
+        res.status(200).json({ success: true, message: 'Duty log fetched', data });
+    } catch (error) {
+        next(error);
+    }
+}
+
 export async function getDeliveryPartnerById(req, res, next) {
     try {
         const delivery = await adminService.getDeliveryPartnerById(req.params.id);

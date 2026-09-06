@@ -15,7 +15,8 @@ import {
     uploadTopBannersController,
     deleteTopBannerController,
     updateTopBannerOrderController,
-    toggleTopBannerStatusController
+    toggleTopBannerStatusController,
+    updateTopBannerZoneController
 } from '../controllers/topBanner.controller.js';
 import {
     listUnder250BannersController,
@@ -148,6 +149,7 @@ router.post(
 router.delete('/top-banners/:id', deleteTopBannerController);
 router.patch('/top-banners/:id/order', updateTopBannerOrderController);
 router.patch('/top-banners/:id/status', toggleTopBannerStatusController);
+router.patch('/top-banners/:id/zone', updateTopBannerZoneController);
 
 // Admin under 250 banners
 router.get('/hero-banners/under-250', listUnder250BannersController);

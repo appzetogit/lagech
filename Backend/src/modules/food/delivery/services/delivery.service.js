@@ -361,6 +361,45 @@ export const getSupportTicketByIdAndPartner = async (ticketId, deliveryPartnerId
     });
 };
 
+/**
+ * Close any shift left open for this rider.
+ *
+ * Normally there is exactly one, but a rider whose app was killed mid-shift
+ * leaves a row with no wentOfflineAt, and the next go-online would otherwise
+ * open a second. durationMinutes is written here so duty-hour reporting is a
+ * sum over a column rather than a scan computing timestamp differences.
+ *
+ * `bySystem` marks shifts nobody actually ended, so those hours can be told
+ * apart from real ones instead of quietly inflating a rider's total.
+ */
+const closeOpenSessions = async (tx, partnerId, { bySystem = false, lat = null, lng = null } = {}) => {
+    const open = await tx.foodDeliveryPartnerSession.findMany({
+        where: { deliveryPartnerId: partnerId, wentOfflineAt: null },
+        select: { id: true, wentOnlineAt: true },
+    });
+    if (open.length === 0) return 0;
+
+    const now = new Date();
+    await Promise.all(
+        open.map((session) =>
+            tx.foodDeliveryPartnerSession.update({
+                where: { id: session.id },
+                data: {
+                    wentOfflineAt: now,
+                    offlineLat: lat,
+                    offlineLng: lng,
+                    durationMinutes: Math.max(
+                        0,
+                        Math.round((now.getTime() - new Date(session.wentOnlineAt).getTime()) / 60000),
+                    ),
+                    closedBySystem: bySystem,
+                },
+            }),
+        ),
+    );
+    return open.length;
+};
+
 export const updateDeliveryAvailability = async (userId, payload) => {
     const partner = await requirePartner(userId);
 
@@ -375,7 +414,8 @@ export const updateDeliveryAvailability = async (userId, payload) => {
     else if (rawStatus === 'offline' || rawStatus === false || rawStatus === 'false') validStatus = 'offline';
 
     const data = { availabilityStatus: validStatus };
-    if (Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
+    const hasFix = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+    if (hasFix) {
         // Only the plain coordinates are written; the lastLocation geography column
         // is derived by the partner_location_sync trigger.
         data.lastLat = lat;
@@ -383,7 +423,39 @@ export const updateDeliveryAvailability = async (userId, payload) => {
         data.lastLocationAt = new Date();
     }
 
-    const updated = await prisma.foodDeliveryPartner.update({ where: { id: partner.id }, data });
+    // This endpoint doubles as the location heartbeat and is called every few
+    // seconds while a rider is online, so shift rows are written only on a real
+    // transition -- otherwise the log would be one row per ping.
+    const wasOnline = partner.availabilityStatus === 'online';
+    const isOnline = validStatus === 'online';
+
+    const updated = await prisma.$transaction(async (tx) => {
+        const row = await tx.foodDeliveryPartner.update({ where: { id: partner.id }, data });
+
+        if (!wasOnline && isOnline) {
+            // Defensive: if a previous shift was never closed (app killed, phone
+            // died) close it before opening the next, so a rider never has two
+            // open sessions and duty hours cannot double-count.
+            await closeOpenSessions(tx, partner.id, { bySystem: true });
+            await tx.foodDeliveryPartnerSession.create({
+                data: {
+                    deliveryPartnerId: partner.id,
+                    wentOnlineAt: new Date(),
+                    onlineLat: hasFix ? lat : null,
+                    onlineLng: hasFix ? lng : null,
+                },
+            });
+        } else if (wasOnline && !isOnline) {
+            await closeOpenSessions(tx, partner.id, {
+                bySystem: false,
+                lat: hasFix ? lat : null,
+                lng: hasFix ? lng : null,
+            });
+        }
+
+        return row;
+    });
+
     return { availabilityStatus: updated.availabilityStatus };
 };
 
@@ -559,19 +631,55 @@ export const getDeliveryPartnerEarnings = async (deliveryPartnerId, query = {}) 
         ...(range ? { deliveredAt: { gte: range.start, lte: range.end } } : {}),
     };
 
-    const [totalOrders, agg] = await Promise.all([
+    // Shifts that overlap the window at all, so a shift spanning midnight is
+    // still counted rather than dropped for starting outside it.
+    const sessionWhere = {
+        deliveryPartnerId: partnerId,
+        ...(range
+            ? {
+                  wentOnlineAt: { lte: range.end },
+                  OR: [{ wentOfflineAt: null }, { wentOfflineAt: { gte: range.start } }],
+              }
+            : {}),
+    };
+
+    const [totalOrders, agg, sessions] = await Promise.all([
         prisma.foodOrder.count({ where }),
         prisma.foodOrder.aggregate({ where, _sum: { riderEarning: true } }),
+        prisma.foodDeliveryPartnerSession.findMany({
+            where: sessionWhere,
+            select: { wentOnlineAt: true, wentOfflineAt: true },
+        }),
     ]);
 
     const totalEarnings = num(agg?._sum?.riderEarning);
+
+    // Reported as 0 before the duty log existed, because nothing recorded when
+    // a rider went on or off shift. Clipped to the window so only the part of
+    // a shift inside the period is counted, and an open shift is measured up to
+    // now rather than treated as zero-length.
+    const now = new Date();
+    const clipStart = range ? range.start.getTime() : -Infinity;
+    const clipEnd = range ? range.end.getTime() : Infinity;
+    const onlineMs = sessions.reduce((sum, session) => {
+        const from = Math.max(new Date(session.wentOnlineAt).getTime(), clipStart);
+        const to = Math.min(
+            (session.wentOfflineAt ? new Date(session.wentOfflineAt) : now).getTime(),
+            clipEnd,
+        );
+        return sum + Math.max(0, to - from);
+    }, 0);
+    const onlineMinutesTotal = Math.round(onlineMs / 60000);
 
     return {
         summary: {
             totalEarnings,
             totalOrders,
-            totalHours: 0,
-            totalMinutes: 0,
+            totalHours: Math.floor(onlineMinutesTotal / 60),
+            totalMinutes: onlineMinutesTotal % 60,
+            /// Whole minutes on shift, for callers that would rather not
+            /// recombine hours and minutes.
+            totalOnlineMinutes: onlineMinutesTotal,
             orderEarning: totalEarnings,
             incentive: 0,
             otherEarnings: 0,

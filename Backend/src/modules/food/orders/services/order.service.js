@@ -547,7 +547,9 @@ export async function createOrder(userId, dto) {
       normalizedPricing.roadDistanceKm = distanceKm;
     }
 
-    const feeSettings = await loadActiveFeeSettings();
+    // Same zone the order is about to be stamped with, a few lines below.
+    const orderZoneId = dto.zoneId || restaurant.zoneId || null;
+    const feeSettings = await loadActiveFeeSettings(orderZoneId);
     const riderEarning = calculateRiderEarning(feeSettings, distanceKm) || 0;
 
     let restaurantCommission = 0;

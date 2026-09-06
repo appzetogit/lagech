@@ -297,6 +297,19 @@ enum CashbackType {
   flat
 }
 
+/// How a restaurant is billed. Commission and subscription both already
+/// existed and could be configured at the same time with nothing choosing
+/// between them; this makes the choice explicit and exclusive.
+enum RestaurantBillingMode {
+  /// One rate against the order subtotal (the behaviour before this existed).
+  commission_overall
+  /// Per-dish rates, summed over the order lines; dishes without their own
+  /// rate fall back to the restaurant rate.
+  commission_dish
+  /// Flat monthly plan instead of per-order commission.
+  subscription
+}
+
 enum CommissionValueType {
   percentage
   amount
@@ -513,7 +526,7 @@ enum FeedbackUserModel {
 enum ExploreLinkType {
   offers
   gourmet
-  top_10 @map("top-10")
+  top_10      @map("top-10")
   collections
   custom
 }
@@ -647,13 +660,13 @@ model FoodRestaurant {
 
   pureVegRestaurant Boolean @default(false)
 
-  addressLine1 String?
-  addressLine2 String?
-  area         String?
-  city         String?
-  state        String?
-  pincode      String?
-  landmark     String?
+  addressLine1     String?
+  addressLine2     String?
+  area             String?
+  city             String?
+  state            String?
+  pincode          String?
+  landmark         String?
   /// Geocoder's one-line address. Lived inside the `location` subdocument in
   /// Mongo alongside a duplicate `address` key; both are this one column.
   formattedAddress String?
@@ -664,18 +677,18 @@ model FoodRestaurant {
   openDays    String[]
 
   /// Manual Online/Offline toggle. false = force offline regardless of outlet timings.
-  isAcceptingOrders Boolean @default(true)
+  isAcceptingOrders    Boolean @default(true)
   /// Legacy, no longer honoured. Cleared whenever the toggle is updated.
   outsideHoursOverride Boolean @default(false)
 
-  panNumber    String?
-  nameOnPan    String?
-  gstRegistered Boolean @default(false)
-  gstNumber    String?
-  gstLegalName String?
-  gstAddress   String?
-  fssaiNumber  String?
-  fssaiExpiry  DateTime?
+  panNumber     String?
+  nameOnPan     String?
+  gstRegistered Boolean   @default(false)
+  gstNumber     String?
+  gstLegalName  String?
+  gstAddress    String?
+  fssaiNumber   String?
+  fssaiExpiry   DateTime?
 
   accountNumber     String?
   ifscCode          String?
@@ -696,9 +709,9 @@ model FoodRestaurant {
 
   /// Published location. Read latitude/longitude; `location` is trigger-maintained
   /// for GIST/ST_DWithin and is not selectable through Prisma Client.
-  latitude        Float?
-  longitude       Float?
-  location        Unsupported("geography(Point, 4326)")?
+  latitude         Float?
+  longitude        Float?
+  location         Unsupported("geography(Point, 4326)")?
   /// Proposed location awaiting admin approval; the published one stays live.
   pendingLatitude  Float?
   pendingLongitude Float?
@@ -727,9 +740,9 @@ model FoodRestaurant {
   rating       Decimal @default(0) @db.Decimal(2, 1)
   totalRatings Int     @default(0)
 
-  diningEnabled  Boolean @default(false)
-  diningMaxGuests Int    @default(6)
-  diningType     String  @default("family-dining")
+  diningEnabled   Boolean @default(false)
+  diningMaxGuests Int     @default(6)
+  diningType      String  @default("family-dining")
 
   /// Duplicated by FoodRestaurantMenu.sections in Mongo; both kept as-is.
   menuSections Json @default("[]")
@@ -763,26 +776,31 @@ model FoodRestaurant {
   zone        FoodZone? @relation("RestaurantZone", fields: [zoneId], references: [id])
   pendingZone FoodZone? @relation("RestaurantPendingZone", fields: [pendingZoneId], references: [id])
 
-  orders                FoodOrder[]
-  foodItems             FoodItem[]
-  addons                FoodAddon[]
-  categories            FoodCategory[]              @relation("CategoryOwner")
-  createdCategories     FoodCategory[]              @relation("CategoryCreator")
-  menu                  FoodRestaurantMenu?
-  outletTimings         FoodRestaurantOutletTimings?
-  commission            FoodRestaurantCommission?
-  supportTickets        FoodRestaurantSupportTicket[]
-  withdrawals           FoodRestaurantWithdrawal[]
-  subscriptionInvoices  FoodSubscriptionInvoice[]
-  subscriptionTxns      FoodSubscriptionTransaction[]
-  subscriptionHistory   FoodRestaurantSubscriptionHistory[]
-  diningProfile         FoodDiningRestaurant?
-  gourmetListing        FoodGourmetRestaurant[]
-  foodTransactions      FoodTransaction[]
-  userSupportTickets    FoodSupportTicket[]
-  emergencyRequests     DeliveryOrderEmergencyRequest[]
-  feedback              FeedbackExperience[]
-  offers                FoodOffer[]
+  orders            FoodOrder[]
+  foodItems         FoodItem[]
+  addons            FoodAddon[]
+  categories        FoodCategory[]               @relation("CategoryOwner")
+  createdCategories FoodCategory[]               @relation("CategoryCreator")
+  menu              FoodRestaurantMenu?
+  outletTimings     FoodRestaurantOutletTimings?
+  /// Defaults to the previous behaviour so existing restaurants bill exactly
+  /// as they did before the modes existed.
+  billingMode       RestaurantBillingMode        @default(commission_overall)
+
+  commission           FoodRestaurantCommission?
+  itemCommissions      FoodItemCommission[]
+  supportTickets       FoodRestaurantSupportTicket[]
+  withdrawals          FoodRestaurantWithdrawal[]
+  subscriptionInvoices FoodSubscriptionInvoice[]
+  subscriptionTxns     FoodSubscriptionTransaction[]
+  subscriptionHistory  FoodRestaurantSubscriptionHistory[]
+  diningProfile        FoodDiningRestaurant?
+  gourmetListing       FoodGourmetRestaurant[]
+  foodTransactions     FoodTransaction[]
+  userSupportTickets   FoodSupportTicket[]
+  emergencyRequests    DeliveryOrderEmergencyRequest[]
+  feedback             FeedbackExperience[]
+  offers               FoodOffer[]
 
   @@unique([restaurantNameNormalized, ownerPhoneLast10])
   @@index([ownerPhone])
@@ -874,6 +892,7 @@ model FoodDeliveryPartner {
   emergencyRequests DeliveryOrderEmergencyRequest[]
   bonusTransactions DeliveryBonusTransaction[]
   earningAddonRuns  FoodEarningAddonHistory[]
+  sessions          FoodDeliveryPartnerSession[]
 
   @@index([referralCode])
   @@index([referredById])
@@ -884,12 +903,12 @@ model FoodDeliveryPartner {
 model FoodAdmin {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 
-  email        String  @unique
+  email        String @unique
   /// bcrypt hash — the pre('save') hook moves into the admin service.
   password     String
-  name         String  @default("")
-  phone        String  @default("")
-  profileImage String  @default("")
+  name         String @default("")
+  phone        String @default("")
+  profileImage String @default("")
 
   fcmTokens      String[]
   fcmTokenMobile String[]
@@ -1210,15 +1229,15 @@ model FoodOrder {
   customerPhone String @default("")
 
   // ── delivery address (was an embedded subdoc) ──
-  addrLabel             AddressLabel @default(Home)
-  addrName              String       @default("")
-  addrFullName          String       @default("")
+  addrLabel             AddressLabel                           @default(Home)
+  addrName              String                                 @default("")
+  addrFullName          String                                 @default("")
   addrStreet            String
-  addrAdditionalDetails String       @default("")
+  addrAdditionalDetails String                                 @default("")
   addrCity              String
   addrState             String
-  addrZipCode           String       @default("")
-  addrPhone             String       @default("")
+  addrZipCode           String                                 @default("")
+  addrPhone             String                                 @default("")
   /// Plain lat/lng is what application code reads — Prisma Client cannot select an
   /// Unsupported column, and buildLiveEta/buildDeliverySocketPayload need the point
   /// on every order fetch. The geography column below is kept in sync by a trigger
@@ -1249,17 +1268,17 @@ model FoodOrder {
   roadDurationMins     Int?
 
   // ── payment snapshot (audit trail lives in Payment/Transaction) ──
-  paymentMethod    OrderPaymentMethod
-  paymentStatus    OrderPaymentStatus @default(cod_pending)
-  paymentAmountDue Decimal?           @db.Decimal(14, 2)
-  razorpayOrderId  String?
+  paymentMethod     OrderPaymentMethod
+  paymentStatus     OrderPaymentStatus @default(cod_pending)
+  paymentAmountDue  Decimal?           @db.Decimal(14, 2)
+  razorpayOrderId   String?
   razorpayPaymentId String?
   razorpaySignature String?
   /// QR checkout details — written once, never filtered on.
-  qr               Json?
-  refundStatus     OrderRefundStatus  @default(none)
-  refundAmount     Decimal            @default(0) @db.Decimal(14, 2)
-  refundId         String             @default("")
+  qr                Json?
+  refundStatus      OrderRefundStatus  @default(none)
+  refundAmount      Decimal            @default(0) @db.Decimal(14, 2)
+  refundId          String             @default("")
   refundProcessedAt DateTime?
 
   orderStatus OrderStatus @default(created)
@@ -1303,11 +1322,11 @@ model FoodOrder {
   /// Idempotency guard so retries never double-push the "new order" alert.
   restaurantNotifiedAt    DateTime?
 
-  sendCutlery    Boolean   @default(true)
-  deliveryFleet  String    @default("standard")
-  scheduledAt    DateTime?
+  sendCutlery   Boolean   @default(true)
+  deliveryFleet String    @default("standard")
+  scheduledAt   DateTime?
 
-  riderEarning Decimal @default(0) @db.Decimal(14, 2)
+  riderEarning   Decimal @default(0) @db.Decimal(14, 2)
   /// Can be negative when discounts/rider pay exceed platform income.
   platformProfit Decimal @default(0) @db.Decimal(14, 2)
 
@@ -1315,9 +1334,9 @@ model FoodOrder {
   tripDurationMins Int?
 
   /// Plain 4-digit handover OTP; cleared after verify. Never return to the partner.
-  deliveryOtp        String  @default("") @db.VarChar(8)
-  dropOtpRequired    Boolean @default(false)
-  dropOtpVerified    Boolean @default(false)
+  deliveryOtp     String  @default("") @db.VarChar(8)
+  dropOtpRequired Boolean @default(false)
+  dropOtpVerified Boolean @default(false)
 
   riderLat          Float?
   riderLng          Float?
@@ -1481,15 +1500,15 @@ model FoodTransaction {
   qr                Json?
 
   // ── the split ──
-  totalCustomerPaid   Decimal @db.Decimal(14, 2)
-  restaurantShare     Decimal @db.Decimal(14, 2)
-  commissionAmount    Decimal @db.Decimal(14, 2)
-  riderShare          Decimal @db.Decimal(14, 2)
+  totalCustomerPaid                Decimal @db.Decimal(14, 2)
+  restaurantShare                  Decimal @db.Decimal(14, 2)
+  commissionAmount                 Decimal @db.Decimal(14, 2)
+  riderShare                       Decimal @db.Decimal(14, 2)
   /// Can be negative when discounts/rider pay exceed platform income.
-  platformNetProfit   Decimal @db.Decimal(14, 2)
-  taxAmount           Decimal @default(0) @db.Decimal(14, 2)
-  adminDiscountShare  Decimal @default(0) @db.Decimal(14, 2)
-  restaurantDiscountShare Decimal @default(0) @db.Decimal(14, 2)
+  platformNetProfit                Decimal @db.Decimal(14, 2)
+  taxAmount                        Decimal @default(0) @db.Decimal(14, 2)
+  adminDiscountShare               Decimal @default(0) @db.Decimal(14, 2)
+  restaurantDiscountShare          Decimal @default(0) @db.Decimal(14, 2)
   discountAdminBearPercentage      Decimal @default(0) @db.Decimal(5, 2)
   discountRestaurantBearPercentage Decimal @default(0) @db.Decimal(5, 2)
 
@@ -1538,11 +1557,11 @@ model FoodTransactionHistory {
 model FoodSettings {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 
-  key             String    @unique
-  dispatchMode    String    @default("auto")
-  updatedByRole   String?
-  updatedByAdminId String?  @db.VarChar(24)
-  updatedAtBy     DateTime?
+  key              String    @unique
+  dispatchMode     String    @default("auto")
+  updatedByRole    String?
+  updatedByAdminId String?   @db.VarChar(24)
+  updatedAtBy      DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1597,8 +1616,9 @@ model FoodItem {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  restaurant FoodRestaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
-  category   FoodCategory?  @relation(fields: [categoryId], references: [id])
+  restaurant     FoodRestaurant      @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  commissionRule FoodItemCommission?
+  category       FoodCategory?       @relation(fields: [categoryId], references: [id])
 
   @@index([restaurantId, createdAt(sort: Desc)])
   @@index([approvalStatus, createdAt(sort: Desc)])
@@ -1655,8 +1675,8 @@ model FoodCategory {
   /// Null = admin/global category, shareable across restaurants.
   /// Set = private to that restaurant. Approval moderates content; it does not
   /// make a restaurant-owned category globally reusable.
-  restaurantId            String? @db.VarChar(24)
-  createdByRestaurantId   String? @db.VarChar(24)
+  restaurantId          String? @db.VarChar(24)
+  createdByRestaurantId String? @db.VarChar(24)
 
   approvalStatus  ApprovalStatus @default(approved)
   isApproved      Boolean        @default(true)
@@ -1857,11 +1877,13 @@ model FoodZone {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  restaurants        FoodRestaurant[] @relation("RestaurantZone")
-  pendingRestaurants FoodRestaurant[] @relation("RestaurantPendingZone")
+  restaurants        FoodRestaurant[]      @relation("RestaurantZone")
+  pendingRestaurants FoodRestaurant[]      @relation("RestaurantPendingZone")
   orders             FoodOrder[]
   categories         FoodCategory[]
   promotionBanners   HomePromotionBanner[]
+  foodFeeSettings    FoodFeeSettings[]
+  topBanners         TopBanner[]
 
   @@index([isActive, name])
   @@index([country, name])
@@ -1905,7 +1927,7 @@ model FoodOffer {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  restaurant FoodRestaurant? @relation(fields: [restaurantId], references: [id])
+  restaurant FoodRestaurant?  @relation(fields: [restaurantId], references: [id])
   usages     FoodOfferUsage[]
 
   @@index([restaurantId, createdAt(sort: Desc)])
@@ -1942,7 +1964,7 @@ model FoodOfferUsage {
 model FoodCashbackSettings {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 
-  isEnabled Boolean @default(false)
+  isEnabled     Boolean      @default(false)
   /// percentage → percent of item subtotal; flat → fixed rupees
   cashbackType  CashbackType @default(percentage)
   cashbackValue Decimal      @default(0) @db.Decimal(14, 2)
@@ -2017,12 +2039,17 @@ model FoodFeeSettings {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 
   /// No defaults — admin must configure these explicitly.
-  deliveryFee      Decimal? @db.Decimal(14, 2)
-  platformFee      Decimal? @db.Decimal(14, 2)
-  quickDeliveryFee Decimal? @db.Decimal(14, 2)
-  gstRate          Decimal? @db.Decimal(5, 2)
+  deliveryFee        Decimal? @db.Decimal(14, 2)
+  platformFee        Decimal? @db.Decimal(14, 2)
+  quickDeliveryFee   Decimal? @db.Decimal(14, 2)
+  gstRate            Decimal? @db.Decimal(5, 2)
   /// GST on the delivery fee. Unset means it is not charged at all.
   deliveryFeeGstRate Decimal? @db.Decimal(5, 2)
+
+  /// Null is the global default. A row scoped to a zone overrides it for
+  /// orders in that zone; loadActiveFeeSettings falls back to the global row
+  /// when a zone has none, so adding a zone never leaves it unpriced.
+  zoneId String? @db.VarChar(24)
 
   isActive Boolean @default(true)
 
@@ -2032,7 +2059,10 @@ model FoodFeeSettings {
   /// Distance bands. Was a Json array; see DeliveryFeeBand for why.
   deliveryFeeBands DeliveryFeeBand[]
 
+  zone FoodZone? @relation(fields: [zoneId], references: [id])
+
   @@index([isActive, createdAt(sort: Desc)])
+  @@index([zoneId, isActive, createdAt(sort: Desc)])
   @@map("food_fee_settings")
 }
 
@@ -2088,18 +2118,18 @@ model FoodBusinessSettings {
   pincode String @default("")
   region  String @default("India")
 
-  logoUrl                String @default("")
-  logoPublicId           String @default("")
-  faviconUrl             String @default("")
-  faviconPublicId        String @default("")
-  restaurantLogoUrl      String @default("")
-  restaurantLogoPublicId String @default("")
-  restaurantFaviconUrl   String @default("")
+  logoUrl                   String @default("")
+  logoPublicId              String @default("")
+  faviconUrl                String @default("")
+  faviconPublicId           String @default("")
+  restaurantLogoUrl         String @default("")
+  restaurantLogoPublicId    String @default("")
+  restaurantFaviconUrl      String @default("")
   restaurantFaviconPublicId String @default("")
-  deliveryLogoUrl        String @default("")
-  deliveryLogoPublicId   String @default("")
-  deliveryFaviconUrl     String @default("")
-  deliveryFaviconPublicId String @default("")
+  deliveryLogoUrl           String @default("")
+  deliveryLogoPublicId      String @default("")
+  deliveryFaviconUrl        String @default("")
+  deliveryFaviconPublicId   String @default("")
 
   userThemeColor       String @default("#FA0272")
   userFontFamily       String @default("Poppins")
@@ -2170,6 +2200,35 @@ model FoodRestaurantCommission {
   @@map("food_restaurant_commissions")
 }
 
+/// Per-dish commission, used when a restaurant is on commission_dish.
+///
+/// A separate table rather than columns on FoodItem: most items never carry
+/// an override, the rate is billing configuration rather than menu content,
+/// and this mirrors how FoodRestaurantCommission already hangs off the
+/// restaurant.
+model FoodItemCommission {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  itemId       String @unique @db.VarChar(24)
+  /// Denormalised so the whole of a restaurant's rates load in one query when
+  /// pricing an order.
+  restaurantId String @db.VarChar(24)
+
+  commissionType  CommissionValueType @default(percentage)
+  commissionValue Decimal             @default(0) @db.Decimal(14, 2)
+
+  status Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  item       FoodItem       @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  restaurant FoodRestaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@index([restaurantId, status])
+  @@map("food_item_commissions")
+}
+
 model FoodDeliveryCommissionRule {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 
@@ -2186,6 +2245,50 @@ model FoodDeliveryCommissionRule {
   @@index([status])
   @@index([createdAt(sort: Desc)])
   @@map("food_delivery_commission_rules")
+}
+
+/// One row per online stretch: opened when a rider goes online, closed when
+/// they go offline. availabilityStatus on the partner is only the current
+/// state -- it is overwritten in place, so before this there was no record of
+/// when anyone started or finished a shift, and the earnings summary reported
+/// totalHours: 0 because nothing could answer the question.
+///
+/// The availability endpoint doubles as the location heartbeat and is called
+/// repeatedly while online, so rows are opened only on an actual
+/// offline -> online transition, never per request.
+model FoodDeliveryPartnerSession {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  deliveryPartnerId String @db.VarChar(24)
+
+  wentOnlineAt  DateTime  @default(now())
+  /// Null while the shift is still open.
+  wentOfflineAt DateTime?
+
+  /// Where the rider was at each end of the shift, when the app reported it.
+  onlineLat  Float?
+  onlineLng  Float?
+  offlineLat Float?
+  offlineLng Float?
+
+  /// Denormalised on close so duty-hour reporting does not have to sum
+  /// timestamp differences across a scan of every session.
+  durationMinutes Int?
+
+  /// True when the reaper closed this rather than the rider going offline --
+  /// app killed, phone died, session left hanging. Kept distinct so duty hours
+  /// are not silently inflated by sessions nobody ended.
+  closedBySystem Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  deliveryPartner FoodDeliveryPartner @relation(fields: [deliveryPartnerId], references: [id], onDelete: Cascade)
+
+  @@index([deliveryPartnerId, wentOnlineAt(sort: Desc)])
+  /// Finding the open session for a rider, and for the reaper sweep.
+  @@index([deliveryPartnerId, wentOfflineAt])
+  @@map("food_delivery_partner_sessions")
 }
 
 model FoodDeliveryCashLimit {
@@ -2221,9 +2324,9 @@ model FoodDeliveryEmergencyHelp {
 model FoodRestaurantSubscriptionSettings {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 
-  starterPrice  Decimal @default(999) @db.Decimal(14, 2)
-  growthPrice   Decimal @default(1999) @db.Decimal(14, 2)
-  premiumPrice  Decimal @default(2999) @db.Decimal(14, 2)
+  starterPrice Decimal @default(999) @db.Decimal(14, 2)
+  growthPrice  Decimal @default(1999) @db.Decimal(14, 2)
+  premiumPrice Decimal @default(2999) @db.Decimal(14, 2)
 
   starterMinGmv Decimal @default(0) @db.Decimal(14, 2)
   starterMaxGmv Decimal @default(30000) @db.Decimal(14, 2)
@@ -2292,26 +2395,26 @@ model FoodSubscriptionInvoice {
   periodStart DateTime?
   periodEnd   DateTime?
 
-  gmv        Decimal          @default(0) @db.Decimal(14, 2)
-  orderCount Int              @default(0)
-  planName   SubscriptionPlan
-  planAmount Decimal          @db.Decimal(14, 2)
-  gstAmount  Decimal          @default(0) @db.Decimal(14, 2)
-  totalAmount Decimal         @db.Decimal(14, 2)
+  gmv         Decimal          @default(0) @db.Decimal(14, 2)
+  orderCount  Int              @default(0)
+  planName    SubscriptionPlan
+  planAmount  Decimal          @db.Decimal(14, 2)
+  gstAmount   Decimal          @default(0) @db.Decimal(14, 2)
+  totalAmount Decimal          @db.Decimal(14, 2)
 
-  paidAmount   Decimal @default(0) @db.Decimal(14, 2)
-  waivedAmount Decimal @default(0) @db.Decimal(14, 2)
+  paidAmount        Decimal @default(0) @db.Decimal(14, 2)
+  waivedAmount      Decimal @default(0) @db.Decimal(14, 2)
   /// Signed: positive increases the due, negative reduces it.
   adjustmentAmount  Decimal @default(0) @db.Decimal(14, 2)
   outstandingAmount Decimal @db.Decimal(14, 2)
 
   status SubscriptionInvoiceStatus @default(pending)
 
-  isLegacyCarryForward Boolean @default(false)
+  isLegacyCarryForward Boolean            @default(false)
   /// Plan prices / GMV bands used at generation, for immutability and audit.
-  settingsSnapshot     Json    @default("{}")
+  settingsSnapshot     Json               @default("{}")
   generatedBy          InvoiceGeneratedBy @default(system)
-  notes                String  @default("")
+  notes                String             @default("")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2334,10 +2437,10 @@ model FoodSubscriptionTransaction {
   invoiceId    String @db.VarChar(24)
   billingMonth String @db.VarChar(16)
 
-  type SubscriptionTxnType
+  type               SubscriptionTxnType
   /// Signed for adjustments; positive for payments, deductions, waivers, invoice totals.
-  amount            Decimal @db.Decimal(14, 2)
-  outstandingAfter  Decimal @db.Decimal(14, 2)
+  amount             Decimal             @db.Decimal(14, 2)
+  outstandingAfter   Decimal             @db.Decimal(14, 2)
   invoiceStatusAfter String
 
   processedByRole ProcessorRole @default(SYSTEM)
@@ -2398,10 +2501,10 @@ model FoodSubscriptionBillingRun {
   billingMonth String           @unique @db.VarChar(16)
   status       BillingRunStatus @default(pending)
 
-  invoicedCount        Int      @default(0)
-  skippedZeroGmvCount  Int      @default(0)
-  errorCount           Int      @default(0)
-  errors               String[]
+  invoicedCount       Int      @default(0)
+  skippedZeroGmvCount Int      @default(0)
+  errorCount          Int      @default(0)
+  errors              String[]
 
   startedAt  DateTime?
   finishedAt DateTime?
@@ -2452,7 +2555,7 @@ model FoodDeliveryWithdrawal {
   amount Decimal          @db.Decimal(14, 2)
   status WithdrawalStatus @default(pending)
 
-  paymentMethod String @default("bank_transfer")
+  paymentMethod String  @default("bank_transfer")
   bankDetails   Json?
   upiId         String?
   upiQrCode     String?
@@ -2503,9 +2606,9 @@ model DeliveryBonusTransaction {
   deliveryPartnerId String @db.VarChar(24)
 
   /// Admin-supplied reference; unique so a resubmitted form cannot double-pay.
-  transactionId  String  @unique
-  amount         Decimal @db.Decimal(14, 2)
-  reference      String  @default("")
+  transactionId String  @unique
+  amount        Decimal @db.Decimal(14, 2)
+  reference     String  @default("")
 
   createdByAdminId String? @db.VarChar(24)
 
@@ -2634,7 +2737,7 @@ model DeliverySupportTicket {
   id                String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
   deliveryPartnerId String @db.VarChar(24)
 
-  ticketId  String? @unique
+  ticketId String? @unique
 
   subject     String
   description String
@@ -2729,7 +2832,7 @@ model FoodChatConversation {
   /// Subject the user picked, e.g. "I want to cancel my order".
   title String @default("") @db.VarChar(200)
 
-  status ChatThreadStatus @default(open)
+  status   ChatThreadStatus @default(open)
   /// Only set once status becomes 'closed'; cleared if reopened.
   closedAt DateTime?
 
@@ -2878,11 +2981,11 @@ model FeedbackExperience {
 model FoodDiningCategory {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 
-  name     String
-  slug     String  @unique
-  imageUrl String  @default("")
-  isActive Boolean @default(true)
-  sortOrder Int    @default(0)
+  name      String
+  slug      String  @unique
+  imageUrl  String  @default("")
+  isActive  Boolean @default(true)
+  sortOrder Int     @default(0)
 
   /// ponytail: id array, matching the Mongo access pattern.
   restaurantIds String[]
@@ -3038,12 +3141,20 @@ model TopBanner {
   image    String
   publicId String?
   order    Int     @default(0)
+
+  /// Null means every zone. A zone-scoped banner is an override shown only
+  /// to customers resolved into that zone; global banners keep showing
+  /// alongside it.
+  zoneId   String? @db.VarChar(24)
   isActive Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  zone FoodZone? @relation(fields: [zoneId], references: [id])
+
   @@index([isActive, order])
+  @@index([zoneId])
   @@map("top_banners")
 }
 
@@ -3088,7 +3199,7 @@ model FoodGourmetRestaurant {
 model FoodLandingSettings {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 
-  exploreMoreHeading String @default("Explore more")
+  exploreMoreHeading       String   @default("Explore more")
   /// ponytail: id array, matching the Mongo access pattern.
   recommendedRestaurantIds String[]
 

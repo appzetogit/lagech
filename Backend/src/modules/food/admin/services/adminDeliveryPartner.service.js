@@ -220,6 +220,75 @@ export async function getDeliveryPartnerById(id) {
  * Returns `{ requests }` with no pagination wrapper, and reports a rejected
  * application as 'denied' — both are what the admin screen reads.
  */
+/**
+ * A rider's shift history: when they went online, when they went offline, and
+ * how long each stretch lasted.
+ *
+ * availabilityStatus on the partner row is only the current state and is
+ * overwritten in place, so before the duty log there was no way to answer
+ * "when was this rider actually working".
+ */
+export async function getDeliveryPartnerSessions(id, query = {}) {
+    if (!isId(id)) throw new ValidationError('Delivery partner not found');
+
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.min(200, Math.max(1, Number(query.limit) || 50));
+
+    const from = query.from ? new Date(query.from) : null;
+    const to = query.to ? new Date(query.to) : null;
+    const validFrom = from && !Number.isNaN(from.getTime()) ? from : null;
+    const validTo = to && !Number.isNaN(to.getTime()) ? to : null;
+
+    // Overlap, not containment: a shift that started before the window and ran
+    // into it still belongs in the answer.
+    const where = {
+        deliveryPartnerId: String(id),
+        ...(validTo ? { wentOnlineAt: { lte: validTo } } : {}),
+        ...(validFrom
+            ? { OR: [{ wentOfflineAt: null }, { wentOfflineAt: { gte: validFrom } }] }
+            : {}),
+    };
+
+    const [rows, total] = await Promise.all([
+        prisma.foodDeliveryPartnerSession.findMany({
+            where,
+            orderBy: { wentOnlineAt: 'desc' },
+            skip: (page - 1) * limit,
+            take: limit,
+        }),
+        prisma.foodDeliveryPartnerSession.count({ where }),
+    ]);
+
+    const now = Date.now();
+    const sessions = rows.map((row) => ({
+        id: row.id,
+        wentOnlineAt: row.wentOnlineAt,
+        wentOfflineAt: row.wentOfflineAt,
+        isOpen: row.wentOfflineAt === null,
+        // An open shift is measured up to now, so the current stretch is not
+        // shown as zero minutes.
+        durationMinutes:
+            row.durationMinutes ??
+            Math.max(0, Math.round((now - new Date(row.wentOnlineAt).getTime()) / 60000)),
+        closedBySystem: row.closedBySystem,
+        onlineLocation: row.onlineLat != null ? { lat: row.onlineLat, lng: row.onlineLng } : null,
+        offlineLocation: row.offlineLat != null ? { lat: row.offlineLat, lng: row.offlineLng } : null,
+    }));
+
+    const totalMinutes = sessions.reduce((sum, item) => sum + item.durationMinutes, 0);
+
+    return {
+        sessions,
+        summary: {
+            totalSessions: total,
+            totalMinutes,
+            totalHours: Math.floor(totalMinutes / 60),
+            remainderMinutes: totalMinutes % 60,
+        },
+        pagination: { page, limit, total },
+    };
+}
+
 export async function getDeliveryJoinRequests(query = {}) {
     const { status = 'pending', zone, vehicleType } = query;
     const limit = Math.max(1, Math.min(1000, Number(query.limit) || 100));

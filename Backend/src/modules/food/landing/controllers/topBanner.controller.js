@@ -1,6 +1,7 @@
 import { prisma } from '../../../../config/prisma.js';
 import { saveImageFile, deleteStoredFile } from '../../../../services/storage.service.js';
 import { logger } from '../../../../utils/logger.js';
+import { isId } from '../../../../utils/helpers.js';
 
 const BANNER_FOLDER = 'food/top-banners';
 
@@ -36,6 +37,8 @@ export const uploadTopBannersController = async (req, res) => {
                         publicId: saved.path,
                         order: last ? last.order + 1 : 0,
                         isActive: true,
+                        // Absent or blank means the banner shows in every zone.
+                        zoneId: isId(req.body?.zoneId) ? String(req.body.zoneId) : null,
                     },
                 }));
             } catch (err) {
@@ -94,6 +97,31 @@ export const updateTopBannerOrderController = async (req, res) => {
         res.status(200).json({ success: true, message: 'Order updated', data: { banner } });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Failed to update order', error: error.message });
+    }
+};
+
+export const updateTopBannerZoneController = async (req, res) => {
+    try {
+        const raw = req.body?.zoneId;
+        // Explicit null/empty is meaningful here: it moves a zone-scoped banner
+        // back to showing everywhere, so it is not the same as omitting it.
+        const zoneId = isId(raw) ? String(raw) : null;
+        if (raw !== null && raw !== undefined && raw !== '' && zoneId === null) {
+            return res.status(400).json({ success: false, message: 'Invalid zone id' });
+        }
+
+        const { count } = await prisma.topBanner.updateMany({
+            where: { id: req.params.id },
+            data: { zoneId },
+        });
+        if (!count) {
+            return res.status(404).json({ success: false, message: 'Banner not found' });
+        }
+
+        const banner = await prisma.topBanner.findUnique({ where: { id: req.params.id } });
+        res.status(200).json({ success: true, message: 'Zone updated', data: { banner } });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Failed to update zone', error: error.message });
     }
 };
 

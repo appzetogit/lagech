@@ -62,8 +62,15 @@ export const getPublicHeroBannersController = async (req, res, next) => {
 
 export const getPublicTopBannersController = async (req, res, next) => {
     try {
+        const zoneId = req.query?.zoneId;
         const banners = await prisma.topBanner.findMany({
-            where: { isActive: true },
+            where: {
+                isActive: true,
+                // Global banners (zoneId null) always show; a zone only ever
+                // adds to them. Filtering to the zone alone would hide every
+                // global banner the moment one zone-scoped banner existed.
+                ...(isId(zoneId) ? { OR: [{ zoneId: null }, { zoneId: String(zoneId) }] } : {}),
+            },
             orderBy: { order: 'asc' },
         });
         return sendResponse(res, 200, 'Top banners fetched', { banners });
