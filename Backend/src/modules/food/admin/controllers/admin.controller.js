@@ -1427,6 +1427,33 @@ export async function getContactMessages(req, res, next) {
     }
 }
 
+export async function setRestaurantBillingMode(req, res, next) {
+    try {
+        const data = await adminService.setRestaurantBillingMode(req.params.id, req.body?.billingMode);
+        res.status(200).json({ success: true, message: 'Billing mode updated', data });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function getItemCommissions(req, res, next) {
+    try {
+        const data = await adminService.getItemCommissions(req.params.id);
+        res.status(200).json({ success: true, message: 'Dish commissions fetched', data });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function upsertItemCommission(req, res, next) {
+    try {
+        const data = await adminService.upsertItemCommission(req.params.id, req.params.itemId, req.body || {});
+        res.status(200).json({ success: true, message: 'Dish commission updated', data });
+    } catch (error) {
+        next(error);
+    }
+}
+
 export async function getDeliveryPartnerSessions(req, res, next) {
     try {
         const data = await adminService.getDeliveryPartnerSessions(req.params.id, req.query);

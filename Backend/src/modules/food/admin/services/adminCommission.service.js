@@ -54,6 +54,118 @@ const fromDefaultCommission = (defaultCommission = {}) => {
 
 const WITH_RESTAURANT = { restaurant: { select: { id: true, restaurantName: true } } };
 
+const BILLING_MODES = ['commission_overall', 'commission_dish', 'subscription'];
+
+/**
+ * How a restaurant is billed. Commission and subscription both already
+ * existed and could be configured at the same time with nothing choosing
+ * between them; this is the choice.
+ */
+export async function setRestaurantBillingMode(restaurantId, mode) {
+    if (!isId(restaurantId)) throw new ValidationError('Restaurant not found');
+    if (!BILLING_MODES.includes(String(mode))) {
+        throw new ValidationError(`Billing mode must be one of: ${BILLING_MODES.join(', ')}`);
+    }
+
+    const { count } = await prisma.foodRestaurant.updateMany({
+        where: { id: String(restaurantId) },
+        data: { billingMode: String(mode) },
+    });
+    if (!count) throw new ValidationError('Restaurant not found');
+
+    return { restaurantId: String(restaurantId), billingMode: String(mode) };
+}
+
+/** Per-dish rates for one restaurant, with every item listed so the admin can see what is unset. */
+export async function getItemCommissions(restaurantId) {
+    if (!isId(restaurantId)) throw new ValidationError('Restaurant not found');
+
+    const [restaurant, items, rules] = await Promise.all([
+        prisma.foodRestaurant.findUnique({
+            where: { id: String(restaurantId) },
+            select: { id: true, restaurantName: true, billingMode: true },
+        }),
+        prisma.foodItem.findMany({
+            where: { restaurantId: String(restaurantId) },
+            select: { id: true, name: true, price: true },
+            orderBy: { name: 'asc' },
+        }),
+        prisma.foodItemCommission.findMany({ where: { restaurantId: String(restaurantId) } }),
+    ]);
+
+    if (!restaurant) throw new ValidationError('Restaurant not found');
+
+    const byItem = new Map(rules.map((r) => [String(r.itemId), r]));
+
+    return {
+        restaurant,
+        // Every dish, not just the ones with a rate: an admin needs to see
+        // which dishes would fall back to the restaurant rate.
+        items: items.map((item) => {
+            const rule = byItem.get(String(item.id)) || null;
+            return {
+                itemId: item.id,
+                name: item.name,
+                price: Number(item.price) || 0,
+                hasOwnRate: Boolean(rule),
+                commissionType: rule?.commissionType || 'percentage',
+                commissionValue: Number(rule?.commissionValue) || 0,
+                status: rule ? rule.status : true,
+            };
+        }),
+    };
+}
+
+/** Set or clear one dish's rate. A null value clears it back to the restaurant rate. */
+export async function upsertItemCommission(restaurantId, itemId, payload = {}) {
+    if (!isId(restaurantId) || !isId(itemId)) throw new ValidationError('Item not found');
+
+    const item = await prisma.foodItem.findFirst({
+        where: { id: String(itemId), restaurantId: String(restaurantId) },
+        select: { id: true },
+    });
+    // Checked against the restaurant, not just by id: without this an admin
+    // could set a rate on another restaurant's dish by passing its id.
+    if (!item) throw new ValidationError('Item not found for this restaurant');
+
+    if (payload.commissionValue === null || payload.clear === true) {
+        await prisma.foodItemCommission.deleteMany({ where: { itemId: String(itemId) } });
+        return { itemId: String(itemId), cleared: true };
+    }
+
+    const type = payload.commissionType === 'amount' ? 'amount' : 'percentage';
+    const value = Number(payload.commissionValue);
+    if (!Number.isFinite(value) || value < 0) {
+        throw new ValidationError('Commission value must be zero or more');
+    }
+    if (type === 'percentage' && value > 100) {
+        throw new ValidationError('A percentage commission cannot exceed 100');
+    }
+
+    const row = await prisma.foodItemCommission.upsert({
+        where: { itemId: String(itemId) },
+        create: {
+            itemId: String(itemId),
+            restaurantId: String(restaurantId),
+            commissionType: type,
+            commissionValue: value,
+            status: payload.status !== false,
+        },
+        update: {
+            commissionType: type,
+            commissionValue: value,
+            ...(payload.status === undefined ? {} : { status: payload.status !== false }),
+        },
+    });
+
+    return {
+        itemId: row.itemId,
+        commissionType: row.commissionType,
+        commissionValue: Number(row.commissionValue),
+        status: row.status,
+    };
+}
+
 export async function getRestaurantCommissions() {
     const list = await prisma.foodRestaurantCommission.findMany({
         orderBy: { createdAt: 'desc' },

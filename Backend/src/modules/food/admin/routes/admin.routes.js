@@ -248,6 +248,12 @@ router.delete('/restaurants/:id', adminController.deleteRestaurant);
 
 
 // ----- Restaurant Commission -----
+// Billing mode and per-dish rates. Under /restaurants so they inherit the
+// restaurant_management guard that resolveSectionFromRequest already applies.
+router.patch('/restaurants/:id/billing-mode', adminController.setRestaurantBillingMode);
+router.get('/restaurants/:id/item-commissions', adminController.getItemCommissions);
+router.patch('/restaurants/:id/item-commissions/:itemId', adminController.upsertItemCommission);
+
 router.get('/restaurant-commissions/bootstrap', adminController.getRestaurantCommissionBootstrap);
 router.get('/restaurant-commissions', adminController.getRestaurantCommissions);
 router.post('/restaurant-commissions', adminController.createRestaurantCommission);
