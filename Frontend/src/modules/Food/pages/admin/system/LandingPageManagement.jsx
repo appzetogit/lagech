@@ -26,6 +26,10 @@ export default function LandingPageManagement() {
   const [topBannersUploadProgress, setTopBannersUploadProgress] = useState({ current: 0, total: 0 })
   const [topBannersDeleting, setTopBannersDeleting] = useState(null)
   const topBannersFileInputRef = useRef(null)
+  // Zones for the per-banner scope selector. A banner with no zone shows
+  // everywhere; a zone-scoped one shows only there, alongside the global ones.
+  const [zones, setZones] = useState([])
+  const [bannerZoneSaving, setBannerZoneSaving] = useState(null)
 
   // Hero Banners
   const [banners, setBanners] = useState([])
@@ -150,6 +154,7 @@ export default function LandingPageManagement() {
   useEffect(() => {
 
     fetchTopBanners()
+    fetchZones()
     fetchBanners()
     fetchUnder250Banners()
     fetchDiningBanners()
@@ -172,6 +177,37 @@ export default function LandingPageManagement() {
 
 
   // ==================== TOP BANNERS ====================
+  const fetchZones = async () => {
+    try {
+      const response = await adminAPI.getZones({ isActive: true })
+      const payload = response?.data?.data ?? response?.data ?? {}
+      const rows = payload.zones || payload.items || payload.data || (Array.isArray(payload) ? payload : [])
+      setZones(Array.isArray(rows) ? rows : [])
+    } catch (err) {
+      // A missing zone list only costs the selector its options; the rest of
+      // the screen still works.
+      setZones([])
+    }
+  }
+
+  const handleTopBannerZoneChange = async (bannerId, zoneId) => {
+    setBannerZoneSaving(bannerId)
+    try {
+      await adminAPI.updateTopBannerZone(bannerId, zoneId || null)
+      setTopBanners((rows) =>
+        rows.map((b) => ((b._id || b.id) === bannerId ? { ...b, zoneId: zoneId || null } : b)),
+      )
+      // This screen reports success with its own inline banner rather than a
+      // toast; matching it keeps one style of feedback on the page.
+      setSuccess(zoneId ? "Banner scoped to that zone" : "Banner now shows in every zone")
+      setTimeout(() => setSuccess(null), 4000)
+    } catch (err) {
+      setErrorSafely(err.response?.data?.message || "Failed to update banner zone")
+    } finally {
+      setBannerZoneSaving(null)
+    }
+  }
+
   const fetchTopBanners = async () => {
     try {
       setTopBannersLoading(true)
@@ -1564,6 +1600,29 @@ export default function LandingPageManagement() {
                             <button onClick={() => handleDeleteTopBanner(banner._id)} disabled={topBannersDeleting === banner._id} className="p-1.5 rounded hover:bg-red-100 text-red-600 disabled:opacity-50">
                               {topBannersDeleting === banner._id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                             </button>
+                          </div>
+                        </div>
+                        <div className="mt-3 pt-3 border-t border-slate-200">
+                          <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">
+                            Zone
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <select
+                              value={banner.zoneId || ""}
+                              disabled={bannerZoneSaving === banner._id}
+                              onChange={(e) => handleTopBannerZoneChange(banner._id, e.target.value)}
+                              className="flex-1 text-sm rounded-lg border border-slate-300 px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:opacity-60"
+                            >
+                              <option value="">All zones</option>
+                              {zones.map((zone) => (
+                                <option key={zone.id || zone._id} value={zone.id || zone._id}>
+                                  {zone.name || zone.zoneName}
+                                </option>
+                              ))}
+                            </select>
+                            {bannerZoneSaving === banner._id && (
+                              <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
+                            )}
                           </div>
                         </div>
                         {banner.linkedRestaurants && banner.linkedRestaurants.length > 0 && (

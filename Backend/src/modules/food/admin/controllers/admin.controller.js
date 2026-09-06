@@ -1184,7 +1184,7 @@ export async function toggleDeliveryCommissionRuleStatus(req, res, next) {
 // ----- Fee Settings (admin) -----
 export async function getFeeSettings(req, res, next) {
     try {
-        const data = await adminService.getFeeSettings();
+        const data = await adminService.getFeeSettings(req.query?.zoneId);
         res.status(200).json({ success: true, message: 'Fee settings fetched successfully', data });
     } catch (error) {
         next(error);

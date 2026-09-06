@@ -16,7 +16,12 @@ const feeSettingsUpsertSchema = z.object({
     quickDeliveryFee: z.number().min(0).nullable().optional(),
     gstRate: z.number().min(0).max(100).nullable().optional(),
     deliveryFeeGstRate: z.number().min(0).max(100).nullable().optional(),
-    isActive: z.boolean().optional()
+    isActive: z.boolean().optional(),
+    // Which zone these fees are for. Absent/null is the global default, which
+    // is what every pre-zone caller means. Zod strips undeclared keys, so
+    // without this the scope would be silently dropped and a zone edit would
+    // overwrite the global row.
+    zoneId: z.string().min(1).nullable().optional()
 });
 
 export const validateFeeSettingsUpsertDto = (body) => {
@@ -52,7 +57,8 @@ export const validateFeeSettingsUpsertDto = (body) => {
                 : body?.deliveryFeeGstRate !== undefined
                     ? Number(body.deliveryFeeGstRate)
                     : undefined,
-        isActive: body?.isActive !== undefined ? Boolean(body.isActive) : undefined
+        isActive: body?.isActive !== undefined ? Boolean(body.isActive) : undefined,
+        zoneId: body?.zoneId ? String(body.zoneId) : body?.zoneId === null ? null : undefined
     };
 
     const result = feeSettingsUpsertSchema.safeParse(normalized);

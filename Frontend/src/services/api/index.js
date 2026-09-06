@@ -1067,6 +1067,38 @@ export const adminAPI = {
     apiClient.delete(`/food/admin/restaurant-commissions/${String(id)}`, {
       contextModule: "admin",
     }),
+  /** How a restaurant is billed: commission_overall | commission_dish | subscription. */
+  setRestaurantBillingMode: (id, billingMode) =>
+    apiClient.patch(
+      `/food/admin/restaurants/${String(id)}/billing-mode`,
+      { billingMode },
+      { contextModule: "admin" },
+    ),
+  /** Every dish for a restaurant, each with its own commission rate or none. */
+  getItemCommissions: (id) =>
+    apiClient.get(`/food/admin/restaurants/${String(id)}/item-commissions`, {
+      contextModule: "admin",
+    }),
+  /** Set one dish rate. Pass { clear: true } to drop it back to the restaurant rate. */
+  upsertItemCommission: (id, itemId, body) =>
+    apiClient.patch(
+      `/food/admin/restaurants/${String(id)}/item-commissions/${String(itemId)}`,
+      body ?? {},
+      { contextModule: "admin" },
+    ),
+  /** A rider's shift history: when they went online and offline. */
+  getDeliveryPartnerSessions: (id, params = {}) =>
+    apiClient.get(`/food/admin/delivery/${String(id)}/sessions`, {
+      params: { limit: 50, ...params },
+      contextModule: "admin",
+    }),
+  /** Move a top banner between zones. null puts it back in every zone. */
+  updateTopBannerZone: (id, zoneId) =>
+    apiClient.patch(
+      `/food/top-banners/${String(id)}/zone`,
+      { zoneId: zoneId || null },
+      { contextModule: "admin" },
+    ),
   toggleRestaurantCommissionStatus: (id) =>
     apiClient.patch(
       `/food/admin/restaurant-commissions/${String(id)}/toggle`,
@@ -1107,8 +1139,9 @@ export const adminAPI = {
     ),
 
   /** Fee Settings (admin) */
-  getFeeSettings: () =>
-    apiClient.get("/food/admin/fee-settings", { contextModule: "admin" }),
+  /** Fee settings for one zone, or the global default when zoneId is omitted. */
+  getFeeSettings: (params = {}) =>
+    apiClient.get("/food/admin/fee-settings", { params, contextModule: "admin" }),
   getPublicFeeSettings: (config = {}) =>
     publicConfigGetOnce("/food/admin/fee-settings/public", config),
   createOrUpdateFeeSettings: (body) =>

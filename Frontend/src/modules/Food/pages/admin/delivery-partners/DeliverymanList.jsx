@@ -5,6 +5,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
 import { toast } from "sonner"
 import { zoneLabel } from "@food/utils/entityLabels"
+import DeliveryDutyLog from "@food/components/admin/DeliveryDutyLog"
 const debugError = () => {}
 
 
@@ -1220,6 +1221,8 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
                     </div>
                   )}
                 </div>
+
+                <DeliveryDutyLog partnerId={viewDetails._id || viewDetails.id} />
               </div>
             ) : (
               <div className="flex items-center justify-center py-8">

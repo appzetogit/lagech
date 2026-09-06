@@ -18,6 +18,13 @@ export default function FeeSettings() {
     gstRate: "",
     deliveryFeeGstRate: "",
   })
+  // Which scope is being edited. "" is the global default that applies to any
+  // zone without fees of its own.
+  const [selectedZoneId, setSelectedZoneId] = useState("")
+  const [zones, setZones] = useState([])
+  // Whether the selected zone has fees of its own, as opposed to inheriting
+  // the global ones. The two look identical on screen otherwise.
+  const [scopeConfigured, setScopeConfigured] = useState(false)
   const [loadingFeeSettings, setLoadingFeeSettings] = useState(false)
   const [savingFeeSettings, setSavingFeeSettings] = useState(false)
   const [editingRangeIndex, setEditingRangeIndex] = useState(null)
@@ -30,11 +37,12 @@ export default function FeeSettings() {
   })
 
   // Fetch fee settings
-  const fetchFeeSettings = async () => {
+  const fetchFeeSettings = async (zoneId = selectedZoneId) => {
     try {
       setLoadingFeeSettings(true)
-      const response = await adminAPI.getFeeSettings()
+      const response = await adminAPI.getFeeSettings(zoneId ? { zoneId } : {})
       if (response.data.success && response.data.data.feeSettings) {
+        setScopeConfigured(true)
         setFeeSettings({
           deliveryFee: response.data.data.feeSettings.deliveryFee ?? "",
           deliveryFeeRanges: response.data.data.feeSettings.deliveryFeeRanges || [],
@@ -44,6 +52,7 @@ export default function FeeSettings() {
           deliveryFeeGstRate: response.data.data.feeSettings.deliveryFeeGstRate ?? "",
         })
       } else if (response.data.success && response.data.data.feeSettings === null) {
+        setScopeConfigured(false)
         // Not configured yet - keep empty fields (no defaults).
         setFeeSettings({
           deliveryFee: "",
@@ -64,10 +73,33 @@ export default function FeeSettings() {
 
   // Fetch fee settings on mount
   useEffect(() => {
-    fetchFeeSettings()
+    const loadZones = async () => {
+      try {
+        const response = await adminAPI.getZones({ isActive: true })
+        const payload = response?.data?.data ?? response?.data ?? {}
+        const rows = payload.zones || payload.items || payload.data || (Array.isArray(payload) ? payload : [])
+        setZones(Array.isArray(rows) ? rows : [])
+      } catch (error) {
+        // Without the list the screen still edits the global default.
+        setZones([])
+      }
+    }
+    loadZones()
   }, [])
 
+  // Reloads whenever the scope changes, so the form always shows the fees for
+  // the zone named above it rather than whichever was loaded first.
+  useEffect(() => {
+    fetchFeeSettings(selectedZoneId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedZoneId])
+
   // Unified save function
+  const zoneLabelFor = (id) => {
+    const zone = zones.find((z) => String(z.id || z._id) === String(id))
+    return zone?.name || zone?.zoneName || "this zone"
+  }
+
   const saveSettings = async (settingsToSave) => {
     try {
       setSavingFeeSettings(true)
@@ -83,6 +115,9 @@ export default function FeeSettings() {
         gstRate: settingsToSave.gstRate === "" ? undefined : Number(settingsToSave.gstRate),
         deliveryFeeGstRate: settingsToSave.deliveryFeeGstRate === "" ? undefined : Number(settingsToSave.deliveryFeeGstRate),
         isActive: true,
+        // Without this a zone edit would land on the global row and change
+        // the fees for every zone that inherits it.
+        zoneId: selectedZoneId || null,
       }
       
       debugLog('[DEBUG] Saving Fee Settings Payload:', payload)
@@ -90,7 +125,12 @@ export default function FeeSettings() {
       const response = await adminAPI.createOrUpdateFeeSettings(payload)
 
       if (response.data.success) {
-        toast.success('Settings saved successfully')
+        toast.success(
+          selectedZoneId
+            ? `Fees saved for ${zoneLabelFor(selectedZoneId)}`
+            : 'Global fees saved',
+        )
+        setScopeConfigured(true)
         const saved = response?.data?.data?.feeSettings
         if (saved) {
           setFeeSettings({
@@ -323,6 +363,45 @@ export default function FeeSettings() {
         <p className="text-sm text-slate-600">
           Configure delivery fee, platform fee, and GST settings for orders
         </p>
+
+        <div className="mt-5 pt-5 border-t border-slate-200">
+          <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
+            Applies to
+          </label>
+          <div className="flex flex-wrap items-center gap-3">
+            <select
+              value={selectedZoneId}
+              onChange={(e) => setSelectedZoneId(e.target.value)}
+              disabled={loadingFeeSettings || savingFeeSettings}
+              className="text-sm rounded-lg border border-slate-300 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:opacity-60 min-w-[220px]"
+            >
+              <option value="">All zones (default)</option>
+              {zones.map((zone) => (
+                <option key={zone.id || zone._id} value={zone.id || zone._id}>
+                  {zone.name || zone.zoneName}
+                </option>
+              ))}
+            </select>
+            {selectedZoneId && (
+              <span
+                className={`px-2.5 py-1 rounded-full text-xs font-semibold border ${
+                  scopeConfigured
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                    : "bg-slate-100 text-slate-600 border-slate-200"
+                }`}
+              >
+                {scopeConfigured ? "Overrides the default" : "Inherits the default"}
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-slate-500 mt-2">
+            {selectedZoneId
+              ? scopeConfigured
+                ? "Orders in this zone are priced with the fees below instead of the default."
+                : "This zone has no fees of its own yet and is priced with the default. Saving here creates an override for it."
+              : "These fees apply to every zone that does not have fees of its own."}
+          </p>
+        </div>
       </div>
 
       {/* Fee Settings Panel */}

@@ -19,6 +19,10 @@ const RESTAURANT_ROW = {
     status: true, ownerName: true, ownerPhone: true, primaryContactNumber: true,
     zoneId: true, profileImage: true, coverImages: true, menuImages: true,
     rating: true, totalRatings: true, createdAt: true,
+    // Needed by the billing screen, which lists restaurants rather than
+    // commission rows -- a restaurant on a subscription plan has no commission
+    // row at all and would otherwise show as being on the default mode.
+    billingMode: true,
 };
 
 const ZONE_SUMMARY = { select: { id: true, name: true, zoneName: true } };

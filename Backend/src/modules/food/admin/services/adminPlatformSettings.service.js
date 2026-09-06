@@ -47,8 +47,18 @@ const serializeFeeSettings = (doc) => {
 
 const FEE_INCLUDE = { deliveryFeeBands: { orderBy: { minDistanceKm: 'asc' } } };
 
-export async function getFeeSettings() {
+/**
+ * Fee settings for one zone, or the global default when no zone is given.
+ *
+ * A zone with no row of its own returns null rather than the global row: the
+ * admin screen has to be able to tell "this zone overrides the default" from
+ * "this zone inherits it", and handing back the global row would make every
+ * zone look configured.
+ */
+export async function getFeeSettings(zoneId = null) {
+    const scope = isId(zoneId) ? { zoneId: String(zoneId) } : { zoneId: null };
     const doc = await prisma.foodFeeSettings.findFirst({
+        where: scope,
         orderBy: { createdAt: 'desc' },
         include: FEE_INCLUDE,
     });
@@ -106,16 +116,24 @@ const asBandError = (error) => {
 export async function upsertFeeSettings(body = {}) {
     const data = feeColumns(body);
     const ranges = body.deliveryFeeRanges;
+    // Absent means the global default, which is what every existing caller
+    // means and what the single pre-zone row already is.
+    const zoneId = isId(body.zoneId) ? String(body.zoneId) : null;
 
     try {
         const saved = await prisma.$transaction(async (tx) => {
-            const existing = await tx.foodFeeSettings.findFirst({ orderBy: { createdAt: 'desc' } });
+            // Scoped: editing a zone must not overwrite the global row, which
+            // is what a bare findFirst would have done once zone rows existed.
+            const existing = await tx.foodFeeSettings.findFirst({
+                where: { zoneId },
+                orderBy: { createdAt: 'desc' },
+            });
 
             // One settings row, edited in place — the Mongo version called this
             // the "single active doc pattern".
             const row = existing
                 ? await tx.foodFeeSettings.update({ where: { id: existing.id }, data })
-                : await tx.foodFeeSettings.create({ data: { isActive: body.isActive !== false, ...data } });
+                : await tx.foodFeeSettings.create({ data: { isActive: body.isActive !== false, zoneId, ...data } });
 
             if (ranges !== undefined) {
                 // Replaced wholesale, in the same transaction as the settings.
