@@ -48,7 +48,13 @@ export function computeRestaurantCommissionAmount(baseAmount, rule) {
 }
 
 export async function getRestaurantCommissionSnapshot(orderDoc) {
-  const baseAmount = Number(orderDoc?.subtotal ?? 0) || 0;
+  // Two shapes reach this: a saved order row, which has `subtotal` as a column,
+  // and the in-flight draft from createOrder, which carries it under `pricing`.
+  // Only the first was read, so every order priced its commission off a base of
+  // 0 and stored 0 in food_orders.restaurantCommission -- and platformProfit,
+  // computed from it at creation, was understated by the same amount.
+  const baseAmount =
+    Number(orderDoc?.subtotal ?? orderDoc?.pricing?.subtotal ?? 0) || 0;
   const restaurantIdRaw = orderDoc?.restaurantId ?? null;
 
   if (!restaurantIdRaw) {
