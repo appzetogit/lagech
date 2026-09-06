@@ -1,0 +1,32 @@
+# Local development database.
+#
+# Postgres with PostGIS, because the schema is not portable without it: zones
+# keep a geography(Polygon) column maintained by a trigger, and delivery
+# partners a geography(Point). Plain postgres accepts the migrations right up
+# until the PostGIS ones, then fails halfway through.
+#
+# Port 5433, not 5432, so this cannot collide with a Postgres someone already
+# runs locally -- and so a stray DATABASE_URL pointing at the default port
+# cannot silently reach this one.
+services:
+  db:
+    image: postgis/postgis:17-3.5
+    container_name: minto-dev-db
+    environment:
+      POSTGRES_USER: minto
+      POSTGRES_PASSWORD: minto
+      POSTGRES_DB: minto
+    ports:
+      - "5433:5432"
+    volumes:
+      - minto-dev-db:/var/lib/postgresql/data
+    healthcheck:
+      # Migrations and the API both wait on this; without it the first
+      # connection races the server's own initialisation and fails.
+      test: ["CMD-SHELL", "pg_isready -U minto -d minto"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  minto-dev-db:
