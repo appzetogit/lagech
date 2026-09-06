@@ -16,6 +16,10 @@ const DEFAULT_MODULE_POWER_SCANNING = {
   user: { themeColor: "#008078", fontFamily: "Poppins" },
   restaurant: { themeColor: "#2563EB", fontFamily: "Poppins" },
   delivery: { themeColor: "#00B761", fontFamily: "Poppins" },
+  // Fixed. The admin panel is internal tooling with a stable brand, not a
+  // themeable storefront -- getModulePowerScanning deliberately ignores any
+  // stored value for this key.
+  admin: { themeColor: "#008078", fontFamily: "Poppins" },
 };
 
 const FONT_STACKS = {
@@ -466,7 +470,15 @@ export const applyModuleBranding = (moduleName = "user", settingsOverride = null
 export const getModulePowerScanning = (moduleName = "user", settingsOverride = null) => {
   const settings = settingsOverride || cachedSettings || {};
   const moduleKey = String(moduleName || "user").trim().toLowerCase();
-  const moduleConfig = settings?.powerScanning?.[moduleKey] || DEFAULT_MODULE_POWER_SCANNING[moduleKey] || DEFAULT_MODULE_POWER_SCANNING.user;
+  // Admin never reads stored theme settings: Power Scanning configures the
+  // three customer-facing apps, and letting one of those repaint the admin
+  // chrome is how the sidebar ended up a different colour than the brand.
+  const moduleConfig =
+    moduleKey === "admin"
+      ? DEFAULT_MODULE_POWER_SCANNING.admin
+      : settings?.powerScanning?.[moduleKey] ||
+        DEFAULT_MODULE_POWER_SCANNING[moduleKey] ||
+        DEFAULT_MODULE_POWER_SCANNING.user;
 
   const rawColor = String(moduleConfig?.themeColor || "").trim();
   const themeColor = /^#[0-9A-Fa-f]{6}$/.test(rawColor) ? rawColor : DEFAULT_MODULE_POWER_SCANNING[moduleKey]?.themeColor || DEFAULT_MODULE_POWER_SCANNING.user.themeColor;

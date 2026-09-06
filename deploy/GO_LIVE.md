@@ -254,4 +254,8 @@ restarting nginx.
 
     cd /var/www/Frontend
     NODE_OPTIONS=--max-old-space-size=1536 npm run build
-    sudo rsync -a --delete dist/ /srv/minto/admin/
+    # Use the script: it keeps the previous build's hashed chunks so tabs that
+    # are already open do not 404 on their next lazy route (a --delete sync here
+    # is what made the admin panel hard-reload on every sidebar click after a
+    # deploy). It also sets the heap size the 2 GB box needs to finish a build.
+    deploy/scripts/deploy-frontend.sh

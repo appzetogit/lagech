@@ -24,6 +24,13 @@ const PublicAppConfigContext = createContext(null);
 const resolveModuleFromPath = (pathname = "") => {
   if (pathname.startsWith("/food/restaurant")) return "restaurant";
   if (pathname.startsWith("/food/delivery")) return "delivery";
+  // The admin panel had no branch of its own, so it fell through to "user"
+  // and was painted with the customer app's theme colour.
+  // applyModulePowerScanning rewrites every bg-teal-*/emerald-*/green-*
+  // class with !important, and the sidebar is bg-teal-800 -- so whatever
+  // colour the customer app was set to became the admin chrome. Admin has a
+  // fixed brand identity and is not themeable from Power Scanning.
+  if (pathname.startsWith("/admin")) return "admin";
   return "user";
 };
 
