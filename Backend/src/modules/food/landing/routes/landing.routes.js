@@ -42,7 +42,10 @@ import {
 } from '../controllers/homePromotionBanner.controller.js';
 import {
     getAdminLandingSettingsController,
-    updateAdminLandingSettingsController
+    updateAdminLandingSettingsController,
+    getAdminLandingZoneSettingsController,
+    updateAdminLandingZoneSettingsController,
+    clearAdminLandingZoneSettingsController
 } from '../controllers/landingSettings.controller.js';
 import {
     listExploreMoreController,
@@ -223,5 +226,12 @@ router.get('/zones/public', listZonesPublicController);
 // Admin landing settings
 router.get('/hero-banners/landing/settings', getAdminLandingSettingsController);
 router.patch('/hero-banners/landing/settings', updateAdminLandingSettingsController);
+
+// Per-zone overrides for the Recommended For You rail. Under the same
+// /hero-banners/landing prefix as the global settings so they share the
+// admin guard already applied to that path.
+router.get('/hero-banners/landing/settings/zones/:zoneId', getAdminLandingZoneSettingsController);
+router.patch('/hero-banners/landing/settings/zones/:zoneId', updateAdminLandingZoneSettingsController);
+router.delete('/hero-banners/landing/settings/zones/:zoneId', clearAdminLandingZoneSettingsController);
 
 export default router;

@@ -194,14 +194,30 @@ export const loadUserHomePublicConfig = async ({ force = false } = {}) => {
   }
 };
 
-export const loadLandingSettingsForZone = async (zoneId, { force = false } = {}) => {
-  const zoneKey = String(zoneId || "global");
+/**
+ * Coordinates are rounded to ~100m before they reach the cache key.
+ *
+ * The rail can be ordered nearest-first, which needs the customer position --
+ * but GPS jitters constantly, and keying the cache on raw coordinates would
+ * miss on nearly every read and refetch the landing config as the customer
+ * stands still. 3 decimal places is finer than the rail can meaningfully
+ * distinguish and stable enough to actually hit.
+ */
+const coordKey = (value) =>
+  Number.isFinite(value) ? String(Math.round(value * 1000) / 1000) : "";
+
+export const loadLandingSettingsForZone = async (zoneId, { force = false, lat, lng } = {}) => {
+  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+  const zoneKey = [String(zoneId || "global"), coordKey(lat), coordKey(lng)].join("|");
 
   if (!force && store.landingByZone.has(zoneKey)) {
     return store.landingByZone.get(zoneKey);
   }
 
-  const params = zoneId ? { zoneId: String(zoneId) } : {};
+  const params = {
+    ...(zoneId ? { zoneId: String(zoneId) } : {}),
+    ...(hasCoords ? { lat, lng } : {}),
+  };
   const response = await publicConfigGetOnce(PUBLIC_CONFIG_URLS.LANDING, {
     params,
     ...(force ? { noCache: true } : {}),
@@ -224,8 +240,8 @@ export const getCachedHeroBanners = () => store.heroBanners;
 
 export const getCachedExploreIcons = () => store.exploreIcons;
 
-export const getCachedLandingSettings = (zoneId) => {
-  const zoneKey = String(zoneId || "global");
+export const getCachedLandingSettings = (zoneId, { lat, lng } = {}) => {
+  const zoneKey = [String(zoneId || "global"), coordKey(lat), coordKey(lng)].join("|");
   return store.landingByZone.get(zoneKey) || null;
 };
 

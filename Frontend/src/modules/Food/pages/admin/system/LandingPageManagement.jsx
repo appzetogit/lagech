@@ -76,7 +76,15 @@ export default function LandingPageManagement() {
   const diningBannersFileInputRef = useRef(null)
 
   // Settings
-  const [settings, setSettings] = useState({ exploreMoreHeading: "Explore More", recommendedRestaurantIds: [] })
+  const [settings, setSettings] = useState({ exploreMoreHeading: "Explore More", recommendedRestaurantIds: [], recommendedOrderMode: "manual" })
+  // Which scope the rail settings below apply to. "" is the global default,
+  // used by every zone that has no overrides of its own.
+  const [railZoneId, setRailZoneId] = useState("")
+  const [railOrderMode, setRailOrderMode] = useState("manual")
+  // Whether the selected zone has its own row, as opposed to inheriting.
+  // The two look identical on screen otherwise.
+  const [railOverrides, setRailOverrides] = useState(false)
+  const [railLoading, setRailLoading] = useState(false)
   const [settingsLoading, setSettingsLoading] = useState(true)
   const [settingsSaving, setSettingsSaving] = useState(false)
   const [recommendedSearchQuery, setRecommendedSearchQuery] = useState("")
@@ -1247,13 +1255,18 @@ export default function LandingPageManagement() {
         const nextSettings = response.data.data.settings || {}
         setSettings({
           exploreMoreHeading: nextSettings.exploreMoreHeading || "Explore More",
-          recommendedRestaurantIds: Array.isArray(nextSettings.recommendedRestaurantIds) ? nextSettings.recommendedRestaurantIds : []
+          recommendedRestaurantIds: Array.isArray(nextSettings.recommendedRestaurantIds) ? nextSettings.recommendedRestaurantIds : [],
+          recommendedOrderMode: nextSettings.recommendedOrderMode || "manual"
         })
+        // Only while the global scope is selected: switching to a zone loads
+        // that zone's mode, and this would otherwise stamp the global one
+        // over it on the next settings refresh.
+        if (!railZoneId) setRailOrderMode(nextSettings.recommendedOrderMode || "manual")
       }
     } catch (err) {
       // Silently handle 401/404 errors - endpoints may not exist yet, use default settings
       if (err.response?.status === 401 || err.response?.status === 404) {
-        setSettings({ exploreMoreHeading: "Explore More", recommendedRestaurantIds: [] }) // Use default settings
+        setSettings({ exploreMoreHeading: "Explore More", recommendedRestaurantIds: [], recommendedOrderMode: "manual" })
         setError(null) // Clear any previous error
       } else {
         // Filter out token-related errors
@@ -1265,26 +1278,109 @@ export default function LandingPageManagement() {
     }
   }
 
+  // Loads whichever scope is selected. A zone with no row of its own shows
+  // what it inherits, so the admin can see what "inherits the default"
+  // actually contains before deciding to override it.
+  const railZoneLabel = (id) => {
+    const zone = zones.find((z) => String(z.id || z._id) === String(id))
+    return zone?.name || zone?.zoneName || "this zone"
+  }
+
+  const fetchRailScope = async (zoneId) => {
+    if (!zoneId) {
+      setRailOverrides(false)
+      setRailOrderMode(settings.recommendedOrderMode || "manual")
+      return
+    }
+    try {
+      setRailLoading(true)
+      const response = await api.get(
+        `/food/hero-banners/landing/settings/zones/${zoneId}`,
+        getAuthConfig(),
+      )
+      const data = response?.data?.data || {}
+      const overrides = data.overrides || null
+      const inherited = data.inheritsWhenUnset || {}
+
+      setRailOverrides(Boolean(overrides))
+      setRailOrderMode(overrides?.recommendedOrderMode || inherited.recommendedOrderMode || "manual")
+      setSettings((prev) => ({
+        ...prev,
+        recommendedRestaurantIds:
+          overrides?.recommendedRestaurantIds?.length
+            ? overrides.recommendedRestaurantIds
+            : (inherited.recommendedRestaurantIds || []),
+      }))
+    } catch (err) {
+      setErrorSafely(err.response?.data?.message || "Failed to load zone settings")
+    } finally {
+      setRailLoading(false)
+    }
+  }
+
+  const handleRailZoneChange = async (zoneId) => {
+    setRailZoneId(zoneId)
+    await fetchRailScope(zoneId)
+  }
+
+  // Drops the zone row so the zone follows the global settings again.
+  const handleRailReset = async () => {
+    if (!railZoneId) return
+    try {
+      setRailLoading(true)
+      await api.delete(`/food/hero-banners/landing/settings/zones/${railZoneId}`, getAuthConfig())
+      setSuccess("Zone now follows the default settings")
+      setTimeout(() => setSuccess(null), 4000)
+      await fetchRailScope(railZoneId)
+    } catch (err) {
+      setErrorSafely(err.response?.data?.message || "Failed to reset zone settings")
+    } finally {
+      setRailLoading(false)
+    }
+  }
+
   const handleSaveSettings = async () => {
     try {
       setSettingsSaving(true)
       setError(null)
       setSuccess(null)
-      const response = await api.patch('/food/hero-banners/landing/settings', {
-        exploreMoreHeading: settings.exploreMoreHeading,
-        recommendedRestaurantIds: Array.isArray(settings.recommendedRestaurantIds) ? settings.recommendedRestaurantIds : []
-      }, getAuthConfig())
-      if (response.data.success) {
-        const savedSettings = response.data.data?.settings || {}
-        setSettings((prev) => ({
-          ...prev,
-          exploreMoreHeading: savedSettings.exploreMoreHeading || prev.exploreMoreHeading,
-          recommendedRestaurantIds: Array.isArray(savedSettings.recommendedRestaurantIds)
-            ? savedSettings.recommendedRestaurantIds
-            : prev.recommendedRestaurantIds
-        }))
-        setSuccess('Settings saved successfully!')
-        setTimeout(() => setSuccess(null), 3000)
+      const ids = Array.isArray(settings.recommendedRestaurantIds)
+        ? settings.recommendedRestaurantIds
+        : []
+
+      if (railZoneId) {
+        // A zone edit goes to that zone's row. Sending it to the global
+        // endpoint would change the rail for every zone inheriting it.
+        await api.patch(
+          `/food/hero-banners/landing/settings/zones/${railZoneId}`,
+          { recommendedRestaurantIds: ids, recommendedOrderMode: railOrderMode },
+          getAuthConfig(),
+        )
+        // The heading is not per-zone, so it still belongs on the global row.
+        await api.patch('/food/hero-banners/landing/settings', {
+          exploreMoreHeading: settings.exploreMoreHeading,
+        }, getAuthConfig())
+        setRailOverrides(true)
+        setSuccess(`Saved for ${railZoneLabel(railZoneId)}`)
+        setTimeout(() => setSuccess(null), 4000)
+      } else {
+        const response = await api.patch('/food/hero-banners/landing/settings', {
+          exploreMoreHeading: settings.exploreMoreHeading,
+          recommendedRestaurantIds: ids,
+          recommendedOrderMode: railOrderMode,
+        }, getAuthConfig())
+        if (response.data.success) {
+          const savedSettings = response.data.data?.settings || {}
+          setSettings((prev) => ({
+            ...prev,
+            exploreMoreHeading: savedSettings.exploreMoreHeading || prev.exploreMoreHeading,
+            recommendedRestaurantIds: Array.isArray(savedSettings.recommendedRestaurantIds)
+              ? savedSettings.recommendedRestaurantIds
+              : prev.recommendedRestaurantIds
+          }))
+          setSuccess('Settings saved successfully!')
+          setTimeout(() => setSuccess(null), 3000)
+        }
       }
     } catch (err) {
       setErrorSafely(err.response?.data?.message || 'Failed to save settings.')
@@ -2073,6 +2169,71 @@ export default function LandingPageManagement() {
                     <p className="text-xs text-slate-500 mt-1 mb-2">
                       Choose multiple restaurants to display below filters on the user home page.
                     </p>
+
+                    <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                      <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1.5">
+                        Applies to
+                      </label>
+                      <div className="flex flex-wrap items-center gap-2 mb-3">
+                        <select
+                          value={railZoneId}
+                          disabled={railLoading || settingsSaving}
+                          onChange={(e) => handleRailZoneChange(e.target.value)}
+                          className="text-sm rounded-lg border border-slate-300 px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:opacity-60 min-w-[200px]"
+                        >
+                          <option value="">All zones (default)</option>
+                          {zones.map((zone) => (
+                            <option key={zone.id || zone._id} value={zone.id || zone._id}>
+                              {zone.name || zone.zoneName}
+                            </option>
+                          ))}
+                        </select>
+                        {railZoneId && (
+                          <span className={`px-2.5 py-1 rounded-full text-xs font-semibold border ${railOverrides ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-slate-100 text-slate-600 border-slate-200"}`}>
+                            {railOverrides ? "Overrides the default" : "Inherits the default"}
+                          </span>
+                        )}
+                        {railZoneId && railOverrides && (
+                          <button
+                            type="button"
+                            onClick={handleRailReset}
+                            disabled={railLoading}
+                            className="px-2.5 py-1 text-xs rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-100 disabled:opacity-60"
+                          >
+                            Follow default
+                          </button>
+                        )}
+                        {railLoading && <Loader2 className="w-4 h-4 animate-spin text-slate-400" />}
+                      </div>
+
+                      <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1.5">
+                        Order
+                      </label>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {[
+                          { value: "manual", label: "The order below" },
+                          { value: "nearest", label: "Closest to the customer" },
+                        ].map((opt) => (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            onClick={() => setRailOrderMode(opt.value)}
+                            className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${railOrderMode === opt.value ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-700 border-slate-300 hover:bg-slate-100"}`}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-xs text-slate-500 mt-2">
+                        {railOrderMode === "nearest"
+                          ? "Sorted by distance from the customer, so the order chosen below is ignored. Customers who have not shared a location see the order below instead."
+                          : railZoneId
+                            ? railOverrides
+                              ? "This zone shows the restaurants below, in this order."
+                              : "This zone has no list of its own yet and shows the default. Saving here creates one for it."
+                            : "Shown to every zone that does not have a list of its own."}
+                      </p>
+                    </div>
 
                     <div className="relative mb-3">
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400" />

@@ -300,6 +300,15 @@ enum CashbackType {
 /// How a restaurant is billed. Commission and subscription both already
 /// existed and could be configured at the same time with nothing choosing
 /// between them; this makes the choice explicit and exclusive.
+/// How the Recommended For You rail is ordered on the customer home page.
+enum RecommendedOrderMode {
+  /// The order the admin arranged them in.
+  manual
+  /// Closest to the customer first. Falls back to `manual` when the customer
+  /// has not shared a location, since there is nothing to measure from.
+  nearest
+}
+
 enum RestaurantBillingMode {
   /// One rate against the order subtotal (the behaviour before this existed).
   commission_overall
@@ -1877,13 +1886,14 @@ model FoodZone {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  restaurants        FoodRestaurant[]      @relation("RestaurantZone")
-  pendingRestaurants FoodRestaurant[]      @relation("RestaurantPendingZone")
-  orders             FoodOrder[]
-  categories         FoodCategory[]
-  promotionBanners   HomePromotionBanner[]
-  foodFeeSettings    FoodFeeSettings[]
-  topBanners         TopBanner[]
+  restaurants             FoodRestaurant[]         @relation("RestaurantZone")
+  pendingRestaurants      FoodRestaurant[]         @relation("RestaurantPendingZone")
+  orders                  FoodOrder[]
+  categories              FoodCategory[]
+  promotionBanners        HomePromotionBanner[]
+  foodFeeSettings         FoodFeeSettings[]
+  topBanners              TopBanner[]
+  foodLandingZoneSettings FoodLandingZoneSettings?
 
   @@index([isActive, name])
   @@index([country, name])
@@ -3196,12 +3206,39 @@ model FoodGourmetRestaurant {
   @@map("food_gourmet_restaurants")
 }
 
+/// Per-zone overrides for the Recommended For You rail.
+///
+/// The rail was one global list filtered down to whichever zone asked, so a
+/// zone could never be given a different set -- only a subset of the one set.
+/// A zone with no row here inherits the singleton above, so adding zone
+/// scoping changes nothing until a zone is actually configured.
+model FoodLandingZoneSettings {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  zoneId String @unique @db.VarChar(24)
+
+  /// Empty means "not overridden" -- the global list is used. A zone that
+  /// genuinely wants no rail turns it off rather than saving an empty list.
+  recommendedRestaurantIds String[]
+
+  recommendedOrderMode RecommendedOrderMode @default(manual)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  zone FoodZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+
+  @@map("food_landing_zone_settings")
+}
+
 model FoodLandingSettings {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 
-  exploreMoreHeading       String   @default("Explore more")
+  exploreMoreHeading       String               @default("Explore more")
   /// ponytail: id array, matching the Mongo access pattern.
   recommendedRestaurantIds String[]
+  /// The default for zones that do not set their own.
+  recommendedOrderMode     RecommendedOrderMode @default(manual)
 
   showHeroBanners  Boolean @default(true)
   showUnder250     Boolean @default(true)

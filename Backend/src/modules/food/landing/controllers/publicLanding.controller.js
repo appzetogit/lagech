@@ -2,7 +2,12 @@ import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { sendResponse } from '../../../../utils/response.js';
 import { getPublicGourmetRestaurants } from '../services/gourmet.service.js';
-import { getLandingSettings } from '../services/landingSettings.service.js';
+import { resolveLandingSettingsForZone } from '../services/landingSettings.service.js';
+import {
+    haversineKm,
+    isValidLatitude,
+    isValidLongitude,
+} from '../../shared/geo.utils.js';
 import { getPublicHomePromotionBanners } from '../services/homePromotionBanner.service.js';
 
 const ACTIVE_BY_ORDER = {
@@ -149,24 +154,57 @@ export const getPublicGourmetController = async (req, res, next) => {
     }
 };
 
+/**
+ * Closest first, for zones set to `nearest`.
+ *
+ * A restaurant with no coordinates sorts last rather than first: NaN and
+ * Infinity both poison a comparator, and an unplaceable restaurant is the one
+ * we are least able to claim is nearby.
+ */
+const byDistanceFrom = (lat, lng) => (a, b) => {
+    const d = (r) =>
+        Number.isFinite(r?.latitude) && Number.isFinite(r?.longitude)
+            ? haversineKm(lat, lng, r.latitude, r.longitude)
+            : Number.MAX_SAFE_INTEGER;
+    return d(a) - d(b);
+};
+
 export const getPublicLandingSettingsController = async (req, res, next) => {
     try {
         const { zoneId } = req.query;
-        const settings = await getLandingSettings();
+        const settings = await resolveLandingSettingsForZone(zoneId);
 
         const recommendedRestaurants = await hydrateRestaurants(
             settings?.recommendedRestaurantIds,
             {
                 ...RESTAURANT_CARD,
                 coverImages: true, menuImages: true, zoneId: true,
+                latitude: true, longitude: true,
             },
             isId(zoneId) ? { zoneId: String(zoneId) } : {},
         );
+
+        // hydrateRestaurants already returns them in the admin's order, which
+        // is what `manual` means, so only `nearest` re-sorts.
+        const lat = Number(req.query.lat);
+        const lng = Number(req.query.lng);
+        const hasCustomerLocation = isValidLatitude(lat) && isValidLongitude(lng);
+        const orderMode = settings?.recommendedOrderMode === 'nearest' ? 'nearest' : 'manual';
+
+        if (orderMode === 'nearest' && hasCustomerLocation) {
+            recommendedRestaurants.sort(byDistanceFrom(lat, lng));
+        }
 
         return sendResponse(res, 200, 'Landing settings fetched', {
             ...settings,
             recommendedRestaurantIds: undefined,
             recommendedRestaurants,
+            /// What actually happened, not what was configured. `nearest` with
+            /// no customer location falls back to the admin's order, and a
+            /// client showing "Nearest first" over a manual list would be
+            /// lying to the customer.
+            recommendedOrderApplied:
+                orderMode === 'nearest' && !hasCustomerLocation ? 'manual' : orderMode,
         });
     } catch (error) {
         next(error);

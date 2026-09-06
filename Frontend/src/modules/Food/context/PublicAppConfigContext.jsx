@@ -56,8 +56,11 @@ export function PublicAppConfigProvider({ children }) {
     return snapshot;
   }, []);
 
-  const refreshLanding = useCallback(async (zoneId, force = false) => {
-    const landing = await loadLandingSettingsForZone(zoneId, { force });
+  // `options` carries the customer coordinates when there are any. The rail
+  // can be ordered nearest-first, and without them the server has nothing to
+  // measure from and falls back to the admin's order.
+  const refreshLanding = useCallback(async (zoneId, force = false, options = {}) => {
+    const landing = await loadLandingSettingsForZone(zoneId, { force, ...options });
     setConfig(getPublicAppConfigSnapshot());
     return landing;
   }, []);

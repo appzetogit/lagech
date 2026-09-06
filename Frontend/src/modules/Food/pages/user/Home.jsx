@@ -1638,7 +1638,13 @@ export default function Home() {
     let cancelled = false;
     setLoadingLandingConfig(true);
 
-    void refreshLanding(zoneId)
+    // Coordinates go with it so a zone set to nearest-first can order the
+    // rail. Rounded before they reach the request cache, so standing still
+    // does not refetch on every GPS jitter.
+    void refreshLanding(zoneId, false, {
+      lat: effectiveLocation?.latitude,
+      lng: effectiveLocation?.longitude,
+    })
       .then((landing) => {
         if (cancelled || !landing) return;
         setExploreMoreHeading(landing.exploreMoreHeading || "Explore More");
@@ -1658,7 +1664,7 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, [zoneId, refreshLanding]);
+  }, [zoneId, refreshLanding, effectiveLocation?.latitude, effectiveLocation?.longitude]);
   const [showToast, setShowToast] = useState(false);
   const [showManageCollections, setShowManageCollections] = useState(false);
   const [selectedRestaurantSlug, setSelectedRestaurantSlug] = useState(null);
