@@ -15,7 +15,9 @@ const debugError = (...args) => {}
 
 
 export default function LandingPageManagement() {
-  const [activeTab, setActiveTab] = useState('top-banners')
+  // Explore More is the only tab now; defaulting to a removed one opened the
+  // page on a tab whose body no longer renders, i.e. blank.
+  const [activeTab, setActiveTab] = useState('explore-more')
   const [exploreMoreSubTab, setExploreMoreSubTab] = useState('icons')
 
 
@@ -1416,11 +1418,14 @@ export default function LandingPageManagement() {
 
   // ==================== RENDER ====================
 
+  // Top Banners, Hero Banners and Switch 99 were removed from this screen.
+  //
+  // Their fetchers and panels are left in place below rather than deleted:
+  // the customer home page still loads and renders top and hero banners
+  // (publicAppConfig loads both on every visit), so this hides the controls
+  // without touching what is on the storefront. Putting a tab back is one
+  // line here; deleting the panels would not be.
   const tabs = [
-    { id: 'top-banners', label: 'Top Banners', icon: ImageIcon },
-    { id: 'banners', label: 'Hero Banners', icon: ImageIcon },
-    { id: 'under-250', label: 'Switch 99 Banner', icon: Tag },
-    // { id: 'dining', label: 'Dining', icon: UtensilsCrossed },
     { id: 'explore-more', label: 'Explore More', icon: Layout },
   ]
 
@@ -1440,7 +1445,7 @@ export default function LandingPageManagement() {
             </div>
             <div>
               <h1 className="text-2xl font-bold text-slate-900">Landing Page Management</h1>
-              <p className="text-sm text-slate-600 mt-1">Manage hero banners</p>
+              <p className="text-sm text-slate-600 mt-1">Manage the Explore More section of the customer home page</p>
             </div>
           </div>
         </div>
