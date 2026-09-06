@@ -229,46 +229,67 @@ const toFeeRanges = (bands = []) =>
     deliveryBoyPerKm: Number(band.deliveryBoyPerKm),
   }));
 
+const FEE_QUERY = {
+  orderBy: { createdAt: 'desc' },
+  include: { deliveryFeeBands: { orderBy: { minDistanceKm: 'asc' } } },
+};
+
 /**
  * Active fee settings, preferring a row scoped to the order's zone.
  *
  * Fees were global: one active row priced every trip in the country. A zone
- * row overrides it, and a zone with no row of its own still falls back to the
- * global one -- so adding zone pricing never leaves a zone unpriced, and
- * deployments that never configure a zone keep the exact behaviour they had.
+ * row overrides it, and a zone with no row of its own falls back to the global
+ * one -- so adding zone pricing never leaves a zone unpriced, and deployments
+ * that never configure a zone keep the exact behaviour they had.
+ *
+ * The override is per field, not wholesale. A zone row is created the moment an
+ * admin saves anything for that zone, and everything they did not fill in is
+ * null on it. Taking the row as-is made those nulls read as "not configured",
+ * so setting only a platform fee for a zone silently made delivery free there.
+ * A blank field means "inherit", which is what the screen says it means.
+ *
+ * The cost is that a zone cannot switch a fee off that the default has on --
+ * blank is inheritance, not zero. Charging nothing by accident is the worse of
+ * the two, and a zone that genuinely wants no delivery fee can set it to 0.
  */
 export async function loadActiveFeeSettings(zoneId = null) {
   const zoned = isId(zoneId)
     ? await prisma.foodFeeSettings.findFirst({
         where: { isActive: true, zoneId: String(zoneId) },
-        orderBy: { createdAt: 'desc' },
-        include: { deliveryFeeBands: { orderBy: { minDistanceKm: 'asc' } } },
+        ...FEE_QUERY,
       })
     : null;
 
-  const feeDoc =
-    zoned ||
+  const global =
     (await prisma.foodFeeSettings.findFirst({
       where: { isActive: true, zoneId: null },
-      orderBy: { createdAt: 'desc' },
-      include: { deliveryFeeBands: { orderBy: { minDistanceKm: 'asc' } } },
+      ...FEE_QUERY,
     })) ||
     // Deployments that predate zone scoping have a single active row with a
-    // null zoneId, which the query above already finds. This last look is for
+    // null zoneId, which the query above already finds. This last look covers
     // the case where every row happens to be zone-scoped and none matched.
-    (await prisma.foodFeeSettings.findFirst({
-      where: { isActive: true },
-      orderBy: { createdAt: 'desc' },
-      include: { deliveryFeeBands: { orderBy: { minDistanceKm: 'asc' } } },
-    }));
+    (await prisma.foodFeeSettings.findFirst({ where: { isActive: true }, ...FEE_QUERY }));
 
+  const feeDoc = zoned || global;
   if (!feeDoc) {
     return { deliveryFee: 0, deliveryFeeRanges: [], platformFee: 0, gstRate: 0, zoneId: null };
   }
 
+  const inherit = (field) =>
+    feeDoc[field] === null || feeDoc[field] === undefined ? global?.[field] ?? null : feeDoc[field];
+
+  const ownRanges = toFeeRanges(feeDoc.deliveryFeeBands);
+  // No bands of its own means the zone did not override the ladder either.
+  const ranges = ownRanges.length > 0 ? ownRanges : toFeeRanges(global?.deliveryFeeBands);
+
   return {
     ...feeDoc,
-    deliveryFeeRanges: toFeeRanges(feeDoc.deliveryFeeBands),
+    deliveryFee: inherit('deliveryFee'),
+    platformFee: inherit('platformFee'),
+    quickDeliveryFee: inherit('quickDeliveryFee'),
+    gstRate: inherit('gstRate'),
+    deliveryFeeGstRate: inherit('deliveryFeeGstRate'),
+    deliveryFeeRanges: ranges,
     /// Which row actually priced this, so callers can report it.
     resolvedFromZone: Boolean(zoned),
   };
