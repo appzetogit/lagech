@@ -56,6 +56,12 @@ const LEGACY_BRAND_TAILWIND_COLORS = [
   "teal-50", "teal-100", "teal-200", "teal-300", "teal-400", "teal-500", "teal-600", "teal-700", "teal-800", "teal-900",
 ];
 
+/** The numeric shade in a token like "teal-800"; 500 when there is none. */
+const shadeOf = (colorToken) => {
+  const match = /-(\d{2,3})$/.exec(String(colorToken || ""));
+  return match ? Number(match[1]) : 500;
+};
+
 const hexToRgbTuple = (hex) => {
   const raw = String(hex || "").trim();
   const normalized = raw.startsWith("#") ? raw.slice(1) : raw;
@@ -96,7 +102,14 @@ const buildThemeOverrideCss = () => {
   const hoverBorderSelectors = [];
   const focusRingSelectors = [];
   const twTextSelectors = [];
+  // Split by shade. One flat alpha for all of them turned every dark surface
+  // into a 10% wash -- the admin sidebar is bg-teal-800 and rendered as a pale
+  // tint of the theme colour rather than a solid one. Tailwind shades mean
+  // something: the light end is a tint behind content, the dark end is a solid
+  // surface, and the two cannot share an opacity.
   const twBgSelectors = [];
+  const twBgSolidSelectors = [];
+  const twHoverBgSolidSelectors = [];
   const twBorderSelectors = [];
   const twFillSelectors = [];
   const twStrokeSelectors = [];
@@ -166,7 +179,8 @@ const buildThemeOverrideCss = () => {
 
   LEGACY_BRAND_TAILWIND_COLORS.forEach((colorToken) => {
     twTextSelectors.push(`.text-${colorToken}`);
-    twBgSelectors.push(`.bg-${colorToken}`);
+    const isSolidShade = shadeOf(colorToken) >= 600;
+    (isSolidShade ? twBgSolidSelectors : twBgSelectors).push(`.bg-${colorToken}`);
     twBorderSelectors.push(`.border-${colorToken}`);
     twFillSelectors.push(`.fill-${colorToken}`);
     twStrokeSelectors.push(`.stroke-${colorToken}`);
@@ -174,7 +188,7 @@ const buildThemeOverrideCss = () => {
     twToSelectors.push(`.to-${colorToken}`);
     twViaSelectors.push(`.via-${colorToken}`);
     twHoverTextSelectors.push(`.hover\\:text-${colorToken}:hover`);
-    twHoverBgSelectors.push(`.hover\\:bg-${colorToken}:hover`);
+    (isSolidShade ? twHoverBgSolidSelectors : twHoverBgSelectors).push(`.hover\\:bg-${colorToken}:hover`);
     twHoverBorderSelectors.push(`.hover\\:border-${colorToken}:hover`);
   });
 
@@ -274,6 +288,9 @@ const buildThemeOverrideCss = () => {
     }
     ${twBgSelectors.join(", ")}, ${twHoverBgSelectors.join(", ")} {
       background-color: rgba(var(--module-theme-rgb), 0.10) !important;
+    }
+    ${twBgSolidSelectors.join(", ")}, ${twHoverBgSolidSelectors.join(", ")} {
+      background-color: var(--module-theme-color) !important;
     }
     ${twBorderSelectors.join(", ")}, ${twHoverBorderSelectors.join(", ")} {
       border-color: rgba(var(--module-theme-rgb), 0.24) !important;
