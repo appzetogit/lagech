@@ -16,6 +16,19 @@ export default function ProtectedRoute({ children }) {
     isModuleAuthenticated("admin") ? "checking" : "deny"
   )
 
+  // Once, on mount -- not on every navigation.
+  //
+  // This used to depend on location.pathname, so every sidebar click set
+  // status back to "checking", which renders the blank div below in place of
+  // the entire panel, fired a profile request, and only restored the tree
+  // when it came back. The whole admin panel unmounted and remounted -- a
+  // full-screen flash for the length of an HTTP round trip -- on every
+  // single click. Authorisation for the new path is still checked on every
+  // render further down; that part is synchronous and needs no network.
+  //
+  // Expiry is not this effect's job either: the axios interceptor refreshes
+  // on 401 for every request the panel makes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     let isMounted = true
 
@@ -64,8 +77,10 @@ export default function ProtectedRoute({ children }) {
     return () => {
       isMounted = false
     }
-  }, [location.pathname])
+  }, [])
 
+  // Only reachable before the first check resolves, i.e. on a cold load of the
+  // panel. After that status stays "ok" and navigation never returns here.
   if (status === "checking") {
     return <div className="min-h-screen bg-neutral-100" />
   }
