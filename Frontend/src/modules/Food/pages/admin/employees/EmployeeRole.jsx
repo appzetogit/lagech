@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { adminAPI } from "@food/api";
+import { adminSectionLabel } from "@food/utils/adminRbac";
 
 export default function EmployeeRole() {
   const [searchParams] = useSearchParams();
@@ -95,7 +96,7 @@ export default function EmployeeRole() {
                 const allChecked = catalog.actions.every((a) => selected.includes(a));
                 return (
                   <tr key={section.key} className="border-b border-slate-100">
-                    <td className="p-3 text-sm font-medium">{section.key}</td>
+                    <td className="p-3 text-sm font-medium">{adminSectionLabel(section.key)}</td>
                     <td className="p-3">
                       <input type="checkbox" checked={allChecked} onChange={(e) => toggleAllSection(section.key, e.target.checked)} />
                     </td>

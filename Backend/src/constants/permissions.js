@@ -14,7 +14,15 @@ export const ADMIN_PERMISSION_SECTIONS = [
     'report_management',
     'transaction_management',
     'banner_management',
-    'pages_social_media'
+    'pages_social_media',
+    // Both of these were already used by guards -- resolveSectionFromRequest
+    // returns them and requireAdminPermission('sub_admin_management') gates
+    // /sub-admins -- but neither was listed here. sanitizeAdminPermissions
+    // drops every key it does not recognise, so they could never be granted and
+    // those pages 403'd for every sub-admin no matter what the role editor was
+    // set to.
+    'system_settings',
+    'sub_admin_management'
 ];
 
 export const ADMIN_FULL_PERMISSIONS = Object.freeze(

@@ -85,6 +85,14 @@ const resolveSectionFromRequest = (path = '', method = '') => {
     if (path.startsWith('/reports')) return 'report_management';
     if (path.startsWith('/feature-settings') || path.startsWith('/business-settings') || path.startsWith('/power-scanning') || path.startsWith('/notifications')) return 'system_settings';
     if (path.startsWith('/pages-social-media')) return 'pages_social_media';
+    // These four sections were grantable in the role editor but appeared in no
+    // guard, so ticking their boxes did nothing at all. The sidebar hid the menu
+    // entry, which made them look enforced -- the API was open to any sub-admin
+    // who called it directly.
+    if (path.startsWith('/referral-settings')) return 'referral_rewards';
+    if (path.startsWith('/contact-messages') || path.startsWith('/safety-emergency-reports')) return 'support_management';
+    if (path.startsWith('/hero-banners') || path.startsWith('/top-banners') || path.startsWith('/promotion-banners')) return 'banner_management';
+    if (path.startsWith('/point-of-sale') || path.startsWith('/pos')) return 'point_of_sale';
     if (path.startsWith('/sidebar-badges') || path.startsWith('/dashboard-stats')) return 'dashboard';
     return null;
 };

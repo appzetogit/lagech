@@ -2,6 +2,7 @@ import express from 'express';
 import { upload } from '../../../../middleware/upload.js';
 import { authMiddleware } from '../../../../core/auth/auth.middleware.js';
 import { requireRoles } from '../../../../core/roles/role.middleware.js';
+import { requireAdminPermission } from '../../../../core/roles/adminPermission.middleware.js';
 import {
     listHeroBannersController,
     uploadHeroBannersController,
@@ -100,9 +101,22 @@ const requireAdminForLandingWrites = (req, res, next) => {
     // Public reads stay open.
     if (/\/public$/.test(path)) return next();
 
+    // Role alone is not enough: every sub-admin carries role ADMIN, so this
+    // used to let any of them manage banners regardless of their permissions.
+    // The sidebar hid the menu entry, which is not a control -- the API was
+    // reachable directly. banner_management is a real section, so enforce it.
+    const action =
+        req.method === 'POST' ? 'create'
+        : req.method === 'DELETE' ? 'delete'
+        : req.method === 'PATCH' || req.method === 'PUT' ? 'edit'
+        : 'view';
+
     return authMiddleware(req, res, (err) => {
         if (err) return next(err);
-        return requireRoles('ADMIN')(req, res, next);
+        return requireRoles('ADMIN')(req, res, (roleErr) => {
+            if (roleErr) return next(roleErr);
+            return requireAdminPermission('banner_management', action)(req, res, next);
+        });
     });
 };
 

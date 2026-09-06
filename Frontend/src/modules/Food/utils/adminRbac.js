@@ -17,7 +17,39 @@ export const ADMIN_PERMISSION_SECTIONS = [
   "transaction_management",
   "banner_management",
   "pages_social_media",
+  // Kept in step with the backend list in src/constants/permissions.js. Both of
+  // these are referenced by PATH_PREFIX_TO_SECTION below and by backend guards,
+  // but were missing from every section list -- so they could never be granted
+  // and their pages were invisible to every sub-admin.
+  "system_settings",
+  "sub_admin_management",
 ];
+
+/** Labels for the role editor; the raw keys are not what an admin should read. */
+export const ADMIN_SECTION_LABELS = {
+  dashboard: "Dashboard",
+  point_of_sale: "Point of Sale",
+  food_management: "Food Management",
+  restaurant_management: "Restaurant Management",
+  order_management: "Order Management",
+  promotions_management: "Promotions",
+  referral_rewards: "Referral & Rewards",
+  customer_management: "Customer Management",
+  delivery_management: "Delivery Management",
+  support_management: "Support Management",
+  report_management: "Reports",
+  transaction_management: "Transactions",
+  banner_management: "Banner Management",
+  pages_social_media: "Pages & Social Media",
+  system_settings: "System Settings",
+  sub_admin_management: "Sub-Admin Management",
+};
+
+export const adminSectionLabel = (key) =>
+  ADMIN_SECTION_LABELS[key] ||
+  String(key || "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (ch) => ch.toUpperCase());
 
 const PATH_PREFIX_TO_SECTION = [
   { prefix: "/admin/food/point-of-sale", section: "point_of_sale" },
@@ -128,6 +160,8 @@ export function findFirstAllowedAdminPath(adminUser) {
     transaction_management: "/admin/food/restaurant-withdraws",
     banner_management: "/admin/food/hero-banner-management",
     pages_social_media: "/admin/food/pages-social-media/about",
+    system_settings: "/admin/food/business-setup",
+    sub_admin_management: "/admin/food/employees",
   };
 
   if (isSuperAdmin(adminUser)) {
