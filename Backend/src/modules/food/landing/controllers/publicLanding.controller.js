@@ -30,10 +30,23 @@ const hydrateRestaurants = async (ids, select, extraWhere = {}) => {
     const wanted = [...new Set((ids || []).map(String).filter(isId))];
     if (!wanted.length) return [];
 
-    return prisma.foodRestaurant.findMany({
+    const rows = await prisma.foodRestaurant.findMany({
         where: { id: { in: wanted }, status: 'approved', ...extraWhere },
         select,
     });
+
+    // Back into the order the ids were given in.
+    //
+    // `WHERE id IN (...)` has no inherent order, so Postgres returned these in
+    // whatever order it liked and the arrangement an admin set on the
+    // Recommended For You rail was simply lost -- the rail came out shuffled
+    // and reordering it in the admin changed nothing. The hero banner caller
+    // re-sorted its own copy afterwards and so never saw this; the landing
+    // settings caller used the rows as they came.
+    const position = new Map(wanted.map((id, index) => [id, index]));
+    return rows.sort(
+        (a, b) => (position.get(String(a.id)) ?? 0) - (position.get(String(b.id)) ?? 0),
+    );
 };
 
 export const getPublicHeroBannersController = async (req, res, next) => {
