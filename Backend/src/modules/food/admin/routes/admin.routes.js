@@ -151,6 +151,9 @@ router.delete('/sub-admins/:id', requireAdminPermission('sub_admin_management', 
 // ----- Broadcast Notifications -----
 router.post('/notifications/broadcast', notificationBroadcastController.createBroadcastNotificationController);
 router.get('/notifications/broadcast', notificationBroadcastController.getBroadcastNotificationsController);
+// Preview a win-back audience. Under /notifications so it inherits the
+// system_settings guard the broadcast routes already carry.
+router.get('/notifications/lapsed-customers', notificationBroadcastController.getLapsedCustomersController);
 router.delete('/notifications/broadcast/:id', notificationBroadcastController.deleteBroadcastNotificationController);
 
 // ----- Customers -----

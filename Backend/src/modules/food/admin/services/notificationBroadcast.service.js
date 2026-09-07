@@ -13,10 +13,11 @@ import { getIO, rooms } from '../../../../config/socket.js';
  * history still shows who it went to after those accounts change or leave.
  */
 
-const TARGET_TYPES = new Set(['ALL', 'USER', 'RESTAURANT', 'DELIVERY', 'CUSTOM']);
+const TARGET_TYPES = new Set(['ALL', 'USER', 'RESTAURANT', 'DELIVERY', 'CUSTOM', 'LAPSED']);
 
 const OWNER_LABEL = {
     USER: 'Users',
+    LAPSED: 'Lapsed customers',
     RESTAURANT: 'Restaurants',
     DELIVERY_PARTNER: 'Delivery Partners',
 };
@@ -99,6 +100,91 @@ const dedupeTargets = (targets = []) => {
     return [...map.values()];
 };
 
+/**
+ * Customers worth winning back: they ordered once, and then stopped.
+ *
+ * "Stopped" is measured from their last order rather than their last login,
+ * because there is no last-login column on the user -- and an order is the
+ * better signal anyway. Someone browsing weekly without buying is not lapsed
+ * in any sense that matters.
+ *
+ * Customers who have never ordered at all are a different problem and are
+ * excluded by default: they need onboarding, not a "we miss you" message
+ * about an order they never placed. `includeNeverOrdered` opts into them,
+ * measuring their silence from signup instead.
+ */
+export const getLapsedCustomers = async ({
+    days = 30,
+    includeNeverOrdered = false,
+    limit = 1000,
+} = {}) => {
+    const dayCount = Math.max(1, Math.min(3650, Number(days) || 30));
+    const cutoff = new Date(Date.now() - dayCount * 24 * 60 * 60 * 1000);
+    const take = Math.max(1, Math.min(5000, Number(limit) || 1000));
+
+    const users = await prisma.foodUser.findMany({
+        where: { isActive: true },
+        select: {
+            id: true, name: true, phone: true, email: true, createdAt: true,
+            fcmTokens: true, fcmTokenMobile: true,
+        },
+    });
+    if (!users.length) return { cutoff, days: dayCount, customers: [] };
+
+    // One grouped query rather than a lastOrderAt column on the user, which
+    // would have to be kept correct on every order write and would drift the
+    // first time one of those paths forgot.
+    const lastOrders = await prisma.foodOrder.groupBy({
+        by: ['userId'],
+        where: { userId: { in: users.map((u) => u.id) } },
+        _max: { createdAt: true },
+        _count: { _all: true },
+    });
+    const byUser = new Map(lastOrders.map((row) => [row.userId, row]));
+
+    const customers = [];
+    for (const user of users) {
+        const stats = byUser.get(user.id);
+        const lastOrderAt = stats?._max?.createdAt || null;
+
+        if (!lastOrderAt) {
+            if (!includeNeverOrdered) continue;
+            // Silence measured from signup: a customer who registered
+            // yesterday and has not ordered is not lapsed, they are new.
+            if (new Date(user.createdAt) > cutoff) continue;
+        } else if (new Date(lastOrderAt) > cutoff) {
+            continue;
+        }
+
+        const since = lastOrderAt || user.createdAt;
+        customers.push({
+            id: user.id,
+            name: user.name || '',
+            phone: user.phone || '',
+            email: user.email || '',
+            lastOrderAt,
+            totalOrders: stats?._count?._all || 0,
+            daysSince: Math.floor((Date.now() - new Date(since).getTime()) / 86400000),
+            // Whether a push can actually reach them. An inbox notification is
+            // still written either way, but an admin planning a campaign
+            // should see how much of it will land silently.
+            reachableByPush:
+                (user.fcmTokens?.length || 0) + (user.fcmTokenMobile?.length || 0) > 0,
+        });
+    }
+
+    customers.sort((a, b) => b.daysSince - a.daysSince);
+
+    return {
+        days: dayCount,
+        cutoff,
+        includeNeverOrdered: Boolean(includeNeverOrdered),
+        total: customers.length,
+        reachableByPush: customers.filter((c) => c.reachableByPush).length,
+        customers: customers.slice(0, take),
+    };
+};
+
 const resolveCustomTargets = async ({ targets = [], targetIds = [] } = {}) => {
     // The panel normally sends the full rows it rendered; ids are the fallback.
     const explicit = dedupeTargets(targets);
@@ -114,8 +200,22 @@ const resolveCustomTargets = async ({ targets = [], targetIds = [] } = {}) => {
     return loadAudience('USER', { id: { in: ids } });
 };
 
-const resolveTargets = async ({ targetType, targetIds = [], targets = [] } = {}) => {
+const resolveTargets = async ({ targetType, targetIds = [], targets = [], lapsedDays, lapsedIncludeNeverOrdered } = {}) => {
     if (targetType === 'CUSTOM') return resolveCustomTargets({ targets, targetIds });
+    if (targetType === 'LAPSED') {
+        // Resolved now, not when the campaign was drafted: a customer who
+        // ordered in the meantime should not be told they are missed.
+        const { customers } = await getLapsedCustomers({
+            days: lapsedDays,
+            includeNeverOrdered: lapsedIncludeNeverOrdered,
+        });
+        return customers.map((c) => ({
+            ownerType: 'USER',
+            ownerId: c.id,
+            label: String(c.name || c.phone || 'User').trim(),
+            subLabel: join(c.phone, c.email),
+        }));
+    }
     if (targetType === 'USER') return loadAudience('USER');
     if (targetType === 'RESTAURANT') return loadAudience('RESTAURANT');
     if (targetType === 'DELIVERY') return loadAudience('DELIVERY_PARTNER');
@@ -169,6 +269,8 @@ export const createBroadcastNotification = async ({ body = {}, adminId } = {}) =
         targetType,
         targetIds: body?.targetIds,
         targets: body?.targets,
+        lapsedDays: body?.lapsedDays,
+        lapsedIncludeNeverOrdered: body?.lapsedIncludeNeverOrdered,
     });
     if (!resolvedTargets.length) {
         throw new ValidationError(`No recipients found for ${targetType.toLowerCase()} broadcast`);
