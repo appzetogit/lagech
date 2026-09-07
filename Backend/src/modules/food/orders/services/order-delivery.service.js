@@ -456,6 +456,26 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
   const { row, order } = await loadOrder(id, deliveryInclude);
   const responseOrder = sanitizeOrderForDeliveryPartner(order);
 
+  // Awaited here rather than in the background block below.
+  //
+  // It used to sit inside that block, after an awaited Firebase Realtime
+  // Database write. When the RTDB url is misconfigured that write never
+  // settles -- the SDK retries the connection instead of rejecting -- so
+  // execution never reached this line and the rider was never recorded on
+  // the transaction. Every ledger row ever written has a null
+  // deliveryPartnerId because of it, which is why rider settlement had
+  // nothing to settle.
+  //
+  // It is one indexed update and it is financial data: it belongs in the
+  // request, not behind best-effort tracking that is allowed to fail.
+  try {
+    await foodTransactionService.updateTransactionRider(id, partnerId);
+  } catch (error) {
+    logger.error(
+      `Error updating delivery rider transaction for ${id}: ${error?.message || error}`,
+    );
+  }
+
   void (async () => {
     try {
       const rest = row.restaurant;
@@ -509,11 +529,6 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
       logger.error(`Error initializing Firebase order tracking: ${error?.message || error}`);
     }
 
-    try {
-      await foodTransactionService.updateTransactionRider(id, partnerId);
-    } catch (error) {
-      logger.error(`Error updating delivery rider transaction for ${id}: ${error?.message || error}`);
-    }
 
     // Everyone offered this order who did not win it. Deduped: a partner can
     // appear once per re-offer round, and pushing the same withdrawal three times
