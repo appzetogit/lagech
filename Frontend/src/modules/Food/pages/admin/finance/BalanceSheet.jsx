@@ -95,19 +95,40 @@ export default function BalanceSheet() {
   }, [data.rows, search])
 
   const payout = async (row) => {
-    const label = `${row.name} — ${money(row.payable)}`
-    if (!window.confirm(`Mark ${label} as paid for ${period.from} to ${period.to}?\n\nThis closes those orders so the same money cannot be paid again.`)) {
+    // Defaults to the full balance; an admin who paid less overrides it and
+    // the rest stays outstanding rather than being written off silently.
+    const entered = window.prompt(
+      `Amount paid to ${row.name} for ${period.from} to ${period.to}:`,
+      String(Math.abs(row.payable)),
+    )
+    if (entered === null) return
+
+    const amount = Number(entered)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error("Enter an amount greater than zero")
       return
     }
+
+    const reference = window.prompt("Bank/UPI reference for this payout (optional):", "") || ""
+
     setPayingId(row.entityId)
     try {
-      const reference = window.prompt("Bank/UPI reference for this payout (optional):", "") || ""
-      await adminAPI.payoutBalance(row.entityType, row.entityId, {
+      const res = await adminAPI.payoutBalance(row.entityType, row.entityId, {
         from: `${period.from}T00:00:00.000Z`,
         to: `${period.to}T23:59:59.999Z`,
+        amount,
         reference,
       })
-      toast.success(`Paid ${label}`)
+      const data = res?.data?.data ?? {}
+      // Say what actually settled, not what was typed: a part payment closes
+      // whole orders, so the two can differ and the admin needs to see which.
+      if (data.partial) {
+        toast.success(
+          `Recorded ${money(data.amount)} for ${row.name} — ${money(data.remaining)} still outstanding`,
+        )
+      } else {
+        toast.success(`Paid ${row.name} — ${money(data.amount)}`)
+      }
       await load()
     } catch (error) {
       // Interceptor surfaces the reason; the row stays as it was.

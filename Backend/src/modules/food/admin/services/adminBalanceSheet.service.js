@@ -267,6 +267,23 @@ const emptyRiderTotals = () => ({
  * instead of paying twice. `count` is what actually moved, and a zero means
  * somebody got there first.
  */
+/**
+ * Settle one entity for one period, in full or in part.
+ *
+ * Without `amount` this closes everything outstanding in the period. With
+ * one, it closes whole transactions oldest-first until the next would take
+ * the total past what was paid, and reports what actually moved.
+ *
+ * Transactions are closed rather than a running paid-total kept against the
+ * entity, so "unsettled" keeps meaning "still owed" -- the balance query, the
+ * double-pay guard and this all read the same flag. The cost is that a
+ * payment cannot land mid-transaction: paying 250 against orders of 200 and
+ * 100 settles the 200 and leaves the 100 open, and the response says so
+ * rather than quietly banking the difference.
+ *
+ * The flag update is scoped to `isSettled: false` rather than to ids read a
+ * moment earlier, so two admins running the same period cannot both pay it.
+ */
 export async function payoutEntity(entityType, entityId, body = {}) {
     if (!isId(entityId)) throw new ValidationError('Invalid entity id');
     if (!['restaurant', 'rider'].includes(entityType)) {
@@ -275,28 +292,65 @@ export async function payoutEntity(entityType, entityId, body = {}) {
 
     const { start, end } = parsePeriod(body);
     const isRestaurant = entityType === 'restaurant';
+    const shareField = isRestaurant ? 'restaurantShare' : 'riderShare';
+
+    const requested =
+        body.amount === undefined || body.amount === null || body.amount === ''
+            ? null
+            : money(body.amount);
+    if (requested !== null && !(requested > 0)) {
+        throw new ValidationError('Amount must be greater than zero');
+    }
 
     const scope = isRestaurant
         ? { restaurantId: String(entityId), isRestaurantSettled: false }
         : { deliveryPartnerId: String(entityId), isRiderSettled: false };
 
     return prisma.$transaction(async (tx) => {
-        const pending = await tx.foodTransaction.aggregate({
+        const outstanding = await tx.foodTransaction.findMany({
             where: { ...periodWhere(start, end), ...scope },
-            _sum: isRestaurant ? { restaurantShare: true } : { riderShare: true },
-            _count: { _all: true },
+            orderBy: { createdAt: 'asc' },
+            select: { id: true, [shareField]: true },
         });
 
-        if (!pending._count._all) {
+        if (!outstanding.length) {
             throw new ValidationError('Nothing outstanding for this period');
         }
 
-        const amount = money(
-            isRestaurant ? pending._sum.restaurantShare : pending._sum.riderShare,
+        const totalOutstanding = money(
+            outstanding.reduce((sum, row) => sum + num(row[shareField]), 0),
         );
 
+        // Full settlement: everything in the period, which is also what a
+        // request for at least the whole balance means.
+        const payingInFull = requested === null || requested >= totalOutstanding;
+
+        let ids = outstanding.map((row) => row.id);
+        let amount = totalOutstanding;
+
+        if (!payingInFull) {
+            ids = [];
+            amount = 0;
+            for (const row of outstanding) {
+                const share = num(row[shareField]);
+                if (money(amount + share) > requested) break;
+                ids.push(row.id);
+                amount = money(amount + share);
+            }
+
+            if (!ids.length) {
+                // Every remaining order is larger than the payment, so
+                // nothing can be closed. Saying so beats recording a
+                // settlement that changes no balance.
+                throw new ValidationError(
+                    `The smallest outstanding order is ${money(num(outstanding[0][shareField]))}, ` +
+                        `which is more than ${requested}. Nothing was settled.`,
+                );
+            }
+        }
+
         const { count } = await tx.foodTransaction.updateMany({
-            where: { ...periodWhere(start, end), ...scope },
+            where: { id: { in: ids }, ...scope },
             data: isRestaurant
                 ? { isRestaurantSettled: true, restaurantSettledAt: new Date() }
                 : { isRiderSettled: true, riderSettledAt: new Date() },
@@ -316,10 +370,15 @@ export async function payoutEntity(entityType, entityId, body = {}) {
                 processedAt: new Date(),
                 processedBy: body.adminId ? String(body.adminId) : null,
                 notes: String(body.notes || ''),
-                // The transaction count is the audit trail: it says how many
-                // orders this settlement closed, so a later reconciliation can
-                // check the sum against them.
-                metadata: { transactionsSettled: count },
+                metadata: {
+                    transactionsSettled: count,
+                    // Kept so a later reconciliation can see this was a part
+                    // payment and what was left behind, without recomputing
+                    // a balance that has since moved on.
+                    requestedAmount: requested,
+                    remainingAfter: money(totalOutstanding - amount),
+                    partial: !payingInFull,
+                },
             },
         });
 
@@ -328,6 +387,11 @@ export async function payoutEntity(entityType, entityId, body = {}) {
             entityType,
             entityId: String(entityId),
             amount,
+            requestedAmount: requested,
+            // What the admin still owes after this, so the caller does not
+            // have to refetch to know whether the row should disappear.
+            remaining: money(totalOutstanding - amount),
+            partial: !payingInFull,
             transactionsSettled: count,
             period: { from: start, to: end },
         };
