@@ -28,6 +28,30 @@ const debugWarn = (...args) => {}
 const debugError = (...args) => {}
 
 
+/**
+ * Progress toward an offer, in the unit that offer is actually measured in.
+ *
+ * An hours-based offer was showing "2 / 0" under an Orders column -- the
+ * rider's unrelated order count against a requirement of zero, which reads
+ * as broken and hides the figure that earned the incentive.
+ */
+const addonProgress = (item) => {
+  if (item?.criteria === "online_hours") {
+    const done = Number(item.onlineMinutesCompleted) || 0
+    const need = Number(item.onlineMinutesRequired) || 0
+    const asHours = (mins) => Math.round((mins / 60) * 10) / 10
+    return {
+      label: `${asHours(done)}h / ${asHours(need)}h`,
+      done,
+      need,
+      unit: "online",
+    }
+  }
+  const done = Number(item?.ordersCompleted) || 0
+  const need = Number(item?.ordersRequired) || 0
+  return { label: `${done} / ${need}`, done, need, unit: "orders" }
+}
+
 export default function EarningAddonHistory() {
   const [searchQuery, setSearchQuery] = useState("")
   const [history, setHistory] = useState([])
@@ -225,15 +249,15 @@ export default function EarningAddonHistory() {
       return
     }
 
-    const headers = ["SI", "Deliveryman", "Delivery ID", "Phone", "Offer Title", "Orders Completed", "Orders Required", "Earning Amount", "Date", "Status"]
+    const headers = ["SI", "Deliveryman", "Delivery ID", "Phone", "Offer Title", "Earned By", "Progress", "Earning Amount", "Date", "Status"]
     const data = filteredHistory.map((item, index) => ({
       sl: index + 1,
       deliveryman: item.deliveryman || 'Unknown',
       deliveryId: item.deliveryId || 'N/A',
       phone: item.deliveryPhone || 'N/A',
       offerTitle: item.offerTitle || 'N/A',
-      ordersCompleted: item.ordersCompleted || 0,
-      ordersRequired: item.ordersRequired || 0,
+      earnedBy: item.criteria === "online_hours" ? "Hours online" : "Orders",
+      progress: addonProgress(item).label,
       earningAmount: `Rs.${(item.totalEarning || item.earningAmount || 0).toFixed(2)}`,
       date: formatDate(item.date || item.completedAt),
       status: item.status || 'unknown'
@@ -278,8 +302,8 @@ export default function EarningAddonHistory() {
                     row.deliveryId,
                     row.phone,
                     row.offerTitle,
-                    row.ordersCompleted,
-                    row.ordersRequired,
+                    row.earnedBy,
+                    row.progress,
                     row.earningAmount,
                     row.date,
                     row.status
@@ -308,7 +332,7 @@ export default function EarningAddonHistory() {
 
           autoTable(doc, {
             head: [headers],
-            body: data.map(row => [row.sl, row.deliveryman, row.deliveryId, row.phone, row.offerTitle, row.ordersCompleted, row.ordersRequired, row.earningAmount, row.date, row.status]),
+            body: data.map(row => [row.sl, row.deliveryman, row.deliveryId, row.phone, row.offerTitle, row.earnedBy, row.progress, row.earningAmount, row.date, row.status]),
             startY: 28,
             styles: { fontSize: 7, cellPadding: 2 },
             headStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold' }
@@ -465,7 +489,7 @@ export default function EarningAddonHistory() {
                     {visibleColumns.ordersCompleted && (
                       <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
                         <div className="flex items-center gap-2">
-                          <span>Orders</span>
+                          <span>Progress</span>
                         </div>
                       </th>
                     )}
@@ -543,13 +567,13 @@ export default function EarningAddonHistory() {
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div className="flex flex-col">
                               <span className="text-sm font-medium text-slate-900">
-                                {item.ordersCompleted || 0} / {item.ordersRequired || 0}
+                                {addonProgress(item).label}
                               </span>
-                              {item.ordersRequired > 0 && (
-                                <span className="text-xs text-slate-500 mt-0.5">
-                                  {Math.round(((item.ordersCompleted || 0) / item.ordersRequired) * 100)}% Complete
-                                </span>
-                              )}
+                              <span className="text-xs text-slate-500 mt-0.5">
+                                {addonProgress(item).unit === "online" ? "hours online" : "orders"}
+                                {addonProgress(item).need > 0 &&
+                                  ` · ${Math.round((addonProgress(item).done / addonProgress(item).need) * 100)}%`}
+                              </span>
                             </div>
                           </td>
                         )}
