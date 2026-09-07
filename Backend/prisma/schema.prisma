@@ -2631,14 +2631,31 @@ model DeliveryBonusTransaction {
   @@map("food_delivery_bonus_transactions")
 }
 
+/// What a rider has to do to earn an incentive.
+enum EarningAddonCriteria {
+  /// Deliveries completed inside the offer window.
+  orders
+  /// Time spent online inside the offer window, whether or not it produced
+  /// deliveries -- paying riders for being available in a quiet zone.
+  online_hours
+}
+
 model FoodEarningAddon {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 
   title       String
   description String @default("")
 
-  requiredOrders Int
-  earningAmount  Decimal @db.Decimal(14, 2)
+  criteria EarningAddonCriteria @default(orders)
+
+  /// Defaulted so an hours-based offer does not have to send a meaningless
+  /// order target. Only read when criteria is `orders`.
+  requiredOrders        Int @default(0)
+  /// Minutes, not hours, so an admin can set 90 minutes without a fraction.
+  /// Only read when criteria is `online_hours`.
+  requiredOnlineMinutes Int @default(0)
+
+  earningAmount Decimal @db.Decimal(14, 2)
 
   startDate DateTime
   endDate   DateTime
@@ -2665,6 +2682,12 @@ model FoodEarningAddonHistory {
 
   ordersCompleted Int @default(0)
   ordersRequired  Int @default(0)
+
+  /// The same pair for hours-based offers, so a credited incentive records
+  /// what it was actually paid for rather than leaving an admin to guess
+  /// from the offer, which may have been edited since.
+  onlineMinutesCompleted Int @default(0)
+  onlineMinutesRequired  Int @default(0)
 
   earningAmount Decimal @default(0) @db.Decimal(14, 2)
   totalEarning  Decimal @default(0) @db.Decimal(14, 2)

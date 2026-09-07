@@ -41,7 +41,9 @@ export async function getEarningAddons() {
 
 const addonFields = (body = {}) => ({
     title: body.title,
+    criteria: body.criteria === 'online_hours' ? 'online_hours' : 'orders',
     requiredOrders: Number(body.requiredOrders) || 0,
+    requiredOnlineMinutes: Number(body.requiredOnlineMinutes) || 0,
     earningAmount: Number(body.earningAmount) || 0,
     startDate: body.startDate ? new Date(body.startDate) : undefined,
     endDate: body.endDate ? new Date(body.endDate) : undefined,
@@ -89,7 +91,7 @@ export async function toggleEarningAddonStatus(id, status) {
 
 const HISTORY_INCLUDE = {
     deliveryPartner: { select: { id: true, name: true, phone: true, email: true } },
-    offer: { select: { id: true, title: true, requiredOrders: true, earningAmount: true } },
+    offer: { select: { id: true, title: true, criteria: true, requiredOrders: true, requiredOnlineMinutes: true, earningAmount: true } },
 };
 
 const serializeHistory = (h, index = 0, offset = 0) => ({
@@ -101,8 +103,11 @@ const serializeHistory = (h, index = 0, offset = 0) => ({
     deliveryman: h.deliveryPartner?.name || '',
     deliveryPhone: h.deliveryPartner?.phone || 'N/A',
     offerTitle: h.offer?.title || '',
+    criteria: h.offer?.criteria || 'orders',
     ordersCompleted: h.ordersCompleted ?? 0,
     ordersRequired: h.ordersRequired ?? h.offer?.requiredOrders ?? 0,
+    onlineMinutesCompleted: h.onlineMinutesCompleted ?? 0,
+    onlineMinutesRequired: h.onlineMinutesRequired ?? h.offer?.requiredOnlineMinutes ?? 0,
     earningAmount: num(h.earningAmount ?? h.offer?.earningAmount),
     totalEarning: num(h.totalEarning ?? h.earningAmount),
     status: h.status || 'pending',
@@ -279,6 +284,44 @@ export async function cancelEarningAddonHistory(historyId, reason) {
  *
  * @param {string} deliveryPartnerId  a partner id, or 'all' to sweep everyone
  */
+/**
+ * Minutes a rider spent online inside a window.
+ *
+ * Shifts are clipped to the window rather than counted whole, so one that
+ * started before it or is still running only contributes the part that falls
+ * inside -- otherwise an offer could be earned with time worked before it
+ * began. A shift with no end is measured up to now, since the rider is on it.
+ *
+ * Shifts the reaper closed are included: the rider was online, the app just
+ * never said when they stopped. They are flagged in the duty log so an admin
+ * can see which hours those were before crediting.
+ */
+async function onlineMinutesInWindow(partnerId, from, to) {
+    const sessions = await prisma.foodDeliveryPartnerSession.findMany({
+        where: {
+            deliveryPartnerId: partnerId,
+            wentOnlineAt: { lte: to },
+            OR: [{ wentOfflineAt: null }, { wentOfflineAt: { gte: from } }],
+        },
+        select: { wentOnlineAt: true, wentOfflineAt: true },
+    });
+
+    const now = Date.now();
+    const start = new Date(from).getTime();
+    const end = new Date(to).getTime();
+
+    const ms = sessions.reduce((sum, session) => {
+        const openedAt = Math.max(new Date(session.wentOnlineAt).getTime(), start);
+        const closedAt = Math.min(
+            session.wentOfflineAt ? new Date(session.wentOfflineAt).getTime() : now,
+            end,
+        );
+        return sum + Math.max(0, closedAt - openedAt);
+    }, 0);
+
+    return Math.round(ms / 60000);
+}
+
 export async function checkEarningAddonCompletions(deliveryPartnerId, _force = false) {
     const now = new Date();
 
@@ -321,7 +364,15 @@ export async function checkEarningAddonCompletions(deliveryPartnerId, _force = f
                     createdAt: { gte: offer.startDate, lte: offer.endDate },
                 },
             });
-            if (orderCount < (offer.requiredOrders || 1)) continue;
+
+            const onlineMinutes =
+                offer.criteria === 'online_hours'
+                    ? await onlineMinutesInWindow(partnerId, offer.startDate, offer.endDate)
+                    : 0;
+
+            if (offer.criteria === 'online_hours') {
+                if (onlineMinutes < (offer.requiredOnlineMinutes || 1)) continue;
+            } else if (orderCount < (offer.requiredOrders || 1)) continue;
 
             try {
                 await prisma.$transaction(async (tx) => {
@@ -350,6 +401,8 @@ export async function checkEarningAddonCompletions(deliveryPartnerId, _force = f
                             deliveryPartnerId: partnerId,
                             ordersCompleted: orderCount,
                             ordersRequired: offer.requiredOrders,
+                            onlineMinutesCompleted: onlineMinutes,
+                            onlineMinutesRequired: offer.requiredOnlineMinutes || 0,
                             earningAmount: offer.earningAmount,
                             totalEarning: offer.earningAmount,
                             status: 'pending',

@@ -4,7 +4,11 @@ import { ValidationError } from '../../../../core/auth/errors.js';
 
 const addonUpsertSchema = z.object({
     title: z.string().min(1, 'Title is required'),
-    requiredOrders: z.number().int().min(1, 'Required orders must be at least 1'),
+    criteria: z.enum(['orders', 'online_hours']).default('orders'),
+    // Both accept 0 here; which one must be positive depends on the criteria,
+    // and that is checked below once the shape is known.
+    requiredOrders: z.number().int().min(0),
+    requiredOnlineMinutes: z.number().int().min(0),
     earningAmount: z.number().positive('Earning amount must be greater than 0'),
     startDate: z.string().min(1, 'Start date is required'),
     endDate: z.string().min(1, 'End date is required'),
@@ -14,7 +18,14 @@ const addonUpsertSchema = z.object({
 export const validateEarningAddonUpsertDto = (body) => {
     const normalized = {
         title: typeof body?.title === 'string' ? body.title.trim() : '',
-        requiredOrders: Number(body?.requiredOrders),
+        criteria: body?.criteria === 'online_hours' ? 'online_hours' : 'orders',
+        requiredOrders: Number(body?.requiredOrders) || 0,
+        // Accepts hours from the form and stores minutes, so an admin types
+        // "8" rather than "480" and the database never holds a fraction.
+        requiredOnlineMinutes:
+            body?.requiredOnlineMinutes !== undefined
+                ? Number(body.requiredOnlineMinutes) || 0
+                : Math.round((Number(body?.requiredOnlineHours) || 0) * 60),
         earningAmount: Number(body?.earningAmount),
         startDate: body?.startDate ? String(body.startDate) : '',
         endDate: body?.endDate ? String(body.endDate) : '',
@@ -38,9 +49,18 @@ export const validateEarningAddonUpsertDto = (body) => {
         throw new ValidationError('End date must be after start date');
     }
 
+    if (result.data.criteria === 'online_hours' && result.data.requiredOnlineMinutes < 1) {
+        throw new ValidationError('Required online time must be at least 1 minute');
+    }
+    if (result.data.criteria === 'orders' && result.data.requiredOrders < 1) {
+        throw new ValidationError('Required orders must be at least 1');
+    }
+
     return {
         title: result.data.title,
+        criteria: result.data.criteria,
         requiredOrders: result.data.requiredOrders,
+        requiredOnlineMinutes: result.data.requiredOnlineMinutes,
         earningAmount: result.data.earningAmount,
         startDate,
         endDate,

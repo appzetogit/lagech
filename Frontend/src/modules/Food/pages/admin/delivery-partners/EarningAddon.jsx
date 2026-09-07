@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect, useMemo } from "react"
-import { Search, Plus, Edit, Trash2, ToggleLeft, ToggleRight, Settings, ArrowUpDown, Check, Columns, Package } from "lucide-react"
+import { Search, Plus, Edit, Trash2, ToggleLeft, ToggleRight, Settings, ArrowUpDown, Check, Columns, Package, Clock } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
 import { adminAPI } from "@food/api"
@@ -31,7 +31,9 @@ export default function EarningAddon() {
   // Form state
   const [formData, setFormData] = useState({
     title: "",
+    criteria: "orders",
     requiredOrders: "",
+    requiredOnlineHours: "",
     earningAmount: "",
     startDate: "",
     endDate: "",
@@ -94,7 +96,12 @@ export default function EarningAddon() {
       setIsEditMode(true)
       setFormData({
         title: addon.title || "",
+        criteria: addon.criteria === "online_hours" ? "online_hours" : "orders",
         requiredOrders: addon.requiredOrders?.toString() || "",
+        // Stored in minutes, edited in hours.
+        requiredOnlineHours: addon.requiredOnlineMinutes
+          ? String(Math.round((addon.requiredOnlineMinutes / 60) * 100) / 100)
+          : "",
         earningAmount: addon.earningAmount?.toString() || "",
         startDate: addon.startDate ? new Date(addon.startDate).toISOString().split('T')[0] : "",
         endDate: addon.endDate ? new Date(addon.endDate).toISOString().split('T')[0] : "",
@@ -105,7 +112,9 @@ export default function EarningAddon() {
       setIsEditMode(false)
       setFormData({
         title: "",
-        requiredOrders: "",
+        criteria: "orders",
+    requiredOrders: "",
+    requiredOnlineHours: "",
         earningAmount: "",
         startDate: "",
         endDate: "",
@@ -121,7 +130,9 @@ export default function EarningAddon() {
     setIsEditMode(false)
     setFormData({
       title: "",
-      requiredOrders: "",
+      criteria: "orders",
+    requiredOrders: "",
+    requiredOnlineHours: "",
       earningAmount: "",
       startDate: "",
       endDate: "",
@@ -138,7 +149,12 @@ export default function EarningAddon() {
       return
     }
 
-    if (!formData.requiredOrders || parseInt(formData.requiredOrders) < 1) {
+    if (formData.criteria === "online_hours") {
+      if (!formData.requiredOnlineHours || parseFloat(formData.requiredOnlineHours) <= 0) {
+        toast.error("Required online hours must be greater than 0")
+        return false
+      }
+    } else if (!formData.requiredOrders || parseInt(formData.requiredOrders) < 1) {
       toast.error("Required orders must be at least 1")
       return
     }
@@ -164,7 +180,10 @@ export default function EarningAddon() {
     try {
       const payload = {
         title: formData.title.trim(),
-        requiredOrders: parseInt(formData.requiredOrders),
+        criteria: formData.criteria,
+        requiredOrders: formData.criteria === "orders" ? parseInt(formData.requiredOrders) : 0,
+        requiredOnlineHours:
+          formData.criteria === "online_hours" ? parseFloat(formData.requiredOnlineHours) : 0,
         earningAmount: parseFloat(formData.earningAmount),
         startDate: formData.startDate,
         endDate: formData.endDate,
@@ -261,7 +280,7 @@ export default function EarningAddon() {
 
   const columnsConfig = {
     title: "Title",
-    requiredOrders: "Required Orders",
+    requiredOrders: "Target",
     earningAmount: "Earning Amount",
     startDate: "Start Date",
     endDate: "End Date",
@@ -345,7 +364,7 @@ export default function EarningAddon() {
                     {visibleColumns.requiredOrders && (
                       <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
                         <div className="flex items-center gap-2">
-                          <span>Required Orders</span>
+                          <span>Target</span>
                         </div>
                       </th>
                     )}
@@ -414,8 +433,21 @@ export default function EarningAddon() {
                         {visibleColumns.requiredOrders && (
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div className="flex items-center gap-1">
-                              <Package className="w-4 h-4 text-slate-400" />
-                              <span className="text-sm font-medium text-slate-900">{addon.requiredOrders}</span>
+                              {addon.criteria === "online_hours" ? (
+                                <>
+                                  <Clock className="w-4 h-4 text-slate-400" />
+                                  <span className="text-sm font-medium text-slate-900">
+                                    {Math.round(((addon.requiredOnlineMinutes || 0) / 60) * 100) / 100}h online
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  <Package className="w-4 h-4 text-slate-400" />
+                                  <span className="text-sm font-medium text-slate-900">
+                                    {addon.requiredOrders} orders
+                                  </span>
+                                </>
+                              )}
                             </div>
                           </td>
                         )}
@@ -525,21 +557,65 @@ export default function EarningAddon() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className="block text-sm font-semibold text-slate-700">
-                  Required Orders <span className="text-red-500">*</span>
+                  Earned by <span className="text-red-500">*</span>
                 </label>
-                <div className="relative">
-                  <Package className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                  <input
-                    type="number"
-                    required
-                    min="1"
-                    value={formData.requiredOrders}
-                    onChange={(e) => setFormData({ ...formData, requiredOrders: e.target.value })}
-                    className="w-full pl-9 pr-3 py-2.5 border-2 border-slate-200 rounded-lg bg-white focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all text-sm"
-                    placeholder="e.g., 50"
-                  />
+                <div className="flex gap-2">
+                  {[
+                    { value: "orders", label: "Completing orders" },
+                    { value: "online_hours", label: "Hours online" },
+                  ].map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setFormData({ ...formData, criteria: opt.value })}
+                      className={`flex-1 px-3 py-2 text-sm font-medium rounded-lg border-2 transition-all ${formData.criteria === opt.value ? "border-emerald-500 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"}`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
                 </div>
               </div>
+              {formData.criteria === "online_hours" ? (
+                <div className="space-y-1.5">
+                  <label className="block text-sm font-semibold text-slate-700">
+                    Required Hours Online <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <Clock className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <input
+                      type="number"
+                      required
+                      min="0.25"
+                      step="0.25"
+                      value={formData.requiredOnlineHours}
+                      onChange={(e) => setFormData({ ...formData, requiredOnlineHours: e.target.value })}
+                      className="w-full pl-9 pr-3 py-2.5 border-2 border-slate-200 rounded-lg bg-white focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all text-sm"
+                      placeholder="e.g., 8"
+                    />
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    Total time online between the offer dates, across all shifts. Counted from the duty log.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  <label className="block text-sm font-semibold text-slate-700">
+                    Required Orders <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <Package className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <input
+                      type="number"
+                      required
+                      min="1"
+                      value={formData.requiredOrders}
+                      onChange={(e) => setFormData({ ...formData, requiredOrders: e.target.value })}
+                      className="w-full pl-9 pr-3 py-2.5 border-2 border-slate-200 rounded-lg bg-white focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all text-sm"
+                      placeholder="e.g., 50"
+                    />
+                  </div>
+                </div>
+              )}
               <div className="space-y-1.5">
                 <label className="block text-sm font-semibold text-slate-700">
                   Earning Amount (₹) <span className="text-red-500">*</span>

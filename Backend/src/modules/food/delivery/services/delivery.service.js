@@ -895,18 +895,57 @@ export const getActiveEarningAddonsForPartner = async (deliveryPartnerId) => {
                 ...(startDate && endDate ? { deliveredAt: { gte: startDate, lte: endDate } } : {}),
             };
 
-            const [currentOrders, earningsAgg] = await Promise.all([
+            const [currentOrders, earningsAgg, offerSessions] = await Promise.all([
                 prisma.foodOrder.count({ where }),
                 prisma.foodOrder.aggregate({ where, _sum: { riderEarning: true } }),
+                // Only for hours-based offers; an orders-based one does not
+                // need the duty log and should not pay for the query.
+                addon.criteria === 'online_hours' && startDate && endDate
+                    ? prisma.foodDeliveryPartnerSession.findMany({
+                          where: {
+                              deliveryPartnerId: partnerId,
+                              wentOnlineAt: { lte: endDate },
+                              OR: [
+                                  { wentOfflineAt: null },
+                                  { wentOfflineAt: { gte: startDate } },
+                              ],
+                          },
+                          select: { wentOnlineAt: true, wentOfflineAt: true },
+                      })
+                    : [],
             ]);
+
+            // Clipped to the offer window, so a shift that began before it
+            // or is still running only counts the part that falls inside.
+            const nowMs = Date.now();
+            const windowStart = startDate ? new Date(startDate).getTime() : 0;
+            const windowEnd = endDate ? new Date(endDate).getTime() : nowMs;
+            const currentOnlineMinutes = Math.round(
+                offerSessions.reduce((sum, session) => {
+                    const openedAt = Math.max(
+                        new Date(session.wentOnlineAt).getTime(),
+                        windowStart,
+                    );
+                    const closedAt = Math.min(
+                        session.wentOfflineAt
+                            ? new Date(session.wentOfflineAt).getTime()
+                            : nowMs,
+                        windowEnd,
+                    );
+                    return sum + Math.max(0, closedAt - openedAt);
+                }, 0) / 60000,
+            );
 
             return {
                 id: addon.id,
                 title: addon.title || 'Earnings Guarantee',
                 description: addon.description || '',
                 targetAmount: num(addon.earningAmount),
+                criteria: addon.criteria || 'orders',
                 targetOrders: num(addon.requiredOrders),
                 currentOrders: num(currentOrders),
+                targetOnlineMinutes: num(addon.requiredOnlineMinutes),
+                currentOnlineMinutes,
                 currentEarnings: num(earningsAgg?._sum?.riderEarning),
                 startDate,
                 endDate,
