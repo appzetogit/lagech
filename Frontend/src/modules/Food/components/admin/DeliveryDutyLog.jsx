@@ -73,10 +73,29 @@ export default function DeliveryDutyLog({ partnerId }) {
                 {summary && (
                     <span className="text-xs text-slate-600">
                         {summary.totalSessions} shift{summary.totalSessions === 1 ? "" : "s"} ·{" "}
-                        {summary.totalHours}h {summary.remainderMinutes}m online
+                        {summary.totalHours}h {summary.remainderMinutes}m online all time
                     </span>
                 )}
             </div>
+
+            {summary && (
+                <div className="mb-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <Fact label="Last went online" value={fmtTime(summary.lastOnlineAt)} />
+                    <Fact
+                        label="Last went offline"
+                        value={
+                            summary.isCurrentlyOnline
+                                ? "Still online"
+                                : fmtTime(summary.lastOfflineAt)
+                        }
+                        highlight={summary.isCurrentlyOnline}
+                    />
+                    <Fact
+                        label="Total time online"
+                        value={`${summary.totalHours}h ${summary.remainderMinutes}m`}
+                    />
+                </div>
+            )}
 
             {loading ? (
                 <div className="flex items-center justify-center py-6">
@@ -142,6 +161,16 @@ export default function DeliveryDutyLog({ partnerId }) {
                     </table>
                 </div>
             )}
+        </div>
+    )
+}
+
+/** One labelled figure in the summary strip. */
+function Fact({ label, value, highlight = false }) {
+    return (
+        <div className={`rounded-lg border px-3 py-2 ${highlight ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-slate-50"}`}>
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+            <p className={`text-sm font-semibold ${highlight ? "text-emerald-700" : "text-slate-900"}`}>{value}</p>
         </div>
     )
 }

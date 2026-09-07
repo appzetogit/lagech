@@ -275,7 +275,37 @@ export async function getDeliveryPartnerSessions(id, query = {}) {
         offlineLocation: row.offlineLat != null ? { lat: row.offlineLat, lng: row.offlineLng } : null,
     }));
 
-    const totalMinutes = sessions.reduce((sum, item) => sum + item.durationMinutes, 0);
+    // Totals are over the whole matching range, not the page.
+    //
+    // These used to be summed from `sessions`, which is one page of rows, so
+    // the shift count was the real total while the hours beside it were only
+    // the newest fifty -- two numbers in the same summary counting different
+    // things. A rider with more history than that under-reported their hours
+    // silently.
+    const [closedAgg, openSessions, latest] = await Promise.all([
+        prisma.foodDeliveryPartnerSession.aggregate({
+            where: { ...where, wentOfflineAt: { not: null } },
+            _sum: { durationMinutes: true },
+        }),
+        // An open shift has no durationMinutes yet, so the aggregate above
+        // cannot see it. The time so far still counts.
+        prisma.foodDeliveryPartnerSession.findMany({
+            where: { ...where, wentOfflineAt: null },
+            select: { wentOnlineAt: true },
+        }),
+        prisma.foodDeliveryPartnerSession.findFirst({
+            where: { deliveryPartnerId: String(id) },
+            orderBy: { wentOnlineAt: 'desc' },
+            select: { wentOnlineAt: true, wentOfflineAt: true },
+        }),
+    ]);
+
+    const openMinutes = openSessions.reduce(
+        (sum, session) =>
+            sum + Math.max(0, Math.round((now - new Date(session.wentOnlineAt).getTime()) / 60000)),
+        0,
+    );
+    const totalMinutes = Number(closedAgg._sum.durationMinutes || 0) + openMinutes;
 
     return {
         sessions,
@@ -284,6 +314,13 @@ export async function getDeliveryPartnerSessions(id, query = {}) {
             totalMinutes,
             totalHours: Math.floor(totalMinutes / 60),
             remainderMinutes: totalMinutes % 60,
+            /// The two questions an admin actually asks of this screen.
+            /// Unfiltered by the date range on purpose: "when was this rider
+            /// last online" should not change because someone narrowed the
+            /// dates to look at one week.
+            lastOnlineAt: latest?.wentOnlineAt || null,
+            lastOfflineAt: latest?.wentOfflineAt || null,
+            isCurrentlyOnline: Boolean(latest && !latest.wentOfflineAt),
         },
         pagination: { page, limit, total },
     };
