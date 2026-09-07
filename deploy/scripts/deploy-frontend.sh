@@ -24,10 +24,14 @@ set -euo pipefail
 ROOT="${1:-/srv/minto/admin}"
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../Frontend" && pwd)"
 
-# How long an old chunk stays reachable. Comfortably longer than a working day,
-# so a tab left open over lunch still works, and short enough that assets/ does
-# not grow without bound.
-RETAIN_DAYS="${RETAIN_DAYS:-7}"
+# How long an old chunk stays reachable.
+#
+# Long enough that a tab left open overnight still resolves its lazy routes,
+# short enough that assets/ stays bounded: each deploy adds roughly 10 MB of
+# newly hashed chunks, and at seven days that was ~100 MB a week on a box with
+# under a gigabyte free. Three days is still far longer than anyone leaves the
+# admin panel open expecting it to work.
+RETAIN_DAYS="${RETAIN_DAYS:-3}"
 
 echo "==> Building $SRC"
 cd "$SRC"
