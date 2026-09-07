@@ -1069,6 +1069,12 @@ export const adminAPI = {
     }),
   /** How a restaurant is billed: commission_overall | commission_dish | subscription. */
   /** What is still owed to restaurants for a period. */
+  /** Preview a win-back audience: customers who stopped ordering. */
+  getLapsedCustomers: (params = {}) =>
+    apiClient.get("/food/admin/notifications/lapsed-customers", {
+      params,
+      contextModule: "admin",
+    }),
   getBalanceSheetRestaurants: (params = {}) =>
     apiClient.get("/food/admin/withdrawals/balance-sheet/restaurants", {
       params,

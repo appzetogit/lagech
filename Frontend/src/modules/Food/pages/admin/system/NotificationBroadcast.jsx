@@ -8,6 +8,7 @@ const TARGET_OPTIONS = [
   { value: "RESTAURANT", label: "Restaurants" },
   { value: "DELIVERY", label: "Delivery Partners" },
   { value: "CUSTOM", label: "Particular Persons" },
+  { value: "LAPSED", label: "Win back lapsed customers" },
 ];
 
 const getRows = (response) => {
@@ -48,7 +49,12 @@ export default function NotificationBroadcast() {
     title: "",
     message: "",
     targetType: "ALL",
+    // Only read for the LAPSED audience.
+    lapsedDays: 30,
+    lapsedIncludeNeverOrdered: false,
   });
+  const [lapsedPreview, setLapsedPreview] = useState(null);
+  const [lapsedLoading, setLapsedLoading] = useState(false);
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -149,10 +155,48 @@ export default function NotificationBroadcast() {
     );
   };
 
+  // Who this would reach, refreshed as the threshold moves.
+  //
+  // Sending is the only other way to find out, and the audience is real
+  // customers -- an admin should see the size and how much of it can take a
+  // push before pressing send, not after.
+  useEffect(() => {
+    if (form.targetType !== "LAPSED") {
+      setLapsedPreview(null);
+      return;
+    }
+    let cancelled = false;
+    const run = async () => {
+      setLapsedLoading(true);
+      try {
+        const response = await adminAPI.getLapsedCustomers({
+          days: form.lapsedDays,
+          includeNeverOrdered: form.lapsedIncludeNeverOrdered,
+          limit: 25,
+        });
+        if (!cancelled) setLapsedPreview(response?.data?.data ?? null);
+      } catch (error) {
+        if (!cancelled) setLapsedPreview(null);
+      } finally {
+        if (!cancelled) setLapsedLoading(false);
+      }
+    };
+    // Debounced: the day count is a number input and every keystroke
+    // would otherwise re-run a scan over every customer.
+    const timer = setTimeout(run, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [form.targetType, form.lapsedDays, form.lapsedIncludeNeverOrdered]);
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     if (!form.title.trim() || !form.message.trim()) return;
     if (form.targetType === "CUSTOM" && selectedRecipients.length === 0) return;
+    // The API rejects an empty audience anyway; catching it here means the
+    // admin is told before the request rather than by a 400.
+    if (form.targetType === "LAPSED" && !(lapsedPreview?.total > 0)) return;
 
     try {
       setSubmitting(true);
@@ -160,6 +204,12 @@ export default function NotificationBroadcast() {
         title: form.title.trim(),
         message: form.message.trim(),
         targetType: form.targetType,
+        ...(form.targetType === "LAPSED"
+          ? {
+              lapsedDays: Number(form.lapsedDays) || 30,
+              lapsedIncludeNeverOrdered: Boolean(form.lapsedIncludeNeverOrdered),
+            }
+          : {}),
         targetIds:
           form.targetType === "CUSTOM"
             ? selectedRecipients.map((item) => item.ownerId)
@@ -235,6 +285,89 @@ export default function NotificationBroadcast() {
               </select>
             </label>
           </div>
+
+          {form.targetType === "LAPSED" && (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+              <div className="flex flex-wrap items-end gap-4">
+                <label className="block">
+                  <span className="text-sm font-semibold text-slate-700">
+                    Has not ordered in
+                  </span>
+                  <div className="mt-2 flex items-center gap-2">
+                    <input
+                      type="number"
+                      min="1"
+                      max="3650"
+                      value={form.lapsedDays}
+                      onChange={(event) =>
+                        setForm((prev) => ({ ...prev, lapsedDays: event.target.value }))
+                      }
+                      className="w-24 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-amber-500"
+                    />
+                    <span className="text-sm text-slate-600">days</span>
+                  </div>
+                </label>
+
+                <label className="flex items-center gap-2 pb-2">
+                  <input
+                    type="checkbox"
+                    checked={form.lapsedIncludeNeverOrdered}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        lapsedIncludeNeverOrdered: event.target.checked,
+                      }))
+                    }
+                    className="h-4 w-4"
+                  />
+                  <span className="text-sm text-slate-700">
+                    Also include customers who have never ordered
+                  </span>
+                </label>
+              </div>
+
+              <div className="mt-3 border-t border-amber-200 pt-3">
+                {lapsedLoading ? (
+                  <p className="text-sm text-slate-600">Checking who this reaches…</p>
+                ) : !lapsedPreview ? (
+                  <p className="text-sm text-slate-600">Set a threshold to preview the audience.</p>
+                ) : lapsedPreview.total === 0 ? (
+                  <p className="text-sm font-medium text-slate-700">
+                    No customers have been quiet that long. Nothing would be sent.
+                  </p>
+                ) : (
+                  <>
+                    <p className="text-sm text-slate-800">
+                      <strong>{lapsedPreview.total}</strong> customer
+                      {lapsedPreview.total === 1 ? "" : "s"} match.{" "}
+                      <strong>{lapsedPreview.reachableByPush}</strong> can receive a push;
+                      the rest get it in their in-app inbox only.
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {lapsedPreview.customers.slice(0, 8).map((customer) => (
+                        <span
+                          key={customer.id}
+                          className="rounded-full border border-amber-300 bg-white px-2.5 py-1 text-xs text-slate-700"
+                          title={
+                            customer.lastOrderAt
+                              ? `Last ordered ${new Date(customer.lastOrderAt).toLocaleDateString()}`
+                              : "Has never ordered"
+                          }
+                        >
+                          {customer.name || customer.phone} · {customer.daysSince}d
+                        </span>
+                      ))}
+                      {lapsedPreview.total > 8 && (
+                        <span className="px-2 py-1 text-xs text-slate-500">
+                          +{lapsedPreview.total - 8} more
+                        </span>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
 
           <label className="block">
             <span className="text-sm font-semibold text-slate-700">Message</span>
