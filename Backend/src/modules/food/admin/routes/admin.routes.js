@@ -250,6 +250,14 @@ router.delete('/restaurants/:id', adminController.deleteRestaurant);
 // ----- Restaurant Commission -----
 // Billing mode and per-dish rates. Under /restaurants so they inherit the
 // restaurant_management guard that resolveSectionFromRequest already applies.
+// Balance sheet and weekly payouts. Under /withdrawals so they inherit the
+// transaction_management guard resolveSectionFromRequest already applies --
+// paying people out is the same authority as approving a withdrawal.
+router.get('/withdrawals/balance-sheet/restaurants', adminController.getBalanceSheetRestaurants);
+router.get('/withdrawals/balance-sheet/riders', adminController.getBalanceSheetRiders);
+router.get('/withdrawals/balance-sheet/history', adminController.getBalanceSheetHistory);
+router.post('/withdrawals/balance-sheet/payout/:entityType/:entityId', adminController.payoutBalance);
+
 router.patch('/restaurants/:id/billing-mode', adminController.setRestaurantBillingMode);
 router.get('/restaurants/:id/item-commissions', adminController.getItemCommissions);
 router.patch('/restaurants/:id/item-commissions/:itemId', adminController.upsertItemCommission);

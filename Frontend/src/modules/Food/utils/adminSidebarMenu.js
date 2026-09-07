@@ -193,6 +193,12 @@ export const adminSidebarMenu = [
     type: "section",
     label: "TRANSACTION MANAGEMENT",
     items: [
+      {
+        type: "link",
+        label: "Balance Sheet",
+        path: "/admin/food/balance-sheet",
+        icon: "Wallet",
+      },
       { type: "link", label: "Restaurant Withdraws", path: "/admin/food/restaurant-withdraws", icon: "CreditCard" },
     ],
   },

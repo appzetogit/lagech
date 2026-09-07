@@ -32,6 +32,7 @@ const JoiningRequest = lazy(() => import("@food/pages/admin/restaurant/JoiningRe
 const UnregisteredRestaurants = lazy(() => import("@food/pages/admin/restaurant/UnregisteredRestaurants"));
 const RestaurantCommission = lazy(() => import("@food/pages/admin/restaurant/RestaurantCommission"));
 const RestaurantBilling = lazy(() => import("@food/pages/admin/restaurant/RestaurantBilling"));
+const BalanceSheet = lazy(() => import("@food/pages/admin/finance/BalanceSheet"));
 const RestaurantComplaints = lazy(() => import("@food/pages/admin/restaurant/RestaurantComplaints"));
 const RestaurantReviews = lazy(() => import("@food/pages/admin/restaurant/RestaurantReviews"));
 const RestaurantsBulkImport = lazy(() => import("@food/pages/admin/restaurant/RestaurantsBulkImport"));
@@ -338,6 +339,7 @@ export default function AdminRouter() {
             <Route path="restaurant-vat-report" element={<RestaurantVATReport />} />
             
             <Route path="restaurant-withdraws" element={<RestaurantWithdraws />} />
+            <Route path="balance-sheet" element={<BalanceSheet />} />
             <Route path="withdraw-method" element={<WithdrawMethod />} />
             
             <Route path="employee-role" element={<EmployeeRole />} />

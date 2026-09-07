@@ -1427,6 +1427,46 @@ export async function getContactMessages(req, res, next) {
     }
 }
 
+export async function getBalanceSheetRestaurants(req, res, next) {
+    try {
+        const data = await adminService.getRestaurantBalances(req.query);
+        res.status(200).json({ success: true, message: 'Restaurant balances fetched', data });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function getBalanceSheetRiders(req, res, next) {
+    try {
+        const data = await adminService.getRiderBalances(req.query);
+        res.status(200).json({ success: true, message: 'Rider balances fetched', data });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function payoutBalance(req, res, next) {
+    try {
+        const data = await adminService.payoutEntity(req.params.entityType, req.params.entityId, {
+            ...(req.body || {}),
+            // Recorded on the settlement so a payout can be traced to who ran it.
+            adminId: req.user?.userId,
+        });
+        res.status(200).json({ success: true, message: 'Payout recorded', data });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function getBalanceSheetHistory(req, res, next) {
+    try {
+        const data = await adminService.getSettlementHistory(req.query);
+        res.status(200).json({ success: true, message: 'Settlement history fetched', data });
+    } catch (error) {
+        next(error);
+    }
+}
+
 export async function setRestaurantBillingMode(req, res, next) {
     try {
         const data = await adminService.setRestaurantBillingMode(req.params.id, req.body?.billingMode);

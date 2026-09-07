@@ -1068,6 +1068,31 @@ export const adminAPI = {
       contextModule: "admin",
     }),
   /** How a restaurant is billed: commission_overall | commission_dish | subscription. */
+  /** What is still owed to restaurants for a period. */
+  getBalanceSheetRestaurants: (params = {}) =>
+    apiClient.get("/food/admin/withdrawals/balance-sheet/restaurants", {
+      params,
+      contextModule: "admin",
+    }),
+  /** Same for delivery partners; their balance nets off cash they still hold. */
+  getBalanceSheetRiders: (params = {}) =>
+    apiClient.get("/food/admin/withdrawals/balance-sheet/riders", {
+      params,
+      contextModule: "admin",
+    }),
+  /** Past payout runs. */
+  getBalanceSheetHistory: (params = {}) =>
+    apiClient.get("/food/admin/withdrawals/balance-sheet/history", {
+      params,
+      contextModule: "admin",
+    }),
+  /** Settle one entity for a period. Closes those orders against re-payment. */
+  payoutBalance: (entityType, entityId, body) =>
+    apiClient.post(
+      `/food/admin/withdrawals/balance-sheet/payout/${String(entityType)}/${String(entityId)}`,
+      body ?? {},
+      { contextModule: "admin" },
+    ),
   setRestaurantBillingMode: (id, billingMode) =>
     apiClient.patch(
       `/food/admin/restaurants/${String(id)}/billing-mode`,
