@@ -22,7 +22,10 @@ export const ADMIN_PERMISSION_SECTIONS = [
   // but were missing from every section list -- so they could never be granted
   // and their pages were invisible to every sub-admin.
   "system_settings",
-  "sub_admin_management",
+  // sub_admin_management is deliberately absent: every one of its endpoints
+  // is super-admin only, because a sub-admin who can edit sub-admins can
+  // grant themselves everything else. Listing it here would put a checkbox in
+  // the role editor that can never do anything.
 ];
 
 /** Labels for the role editor; the raw keys are not what an admin should read. */
