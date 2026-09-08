@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, Suspense } from "react"
 import { Outlet, useLocation } from "react-router-dom"
+import { useFitTablesToViewport } from "./useFitTablesToViewport"
 import AdminSidebar from "./AdminSidebar"
 import AdminNavbar from "./AdminNavbar"
 import { API_BASE_URL } from "@food/api/config"
@@ -33,6 +34,10 @@ export default function AdminLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const mainContentRef = useRef(null);
+
+  // Give every table on the page the height that is actually left below it,
+  // rather than the one constant the stylesheet has to guess at.
+  useFitTablesToViewport(mainContentRef, [location.pathname, isSidebarCollapsed]);
 
   // Safely enforce light mode for the Admin panel to prevent User dark mode bleeding
   useEffect(() => {

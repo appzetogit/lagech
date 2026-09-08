@@ -192,10 +192,13 @@
  * height inside a modal fights the modal's own scrolling.
  */
 main .overflow-x-auto:has(> table) {
-  /* The subtraction is for the chrome above the table -- header, page title,
-   * stat cards. In a short window it goes negative and clamps to zero, which
-   * would hide the table outright, so a floor keeps a few rows visible. */
-  max-height: max(12rem, calc(100vh - 20rem));
+  /* The variable is measured per table -- see useFitTablesToViewport -- because
+   * one constant cannot describe the chrome above every table: a page with nine
+   * stat cards over it and a page with only a title do not have the same room
+   * left. The fallback is that constant, which is what applies before the
+   * measurement lands. Its floor matters: in a short window the subtraction goes
+   * negative and clamps to zero, hiding the table outright. */
+  max-height: var(--table-max-h, max(12rem, calc(100vh - 20rem)));
   overflow-y: auto;
   /* `top: 0` on the header means the top of this box's content, so a wrapper
    * padded on all sides parks the header below its own edge and leaves a strip
@@ -203,6 +206,19 @@ main .overflow-x-auto:has(> table) {
    * only the top has to go, and the header sitting flush is what a pinned
    * header should look like anyway. */
   padding-top: 0;
+}
+
+/* Admin tables read at 12-13px, which is small for a screen somebody works in
+ * all day and reads money off. A step up on the cells and the headers, set here
+ * rather than on each of the forty-odd tables. Unlayered, so it wins over the
+ * utility classes on the cells without needing !important. */
+main .overflow-x-auto > table > tbody td {
+  font-size: 0.9375rem;
+  line-height: 1.4;
+}
+
+main .overflow-x-auto > table > thead th {
+  font-size: 0.8125rem;
 }
 
 main .overflow-x-auto > table > thead th {

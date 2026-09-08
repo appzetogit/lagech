@@ -1,21 +1,55 @@
 import { z } from 'zod';
 import { ValidationError } from '../../../../core/auth/errors.js';
 
+/**
+ * A number the admin typed, bounded on both ends.
+ *
+ * `.finite()` is the load-bearing part. Every value here arrives as a string
+ * and is put through Number(), and a number input accepts exponent notation --
+ * so "102020202020e233" reaches this as Infinity. Zod rejects NaN but not
+ * Infinity, and Infinity passes `.min(0)` happily, so on the fields that had no
+ * ceiling it was being stored.
+ *
+ * Messages name their own field because the admin panel shows the first error
+ * verbatim, and "Number must be less than or equal to 100" does not say which
+ * box to go and fix.
+ */
+const bounded = (label, max, unit = '') =>
+    z
+        .number({ invalid_type_error: `${label} must be a number` })
+        .finite(`${label} must be a real number`)
+        .min(0, `${label} cannot be negative`)
+        .max(max, `${label} cannot be more than ${max}${unit}`);
+
+/** A rate out of a hundred. Above that it is a typo, not a tax. */
+const percentage = (label) => bounded(label, 100, '%');
+
+/**
+ * A ceiling for the money fields, which had none at all.
+ *
+ * Not a business rule -- no real platform fee approaches it -- just far enough
+ * out that a genuine setting can never reach it and a mistyped one always does.
+ */
+const MAX_AMOUNT = 100000;
+
+/** Ranges are distances in kilometres. */
+const MAX_DISTANCE_KM = 1000;
+
 const rangeSchema = z.object({
-    min: z.number().min(0),
-    max: z.number().min(0),
-    fee: z.number().min(0),
-    deliveryBoyPerKm: z.number().min(0).optional().default(0),
-    deliveryBoyBasePay: z.number().min(0).optional().default(0)
+    min: bounded('Range start', MAX_DISTANCE_KM, ' km'),
+    max: bounded('Range end', MAX_DISTANCE_KM, ' km'),
+    fee: bounded('Range delivery fee', MAX_AMOUNT),
+    deliveryBoyPerKm: bounded('Per km amount', MAX_AMOUNT).optional().default(0),
+    deliveryBoyBasePay: bounded('Base pay', MAX_AMOUNT).optional().default(0)
 });
 
 const feeSettingsUpsertSchema = z.object({
-    deliveryFee: z.number().min(0).nullable().optional(),
+    deliveryFee: bounded('Delivery fee', MAX_AMOUNT).nullable().optional(),
     deliveryFeeRanges: z.array(rangeSchema).optional(),
-    platformFee: z.number().min(0).nullable().optional(),
-    quickDeliveryFee: z.number().min(0).nullable().optional(),
-    gstRate: z.number().min(0).max(100).nullable().optional(),
-    deliveryFeeGstRate: z.number().min(0).max(100).nullable().optional(),
+    platformFee: bounded('Platform fee', MAX_AMOUNT).nullable().optional(),
+    quickDeliveryFee: bounded('Quick delivery extra', MAX_AMOUNT).nullable().optional(),
+    gstRate: percentage('GST rate').nullable().optional(),
+    deliveryFeeGstRate: percentage('Delivery fee GST rate').nullable().optional(),
     isActive: z.boolean().optional(),
     // Which zone these fees are for. Absent/null is the global default, which
     // is what every pre-zone caller means. Zod strips undeclared keys, so

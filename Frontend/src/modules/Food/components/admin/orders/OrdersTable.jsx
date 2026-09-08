@@ -707,15 +707,22 @@ export default function OrdersTable({
         </table>
       </div>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
+      {/* Pagination
+
+          The count line used to be inside the same condition as the page
+          buttons, so a list that fits on one page showed neither -- and with
+          24 orders against a page size of 50 there was nothing on screen
+          saying how many there were or how many a page holds. The line always
+          shows now; only the buttons depend on there being more than one page. */}
+      {resolvedTotalCount > 0 && (
+        <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-sm text-slate-600">
             Showing <span className="font-semibold">{(currentPage - 1) * itemsPerPage + 1}</span> to{" "}
             <span className="font-semibold">{Math.min(currentPage * itemsPerPage, resolvedTotalCount)}</span> of{" "}
             <span className="font-semibold">{resolvedTotalCount}</span> orders
+            <span className="text-slate-400"> · {itemsPerPage} per page</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className={`flex items-center gap-2 ${totalPages > 1 ? "" : "hidden"}`}>
             <button
               onClick={() => handlePageChange(Math.max(1, currentPage - 1))}
               disabled={currentPage === 1}

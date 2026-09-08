@@ -3,6 +3,7 @@ import { Save, Loader2, DollarSign, Plus, Trash2, Edit, Check, X } from "lucide-
 import { Button } from "@food/components/ui/button"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
+import { FEE_FIELDS, checkFee, validateFeeSettings } from "./feeValidation"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -27,6 +28,9 @@ export default function FeeSettings() {
   const [scopeConfigured, setScopeConfigured] = useState(false)
   const [loadingFeeSettings, setLoadingFeeSettings] = useState(false)
   const [savingFeeSettings, setSavingFeeSettings] = useState(false)
+  // Which boxes are out of bounds, keyed by field. Shown under the box rather
+  // than as a toast, so the admin can see which one to fix.
+  const [feeErrors, setFeeErrors] = useState({})
   const [editingRangeIndex, setEditingRangeIndex] = useState(null)
   const [newRange, setNewRange] = useState({ 
     min: '', 
@@ -101,6 +105,16 @@ export default function FeeSettings() {
   }
 
   const saveSettings = async (settingsToSave) => {
+    // The inputs carry min/max, but those only drive the spinner arrows --
+    // typing past them is allowed and nothing was checking the result.
+    const problems = validateFeeSettings(settingsToSave)
+    setFeeErrors(problems)
+    const first = Object.values(problems)[0]
+    if (first) {
+      toast.error(first)
+      return false
+    }
+
     try {
       setSavingFeeSettings(true)
       const payload = {
@@ -155,6 +169,27 @@ export default function FeeSettings() {
       setSavingFeeSettings(false)
     }
   }
+
+  const setFee = (key, value) => {
+    setFeeSettings((prev) => ({ ...prev, [key]: value }))
+    const field = FEE_FIELDS.find((f) => f.key === key)
+    // Cleared as soon as the value becomes acceptable, rather than making the
+    // admin press Save again to find out whether they fixed it.
+    setFeeErrors((prev) => ({ ...prev, [key]: (field && checkFee(value, field)) || undefined }))
+  }
+
+  // A number input treats "e" as an exponent, which is how 102020202020e233
+  // got typed into a GST box. Nothing in a fee is ever written that way.
+  const blockExponent = (e) => {
+    if (e.key === "e" || e.key === "E" || e.key === "+") e.preventDefault()
+  }
+
+  const feeInputClass = (key) =>
+    `w-full px-4 py-2 border rounded-lg outline-none transition-all ${
+      feeErrors[key]
+        ? "border-red-400 focus:ring-2 focus:ring-red-500 focus:border-red-500"
+        : "border-slate-300 focus:ring-2 focus:ring-green-500 focus:border-green-500"
+    }`
 
   // Save fee settings (main button)
   const handleSaveFeeSettings = async () => {
@@ -708,15 +743,19 @@ export default function FeeSettings() {
                   <input
                     type="number"
                     value={feeSettings.platformFee}
-                    onChange={(e) => setFeeSettings({ ...feeSettings, platformFee: e.target.value })}
+                    onChange={(e) => setFee("platformFee", e.target.value)}
+                    onKeyDown={blockExponent}
                     min="0"
                     step="1"
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none transition-all"
+                    className={feeInputClass("platformFee")}
                     placeholder="5"
                   />
                   <p className="text-xs text-slate-500">
                     Platform service fee per order
                   </p>
+                  {feeErrors.platformFee ? (
+                    <p className="text-xs font-medium text-red-600">{feeErrors.platformFee}</p>
+                  ) : null}
                 </div>
 
                 {/* Quick Delivery Fee */}
@@ -727,15 +766,19 @@ export default function FeeSettings() {
                   <input
                     type="number"
                     value={feeSettings.quickDeliveryFee}
-                    onChange={(e) => setFeeSettings({ ...feeSettings, quickDeliveryFee: e.target.value })}
+                    onChange={(e) => setFee("quickDeliveryFee", e.target.value)}
+                    onKeyDown={blockExponent}
                     min="0"
                     step="1"
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none transition-all"
+                    className={feeInputClass("quickDeliveryFee")}
                     placeholder="15"
                   />
                   <p className="text-xs text-slate-500">
                     Extra amount added on top of delivery fee when user selects Quick Mode
                   </p>
+                  {feeErrors.quickDeliveryFee ? (
+                    <p className="text-xs font-medium text-red-600">{feeErrors.quickDeliveryFee}</p>
+                  ) : null}
                 </div>
 
                 {/* GST Rate */}
@@ -746,16 +789,20 @@ export default function FeeSettings() {
                   <input
                     type="number"
                     value={feeSettings.gstRate}
-                    onChange={(e) => setFeeSettings({ ...feeSettings, gstRate: e.target.value })}
+                    onChange={(e) => setFee("gstRate", e.target.value)}
+                    onKeyDown={blockExponent}
                     min="0"
                     max="100"
                     step="0.1"
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none transition-all"
+                    className={feeInputClass("gstRate")}
                     placeholder="5"
                   />
                   <p className="text-xs text-slate-500">
                     GST percentage applied on order subtotal
                   </p>
+                  {feeErrors.gstRate ? (
+                    <p className="text-xs font-medium text-red-600">{feeErrors.gstRate}</p>
+                  ) : null}
                 </div>
 
                 {/* Delivery Fee GST Rate */}
@@ -766,18 +813,20 @@ export default function FeeSettings() {
                   <input
                     type="number"
                     value={feeSettings.deliveryFeeGstRate}
-                    onChange={(e) =>
-                      setFeeSettings({ ...feeSettings, deliveryFeeGstRate: e.target.value })
-                    }
+                    onChange={(e) => setFee("deliveryFeeGstRate", e.target.value)}
+                    onKeyDown={blockExponent}
                     min="0"
                     max="100"
                     step="0.1"
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none transition-all"
+                    className={feeInputClass("deliveryFeeGstRate")}
                     placeholder="0"
                   />
                   <p className="text-xs text-slate-500">
                     GST percentage applied on the delivery fee. Leave blank or 0 to not charge it.
                   </p>
+                  {feeErrors.deliveryFeeGstRate ? (
+                    <p className="text-xs font-medium text-red-600">{feeErrors.deliveryFeeGstRate}</p>
+                  ) : null}
                 </div>
               </div>
           </>
