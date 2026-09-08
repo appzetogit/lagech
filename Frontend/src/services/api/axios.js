@@ -26,6 +26,9 @@ const ADMIN_PERMISSION_PATH_MAP = [
   { prefix: "/food/admin/sub-admins", section: "sub_admin_management" },
   { prefix: "/food/admin/customers", section: "customer_management" },
   { prefix: "/food/admin/support-tickets", section: "customer_management" },
+  // Live chat rides on the same section as the rest of support. It is not
+  // under /food/admin, so it needs saying explicitly.
+  { prefix: "/food/chat", section: "customer_management" },
   { prefix: "/food/admin/restaurants", section: "restaurant_management" },
   { prefix: "/food/admin/restaurant-settings", section: "restaurant_management" },
   { prefix: "/food/admin/restaurant-subscription-settings", section: "restaurant_management" },

@@ -376,8 +376,68 @@ export async function listConversations(me, query = {}) {
         (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
     );
 
-    return { conversations: merged };
+    return { conversations: await attachPeers(merged) };
 }
+
+/**
+ * Put a name and a number on the other side of each thread.
+ *
+ * A conversation carries only tokens -- "USER:6a83..." -- which is all the
+ * participants themselves need, because each already knows who they are talking
+ * to. A support desk does not: an inbox listing two dozen opaque ids is not
+ * something anyone can work. Resolved in three queries rather than one per row.
+ *
+ * A peer that no longer exists (a deleted account) keeps its token and gets no
+ * name, so the thread still lists and its history is still readable.
+ */
+const attachPeers = async (conversations) => {
+    const byRole = { USER: new Set(), DELIVERY_PARTNER: new Set(), RESTAURANT: new Set() };
+
+    for (const c of conversations) {
+        const [role, id] = String(c.peerToken || '').split(':');
+        if (byRole[role] && id) byRole[role].add(id);
+    }
+
+    const ids = (role) => [...byRole[role]];
+    const [users, riders, restaurants] = await Promise.all([
+        byRole.USER.size
+            ? prisma.foodUser.findMany({ where: { id: { in: ids('USER') } }, select: { id: true, name: true, phone: true } })
+            : [],
+        byRole.DELIVERY_PARTNER.size
+            ? prisma.foodDeliveryPartner.findMany({
+                  where: { id: { in: ids('DELIVERY_PARTNER') } },
+                  select: { id: true, name: true, phone: true },
+              })
+            : [],
+        byRole.RESTAURANT.size
+            ? prisma.foodRestaurant.findMany({
+                  where: { id: { in: ids('RESTAURANT') } },
+                  select: { id: true, restaurantName: true, ownerPhone: true },
+              })
+            : [],
+    ]);
+
+    const names = new Map();
+    for (const u of users) names.set(`USER:${u.id}`, { name: u.name || '', phone: u.phone || '' });
+    for (const r of riders)
+        names.set(`DELIVERY_PARTNER:${r.id}`, { name: r.name || '', phone: r.phone || '' });
+    for (const r of restaurants)
+        names.set(`RESTAURANT:${r.id}`, { name: r.restaurantName || '', phone: r.ownerPhone || '' });
+
+    return conversations.map((c) => {
+        const [role, id] = String(c.peerToken || '').split(':');
+        const found = names.get(c.peerToken);
+        return {
+            ...c,
+            peer: {
+                role: role || '',
+                id: id || '',
+                name: found?.name || (role === 'ADMIN' ? 'Support' : ''),
+                phone: found?.phone || '',
+            },
+        };
+    });
+};
 
 /** Shape sent to clients over both REST and the socket, so they never disagree. */
 const serializeConversation = (doc, extra = {}) => ({

@@ -76,6 +76,9 @@ const PATH_PREFIX_TO_SECTION = [
   { prefix: "/admin/food/referral-settings", section: "referral_rewards" },
   { prefix: "/admin/food/customers", section: "customer_management" },
   { prefix: "/admin/food/support-tickets", section: "customer_management" },
+  // Live chat rides on the same section as the rest of support. It is not
+  // under /food/admin, so it needs saying explicitly.
+  { prefix: "/admin/food/chattings", section: "customer_management" },
   { prefix: "/admin/food/delivery", section: "delivery_management" },
   { prefix: "/admin/food/delivery-partners", section: "delivery_management" },
   { prefix: "/admin/food/contact-messages", section: "support_management" },

@@ -199,6 +199,34 @@ export const supportAPI = {
     }),
 };
 
+/**
+ * Support chat. The same endpoints serve every role -- the server decides who
+ * you are from the token and will not hand back a thread you are not in -- so
+ * there is one group rather than one per app.
+ */
+export const chatAPI = {
+  listConversations: (params = {}, config = {}) =>
+    apiClient.get("/food/chat/conversations", { params, ...config }),
+  getHistory: (params = {}, config = {}) =>
+    apiClient.get("/food/chat/messages", { params, ...config }),
+  sendMessage: (body = {}, config = {}) =>
+    apiClient.post("/food/chat/messages", body ?? {}, config),
+  createConversation: (body = {}, config = {}) =>
+    apiClient.post("/food/chat/conversations", body ?? {}, config),
+  setStatus: (conversationId, status, config = {}) =>
+    apiClient.patch(
+      `/food/chat/conversations/${String(conversationId)}/status`,
+      { status },
+      config,
+    ),
+  markRead: (conversationId, config = {}) =>
+    apiClient.patch(
+      `/food/chat/conversations/${String(conversationId)}/read`,
+      {},
+      config,
+    ),
+};
+
 export const notificationAPI = {
   getInbox: (params = {}, config = {}) =>
     apiClient.get("/food/notifications/inbox", {
