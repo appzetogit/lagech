@@ -277,7 +277,15 @@ export default function Chattings() {
       setDraft("")
       setPending([])
       if (sent) {
-        // The socket echoes to the sender's *other* devices, not this one.
+        // Only if the server agrees it belongs here. Conversation ids are
+        // derived from who is talking, not taken from the request, so a reply
+        // can land in a different thread than the one on screen -- appending
+        // it regardless would draw a message into a conversation it is not in.
+        if (sent.conversationId !== selected.conversationId) {
+          loadConversations()
+          openConversation(sent.conversationId)
+          return
+        }
         setMessages((prev) => (prev.some((m) => m.id === sent.id) ? prev : [...prev, sent]))
         setConversations((prev) =>
           prev.map((c) =>
