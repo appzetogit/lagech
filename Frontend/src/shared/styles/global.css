@@ -175,3 +175,35 @@
   z-index: 999999 !important;
   pointer-events: auto !important;
 }
+
+/* ── Admin tables: header rows stay put while the rows scroll ─────────────────
+ *
+ * The header used to scroll away with the page, so on a long table you lost
+ * track of which column you were reading.
+ *
+ * Making `th` sticky is only half of it. These tables sit in `overflow-x-auto`
+ * wrappers, and a box with `overflow-x: auto` computes `overflow-y: auto` too --
+ * so the wrapper is already a scroll container, and a sticky child sticks to
+ * *it* rather than to the page. With no height on the wrapper it never scrolls
+ * vertically, the page scrolls instead, and the header goes with it. Giving the
+ * wrapper a height is what makes the sticky header engage.
+ *
+ * Scoped to `main` on purpose: dialogs portal to the body, and a viewport-based
+ * height inside a modal fights the modal's own scrolling.
+ */
+main .overflow-x-auto:has(> table) {
+  max-height: calc(100vh - 20rem);
+  overflow-y: auto;
+}
+
+main .overflow-x-auto > table > thead th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  /* An opaque background, or rows show through as they pass underneath. This
+   * is slate-50, which is what all but a handful of these theads already set. */
+  background-color: #f8fafc;
+  /* A border on `thead` does not travel with a sticky `th`; an inset shadow
+   * does, so the divider under the header survives scrolling. */
+  box-shadow: inset 0 -1px 0 #e2e8f0;
+}

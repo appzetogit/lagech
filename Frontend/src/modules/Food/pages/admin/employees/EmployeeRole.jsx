@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { adminAPI } from "@food/api";
+import { toast } from "sonner";
 import { adminSectionLabel } from "@food/utils/adminRbac";
 
 export default function EmployeeRole() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const subAdminId = searchParams.get("id");
   const [catalog, setCatalog] = useState({ sections: [], actions: [] });
   const [subAdmin, setSubAdmin] = useState(null);
@@ -59,7 +61,18 @@ export default function EmployeeRole() {
     setSaving(true);
     try {
       await adminAPI.updateSubAdminPermissions(subAdminId, permissions);
-      await load();
+      // Saving said nothing and stayed put, so the only way to tell whether it
+      // had worked was to reload the page and re-read the checkboxes.
+      const granted = Object.values(permissions).filter((actions) => actions?.length).length;
+      toast.success(
+        granted
+          ? `Permissions saved — ${granted} section${granted === 1 ? "" : "s"} granted`
+          : "Permissions saved — this sub-admin now has no access",
+      );
+      navigate("/admin/food/employees");
+    } catch (error) {
+      // The interceptor reports why; staying on the page keeps the unsaved
+      // selection so it does not have to be ticked again.
     } finally {
       setSaving(false);
     }

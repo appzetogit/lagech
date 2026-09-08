@@ -8,6 +8,7 @@ import ViewOrderDetectDeliveryDialog from "@food/components/admin/orders/ViewOrd
 import SettingsDialog from "@food/components/admin/orders/SettingsDialog"
 import { useGenericTableManagement } from "@food/components/admin/orders/useGenericTableManagement"
 import { restaurantLabel } from "@food/utils/entityLabels"
+import OrderDetectFilterPanel from "@food/components/admin/orders/OrderDetectFilterPanel"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -358,6 +359,15 @@ export default function OrderDetectDelivery() {
     ["orderId", "userName", "userNumber", "restaurantName", "deliveryBoyName", "status"]
   )
 
+  // Options come from the orders actually loaded, so the dropdowns never
+  // offer a restaurant or rider that cannot appear in this table.
+  const filterOptions = useMemo(() => {
+    const uniq = (key) =>
+      [...new Set(orders.map((o) => o?.[key]).filter(Boolean).map(String))].sort();
+    return { restaurants: uniq("restaurantName"), deliveryPartners: uniq("deliveryBoyName") };
+  }, [orders]);
+
+
   // Statistics
   const stats = useMemo(() => {
     const total = filteredData.length
@@ -549,6 +559,16 @@ export default function OrderDetectDelivery() {
           status: "Status",
           actions: "Actions",
         }}
+      />
+      <OrderDetectFilterPanel
+        isOpen={isFilterOpen}
+        onClose={() => setIsFilterOpen(false)}
+        filters={filters}
+        setFilters={setFilters}
+        onApply={handleApplyFilters}
+        onReset={handleResetFilters}
+        restaurants={filterOptions.restaurants}
+        deliveryPartners={filterOptions.deliveryPartners}
       />
       <ViewOrderDetectDeliveryDialog
         isOpen={isViewOrderOpen}
