@@ -255,6 +255,54 @@ const emitRealtimeNotifications = (targets = [], broadcast) => {
     }
 };
 
+/**
+ * Make a coupon usable by the people this campaign is about to reach.
+ *
+ * A win-back message saying "here is 50% off" is worth nothing if the code
+ * is refused, so for a customer-specific coupon the recipients are added to
+ * its allow-list as the campaign goes out. Coupons open to everyone need no
+ * grant; the code simply travels with the message.
+ *
+ * Only customers are granted. A restaurant or rider in a mixed audience has
+ * no place on a customer coupon allow-list, and adding their ids would put
+ * entries there that can never match a signed-in customer.
+ */
+const attachCouponToAudience = async (couponId, targets = []) => {
+    if (!isId(couponId)) return null;
+
+    const offer = await prisma.foodOffer.findUnique({
+        where: { id: String(couponId) },
+        select: { id: true, couponCode: true, customerScope: true, customerIds: true, status: true },
+    });
+    if (!offer) throw new ValidationError('The selected coupon no longer exists');
+    if (offer.status !== 'active') {
+        // Sending a code that is switched off produces a message customers
+        // act on and cannot use.
+        throw new ValidationError(`Coupon ${offer.couponCode} is not active`);
+    }
+
+    if (offer.customerScope !== 'specific') {
+        return { id: offer.id, code: offer.couponCode, granted: 0 };
+    }
+
+    const existing = new Set((offer.customerIds || []).map(String));
+    const toAdd = targets
+        .filter((t) => t.ownerType === 'USER')
+        .map((t) => String(t.ownerId))
+        .filter((id) => isId(id) && !existing.has(id));
+
+    if (toAdd.length) {
+        await prisma.foodOffer.update({
+            where: { id: offer.id },
+            // Written as the union rather than a push, so re-running a
+            // campaign cannot list the same customer twice.
+            data: { customerIds: [...existing, ...toAdd] },
+        });
+    }
+
+    return { id: offer.id, code: offer.couponCode, granted: toAdd.length };
+};
+
 export const createBroadcastNotification = async ({ body = {}, adminId } = {}) => {
     const title = normalizeText(body?.title, 'title');
     const message = normalizeText(body?.message, 'message');
@@ -276,12 +324,18 @@ export const createBroadcastNotification = async ({ body = {}, adminId } = {}) =
         throw new ValidationError(`No recipients found for ${targetType.toLowerCase()} broadcast`);
     }
 
+    // Before the message, not after: a customer who reads it and tries the
+    // code immediately should find it already works.
+    const coupon = await attachCouponToAudience(body?.couponId, resolvedTargets);
+
     const broadcast = await prisma.notificationBroadcast.create({
         data: {
             title,
             message,
             link,
             targetType,
+            couponId: coupon?.id || null,
+            couponCode: coupon?.code || '',
             // Only a custom broadcast has an explicit id list; the rest are
             // "everyone who matched at the time", which `targets` records.
             targetIds: targetType === 'CUSTOM' ? resolvedTargets.map((t) => t.ownerId) : [],
@@ -304,18 +358,37 @@ export const createBroadcastNotification = async ({ body = {}, adminId } = {}) =
                 broadcastId: broadcast.id,
                 ownerLabel: target.label || '',
                 ownerSubLabel: target.subLabel || '',
+                // So the app can show the code as something tappable rather
+                // than leaving the customer to retype it out of the message.
+                couponCode: coupon?.code || '',
             },
         })),
     });
 
     await notifyOwnersSafely(
         resolvedTargets.map(({ ownerType, ownerId }) => ({ ownerType, ownerId })),
-        { title, body: message, data: { type: 'admin_broadcast', broadcastId: broadcast.id, link } }
+        {
+            title,
+            body: message,
+            data: {
+                type: 'admin_broadcast',
+                broadcastId: broadcast.id,
+                link,
+                couponCode: coupon?.code || '',
+            },
+        }
     );
 
     emitRealtimeNotifications(resolvedTargets, broadcast);
 
-    return { broadcast, targetPreview: resolvedTargets.slice(0, 10) };
+    return {
+        broadcast,
+        targetPreview: resolvedTargets.slice(0, 10),
+        // How many recipients were newly granted the coupon, which is not
+        // the audience size: anyone already on the allow-list is not counted
+        // again.
+        coupon,
+    };
 };
 
 export const getBroadcastNotifications = async ({ page = 1, limit = 10 } = {}) => {

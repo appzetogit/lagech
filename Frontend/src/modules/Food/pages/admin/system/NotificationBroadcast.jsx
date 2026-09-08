@@ -52,8 +52,11 @@ export default function NotificationBroadcast() {
     // Only read for the LAPSED audience.
     lapsedDays: 30,
     lapsedIncludeNeverOrdered: false,
+    // Optional coupon sent with the campaign.
+    couponId: "",
   });
   const [lapsedPreview, setLapsedPreview] = useState(null);
+  const [coupons, setCoupons] = useState([]);
   const [lapsedLoading, setLapsedLoading] = useState(false);
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(true);
@@ -155,6 +158,22 @@ export default function NotificationBroadcast() {
     );
   };
 
+  // Coupons that can travel with a campaign. Inactive ones are dropped
+  // rather than shown and refused on send -- a code that is switched off
+  // makes a message customers act on and cannot use.
+  useEffect(() => {
+    const run = async () => {
+      try {
+        const response = await adminAPI.getAllOffers();
+        const rows = response?.data?.data?.offers ?? [];
+        setCoupons(rows.filter((o) => o.status === "active"));
+      } catch (error) {
+        setCoupons([]);
+      }
+    };
+    run();
+  }, []);
+
   // Who this would reach, refreshed as the threshold moves.
   //
   // Sending is the only other way to find out, and the audience is real
@@ -204,6 +223,7 @@ export default function NotificationBroadcast() {
         title: form.title.trim(),
         message: form.message.trim(),
         targetType: form.targetType,
+        ...(form.couponId ? { couponId: form.couponId } : {}),
         ...(form.targetType === "LAPSED"
           ? {
               lapsedDays: Number(form.lapsedDays) || 30,
@@ -368,6 +388,28 @@ export default function NotificationBroadcast() {
               </div>
             </div>
           )}
+
+          <div>
+            <span className="text-sm font-semibold text-slate-700">Attach a coupon</span>
+            <select
+              value={form.couponId}
+              onChange={(event) => setForm((prev) => ({ ...prev, couponId: event.target.value }))}
+              className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            >
+              <option value="">No coupon</option>
+              {coupons.map((coupon) => (
+                <option key={coupon.offerId} value={coupon.offerId}>
+                  {coupon.couponCode}
+                  {coupon.customerGroup === "specific" ? " (customer-specific)" : ""}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-slate-500">
+              {form.couponId
+                ? "Recipients are given access to this code as the campaign sends, so it works the moment they read the message. Write the code into your message so they can see it."
+                : "Optional. A customer-specific coupon is granted to everyone this campaign reaches."}
+            </p>
+          </div>
 
           <label className="block">
             <span className="text-sm font-semibold text-slate-700">Message</span>

@@ -503,6 +503,8 @@ enum BroadcastTargetType {
   RESTAURANT
   DELIVERY
   CUSTOM
+  /// Customers who ordered once and then stopped.
+  LAPSED
 }
 
 enum PageKey {
@@ -2974,9 +2976,17 @@ model NotificationBroadcast {
   /// [{ ownerType, ownerId, label, subLabel }] — display snapshot of the audience.
   targets    Json                @default("[]")
 
-  link        String @default("")
-  createdById String @db.VarChar(24)
-  targetCount Int    @default(0)
+  link String @default("")
+
+  /// A coupon sent with this campaign, if any.
+  ///
+  /// The code is stored alongside the id because a coupon can be deleted and
+  /// the record of what was offered should outlive it -- a customer holding
+  /// the message still has the code in their hand.
+  couponId    String? @db.VarChar(24)
+  couponCode  String  @default("")
+  createdById String  @db.VarChar(24)
+  targetCount Int     @default(0)
 
   createdAt DateTime @default(now())
 
