@@ -303,6 +303,38 @@ const attachCouponToAudience = async (couponId, targets = []) => {
     return { id: offer.id, code: offer.couponCode, granted: toAdd.length };
 };
 
+/**
+ * Put the coupon code in the message, unless the admin already did.
+ *
+ * A campaign that attaches a coupon but never names it leaves the customer
+ * with a discount they cannot find. Appending it here rather than in the admin
+ * screen means the stored message, the inbox entry and the push body all carry
+ * the same text -- appending in three places is three chances for them to
+ * drift.
+ *
+ * The check is case-insensitive and looks for the bare code, so an admin who
+ * wrote "use winback25 today" does not get it repeated back at them.
+ */
+const withCouponCode = (message, code) => {
+    const trimmed = String(message || '').trim();
+    const couponCode = String(code || '').trim();
+    if (!couponCode) return trimmed;
+
+    // Coupon codes are uppercased alphanumerics by the validator, so the
+    // common case needs no regex escaping at all. Anything unexpected falls
+    // back to a plain substring test rather than being compiled into a
+    // pattern.
+    const simple = /^[A-Z0-9_-]+$/i.test(couponCode);
+    const mentioned = simple
+        ? new RegExp(`\\b${couponCode}\\b`, 'i').test(trimmed)
+        : trimmed.toUpperCase().includes(couponCode.toUpperCase());
+    if (mentioned) return trimmed;
+
+    return `${trimmed}
+
+Use code ${couponCode}`;
+};
+
 export const createBroadcastNotification = async ({ body = {}, adminId } = {}) => {
     const title = normalizeText(body?.title, 'title');
     const message = normalizeText(body?.message, 'message');
@@ -328,10 +360,13 @@ export const createBroadcastNotification = async ({ body = {}, adminId } = {}) =
     // code immediately should find it already works.
     const coupon = await attachCouponToAudience(body?.couponId, resolvedTargets);
 
+    // One place, so every copy of the text below says the same thing.
+    const finalMessage = withCouponCode(message, coupon?.code);
+
     const broadcast = await prisma.notificationBroadcast.create({
         data: {
             title,
-            message,
+            message: finalMessage,
             link,
             targetType,
             couponId: coupon?.id || null,
@@ -350,7 +385,7 @@ export const createBroadcastNotification = async ({ body = {}, adminId } = {}) =
             ownerType: target.ownerType,
             ownerId: target.ownerId,
             title,
-            message,
+            message: finalMessage,
             link,
             category: 'broadcast',
             broadcastId: broadcast.id,
@@ -369,7 +404,7 @@ export const createBroadcastNotification = async ({ body = {}, adminId } = {}) =
         resolvedTargets.map(({ ownerType, ownerId }) => ({ ownerType, ownerId })),
         {
             title,
-            body: message,
+            body: finalMessage,
             data: {
                 type: 'admin_broadcast',
                 broadcastId: broadcast.id,

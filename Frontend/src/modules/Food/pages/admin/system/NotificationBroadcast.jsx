@@ -406,7 +406,7 @@ export default function NotificationBroadcast() {
             </select>
             <p className="mt-1 text-xs text-slate-500">
               {form.couponId
-                ? "Recipients are given access to this code as the campaign sends, so it works the moment they read the message. Write the code into your message so they can see it."
+                ? "Recipients are given access to this code as the campaign sends, so it works the moment they read the message. The code is added to the end of your message unless you have already written it in."
                 : "Optional. A customer-specific coupon is granted to everyone this campaign reaches."}
             </p>
           </div>
