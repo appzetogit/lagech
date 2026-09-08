@@ -6,6 +6,7 @@ import { exportCustomersToCSV, exportCustomersToExcel, exportCustomersToPDF } fr
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@food/components/ui/dialog"
+import { usePaginationParams } from "@food/hooks/usePaginationParams"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -26,7 +27,10 @@ export default function Customers() {
   const [customers, setCustomers] = useState([])
   const [loading, setLoading] = useState(true)
   const [totalCustomers, setTotalCustomers] = useState(0)
-  const [page, setPage] = useState(1)
+  // In the URL, so a reload or a shared link lands on the same page, and the
+  // page size stops being a constant nobody can see.
+  const { page, limit: pageSize, setPage, setLimit: setPageSize, limitOptions } =
+    usePaginationParams({ defaultLimit: PAGE_SIZE })
   const [selectedCustomer, setSelectedCustomer] = useState(null)
   const [userDetails, setUserDetails] = useState(null)
   const [loadingDetails, setLoadingDetails] = useState(false)
@@ -41,9 +45,9 @@ export default function Customers() {
   const [draft, setDraft] = useState(EMPTY_FILTERS)
   const [filters, setFilters] = useState(EMPTY_FILTERS)
 
-  const totalPages = Math.max(1, Math.ceil(totalCustomers / PAGE_SIZE))
-  const showingFrom = totalCustomers === 0 ? 0 : (page - 1) * PAGE_SIZE + 1
-  const showingTo = Math.min(page * PAGE_SIZE, totalCustomers)
+  const totalPages = Math.max(1, Math.ceil(totalCustomers / pageSize))
+  const showingFrom = totalCustomers === 0 ? 0 : (page - 1) * pageSize + 1
+  const showingTo = Math.min(page * pageSize, totalCustomers)
 
   useEffect(() => {
     if (!loading && page > totalPages) {
@@ -103,7 +107,7 @@ export default function Customers() {
         const chooseFirst = parseInt(filters.chooseFirst, 10)
         const useChooseFirst = Number.isFinite(chooseFirst) && chooseFirst > 0
         const params = {
-          limit: useChooseFirst ? chooseFirst : PAGE_SIZE,
+          limit: useChooseFirst ? chooseFirst : pageSize,
           page: useChooseFirst ? 1 : page,
           ...(searchQuery && { search: searchQuery }),
           ...(filters.status && { status: filters.status }),
@@ -141,7 +145,7 @@ export default function Customers() {
       cancelled = true
       clearTimeout(t)
     }
-  }, [page, searchQuery, filters])
+  }, [page, pageSize, searchQuery, filters])
 
   const [searchParams] = useSearchParams()
   const userIdFromUrl = searchParams.get("userId")
@@ -353,10 +357,29 @@ export default function Customers() {
                 Reset Filters
               </button>
             </div>
-            <div className="text-sm text-slate-600">
-              {loading
-                ? "Loading..."
-                : `Showing ${showingFrom}-${showingTo} of ${totalCustomers} customers`}
+            <div className="flex items-center gap-2 text-sm text-slate-600">
+              {/* The page size was a constant in the source: nobody could see
+                  what it was, let alone change it. */}
+              <label className="inline-flex items-center gap-1">
+                <select
+                  value={pageSize}
+                  onChange={(event) => setPageSize(Number(event.target.value))}
+                  className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-sm text-slate-700"
+                  aria-label="Rows per page"
+                >
+                  {limitOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+                per page
+              </label>
+              <span>
+                {loading
+                  ? "Loading..."
+                  : `Showing ${showingFrom}-${showingTo} of ${totalCustomers} customers`}
+              </span>
             </div>
           </div>
         </div>
@@ -445,7 +468,7 @@ export default function Customers() {
                     <tr key={customer.id || customer._id || customer.sl} className="hover:bg-slate-50 transition-colors">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className="text-sm font-medium text-slate-700">
-                          {(page - 1) * PAGE_SIZE + index + 1}
+                          {(page - 1) * pageSize + index + 1}
                         </span>
                       </td>
                       <td className="px-6 py-4">
@@ -517,7 +540,7 @@ export default function Customers() {
             </table>
           </div>
 
-          {!loading && totalCustomers > PAGE_SIZE && !filters.chooseFirst ? (
+          {!loading && totalCustomers > pageSize && !filters.chooseFirst ? (
             <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-slate-200 pt-4">
               <p className="text-sm text-slate-600">
                 Page {page} of {totalPages}

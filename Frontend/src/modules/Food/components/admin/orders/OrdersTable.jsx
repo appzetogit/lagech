@@ -49,6 +49,8 @@ export default function OrdersTable({
   currentPage: externalCurrentPage,
   totalPages: externalTotalPages,
   pageSize = 10,
+  pageSizeOptions,
+  onPageSizeChange,
   onPageChange,
 }) {
   const [internalCurrentPage, setInternalCurrentPage] = useState(1)
@@ -720,7 +722,26 @@ export default function OrdersTable({
             Showing <span className="font-semibold">{(currentPage - 1) * itemsPerPage + 1}</span> to{" "}
             <span className="font-semibold">{Math.min(currentPage * itemsPerPage, resolvedTotalCount)}</span> of{" "}
             <span className="font-semibold">{resolvedTotalCount}</span> orders
-            <span className="text-slate-400"> · {itemsPerPage} per page</span>
+            {onPageSizeChange && pageSizeOptions?.length ? (
+              <label className="ml-2 inline-flex items-center gap-1 text-slate-500">
+                ·
+                <select
+                  value={itemsPerPage}
+                  onChange={(event) => onPageSizeChange(Number(event.target.value))}
+                  className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-sm text-slate-700"
+                  aria-label="Rows per page"
+                >
+                  {pageSizeOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+                per page
+              </label>
+            ) : (
+              <span className="text-slate-400"> · {itemsPerPage} per page</span>
+            )}
           </div>
           <div className={`flex items-center gap-2 ${totalPages > 1 ? "" : "hidden"}`}>
             <button

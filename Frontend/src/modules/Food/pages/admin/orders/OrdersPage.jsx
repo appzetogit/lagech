@@ -4,7 +4,8 @@ import io from "socket.io-client"
 import { FileText, Package } from "lucide-react"
 import { adminAPI } from "@food/api"
 import { API_BASE_URL } from "@food/api/config"
-import { toast } from "sonner"
+import { toast } from "sonner"
+import { usePaginationParams } from "@food/hooks/usePaginationParams"
 import OrdersTopbar from "@food/components/admin/orders/OrdersTopbar"
 import OrdersTable from "@food/components/admin/orders/OrdersTable"
 import FilterPanel from "@food/components/admin/orders/FilterPanel"
@@ -65,7 +66,15 @@ const EMPTY_ORDER_FILTERS = {
 export default function OrdersPage({ statusKey = "all" }) {
   const config = statusConfig[statusKey] || statusConfig["all"]
   const [orders, setOrders] = useState([])
-  const [apiPage, setApiPage] = useState(1)
+  // In the URL, not in state: a reload used to drop you back on page one and
+  // the page size was a constant nobody could see or change.
+  const {
+    page: apiPage,
+    limit: pageSize,
+    setPage: setApiPage,
+    setLimit: setPageSize,
+    limitOptions,
+  } = usePaginationParams({ defaultLimit: PAGE_SIZE })
   const [totalOrdersCount, setTotalOrdersCount] = useState(0)
   const [apiTotalPages, setApiTotalPages] = useState(1)
   const [isInitialLoading, setIsInitialLoading] = useState(true)
@@ -93,6 +102,9 @@ export default function OrdersPage({ statusKey = "all" }) {
   const lastFetchAtRef = useRef(0)
   const socketConnectedRef = useRef(false)
   const apiPageRef = useRef(apiPage)
+  // Read inside the fetch, which is held in a ref and does not re-create when
+  // the size changes.
+  const pageSizeRef = useRef(pageSize)
   const statusKeyRef = useRef(statusKey)
   const searchQueryRef = useRef("")
   const appliedFiltersRef = useRef(EMPTY_ORDER_FILTERS)
@@ -455,7 +467,7 @@ export default function OrdersPage({ statusKey = "all" }) {
       }
 
       const requestPage = withRingCheck ? 1 : page
-      const requestLimit = withRingCheck ? 15 : PAGE_SIZE
+      const requestLimit = withRingCheck ? 15 : pageSizeRef.current
 
       const response = await adminAPI.getOrders(
         {
@@ -830,6 +842,21 @@ export default function OrdersPage({ statusKey = "all" }) {
   useEffect(() => {
     apiPageRef.current = apiPage
   }, [apiPage])
+
+  useEffect(() => {
+    pageSizeRef.current = pageSize
+  }, [pageSize])
+
+  // A different page size is a different request, and page one does not refetch
+  // itself on the apiPage effect below.
+  const firstSizeRef = useRef(true)
+  useEffect(() => {
+    if (firstSizeRef.current) {
+      firstSizeRef.current = false
+      return
+    }
+    fetchOrdersRef.current({ silent: false, withRingCheck: false, page: 1, force: true })
+  }, [pageSize])
 
   useEffect(() => {
     statusKeyRef.current = statusKey
@@ -1393,7 +1420,9 @@ export default function OrdersPage({ statusKey = "all" }) {
         totalCount={totalOrdersCount}
         currentPage={apiPage}
         totalPages={apiTotalPages}
-        pageSize={PAGE_SIZE}
+        pageSize={pageSize}
+        pageSizeOptions={limitOptions}
+        onPageSizeChange={setPageSize}
         onPageChange={setApiPage}
         onViewOrder={handleViewOrder}
         onPrintOrder={handlePrintOrder}

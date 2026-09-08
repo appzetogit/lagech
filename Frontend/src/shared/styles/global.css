@@ -191,6 +191,19 @@
  * Scoped to `main` on purpose: dialogs portal to the body, and a viewport-based
  * height inside a modal fights the modal's own scrolling.
  */
+/* Admin pages are wrapped in `min-h-screen`, which is a full viewport -- but
+ * they are not laid out against the viewport. They live inside <main>, which is
+ * the scroll container and is already a header shorter than the screen. So the
+ * wrapper forced every page to be taller than the box holding it by exactly the
+ * height of the header: a scrollbar on every screen, and a band of empty page
+ * under the content once you reached the bottom of it.
+ *
+ * Against its own container instead. 120 admin pages carry the class, so this
+ * is the one place to say it. */
+main .min-h-screen {
+  min-height: 100%;
+}
+
 main .overflow-x-auto:has(> table) {
   /* The variable is measured per table -- see useFitTablesToViewport -- because
    * one constant cannot describe the chrome above every table: a page with nine
