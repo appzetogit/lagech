@@ -3,6 +3,7 @@ import useRestaurantBackNavigation from "@food/hooks/useRestaurantBackNavigation
 import { ChevronLeft, Loader2, Send } from "lucide-react"
 import { restaurantAPI } from "@food/api"
 import BottomNavOrders from "@food/components/restaurant/BottomNavOrders"
+import SupportChat from "@food/components/shared/SupportChat"
 import { toast } from "sonner"
 
 const CATEGORY_OPTIONS = [
@@ -36,6 +37,7 @@ const getStatusStyle = (status) => {
 export default function RestaurantSupport() {
   const goBack = useRestaurantBackNavigation()
   const [tickets, setTickets] = useState([])
+  const [chatOpen, setChatOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [statusFilter, setStatusFilter] = useState("")
@@ -123,6 +125,30 @@ export default function RestaurantSupport() {
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 pb-28 md:min-h-0 md:max-w-6xl md:mx-auto md:px-8 md:py-6 md:pb-8 md:w-full md:grid md:grid-cols-2 md:gap-6 md:items-start md:space-y-0">
+        {/* Tickets are right for anything needing a record. They are the wrong
+            shape for "my kitchen is down and orders are still coming in", which
+            needs an answer now and stops mattering by the evening. */}
+        <div className="md:col-span-2">
+          {chatOpen ? (
+            <SupportChat
+              className="h-[26rem]"
+              contextModule="restaurant"
+              tokenKeys={["restaurant_accessToken", "accessToken"]}
+              heading="Chat with support"
+              subheading="For something that cannot wait for a ticket."
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => setChatOpen(true)}
+              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-left text-sm font-medium text-slate-900 hover:bg-slate-50 md:w-auto md:shadow-sm"
+            >
+              Chat with support
+              <span className="ml-2 font-normal text-slate-500">Get an answer now</span>
+            </button>
+          )}
+        </div>
+
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 md:col-span-2">
           <div className="rounded-xl border border-slate-200 bg-white p-3 md:p-4 md:shadow-sm">
             <p className="text-xs text-slate-500">Total</p>

@@ -451,7 +451,9 @@ export default function Chattings() {
                               </span>
                             </div>
                             <p className="text-xs text-slate-500 truncate">
-                              {conversation.peer?.phone || conversation.title || ""}
+                              {[conversation.peer?.phone, conversation.orderId ? "order" : ""]
+                                .filter(Boolean)
+                                .join(" · ") || conversation.title || ""}
                             </p>
                             <div className="flex items-center justify-between gap-2">
                               <p className="text-sm text-slate-600 truncate">
@@ -500,7 +502,16 @@ export default function Chattings() {
                           {selected.peer?.name || "Unknown"}
                         </h2>
                         <p className="text-sm text-slate-500 truncate">
-                          {[selected.peer?.phone, selected.title].filter(Boolean).join(" · ")}
+                          {/* A customer can have several threads once they ask
+                              about particular orders, so the order this one is
+                              about is what tells them apart. */}
+                          {[
+                            selected.peer?.phone,
+                            selected.title,
+                            selected.orderId ? `Order ${selected.orderId}` : "",
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
                         </p>
                         <p className="text-xs text-slate-500 truncate">
                           {selected.assignedAdmin

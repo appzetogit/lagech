@@ -1,4 +1,6 @@
+import { useState } from "react"
 import { useParams, Link, useNavigate } from "react-router-dom"
+import SupportChat from "@food/components/shared/SupportChat"
 import {
   ArrowLeft,
   Package,
@@ -124,6 +126,7 @@ const commonIssues = [
 
 export default function OrderHelp() {
   const { orderId } = useParams()
+  const [chatOpen, setChatOpen] = useState(false)
   const navigate = useNavigate()
   const { getOrderById } = useOrders()
   const order = getOrderById(orderId)
@@ -179,7 +182,7 @@ export default function OrderHelp() {
         navigate(`/user/orders/${orderId}/invoice`)
         break
       case "support":
-        // Scroll to support section or open contact modal
+        setChatOpen(true)
         document.getElementById("contact-support")?.scrollIntoView({ behavior: "smooth" })
         break
       case "refund":
@@ -406,6 +409,21 @@ export default function OrderHelp() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 md:space-y-5 lg:space-y-6 p-4 md:p-5 lg:p-6">
+              {/* Scoped to this order: the server keeps the order id in the
+                  thread, so support opens on the one being asked about rather
+                  than on a single running conversation. */}
+              {chatOpen ? (
+                <SupportChat
+                  className="h-[26rem]"
+                  orderId={order.id}
+                  heading={`Chat about order ${order.id}`}
+                  subheading="Send a photo if it helps."
+                />
+              ) : (
+                <Button className="w-full sm:w-auto" onClick={() => setChatOpen(true)}>
+                  Chat with support about this order
+                </Button>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-5 lg:gap-6">
                 <div className="flex items-start gap-3 p-4 bg-muted/50 rounded-lg">
                   <div className="p-2 bg-orange-100 rounded-lg">

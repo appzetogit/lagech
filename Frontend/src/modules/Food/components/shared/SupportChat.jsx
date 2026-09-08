@@ -77,7 +77,13 @@ export default function SupportChat({
       try {
         const listed = await chatAPI.listConversations({}, requestConfig)
         const rows = listed?.data?.data?.conversations ?? []
-        const support = rows.find((c) => c.peerToken === "ADMIN")
+        // Support threads are per order when one is named -- the server keeps
+        // the order id in the derived conversation id -- so matching on the
+        // peer alone would attach a question about one order to another's
+        // thread.
+        const support = rows.find(
+          (c) => c.peerToken === "ADMIN" && (orderId ? c.orderId === orderId : !c.orderId),
+        )
 
         let id = support?.conversationId
         if (!id) {
