@@ -7,7 +7,7 @@ import PushSoundEnableButton from "@food/components/PushSoundEnableButton"
 import { registerWebPushForCurrentModule } from "@food/utils/firebaseMessaging"
 import { isModuleAuthenticated } from "@food/utils/auth"
 import { useRestaurantNotifications } from "@food/hooks/useRestaurantNotifications"
-import { applyModulePowerScanning, getCachedSettings } from "@food/utils/businessSettings"
+import { applyModulePowerScanning, getCachedSettings, resolveModuleFromPath } from "@food/utils/businessSettings"
 import { PublicAppConfigProvider } from "@food/context/PublicAppConfigContext"
 import { shouldSkipScrollResetForHome } from "@food/utils/homeScrollRestore"
 
@@ -88,15 +88,13 @@ export default function App() {
   }, [location.pathname])
 
   useEffect(() => {
-    const resolveModule = () => {
-      if (location.pathname.startsWith("/food/restaurant")) return "restaurant"
-      if (location.pathname.startsWith("/food/delivery")) return "delivery"
-      return "user"
-    }
-
+    // Shared with the config provider, which runs the same way on the same
+    // dependency. This used to be a second copy of that map without the
+    // `/admin` branch, so the two raced on every admin navigation and this one
+    // repainted the panel in the customer app colour whenever it landed last.
     const cached = getCachedSettings()
     if (cached) {
-      applyModulePowerScanning(resolveModule(), cached)
+      applyModulePowerScanning(resolveModuleFromPath(location.pathname), cached)
     }
   }, [location.pathname])
 

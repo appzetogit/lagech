@@ -71,8 +71,8 @@ export default function AdminForgotPassword() {
     const initBranding = async () => {
       try {
         const settings = await loadBusinessSettings()
-        applyModulePowerScanning("user", settings)
-        const { themeColor: color } = getModulePowerScanning("user", settings)
+        applyModulePowerScanning("admin", settings)
+        const { themeColor: color } = getModulePowerScanning("admin", settings)
         setThemeColor(color)
         if (settings?.logo?.url) {
           setLogoUrl(settings.logo.url)
@@ -85,8 +85,8 @@ export default function AdminForgotPassword() {
 
     const handleSettingsUpdate = async () => {
       const settings = await loadBusinessSettings()
-      applyModulePowerScanning("user", settings)
-      const { themeColor: color } = getModulePowerScanning("user", settings)
+      applyModulePowerScanning("admin", settings)
+      const { themeColor: color } = getModulePowerScanning("admin", settings)
       setThemeColor(color)
       if (settings?.logo?.url) {
         setLogoUrl(settings.logo.url)

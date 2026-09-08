@@ -11,6 +11,10 @@ import {
   invalidatePublicAppConfig,
 } from "@food/services/publicAppConfig";
 
+// Re-exported so the existing import sites keep working; defined on its own so
+// it can be tested without this module's API imports.
+export { resolveModuleFromPath } from "./moduleTheme";
+
 const SETTINGS_KEY = 'food_business_settings';
 const DEFAULT_MODULE_POWER_SCANNING = {
   user: { themeColor: "#008078", fontFamily: "Poppins" },

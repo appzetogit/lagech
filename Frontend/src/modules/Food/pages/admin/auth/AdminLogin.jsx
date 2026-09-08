@@ -50,8 +50,8 @@ export default function AdminLogin() {
     const initBranding = async () => {
       try {
         const settings = await loadBusinessSettings()
-        applyModulePowerScanning("user", settings)
-        const { themeColor: color } = getModulePowerScanning("user", settings)
+        applyModulePowerScanning("admin", settings)
+        const { themeColor: color } = getModulePowerScanning("admin", settings)
         setThemeColor(color)
         if (settings?.logo?.url) {
           setLogoUrl(settings.logo.url)
@@ -64,8 +64,8 @@ export default function AdminLogin() {
 
     const handleSettingsUpdate = async () => {
       const settings = await loadBusinessSettings()
-      applyModulePowerScanning("user", settings)
-      const { themeColor: color } = getModulePowerScanning("user", settings)
+      applyModulePowerScanning("admin", settings)
+      const { themeColor: color } = getModulePowerScanning("admin", settings)
       setThemeColor(color)
       if (settings?.logo?.url) {
         setLogoUrl(settings.logo.url)
