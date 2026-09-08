@@ -839,24 +839,12 @@ export default function OrdersPage({ statusKey = "all" }) {
     fetchRestaurantOptions()
   }, [])
 
-  useEffect(() => {
-    apiPageRef.current = apiPage
-  }, [apiPage])
 
   useEffect(() => {
     pageSizeRef.current = pageSize
   }, [pageSize])
 
-  // A different page size is a different request, and page one does not refetch
-  // itself on the apiPage effect below.
-  const firstSizeRef = useRef(true)
-  useEffect(() => {
-    if (firstSizeRef.current) {
-      firstSizeRef.current = false
-      return
-    }
-    fetchOrdersRef.current({ silent: false, withRingCheck: false, page: 1, force: true })
-  }, [pageSize])
+  const firstListLoadRef = useRef(true)
 
   useEffect(() => {
     statusKeyRef.current = statusKey
@@ -874,16 +862,24 @@ export default function OrdersPage({ statusKey = "all" }) {
     setAppliedFilters(EMPTY_ORDER_FILTERS)
   }, [statusKey])
 
+  // Back to the first page when the list itself changes -- but not on the way
+  // in. On a fresh load nothing has changed, and resetting here threw away the
+  // page number the URL arrived with.
   useEffect(() => {
-    apiPageRef.current = 1
+    if (firstListLoadRef.current) {
+      firstListLoadRef.current = false
+      return
+    }
     setApiPage(1)
-    fetchOrdersRef.current({ silent: false, withRingCheck: false, page: 1, force: true })
   }, [statusKey, debouncedSearchQuery, appliedFilters])
 
+  // One place decides what to fetch. Split in two it managed both failures:
+  // two requests for one change, and none at all when a filter reset the page
+  // to the number it was already on.
   useEffect(() => {
-    if (apiPage === 1) return
+    apiPageRef.current = apiPage
     fetchOrdersRef.current({ silent: false, withRingCheck: false, page: apiPage, force: true })
-  }, [apiPage])
+  }, [statusKey, debouncedSearchQuery, appliedFilters, apiPage, pageSize])
 
   useEffect(() => {
     if (statusKey !== "all") return undefined
