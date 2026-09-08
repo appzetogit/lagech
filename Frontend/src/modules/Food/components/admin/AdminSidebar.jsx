@@ -364,6 +364,7 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
     if (l.includes("restaurant complaints")) return badges.restaurantComplaints
     if (p.includes("orders/pending")) return badges.orders
     if (p.includes("offline-payments")) return badges.offlinePayments
+    if (l === "live chat") return badges.liveChat
     if (l.includes("support tickets")) return l.includes("delivery") ? badges.deliverySupportTickets : badges.userSupportTickets
     if (l.includes("withdrawal")) return l.includes("delivery") ? badges.deliveryWithdrawals : badges.restaurantWithdrawals
     if (l.includes("emergency help")) return badges.emergencyHelp

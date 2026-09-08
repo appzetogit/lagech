@@ -317,9 +317,24 @@ export async function getHistory(me, { conversationId, page = 1, limit = 30 }) {
     await markRead(me, conversationId);
 
     return {
-        messages: docs.map(serializeMessage).reverse(), // oldest → newest for UI
+        messages: await attachSenderNames(docs.map(serializeMessage).reverse()), // oldest → newest for UI
         pagination: { page: p, limit: l, total, totalPages: Math.max(1, Math.ceil(total / l)) },
     };
+}
+
+/**
+ * How many messages are waiting on me, across every thread.
+ *
+ * A count rather than the list: the sidebar badge needs one number, and
+ * fetching every conversation to add up their unread fields would make a
+ * badge cost more than the screen it sits beside.
+ */
+export async function unreadCount(me) {
+    const myToken = partyToken(me.role, me.id);
+    const total = await prisma.foodChatMessage.count({
+        where: { recipientToken: myToken, readAt: null },
+    });
+    return { unread: total };
 }
 
 /** Mark every message sent TO me in this conversation as read. */
@@ -406,6 +421,7 @@ export async function listConversations(me, query = {}) {
             // COUNT is int8, which the driver hands back as a BigInt.
             unread: Number(r.unread),
             status: doc?.status || 'open',
+            assignedAdminId: doc?.assignedAdminId ? String(doc.assignedAdminId) : null,
             // Without a row the thread began with its first message.
             createdAt: doc?.createdAt || r.firstAt,
             closedAt: doc?.closedAt || null,
@@ -423,6 +439,7 @@ export async function listConversations(me, query = {}) {
             lastAt: null,
             unread: 0,
             status: doc.status,
+            assignedAdminId: doc.assignedAdminId ? String(doc.assignedAdminId) : null,
             createdAt: doc.createdAt,
             closedAt: doc.closedAt || null,
         });
@@ -432,7 +449,7 @@ export async function listConversations(me, query = {}) {
         (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
     );
 
-    return { conversations: await attachPeers(merged) };
+    return { conversations: await attachAssignees(await attachPeers(merged)) };
 }
 
 /**
@@ -446,8 +463,60 @@ export async function listConversations(me, query = {}) {
  * A peer that no longer exists (a deleted account) keeps its token and gets no
  * name, so the thread still lists and its history is still readable.
  */
+/**
+ * Put a name on each admin reply.
+ *
+ * Every admin talks through the shared token "ADMIN", which is right for
+ * addressing -- a customer writes to support, not to a person -- but it means
+ * a thread reads as one voice. `senderId` has always held the real admin id;
+ * it was just never turned into anything anyone could see.
+ */
+const attachSenderNames = async (messages) => {
+    const adminIds = [
+        ...new Set(
+            messages.filter((m) => m.senderRole === 'ADMIN' && m.senderId).map((m) => String(m.senderId)),
+        ),
+    ];
+    if (!adminIds.length) return messages;
+
+    const admins = await prisma.foodAdmin.findMany({
+        where: { id: { in: adminIds } },
+        select: { id: true, name: true, email: true },
+    });
+    const names = new Map(
+        admins.map((a) => [a.id, a.name || String(a.email || '').split('@')[0] || 'Support']),
+    );
+
+    return messages.map((m) =>
+        m.senderRole === 'ADMIN'
+            ? { ...m, senderName: names.get(String(m.senderId)) || 'Support' }
+            : m,
+    );
+};
+
 /** What a list row says for a message that carries no text. */
 const photoSummary = (count) => (count > 0 ? `${count} photo${count === 1 ? '' : 's'}` : '');
+
+/** The assignee of each thread, by name, in one query rather than per row. */
+const attachAssignees = async (conversations) => {
+    const ids = [...new Set(conversations.map((c) => c.assignedAdminId).filter(Boolean))];
+    if (!ids.length) return conversations.map((c) => ({ ...c, assignedAdmin: null }));
+
+    const admins = await prisma.foodAdmin.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, name: true, email: true },
+    });
+    const byId = new Map(
+        admins.map((a) => [a.id, { id: a.id, name: a.name || String(a.email || '').split('@')[0] || 'Support' }]),
+    );
+
+    return conversations.map((c) => ({
+        ...c,
+        // An admin who has since been deleted leaves the thread assigned to
+        // nobody rather than to a blank name.
+        assignedAdmin: (c.assignedAdminId && byId.get(c.assignedAdminId)) || null,
+    }));
+};
 
 const attachPeers = async (conversations) => {
     const byRole = { USER: new Set(), DELIVERY_PARTNER: new Set(), RESTAURANT: new Set() };
@@ -505,6 +574,8 @@ const serializeConversation = (doc, extra = {}) => ({
     title: doc.title || '',
     peerToken: doc.peerToken,
     status: doc.status,
+    assignedAdminId: doc.assignedAdminId ? String(doc.assignedAdminId) : null,
+    assignedAt: doc.assignedAt || null,
     createdAt: doc.createdAt,
     closedAt: doc.closedAt || null,
     lastMessage: '',
@@ -574,6 +645,48 @@ export async function createConversation(me, dto = {}) {
 
     emitConversationUpdate(doc);
     return { conversation: serializeConversation(doc) };
+}
+
+/**
+ * Take a thread, or put it back.
+ *
+ * Only ever to the caller or to nobody. An admin picker would need the right
+ * to list every admin, which is a permission a support person has no other
+ * reason to hold, and "whoever is dealing with it says so" is the workflow a
+ * desk actually runs on.
+ *
+ * Taking an untouched thread also moves it to in_progress -- the status
+ * existed and nothing ever set it, so every thread sat at open until closed.
+ *
+ * @param {boolean} toSelf true to take it, false to release it
+ */
+export async function assignConversation(me, conversationId, toSelf = true) {
+    if (me?.role !== 'ADMIN') throw new ForbiddenError('Only support can assign a conversation');
+    if (!conversationId) throw new ValidationError('conversationId is required');
+
+    const existing = await prisma.foodChatConversation.findUnique({
+        where: { conversationId: String(conversationId) },
+    });
+    if (!existing) throw new ValidationError('Conversation not found');
+
+    const doc = await prisma.foodChatConversation.update({
+        where: { conversationId: String(conversationId) },
+        data: {
+            assignedAdminId: toSelf ? String(me.id) : null,
+            assignedAt: toSelf ? new Date() : null,
+            // Closed stays closed: picking a thread up is not reopening it.
+            ...(toSelf && existing.status === 'open' ? { status: 'in_progress' } : {}),
+        },
+    });
+
+    emitConversationUpdate(doc);
+    const [withName] = await attachAssignees([
+        {
+            ...serializeConversation(doc),
+            assignedAdminId: doc.assignedAdminId ? String(doc.assignedAdminId) : null,
+        },
+    ]);
+    return { conversation: withName };
 }
 
 /**

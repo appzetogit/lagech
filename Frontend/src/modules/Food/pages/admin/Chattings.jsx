@@ -84,6 +84,19 @@ export default function Chattings() {
   const [uploading, setUploading] = useState(false)
   const [lightbox, setLightbox] = useState(null)
   const [updatingStatus, setUpdatingStatus] = useState(false)
+  const [assigning, setAssigning] = useState(false)
+  // Whose threads are mine. Read from the token rather than fetched: it is
+  // already in hand, and this only decides which label a button shows.
+  const myAdminId = useMemo(() => {
+    try {
+      const raw = localStorage.getItem("admin_accessToken") || ""
+      const body = raw.split(".")[1]
+      if (!body) return ""
+      return JSON.parse(atob(body.replace(/-/g, "+").replace(/_/g, "/")))?.userId || ""
+    } catch {
+      return ""
+    }
+  }, [])
 
   const bottomRef = useRef(null)
   const fileRef = useRef(null)
@@ -311,6 +324,33 @@ export default function Chattings() {
     }
   }
 
+  const toggleAssignment = async () => {
+    if (!selected || assigning) return
+    const take = selected.assignedAdminId !== myAdminId
+    setAssigning(true)
+    try {
+      const response = await chatAPI.assign(selected.conversationId, take, ADMIN_CONFIG)
+      const updated = response?.data?.data?.conversation
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.conversationId === selected.conversationId
+            ? {
+                ...c,
+                assignedAdminId: updated?.assignedAdminId ?? null,
+                assignedAdmin: updated?.assignedAdmin ?? null,
+                status: updated?.status ?? c.status,
+              }
+            : c,
+        ),
+      )
+      toast.success(take ? "Assigned to you" : "Released")
+    } catch (error) {
+      toast.error(error?.response?.data?.message || "Could not change the assignment")
+    } finally {
+      setAssigning(false)
+    }
+  }
+
   const toggleStatus = async () => {
     if (!selected || updatingStatus) return
     const next = selected.status === "closed" ? "open" : "closed"
@@ -423,11 +463,20 @@ export default function Chattings() {
                                 </span>
                               ) : null}
                             </div>
-                            {conversation.status === "closed" ? (
-                              <span className="mt-1 inline-block rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">
-                                Closed
-                              </span>
-                            ) : null}
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {conversation.status === "closed" ? (
+                                <span className="inline-block rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">
+                                  Closed
+                                </span>
+                              ) : null}
+                              {conversation.assignedAdmin ? (
+                                <span className="inline-block rounded bg-teal-50 px-1.5 py-0.5 text-xs text-teal-700">
+                                  {conversation.assignedAdminId === myAdminId
+                                    ? "You"
+                                    : conversation.assignedAdmin.name}
+                                </span>
+                              ) : null}
+                            </div>
                           </div>
                         </div>
                       </button>
@@ -453,16 +502,35 @@ export default function Chattings() {
                         <p className="text-sm text-slate-500 truncate">
                           {[selected.peer?.phone, selected.title].filter(Boolean).join(" · ")}
                         </p>
+                        <p className="text-xs text-slate-500 truncate">
+                          {selected.assignedAdmin
+                            ? `Handled by ${
+                                selected.assignedAdminId === myAdminId
+                                  ? "you"
+                                  : selected.assignedAdmin.name
+                              }`
+                            : "Nobody has picked this up"}
+                        </p>
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={toggleStatus}
-                      disabled={updatingStatus}
-                      className="flex-shrink-0 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                    >
-                      {selected.status === "closed" ? "Reopen" : "Close"}
-                    </button>
+                    <div className="flex flex-shrink-0 items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={toggleAssignment}
+                        disabled={assigning}
+                        className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        {selected.assignedAdminId === myAdminId ? "Release" : "Assign to me"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={toggleStatus}
+                        disabled={updatingStatus}
+                        className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        {selected.status === "closed" ? "Reopen" : "Close"}
+                      </button>
+                    </div>
                   </div>
 
                   <div className="flex-1 overflow-y-auto p-6 min-h-0">
@@ -517,7 +585,12 @@ export default function Chattings() {
                                     mine ? "text-teal-100" : "text-slate-500"
                                   }`}
                                 >
-                                  {clockTime(message.createdAt)}
+                                  {/* Which admin replied. The thread reads as one
+                                      voice to the customer, but a desk of five
+                                      needs to see who said what. */}
+                                  {[message.senderName, clockTime(message.createdAt)]
+                                    .filter(Boolean)
+                                    .join(" · ")}
                                 </p>
                               </div>
                             </div>

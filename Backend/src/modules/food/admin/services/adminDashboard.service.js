@@ -308,6 +308,7 @@ export async function getSidebarBadges() {
             pendingSafetyReports,
             pendingEmergencyHelp,
             pendingRestaurantComplaints,
+            unreadChatMessages,
         ] = await Promise.all([
             prisma.foodRestaurant.count({ where: { status: 'pending' } }),
             prisma.foodDeliveryPartner.count({ where: { status: 'pending' } }),
@@ -333,6 +334,9 @@ export async function getSidebarBadges() {
             // actually raise is DeliveryOrderEmergencyRequest.
             prisma.deliveryOrderEmergencyRequest.count({ where: { status: 'open' } }),
             prisma.foodSupportTicket.count({ where: { status: 'open', restaurantId: { not: null } } }),
+            // Every admin shares the "ADMIN" recipient token, so this is one
+            // desk-wide number rather than a per-person inbox.
+            prisma.foodChatMessage.count({ where: { recipientToken: 'ADMIN', readAt: null } }),
         ]);
 
         return {
@@ -350,6 +354,7 @@ export async function getSidebarBadges() {
             safetyReports: pendingSafetyReports,
             emergencyHelp: pendingEmergencyHelp,
             restaurantComplaints: pendingRestaurantComplaints,
+            liveChat: unreadChatMessages,
         };
     } catch (error) {
         logger.error('Error fetching sidebar badges:', error);

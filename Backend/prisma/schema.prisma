@@ -2874,9 +2874,14 @@ model FoodChatConversation {
   /// Subject the user picked, e.g. "I want to cancel my order".
   title String @default("") @db.VarChar(200)
 
-  status   ChatThreadStatus @default(open)
+  status ChatThreadStatus @default(open)
+
+  /// Which admin picked this thread up. Every admin shares the token "ADMIN",
+  /// so without this a desk of five has no way to divide the work.
+  assignedAdminId String?   @db.VarChar(24)
+  assignedAt      DateTime?
   /// Only set once status becomes 'closed'; cleared if reopened.
-  closedAt DateTime?
+  closedAt        DateTime?
 
   /// Who the opener is talking to: 'ADMIN' or 'DELIVERY_PARTNER:<id>'.
   peerToken     String

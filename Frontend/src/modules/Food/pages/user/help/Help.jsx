@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { Link } from "react-router-dom"
+import SupportChat from "@food/components/shared/SupportChat"
 import {
   Search,
   HelpCircle,
@@ -185,6 +186,7 @@ const helpCategories = [
 ]
 
 export default function Help() {
+  const [chatOpen, setChatOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
   const [expandedCategory, setExpandedCategory] = useState(null)
   const [expandedQuestion, setExpandedQuestion] = useState(null)
@@ -422,17 +424,26 @@ export default function Help() {
                     <p className="text-sm text-muted-foreground mb-2">
                       Available 24/7
                     </p>
+                    {/* Was an alert() saying chat "would open here". */}
                     <Button
                       variant="outline"
                       size="sm"
                       className="mt-1"
-                      onClick={() => alert("Live chat would open here")}
+                      onClick={() => setChatOpen((open) => !open)}
                     >
-                      Start Chat
+                      {chatOpen ? "Hide Chat" : "Start Chat"}
                     </Button>
                   </div>
                 </div>
               </div>
+              {chatOpen ? (
+                <SupportChat
+                  className="mt-4 h-[28rem]"
+                  heading="Chat with support"
+                  subheading="Send a photo if it helps -- the wrong dish, a damaged bag, a receipt."
+                />
+              ) : null}
+
               <div className="pt-4 border-t">
                 <p className="text-sm text-muted-foreground mb-3">
                   <Clock className="h-4 w-4 inline mr-1" />

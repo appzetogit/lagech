@@ -77,6 +77,30 @@ export async function updateConversationStatusController(req, res, next) {
     }
 }
 
+export async function assignConversationController(req, res, next) {
+    try {
+        // Only to the caller or to nobody -- see assignConversation.
+        const toSelf = req.body?.assign !== false;
+        const data = await chatService.assignConversation(
+            me(req),
+            req.params.conversationId,
+            toSelf,
+        );
+        return sendResponse(res, 200, toSelf ? 'Conversation assigned' : 'Conversation released', data);
+    } catch (err) {
+        next(err);
+    }
+}
+
+export async function unreadCountController(req, res, next) {
+    try {
+        const data = await chatService.unreadCount(me(req));
+        return sendResponse(res, 200, 'Unread count fetched', data);
+    } catch (err) {
+        next(err);
+    }
+}
+
 export async function getHistoryController(req, res, next) {
     try {
         const data = await chatService.getHistory(me(req), {

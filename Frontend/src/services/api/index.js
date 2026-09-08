@@ -226,6 +226,14 @@ export const chatAPI = {
       { status },
       config,
     ),
+  // Only ever to the caller or to nobody -- the server refuses anything else.
+  assign: (conversationId, assign = true, config = {}) =>
+    apiClient.patch(
+      `/food/chat/conversations/${String(conversationId)}/assign`,
+      { assign },
+      config,
+    ),
+  unreadCount: (config = {}) => apiClient.get("/food/chat/unread-count", config),
   markRead: (conversationId, config = {}) =>
     apiClient.patch(
       `/food/chat/conversations/${String(conversationId)}/read`,

@@ -23,6 +23,7 @@ const CashLimitInfoV2 = lazy(() => import('./pages/pocket/CashLimitInfoV2').then
 const ProfileBankV2 = lazy(() => import('./pages/profile/ProfileBankV2').then((m) => ({ default: m.ProfileBankV2 })));
 const ProfileDocsV2 = lazy(() => import('./pages/profile/ProfileDocsV2').then((m) => ({ default: m.ProfileDocsV2 })));
 const SupportTicketsV2 = lazy(() => import('./pages/help/SupportTicketsV2').then((m) => ({ default: m.SupportTicketsV2 })));
+const SupportChatV2 = lazy(() => import('./pages/help/SupportChatV2').then((m) => ({ default: m.SupportChatV2 })));
 const CreateSupportTicketV2 = lazy(() => import('./pages/help/CreateSupportTicketV2').then((m) => ({ default: m.CreateSupportTicketV2 })));
 const ViewSupportTicketV2 = lazy(() => import('./pages/help/ViewSupportTicketV2').then((m) => ({ default: m.ViewSupportTicketV2 })));
 const OrderEmergencyRequestsV2 = lazy(() => import('./pages/help/OrderEmergencyRequestsV2').then((m) => ({ default: m.OrderEmergencyRequestsV2 })));
@@ -87,6 +88,7 @@ const DeliveryV2Router = () => {
         <Route path="profile/documents" element={<ProtectedRoute><ProfileDocsV2 /></ProtectedRoute>} />
         
         {/* Support Systems */}
+        <Route path="help/chat" element={<ProtectedRoute><SupportChatV2 /></ProtectedRoute>} />
         <Route path="help/tickets" element={<ProtectedRoute><SupportTicketsV2 /></ProtectedRoute>} />
         <Route path="help/tickets/create" element={<ProtectedRoute><CreateSupportTicketV2 /></ProtectedRoute>} />
         <Route path="help/tickets/:ticketId" element={<ProtectedRoute><ViewSupportTicketV2 /></ProtectedRoute>} />

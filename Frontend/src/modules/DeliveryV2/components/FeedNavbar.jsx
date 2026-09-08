@@ -238,6 +238,15 @@ export default function FeedNavbar({ className = "" }) {
 
   // Help options with proper navigation paths
   const helpOptions = [
+    {
+      // First, because it is what a rider stuck on a doorstep needs. Tickets
+      // are for things that need a paper trail, not for right now.
+      id: "supportChat",
+      title: "Chat with support",
+      subtitle: "Get help now, send a photo",
+      icon: "ticket",
+      path: "/delivery/help/chat"
+    },
     { 
       id: "supportTickets", 
       title: "Support tickets", 
