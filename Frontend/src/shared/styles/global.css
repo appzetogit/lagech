@@ -206,7 +206,17 @@ main .overflow-x-auto > table > thead th {
   /* An opaque background, or rows show through as they pass underneath. This
    * is slate-50, which is what all but a handful of these theads already set. */
   background-color: #f8fafc;
-  /* A border on `thead` does not travel with a sticky `th`; an inset shadow
-   * does, so the divider under the header survives scrolling. */
-  box-shadow: inset 0 -1px 0 #e2e8f0;
+  /* Two shadows on one line.
+   *
+   * The inset one is the divider under the header: a border on `thead` does
+   * not travel with a sticky `th`, an inset shadow does.
+   *
+   * The outset one fills the strip above it. Sticky offsets are measured from
+   * the scroll container's padding box, so a wrapper with `p-5` parks the
+   * header 20px down and rows scroll through the gap above it in plain sight.
+   * A shadow in the header's own colour, offset upwards, paints over that
+   * strip. The distance only has to be more than any wrapper's padding --
+   * where there is none the shadow falls outside the padding box and the
+   * container clips it away, so it costs nothing on the unpadded tables. */
+  box-shadow: inset 0 -1px 0 #e2e8f0, 0 -3rem 0 #f8fafc;
 }
