@@ -5,12 +5,16 @@ import {
     createConversationController,
     updateConversationStatusController,
     getHistoryController,
-    markReadController
+    markReadController,
+    uploadAttachmentController
 } from '../controllers/chat.controller.js';
+import { upload } from '../../../../middleware/upload.js';
 
 const router = express.Router();
 
 // Auth + role gating applied where mounted (routes/index.js).
+// One image at a time. The message that follows carries the paths.
+router.post('/attachments', upload.single('file'), uploadAttachmentController);
 router.post('/messages', sendMessageController);
 router.get('/messages', getHistoryController);
 // ?orderId=<id> filters to one order's threads, newest first.

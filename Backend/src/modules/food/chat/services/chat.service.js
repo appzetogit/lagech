@@ -6,6 +6,7 @@ import { getIO, rooms } from '../../../../config/socket.js';
 import { notifyOwnersSafely } from '../../orders/services/order.helpers.js';
 import { notifyAdminsSafely } from '../../../../core/notifications/firebase.service.js';
 import { logger } from '../../../../utils/logger.js';
+import { buildPublicUrl } from '../../../../services/storage.service.js';
 
 const ROLES = ['USER', 'RESTAURANT', 'DELIVERY_PARTNER', 'ADMIN'];
 
@@ -115,9 +116,55 @@ function resolveOrderRecipient(sender, order, requestedPeerRole = '') {
 const isUserRiderPair = (roleA, roleB) =>
     [roleA, roleB].sort().join('|') === 'DELIVERY_PARTNER|USER';
 
+/** How many images may ride on one message. */
+const MAX_ATTACHMENTS = 5;
+
+/**
+ * Keep only what the upload endpoint issued, and only the fields we store.
+ *
+ * The client sends back what that endpoint returned, so it is our own data --
+ * but it has been through a browser, and a message row is read by every party
+ * in the conversation. Anything not on this list is dropped rather than
+ * persisted, and the url has to be one of ours: a message is a place to put a
+ * link in front of somebody, so an off-site one would be worth planting.
+ */
+const cleanAttachments = (raw) => {
+    if (raw === undefined || raw === null) return [];
+    if (!Array.isArray(raw)) throw new ValidationError('attachments must be a list');
+    if (raw.length > MAX_ATTACHMENTS) {
+        throw new ValidationError(`At most ${MAX_ATTACHMENTS} attachments per message`);
+    }
+
+    return raw.map((item) => {
+        const path = String(item?.path || '').trim();
+
+        // The path is the only thing taken from the client, and it is joined
+        // onto the uploads root to build a url -- so it has to be a plain
+        // relative path. A "../" in here would address files outside it.
+        if (!/^[A-Za-z0-9][A-Za-z0-9._\-/]{0,200}$/.test(path) || path.includes('..')) {
+            throw new ValidationError('Attachment path is not one this server issued');
+        }
+
+        return {
+            // Rebuilt, never echoed back from the client: a message is a place
+            // to put a link in front of somebody, so a url that came in from
+            // outside must not be the one that goes out.
+            url: buildPublicUrl(path),
+            path,
+            mimeType: String(item?.mimeType || ''),
+            size: Number(item?.size) || 0,
+            name: String(item?.name || '').slice(0, 120),
+        };
+    });
+};
+
 export async function sendMessage(sender, dto) {
     const text = String(dto?.text || '').trim();
-    if (!text) throw new ValidationError('Message text is required');
+    const attachments = cleanAttachments(dto?.attachments);
+    // A photo with no caption is an ordinary message; an empty one is not.
+    if (!text && attachments.length === 0) {
+        throw new ValidationError('Write a message or attach an image');
+    }
     if (text.length > 2000) throw new ValidationError('Message is too long (max 2000 chars)');
 
     const requestedPeerRole = String(dto?.peerRole || '').toUpperCase();
@@ -178,6 +225,7 @@ export async function sendMessage(sender, dto) {
             recipientToken,
             participants: [senderToken, recipientToken],
             text,
+            attachments,
         },
     });
 
@@ -199,7 +247,11 @@ export async function sendMessage(sender, dto) {
     // Push to the recipient (FCM handles foreground suppression on-device).
     const pushPayload = {
         title: chatTitle(sender.role),
-        body: text.slice(0, 120),
+        // A caption if there is one, otherwise say what arrived -- a push with
+        // an empty body renders as a blank notification.
+        body: text
+            ? text.slice(0, 120)
+            : `Sent ${attachments.length} photo${attachments.length === 1 ? '' : 's'}`,
         data: { type: 'chat_message', conversationId, orderId: orderId ? String(orderId) : '' },
     };
     if (peerRole === 'ADMIN') {
@@ -229,6 +281,7 @@ export function serializeMessage(row) {
         recipientRole: row.recipientRole,
         recipientId: row.recipientId ? String(row.recipientId) : null,
         text: row.text,
+        attachments: Array.isArray(row.attachments) ? row.attachments : [],
         readAt: row.readAt || null,
         createdAt: row.createdAt,
     };

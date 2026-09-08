@@ -2915,8 +2915,11 @@ model FoodChatMessage {
   /// [senderToken, recipientToken] — finds "my conversations" with one indexed match.
   participants String[]
 
-  text   String    @db.VarChar(2000)
-  readAt DateTime?
+  /// Empty when the message is only an attachment.
+  text        String    @default("") @db.VarChar(2000)
+  /// [{ url, path, mimeType, size, name }] — images the sender attached.
+  attachments Json[]    @default([])
+  readAt      DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

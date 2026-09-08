@@ -209,6 +209,13 @@ export const chatAPI = {
     apiClient.get("/food/chat/conversations", { params, ...config }),
   getHistory: (params = {}, config = {}) =>
     apiClient.get("/food/chat/messages", { params, ...config }),
+  // Uploaded before the message exists, so a slow upload does not hold the
+  // composer and a failed one loses nothing but itself.
+  uploadAttachment: (file, config = {}) => {
+    const form = new FormData()
+    form.append("file", file)
+    return apiClient.post("/food/chat/attachments", form, config)
+  },
   sendMessage: (body = {}, config = {}) =>
     apiClient.post("/food/chat/messages", body ?? {}, config),
   createConversation: (body = {}, config = {}) =>

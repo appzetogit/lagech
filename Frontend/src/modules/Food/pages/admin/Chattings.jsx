@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Info, Loader2, Search, Send } from "lucide-react"
+import { Info, Loader2, Paperclip, Search, Send, X } from "lucide-react"
 import { toast } from "sonner"
 
 import { chatAPI } from "@food/api"
@@ -28,6 +28,9 @@ const TABS = [
 // Admin calls must say so: the token is looked up per module, and without this
 // the chat endpoints would be sent the customer app's token.
 const ADMIN_CONFIG = { contextModule: "admin" }
+
+/** Matches the server, which refuses a sixth. */
+const MAX_ATTACHMENTS = 5
 
 const timeAgo = (value) => {
   if (!value) return ""
@@ -72,9 +75,15 @@ export default function Chattings() {
   const [loadingThread, setLoadingThread] = useState(false)
   const [draft, setDraft] = useState("")
   const [sending, setSending] = useState(false)
+  // Uploaded and held until the message is sent, so the picture is already on
+  // the server by the time Send is pressed.
+  const [pending, setPending] = useState([])
+  const [uploading, setUploading] = useState(false)
+  const [lightbox, setLightbox] = useState(null)
   const [updatingStatus, setUpdatingStatus] = useState(false)
 
   const bottomRef = useRef(null)
+  const fileRef = useRef(null)
   // Read inside the socket handlers, which must not re-subscribe when it moves.
   const selectedIdRef = useRef(null)
   selectedIdRef.current = selectedId
@@ -221,15 +230,42 @@ export default function Chattings() {
     return counts
   }, [conversations])
 
+  const handleFiles = async (fileList) => {
+    const files = [...(fileList || [])]
+    if (!files.length) return
+    const room = MAX_ATTACHMENTS - pending.length
+    if (room <= 0) {
+      toast.error(`At most ${MAX_ATTACHMENTS} images per message`)
+      return
+    }
+
+    setUploading(true)
+    try {
+      for (const file of files.slice(0, room)) {
+        const response = await chatAPI.uploadAttachment(file, ADMIN_CONFIG)
+        const attachment = response?.data?.data?.attachment
+        if (attachment) setPending((prev) => [...prev, attachment])
+      }
+    } catch (error) {
+      toast.error(error?.response?.data?.message || "Could not upload that image")
+    } finally {
+      setUploading(false)
+      // Or picking the same file twice in a row fires no change event.
+      if (fileRef.current) fileRef.current.value = ""
+    }
+  }
+
   const handleSend = async () => {
     const text = draft.trim()
-    if (!text || !selected || sending) return
+    // A photo on its own is a message; nothing at all is not.
+    if ((!text && pending.length === 0) || !selected || sending) return
 
     setSending(true)
     try {
       const response = await chatAPI.sendMessage(
         {
           text,
+          ...(pending.length ? { attachments: pending } : {}),
           conversationId: selected.conversationId,
           peerRole: selected.peer?.role,
           peerId: selected.peer?.id,
@@ -239,13 +275,18 @@ export default function Chattings() {
       )
       const sent = response?.data?.data?.message
       setDraft("")
+      setPending([])
       if (sent) {
         // The socket echoes to the sender's *other* devices, not this one.
         setMessages((prev) => (prev.some((m) => m.id === sent.id) ? prev : [...prev, sent]))
         setConversations((prev) =>
           prev.map((c) =>
             c.conversationId === selected.conversationId
-              ? { ...c, lastMessage: sent.text, lastAt: sent.createdAt }
+              ? {
+                  ...c,
+                  lastMessage: sent.text || `${sent.attachments?.length || 0} photo(s)`,
+                  lastAt: sent.createdAt,
+                }
               : c,
           ),
         )
@@ -434,9 +475,30 @@ export default function Chattings() {
                                   mine ? "bg-teal-600 text-white" : "bg-slate-100 text-slate-900"
                                 }`}
                               >
-                                <p className="text-sm whitespace-pre-wrap break-words">
-                                  {message.text}
-                                </p>
+                                {message.attachments?.length ? (
+                                  <div className="mb-1 flex flex-wrap gap-2">
+                                    {message.attachments.map((file) => (
+                                      <button
+                                        key={file.path}
+                                        type="button"
+                                        onClick={() => setLightbox(file.url)}
+                                        className="block"
+                                      >
+                                        <img
+                                          src={file.url}
+                                          alt={file.name || "Attachment"}
+                                          loading="lazy"
+                                          className="max-h-48 max-w-[14rem] rounded-md object-cover"
+                                        />
+                                      </button>
+                                    ))}
+                                  </div>
+                                ) : null}
+                                {message.text ? (
+                                  <p className="text-sm whitespace-pre-wrap break-words">
+                                    {message.text}
+                                  </p>
+                                ) : null}
                                 <p
                                   className={`mt-1 text-xs ${
                                     mine ? "text-teal-100" : "text-slate-500"
@@ -459,7 +521,52 @@ export default function Chattings() {
                         This conversation is closed. Reopen it to reply.
                       </p>
                     ) : (
-                      <div className="flex items-center gap-3">
+                      <>
+                        {pending.length ? (
+                          <div className="mb-3 flex flex-wrap gap-2">
+                            {pending.map((file) => (
+                              <div key={file.path} className="relative">
+                                <img
+                                  src={file.url}
+                                  alt={file.name || "Attachment"}
+                                  className="h-16 w-16 rounded-md border border-slate-200 object-cover"
+                                />
+                                <button
+                                  type="button"
+                                  aria-label="Remove attachment"
+                                  onClick={() =>
+                                    setPending((prev) => prev.filter((f) => f.path !== file.path))
+                                  }
+                                  className="absolute -right-1.5 -top-1.5 rounded-full bg-slate-800 p-0.5 text-white"
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                        <div className="flex items-center gap-3">
+                          <input
+                            ref={fileRef}
+                            type="file"
+                            accept="image/png,image/jpeg,image/webp,image/gif"
+                            multiple
+                            className="hidden"
+                            onChange={(e) => handleFiles(e.target.files)}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => fileRef.current?.click()}
+                            disabled={uploading || pending.length >= MAX_ATTACHMENTS}
+                            aria-label="Attach an image"
+                            className="flex-shrink-0 rounded-lg border border-slate-300 p-2.5 text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                          >
+                            {uploading ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Paperclip className="h-4 w-4" />
+                            )}
+                          </button>
                         <input
                           type="text"
                           value={draft}
@@ -477,7 +584,7 @@ export default function Chattings() {
                         <button
                           type="button"
                           onClick={handleSend}
-                          disabled={sending || !draft.trim()}
+                          disabled={sending || (!draft.trim() && pending.length === 0)}
                           className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium rounded-lg bg-teal-700 text-white hover:bg-teal-800 disabled:opacity-50"
                         >
                           {sending ? (
@@ -487,7 +594,8 @@ export default function Chattings() {
                           )}
                           Send
                         </button>
-                      </div>
+                        </div>
+                      </>
                     )}
                   </div>
                 </>
@@ -507,6 +615,28 @@ export default function Chattings() {
           </div>
         </div>
       </div>
+
+      {/* Full size: a receipt or a damaged bag is unreadable at bubble size. */}
+      {lightbox ? (
+        <div
+          role="presentation"
+          onClick={() => setLightbox(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6"
+        >
+          <img
+            src={lightbox}
+            alt="Attachment"
+            className="max-h-full max-w-full rounded-lg object-contain"
+          />
+          <button
+            type="button"
+            aria-label="Close image"
+            className="absolute right-6 top-6 rounded-full bg-white/10 p-2 text-white"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+      ) : null}
     </div>
   )
 }

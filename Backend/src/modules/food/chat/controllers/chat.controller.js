@@ -1,7 +1,38 @@
 import { sendResponse } from '../../../../utils/response.js';
 import * as chatService from '../services/chat.service.js';
+import { saveImageFile } from '../../../../services/storage.service.js';
+import { ValidationError } from '../../../../core/auth/errors.js';
 
 const me = (req) => ({ role: req.user?.role, id: req.user?.userId });
+
+/**
+ * Store one image and hand back where it went.
+ *
+ * Uploading and sending are separate on purpose: the picture is on the server
+ * before the message exists, so a slow upload does not hold the composer, and a
+ * failed one loses nothing but itself. The message then carries the path.
+ *
+ * saveImageFile does the checking -- it refuses anything that is not a JPEG,
+ * PNG, WebP or GIF, and re-encodes what it accepts, so a file that merely calls
+ * itself an image does not survive the round trip.
+ */
+export async function uploadAttachmentController(req, res, next) {
+    try {
+        if (!req.file) throw new ValidationError('No file was uploaded');
+        const saved = await saveImageFile(req.file, 'chat');
+        return sendResponse(res, 201, 'Attachment uploaded', {
+            attachment: {
+                url: saved.url,
+                path: saved.path,
+                mimeType: saved.mimeType,
+                size: saved.size,
+                name: String(req.file.originalname || '').slice(0, 120),
+            },
+        });
+    } catch (err) {
+        next(err);
+    }
+}
 
 export async function sendMessageController(req, res, next) {
     try {
