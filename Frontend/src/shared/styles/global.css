@@ -192,7 +192,10 @@
  * height inside a modal fights the modal's own scrolling.
  */
 main .overflow-x-auto:has(> table) {
-  max-height: calc(100vh - 20rem);
+  /* The subtraction is for the chrome above the table -- header, page title,
+   * stat cards. In a short window it goes negative and clamps to zero, which
+   * would hide the table outright, so a floor keeps a few rows visible. */
+  max-height: max(12rem, calc(100vh - 20rem));
   overflow-y: auto;
 }
 
