@@ -2244,7 +2244,9 @@ export async function deleteOrderAdmin(orderId, adminId) {
   return { deleted: true, orderId: order.id, orderMongoId: order.id };
 }
 
-export async function updateOrderStatusAdmin(orderId, orderStatus, note = "", adminId) {
+// `byRole` exists for the expiry watchdog: the same cancellation, but recorded
+// against SYSTEM so the history does not claim a person did it.
+export async function updateOrderStatusAdmin(orderId, orderStatus, note = "", adminId, { byRole = "ADMIN" } = {}) {
   const identity = buildOrderIdentityFilter(orderId);
   const row = await prisma.foodOrder.findFirst({ where: identity, include: orderInclude });
   if (!row) throw new NotFoundError("Order not found");
@@ -2285,7 +2287,7 @@ export async function updateOrderStatusAdmin(orderId, orderStatus, note = "", ad
   }));
 
   await pushStatusHistory(order.id, {
-    byRole: "ADMIN",
+    byRole,
     byId: adminId,
     from,
     to: orderStatus,
