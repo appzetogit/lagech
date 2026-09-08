@@ -65,7 +65,17 @@ export async function getAllOffers(_query = {}) {
             dishName: 'All Items',
             couponCode: o.couponCode,
             // The enum's Prisma name is first_time; the UI says 'new'.
-            customerGroup: o.customerScope === 'first_time' ? 'new' : 'all',
+            // A three-way scope cannot collapse to two: a specific coupon
+            // labelled 'all' would read as usable by everyone, which is the
+            // opposite of what it is.
+            customerGroup:
+                o.customerScope === 'first_time'
+                    ? 'new'
+                    : o.customerScope === 'specific'
+                      ? 'specific'
+                      : 'all',
+            customerIds: Array.isArray(o.customerIds) ? o.customerIds : [],
+            customerCount: Array.isArray(o.customerIds) ? o.customerIds.length : 0,
             discountType: o.discountType,
             discountPercentage: o.discountType === 'percentage' ? num(o.discountValue) : 0,
             originalPrice: o.discountType === 'flat_price' ? num(o.discountValue) : 0,
@@ -109,6 +119,7 @@ export async function createAdminOffer(body = {}) {
                 restaurantScope: body.restaurantScope,
                 restaurantId: selected && isId(body.restaurantId) ? String(body.restaurantId) : null,
                 restaurantIds,
+                customerIds: body.customerIds ?? [],
                 minOrderValue: body.minOrderValue ?? 0,
                 maxDiscount: body.maxDiscount ?? null,
                 usageLimit: body.usageLimit ?? null,

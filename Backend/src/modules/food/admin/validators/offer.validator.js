@@ -6,7 +6,8 @@ const createOfferSchema = z.object({
     couponCode: z.string().min(1, 'Coupon code is required'),
     discountType: z.enum(['percentage', 'flat-price']).default('percentage'),
     discountValue: z.number().positive('Discount value must be greater than 0'),
-    customerScope: z.enum(['all', 'first-time']).default('all'),
+    customerScope: z.enum(['all', 'first-time', 'specific']).default('all'),
+    customerIds: z.array(z.string()).optional(),
     restaurantScope: z.enum(['all', 'selected']).default('all'),
     restaurantId: z.string().optional(),
     restaurantIds: z.array(z.string()).optional(),
@@ -32,6 +33,9 @@ export const validateCreateOfferDto = (body) => {
         restaurantId: body?.restaurantId ? String(body.restaurantId) : undefined,
         restaurantIds: Array.isArray(body?.restaurantIds)
             ? body.restaurantIds.map((id) => String(id)).filter(Boolean)
+            : undefined,
+        customerIds: Array.isArray(body?.customerIds)
+            ? body.customerIds.map((id) => String(id)).filter(Boolean)
             : undefined,
         endDate: body?.endDate ? String(body.endDate) : undefined,
         startDate: body?.startDate ? String(body.startDate) : undefined,
@@ -96,8 +100,18 @@ export const validateCreateOfferDto = (body) => {
         throw new ValidationError('Admin bear and restaurant bear must total 100%');
     }
 
+    const customerIds = [...new Set((result.data.customerIds || []).filter(isId))];
+    if (result.data.customerScope === 'specific' && customerIds.length === 0) {
+        // Saving it anyway would create a coupon that nobody can redeem and
+        // nothing explains -- the code would simply never work.
+        throw new ValidationError('Choose at least one customer for a customer-specific coupon');
+    }
+
     return {
         couponCode: result.data.couponCode.trim().toUpperCase(),
+        // Only kept for the scope that reads it, so switching a coupon back
+        // to everyone does not leave a stale allow-list behind it.
+        customerIds: result.data.customerScope === 'specific' ? customerIds : [],
         discountType: result.data.discountType,
         discountValue: result.data.discountValue,
         customerScope: result.data.customerScope,

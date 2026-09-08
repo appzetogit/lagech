@@ -500,6 +500,16 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
         }
       }
 
+      // A coupon issued to named customers is not usable by anyone else, even
+      // if they somehow learn the code -- which is the whole point of issuing
+      // one. An anonymous cart fails this too: without a user there is nobody
+      // to match against the list.
+      let audienceOk = true;
+      if (offer.customerScope === 'specific') {
+        const allowList = Array.isArray(offer.customerIds) ? offer.customerIds.map(String) : [];
+        audienceOk = isId(userId) && allowList.includes(String(userId));
+      }
+
       let firstOrderOk = true;
       // Both flags mean the same thing — the customer must have no prior orders —
       // so the count is fetched once instead of twice.
@@ -516,6 +526,7 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
         minOk &&
         usageOk &&
         perUserOk &&
+        audienceOk &&
         firstOrderOk;
 
       if (allowed) {

@@ -274,6 +274,8 @@ enum DiscountType {
 enum CustomerScope {
   all
   first_time @map("first-time")
+  /// Usable only by the customers listed in FoodOffer.customerIds.
+  specific
 }
 
 enum RestaurantScope {
@@ -1916,6 +1918,11 @@ model FoodOffer {
   restaurantId    String?         @db.VarChar(24)
   /// ponytail: id array, matching the Mongo access pattern. GIN index in constraints.sql.
   restaurantIds   String[]
+
+  /// Who may redeem this, when customerScope is `specific`. An id array to
+  /// match how restaurantIds already works; a join table would buy nothing
+  /// here, since the list is only ever read whole to check membership.
+  customerIds String[]
 
   minOrderValue Decimal  @default(0) @db.Decimal(14, 2)
   maxDiscount   Decimal? @db.Decimal(14, 2)

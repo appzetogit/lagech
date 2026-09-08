@@ -77,23 +77,30 @@ function StyledSelect({ value, options, onChange, ariaLabel }) {
   )
 }
 
-function RestaurantMultiSelect({ restaurants, value, onChange, error }) {
+/**
+ * Multi-select over a list of { _id, name }.
+ *
+ * Was restaurant-only; customer-specific coupons need the same control
+ * over customers, and two copies of a dropdown with click-outside
+ * handling and a search box is two places for it to drift.
+ */
+function EntityMultiSelect({ options, value, onChange, error, noun = "restaurant" }) {
   const [isOpen, setIsOpen] = useState(false)
   const [query, setQuery] = useState("")
   const rootRef = useRef(null)
   const selectedIds = Array.isArray(value) ? value : []
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds])
-  const selectedRestaurants = useMemo(
-    () => restaurants.filter((restaurant) => selectedSet.has(String(restaurant._id))),
-    [restaurants, selectedSet],
+  const selectedOptions = useMemo(
+    () => options.filter((option) => selectedSet.has(String(option._id))),
+    [options, selectedSet],
   )
-  const filteredRestaurants = useMemo(() => {
+  const filteredOptions = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase()
-    if (!normalizedQuery) return restaurants
-    return restaurants.filter((restaurant) =>
-      String(restaurant.name || "").toLowerCase().includes(normalizedQuery),
+    if (!normalizedQuery) return options
+    return options.filter((option) =>
+      String(option.name || "").toLowerCase().includes(normalizedQuery),
     )
-  }, [query, restaurants])
+  }, [query, options])
 
   useEffect(() => {
     const handleOutsideClick = (event) => {
@@ -105,8 +112,8 @@ function RestaurantMultiSelect({ restaurants, value, onChange, error }) {
     return () => document.removeEventListener("mousedown", handleOutsideClick)
   }, [])
 
-  const toggleRestaurant = (restaurantId) => {
-    const id = String(restaurantId)
+  const toggleOption = (optionId) => {
+    const id = String(optionId)
     onChange(selectedSet.has(id)
       ? selectedIds.filter((selectedId) => selectedId !== id)
       : [...selectedIds, id])
@@ -124,8 +131,8 @@ function RestaurantMultiSelect({ restaurants, value, onChange, error }) {
       >
         <span className={selectedIds.length ? "font-medium text-slate-700" : "text-slate-400"}>
           {selectedIds.length
-            ? `${selectedIds.length} restaurant${selectedIds.length === 1 ? "" : "s"} selected`
-            : "Choose restaurants"}
+            ? `${selectedIds.length} ${noun}${selectedIds.length === 1 ? "" : "s"} selected`
+            : `Choose ${noun}s`}
         </span>
         <ChevronDown className={`h-4 w-4 text-slate-400 transition ${isOpen ? "rotate-180" : ""}`} />
       </button>
@@ -139,21 +146,21 @@ function RestaurantMultiSelect({ restaurants, value, onChange, error }) {
                 type="text"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search restaurants..."
+                placeholder={`Search ${noun}s...`}
                 className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                 autoFocus
               />
             </div>
           </div>
           <div className="max-h-64 overflow-y-auto p-1.5">
-            {filteredRestaurants.length > 0 ? filteredRestaurants.map((restaurant) => {
-              const id = String(restaurant._id)
+            {filteredOptions.length > 0 ? filteredOptions.map((option) => {
+              const id = String(option._id)
               const selected = selectedSet.has(id)
               return (
                 <button
                   key={id}
                   type="button"
-                  onClick={() => toggleRestaurant(id)}
+                  onClick={() => toggleOption(id)}
                   className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition ${
                     selected ? "bg-blue-50 text-blue-700" : "text-slate-700 hover:bg-slate-50"
                   }`}
@@ -163,26 +170,26 @@ function RestaurantMultiSelect({ restaurants, value, onChange, error }) {
                   }`}>
                     {selected && <Check className="h-3.5 w-3.5" />}
                   </span>
-                  <span className="truncate font-medium">{restaurant.name || "Unnamed restaurant"}</span>
+                  <span className="truncate font-medium">{option.name || `Unnamed ${noun}`}</span>
                 </button>
               )
             }) : (
-              <p className="px-3 py-6 text-center text-sm text-slate-500">No restaurants found</p>
+              <p className="px-3 py-6 text-center text-sm text-slate-500">{`No ${noun}s found`}</p>
             )}
           </div>
         </div>
       )}
 
-      {selectedRestaurants.length > 0 && (
+      {selectedOptions.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-2">
-          {selectedRestaurants.map((restaurant) => {
+          {selectedOptions.map((restaurant) => {
             const id = String(restaurant._id)
             return (
               <span key={id} className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700">
                 {restaurant.name}
                 <button
                   type="button"
-                  onClick={() => toggleRestaurant(id)}
+                  onClick={() => toggleOption(id)}
                   aria-label={`Remove ${restaurant.name}`}
                   className="rounded-full p-0.5 hover:bg-blue-100"
                 >
@@ -201,6 +208,7 @@ export default function Coupons() {
   const [searchQuery, setSearchQuery] = useState("")
   const [offers, setOffers] = useState([])
   const [restaurants, setRestaurants] = useState([])
+  const [customerOptions, setCustomerOptions] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [isAddOpen, setIsAddOpen] = useState(false)
@@ -215,6 +223,7 @@ export default function Coupons() {
     discountType: "percentage",
     discountValue: "",
     customerScope: "all",
+    customerIds: [],
     restaurantScope: "all",
     restaurantIds: [],
     endDate: "",
@@ -274,6 +283,32 @@ export default function Coupons() {
     fetchRestaurants()
   }, [])
 
+  // Customers for the specific-customer picker. Loaded once alongside the
+  // restaurants rather than when the scope is chosen, so the list is ready the
+  // moment it is needed.
+  useEffect(() => {
+    const fetchCustomers = async () => {
+      try {
+        const response = await adminAPI.getCustomers({ page: 1, limit: 500 })
+        const payload = response?.data?.data ?? {}
+        const list = payload.customers || payload.users || payload.items || payload.data || []
+        setCustomerOptions(
+          (Array.isArray(list) ? list : []).map((c) => ({
+            ...c,
+            _id: String(c?._id || c?.id || ""),
+            // Phone is what makes two customers with the same name tellable
+            // apart, and plenty have no name at all.
+            name: [c?.name, c?.phone].filter(Boolean).join(" · ") || "Unnamed customer",
+          })).filter((c) => c._id),
+        )
+      } catch (err) {
+        debugError("Error fetching customers:", err)
+      }
+    }
+
+    fetchCustomers()
+  }, [])
+
   const todayYMD = () => {
     const d = new Date()
     const m = String(d.getMonth() + 1).padStart(2, "0")
@@ -304,6 +339,11 @@ export default function Coupons() {
     }
     if (f.restaurantScope === "selected" && (!Array.isArray(f.restaurantIds) || f.restaurantIds.length === 0)) {
       e.restaurantIds = "Select at least one restaurant"
+    }
+    // A specific-customer coupon with nobody chosen is a code that can
+    // never be redeemed and nothing on screen would explain why.
+    if (f.customerScope === "specific" && (!Array.isArray(f.customerIds) || f.customerIds.length === 0)) {
+      e.customerIds = "Choose at least one customer"
     }
     const start = f.startDate ? new Date(`${f.startDate}T00:00:00`) : null
     const end = f.endDate ? new Date(`${f.endDate}T00:00:00`) : null
@@ -394,6 +434,7 @@ export default function Coupons() {
       discountType: "percentage",
       discountValue: "",
       customerScope: "all",
+      customerIds: [],
       restaurantScope: "all",
       restaurantIds: [],
       endDate: "",
@@ -429,6 +470,10 @@ export default function Coupons() {
       return
     }
 
+    if (formData.customerScope === "specific" && formData.customerIds.length === 0) {
+      setSubmitError("Please choose at least one customer")
+      return
+    }
     if (formData.restaurantScope === "selected" && formData.restaurantIds.length === 0) {
       setSubmitError("Please select at least one restaurant")
       return
@@ -443,6 +488,7 @@ export default function Coupons() {
         customerScope: formData.customerScope,
         restaurantScope: formData.restaurantScope,
         restaurantIds: formData.restaurantScope === "selected" ? formData.restaurantIds : undefined,
+        customerIds: formData.customerScope === "specific" ? formData.customerIds : undefined,
         endDate: formData.endDate || undefined,
         startDate: formData.startDate || undefined,
         minOrderValue: formData.minOrderValue !== "" ? Number(formData.minOrderValue) : undefined,
@@ -591,6 +637,7 @@ export default function Coupons() {
                     options={[
                       { value: "all", label: "All Users" },
                       { value: "first-time", label: "First-time Users" },
+                      { value: "specific", label: "Specific Customers" },
                     ]}
                   />
                 </div>
@@ -733,13 +780,34 @@ export default function Coupons() {
                 {formData.restaurantScope === "selected" && (
                   <div className="md:col-span-2 lg:col-span-3">
                     <label className="block text-xs font-semibold text-slate-600 mb-1">Select Restaurants</label>
-                    <RestaurantMultiSelect
-                      restaurants={restaurants}
+                    <EntityMultiSelect
+                      options={restaurants}
+                      noun="restaurant"
                       value={formData.restaurantIds}
                       onChange={(restaurantIds) => handleFormChange("restaurantIds", restaurantIds)}
                       error={errors.restaurantIds}
                     />
                     {errors.restaurantIds && <p className="mt-1 text-xs text-red-600">{errors.restaurantIds}</p>}
+                  </div>
+                )}
+
+                {formData.customerScope === "specific" && (
+                  <div className="md:col-span-2 lg:col-span-3">
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">
+                      Select Customers
+                    </label>
+                    <EntityMultiSelect
+                      options={customerOptions}
+                      noun="customer"
+                      value={formData.customerIds}
+                      onChange={(customerIds) => handleFormChange("customerIds", customerIds)}
+                      error={errors.customerIds}
+                    />
+                    <p className="mt-1 text-xs text-slate-500">
+                      Only these customers can use the code, and it is the only coupon list they
+                      see it on. Anyone else entering it is refused.
+                    </p>
+                    {errors.customerIds && <p className="mt-1 text-xs text-red-600">{errors.customerIds}</p>}
                   </div>
                 )}
               </div>

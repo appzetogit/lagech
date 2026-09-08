@@ -1901,6 +1901,16 @@ export const listPublicOffers = async (query = {}) => {
         });
     }
 
+    // A coupon issued to named customers is only listed for those customers.
+    // Redemption is checked separately, so this is about not dangling a code
+    // in front of someone who cannot use it.
+    if (isId(userId)) {
+        filter.AND.push({ OR: [{ customerScope: { not: 'specific' } }, { customerIds: { has: String(userId) } }] });
+    } else {
+        // No signed-in customer, so nobody matches an allow-list.
+        filter.AND.push({ customerScope: { not: 'specific' } });
+    }
+
     // A returning customer does not see first-order-only coupons.
     if (isId(userId)) {
         const orderCount = await prisma.foodOrder.count({ where: { userId: String(userId) } });
