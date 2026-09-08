@@ -12,6 +12,14 @@ const debugError = (...args) => {}
 
 const PAGE_SIZE = 20
 
+const EMPTY_FILTERS = {
+  orderDate: "",
+  joiningDate: "",
+  status: "",
+  sortBy: "",
+  chooseFirst: "",
+}
+
 export default function Customers() {
   const [searchQuery, setSearchQuery] = useState("")
   const [searchInput, setSearchInput] = useState("")
@@ -23,13 +31,15 @@ export default function Customers() {
   const [userDetails, setUserDetails] = useState(null)
   const [loadingDetails, setLoadingDetails] = useState(false)
   const [showUserDetails, setShowUserDetails] = useState(false)
-  const [filters, setFilters] = useState({
-    orderDate: "",
-    joiningDate: "",
-    status: "",
-    sortBy: "",
-    chooseFirst: "",
-  })
+  // Two copies on purpose. The controls edit `draft`; only Apply Filters copies
+  // it into `filters`, which is what the fetch below watches.
+  //
+  // They used to be one, so every control refetched the moment it changed and
+  // the button next to them -- which only ever committed the search box -- did
+  // nothing at all. Pressing it after choosing a status looked broken because
+  // the list had already changed on its own and the button changed nothing.
+  const [draft, setDraft] = useState(EMPTY_FILTERS)
+  const [filters, setFilters] = useState(EMPTY_FILTERS)
 
   const totalPages = Math.max(1, Math.ceil(totalCustomers / PAGE_SIZE))
   const showingFrom = totalCustomers === 0 ? 0 : (page - 1) * PAGE_SIZE + 1
@@ -42,14 +52,28 @@ export default function Customers() {
   }, [loading, page, totalPages])
 
   const handleFilterChange = (field, value) => {
-    setPage(1)
-    setFilters(prev => ({ ...prev, [field]: value }))
+    setDraft(prev => ({ ...prev, [field]: value }))
   }
 
+  // Both the search box and Apply Filters land here, so either one commits
+  // whatever is currently on screen.
   const handleSearch = () => {
     setPage(1)
     setSearchQuery(searchInput.trim())
+    setFilters(draft)
   }
+
+  const handleReset = () => {
+    setPage(1)
+    setSearchInput("")
+    setSearchQuery("")
+    setDraft(EMPTY_FILTERS)
+    setFilters(EMPTY_FILTERS)
+  }
+
+  // Whether the button would actually change anything, so it can say so.
+  const hasPendingChanges =
+    JSON.stringify(draft) !== JSON.stringify(filters) || searchInput.trim() !== searchQuery
 
   const formatDateTime = (value) => {
     if (!value) return "-"
@@ -84,6 +108,7 @@ export default function Customers() {
           ...(searchQuery && { search: searchQuery }),
           ...(filters.status && { status: filters.status }),
           ...(filters.joiningDate && { joiningDate: filters.joiningDate }),
+          ...(filters.orderDate && { orderDate: filters.orderDate }),
           ...(filters.sortBy && { sortBy: filters.sortBy }),
           ...(useChooseFirst && { chooseFirst }),
         }
@@ -116,7 +141,7 @@ export default function Customers() {
       cancelled = true
       clearTimeout(t)
     }
-  }, [page, searchQuery, filters.status, filters.joiningDate, filters.sortBy, filters.chooseFirst])
+  }, [page, searchQuery, filters])
 
   const [searchParams] = useSearchParams()
   const userIdFromUrl = searchParams.get("userId")
@@ -223,46 +248,49 @@ export default function Customers() {
     <div className="p-4 lg:p-6 bg-slate-50 min-h-screen">
       <div className="max-w-7xl mx-auto">
         {/* Filters Section */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-            <div>
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 sm:p-6 mb-6">
+          {/* Widths step up one break at a time. Going straight from one column
+              to five squeezed five controls -- two of them date pickers, which
+              have a fixed minimum width -- into a tablet, and the row spilled. */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+            <div className="flex flex-col">
               <label className="block text-sm font-semibold text-slate-700 mb-2">
                 Order Date
               </label>
-              <div className="relative">
+              <div className="relative mt-auto">
                 <input
                   type="date"
                   max={new Date().toISOString().split("T")[0]}
-                  value={filters.orderDate}
+                  value={draft.orderDate}
                   onChange={(e) => handleFilterChange("orderDate", e.target.value)}
                   className="w-full px-4 py-2.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
                 />
               </div>
             </div>
 
-            <div>
+            <div className="flex flex-col">
               <label className="block text-sm font-semibold text-slate-700 mb-2">
                 Customer Joining Date
               </label>
-              <div className="relative">
+              <div className="relative mt-auto">
                 <input
                   type="date"
                   max={new Date().toISOString().split("T")[0]}
-                  value={filters.joiningDate}
+                  value={draft.joiningDate}
                   onChange={(e) => handleFilterChange("joiningDate", e.target.value)}
                   className="w-full px-4 py-2.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
                 />
               </div>
             </div>
 
-            <div>
+            <div className="flex flex-col">
               <label className="block text-sm font-semibold text-slate-700 mb-2">
                 Customer status
               </label>
               <select
-                value={filters.status}
+                value={draft.status}
                 onChange={(e) => handleFilterChange("status", e.target.value)}
-                className="w-full px-4 py-2.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                className="mt-auto w-full px-4 py-2.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
               >
                 <option value="">Select Status</option>
                 <option value="active">Active</option>
@@ -270,14 +298,14 @@ export default function Customers() {
               </select>
             </div>
 
-            <div>
+            <div className="flex flex-col">
               <label className="block text-sm font-semibold text-slate-700 mb-2">
                 Sort By
               </label>
               <select
-                value={filters.sortBy}
+                value={draft.sortBy}
                 onChange={(e) => handleFilterChange("sortBy", e.target.value)}
-                className="w-full px-4 py-2.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                className="mt-auto w-full px-4 py-2.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
               >
                 <option value="">Select Customer Sorting Order</option>
                 <option value="name-asc">Name (A-Z)</option>
@@ -287,16 +315,16 @@ export default function Customers() {
               </select>
             </div>
 
-            <div>
+            <div className="flex flex-col">
               <label className="block text-sm font-semibold text-slate-700 mb-2">
                 Choose First
               </label>
               <input
                 type="number"
-                value={filters.chooseFirst}
+                value={draft.chooseFirst}
                 onChange={(e) => handleFilterChange("chooseFirst", e.target.value)}
                 placeholder="Ex: 100"
-                className="w-full px-4 py-2.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                className="mt-auto w-full px-4 py-2.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
               />
             </div>
           </div>
@@ -306,24 +334,20 @@ export default function Customers() {
               <button
                 type="button"
                 onClick={handleSearch}
-                className="px-6 py-2.5 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-all"
+                className={`px-6 py-2.5 text-sm font-medium rounded-lg bg-blue-600 text-white transition-all hover:bg-blue-700 ${
+                  hasPendingChanges ? "ring-2 ring-blue-300 ring-offset-1" : ""
+                }`}
               >
                 Apply Filters
+                {/* The list only moves when this is pressed, so the button has
+                    to show that a choice is waiting on it. */}
+                {hasPendingChanges ? (
+                  <span className="ml-2 inline-block h-2 w-2 rounded-full bg-white align-middle" />
+                ) : null}
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setPage(1)
-                  setSearchInput("")
-                  setSearchQuery("")
-                  setFilters({
-                    orderDate: "",
-                    joiningDate: "",
-                    status: "",
-                    sortBy: "",
-                    chooseFirst: "",
-                  })
-                }}
+                onClick={handleReset}
                 className="px-6 py-2.5 text-sm font-medium rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition-all"
               >
                 Reset Filters

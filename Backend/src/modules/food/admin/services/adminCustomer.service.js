@@ -64,6 +64,27 @@ const serializeCustomer = (user, stats) => ({
     createdAt: user.createdAt,
 });
 
+/**
+ * The whole of one calendar day, as a Prisma range.
+ *
+ * The admin sends a plain `yyyy-mm-dd`, which on its own only matches the
+ * instant of midnight -- so filtering on it directly returns nothing for every
+ * customer who did not register at exactly 00:00:00.
+ *
+ * @returns {{gte: Date, lte: Date}|null} null when the input is absent or not a date
+ */
+export const dayWindow = (value) => {
+    if (!value || !String(value).trim()) return null;
+    const day = new Date(String(value));
+    if (Number.isNaN(day.getTime())) return null;
+
+    const start = new Date(day);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(day);
+    end.setHours(23, 59, 59, 999);
+    return { gte: start, lte: end };
+};
+
 export async function getCustomers(query = {}) {
     const limit = Math.min(Math.max(parseInt(query.limit, 10) || 50, 1), 1000);
     const page = Math.max(parseInt(query.page, 10) || 1, 1);
@@ -74,16 +95,15 @@ export async function getCustomers(query = {}) {
     if (String(query.status) === 'active') where.isActive = true;
     if (String(query.status) === 'inactive') where.isActive = false;
 
-    if (query.joiningDate && String(query.joiningDate).trim()) {
-        const day = new Date(String(query.joiningDate));
-        if (!Number.isNaN(day.getTime())) {
-            const start = new Date(day);
-            start.setHours(0, 0, 0, 0);
-            const end = new Date(day);
-            end.setHours(23, 59, 59, 999);
-            where.createdAt = { gte: start, lte: end };
-        }
-    }
+    const joinedOn = dayWindow(query.joiningDate);
+    if (joinedOn) where.createdAt = joinedOn;
+
+    // The admin panel has always shown an Order Date box; nothing here read it,
+    // so picking a date changed nothing and the filter looked broken. It means
+    // 'customers who placed an order that day' -- any order, not only the ones
+    // that completed, since an admin looking up a date wants everyone who tried.
+    const orderedOn = dayWindow(query.orderDate);
+    if (orderedOn) where.orders = { some: { createdAt: orderedOn } };
 
     if (query.search && String(query.search).trim()) {
         const contains = { contains: String(query.search).trim().slice(0, 80), mode: 'insensitive' };
