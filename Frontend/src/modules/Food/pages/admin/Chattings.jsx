@@ -32,6 +32,9 @@ const ADMIN_CONFIG = { contextModule: "admin" }
 /** Matches the server, which refuses a sixth. */
 const MAX_ATTACHMENTS = 5
 
+/** What a list row says for a message that is only pictures. */
+const photoSummary = (count) => `${count} photo${count === 1 ? "" : "s"}`
+
 const timeAgo = (value) => {
   if (!value) return ""
   const then = new Date(value).getTime()
@@ -154,7 +157,9 @@ export default function Chattings() {
         const existing = prev[index]
         const updated = {
           ...existing,
-          lastMessage: message.text ?? existing.lastMessage,
+          lastMessage:
+            message.text ||
+            (message.attachments?.length ? photoSummary(message.attachments.length) : existing.lastMessage),
           lastAt: message.createdAt ?? existing.lastAt,
           unread:
             conversationId === selectedIdRef.current
@@ -292,7 +297,7 @@ export default function Chattings() {
             c.conversationId === selected.conversationId
               ? {
                   ...c,
-                  lastMessage: sent.text || `${sent.attachments?.length || 0} photo(s)`,
+                  lastMessage: sent.text || photoSummary(sent.attachments?.length || 0),
                   lastAt: sent.createdAt,
                 }
               : c,

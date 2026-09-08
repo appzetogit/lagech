@@ -370,13 +370,14 @@ export async function listConversations(me, query = {}) {
         ),
         latest AS (
             SELECT DISTINCT ON ("conversationId")
-                   "conversationId", "orderId", "text", "createdAt", "participants"
+                   "conversationId", "orderId", "text", "createdAt", "participants",
+                   COALESCE(array_length("attachments", 1), 0) AS "attachmentCount"
             FROM mine
             ORDER BY "conversationId", "createdAt" DESC
         )
         SELECT latest."conversationId", latest."orderId",
                latest."text" AS "lastText", latest."createdAt" AS "lastAt",
-               latest."participants", agg."firstAt", agg."unread"
+               latest."attachmentCount", latest."participants", agg."firstAt", agg."unread"
         FROM latest
         JOIN agg ON agg."conversationId" = latest."conversationId"
         ORDER BY latest."createdAt" DESC
@@ -398,7 +399,9 @@ export async function listConversations(me, query = {}) {
             orderId: r.orderId ? String(r.orderId) : doc?.orderId ? String(doc.orderId) : null,
             title: doc?.title || '',
             peerToken: (r.participants || []).find((t) => t !== myToken) || doc?.peerToken || null,
-            lastMessage: r.lastText,
+            // A message can be pictures and nothing else, and a thread whose
+            // newest message is one reads as empty in the list otherwise.
+            lastMessage: r.lastText || photoSummary(Number(r.attachmentCount) || 0),
             lastAt: r.lastAt,
             // COUNT is int8, which the driver hands back as a BigInt.
             unread: Number(r.unread),
@@ -443,6 +446,9 @@ export async function listConversations(me, query = {}) {
  * A peer that no longer exists (a deleted account) keeps its token and gets no
  * name, so the thread still lists and its history is still readable.
  */
+/** What a list row says for a message that carries no text. */
+const photoSummary = (count) => (count > 0 ? `${count} photo${count === 1 ? '' : 's'}` : '');
+
 const attachPeers = async (conversations) => {
     const byRole = { USER: new Set(), DELIVERY_PARTNER: new Set(), RESTAURANT: new Set() };
 
