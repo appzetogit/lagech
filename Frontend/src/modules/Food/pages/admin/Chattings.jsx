@@ -451,7 +451,7 @@ export default function Chattings() {
                               </span>
                             </div>
                             <p className="text-xs text-slate-500 truncate">
-                              {[conversation.peer?.phone, conversation.orderId ? "order" : ""]
+                              {[conversation.peer?.phone, conversation.orderNumber]
                                 .filter(Boolean)
                                 .join(" · ") || conversation.title || ""}
                             </p>
@@ -508,7 +508,7 @@ export default function Chattings() {
                           {[
                             selected.peer?.phone,
                             selected.title,
-                            selected.orderId ? `Order ${selected.orderId}` : "",
+                            selected.orderNumber ? `Order ${selected.orderNumber}` : "",
                           ]
                             .filter(Boolean)
                             .join(" · ")}

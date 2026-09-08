@@ -453,7 +453,7 @@ export async function listConversations(me, query = {}) {
         (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
     );
 
-    return { conversations: await attachAssignees(await attachPeers(merged)) };
+    return { conversations: await attachOrderNumbers(await attachAssignees(await attachPeers(merged))) };
 }
 
 /**
@@ -519,6 +519,30 @@ const attachAssignees = async (conversations) => {
         // An admin who has since been deleted leaves the thread assigned to
         // nobody rather than to a blank name.
         assignedAdmin: (c.assignedAdminId && byId.get(c.assignedAdminId)) || null,
+    }));
+};
+
+/**
+ * The order number a thread is about, as the admin knows it.
+ *
+ * A customer asking about a particular order gets a thread of its own, so one
+ * person can have several and the order is the only thing telling them apart.
+ * The row carries the database id; nobody works from those -- the number on the
+ * order is FOD-1188555469.
+ */
+const attachOrderNumbers = async (conversations) => {
+    const ids = [...new Set(conversations.map((c) => c.orderId).filter(Boolean))];
+    if (!ids.length) return conversations;
+
+    const orders = await prisma.foodOrder.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, order_id: true },
+    });
+    const byId = new Map(orders.map((o) => [o.id, o.order_id]));
+
+    return conversations.map((c) => ({
+        ...c,
+        orderNumber: (c.orderId && byId.get(c.orderId)) || null,
     }));
 };
 
