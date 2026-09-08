@@ -37,7 +37,17 @@ export function useFitTablesToViewport(mainRef, deps = []) {
                 // admin scrolls and the table would resize under them.
                 const offsetWithinMain =
                     box.getBoundingClientRect().top - mainTop + main.scrollTop
-                const available = Math.round(main.clientHeight - offsetWithinMain - GAP)
+
+                // Whatever the card puts under the table -- the pagination strip
+                // lives outside the scroll box but inside the same card, so a
+                // height that ignored it pushed the card past the bottom by
+                // exactly the height of the line saying how many rows there are.
+                let below = 0
+                for (let next = box.nextElementSibling; next; next = next.nextElementSibling) {
+                    below += next.getBoundingClientRect().height
+                }
+
+                const available = Math.round(main.clientHeight - offsetWithinMain - below - GAP)
 
                 // Too small to be useful means the table is far enough down the
                 // page that it gets its own screen; the CSS floor covers that.
