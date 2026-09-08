@@ -4,21 +4,13 @@ import { X } from "lucide-react"
  * Filters for Order Detect Delivery.
  *
  * The page had a Filters button wired to open state that nothing rendered, so
- * pressing it did nothing at all. The options below are the derived stage
- * labels the page already builds — matching them against the raw order status
- * would filter on a value the table never shows.
+ * pressing it did nothing at all.
+ *
+ * Every option list is derived from the orders on screen rather than written
+ * out here. The status column holds composed labels like "Ordered Delivered",
+ * so a hand-written list of the stages misses them and the filter matches
+ * nothing while looking like it should.
  */
-
-const STATUS_OPTIONS = [
-  "Ordered",
-  "Restaurant Accepted",
-  "Delivery Boy Assigned",
-  "Delivery Boy Reached Pickup",
-  "Order ID Accepted",
-  "Reached Drop",
-  "Delivered",
-  "Rejected",
-]
 
 export default function OrderDetectFilterPanel({
   isOpen,
@@ -27,6 +19,7 @@ export default function OrderDetectFilterPanel({
   setFilters,
   onApply,
   onReset,
+  statuses = [],
   restaurants = [],
   deliveryPartners = [],
 }) {
@@ -58,7 +51,7 @@ export default function OrderDetectFilterPanel({
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-slate-400 focus:outline-none"
             >
               <option value="">All statuses</option>
-              {STATUS_OPTIONS.map((status) => (
+              {statuses.map((status) => (
                 <option key={status} value={status}>
                   {status}
                 </option>

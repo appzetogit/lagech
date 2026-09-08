@@ -364,7 +364,11 @@ export default function OrderDetectDelivery() {
   const filterOptions = useMemo(() => {
     const uniq = (key) =>
       [...new Set(orders.map((o) => o?.[key]).filter(Boolean).map(String))].sort();
-    return { restaurants: uniq("restaurantName"), deliveryPartners: uniq("deliveryBoyName") };
+    return {
+      statuses: uniq("status"),
+      restaurants: uniq("restaurantName"),
+      deliveryPartners: uniq("deliveryBoyName"),
+    };
   }, [orders]);
 
 
@@ -567,6 +571,7 @@ export default function OrderDetectDelivery() {
         setFilters={setFilters}
         onApply={handleApplyFilters}
         onReset={handleResetFilters}
+        statuses={filterOptions.statuses}
         restaurants={filterOptions.restaurants}
         deliveryPartners={filterOptions.deliveryPartners}
       />
