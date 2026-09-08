@@ -237,8 +237,95 @@ function onRefreshFailed(module) {
   }
 }
 
+/**
+ * How long before expiry a token is treated as already spent.
+ *
+ * Access tokens last about fifteen minutes. Waiting for one to actually
+ * expire means the next request 401s, the interceptor below refreshes, and
+ * the request is replayed -- it works, but the browser has already logged the
+ * failed attempt, so the console fills with 401s that nothing went wrong for.
+ * A minute is long enough to cover a slow refresh and a slow request behind
+ * it, and short enough that it does not refresh on every call.
+ */
+const REFRESH_LEEWAY_SECONDS = 60;
+
+/**
+ * When a JWT says it expires, in epoch seconds.
+ *
+ * Read rather than trusted: a token that cannot be parsed returns null and is
+ * simply sent as-is, which lands back on the 401 path. Nothing here decides
+ * whether a token is valid -- only whether it is worth refreshing early.
+ */
+function expiryOf(token) {
+  try {
+    const payload = String(token || '').split('.')[1];
+    if (!payload) return null;
+    const json = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
+    const exp = Number(JSON.parse(json)?.exp);
+    return Number.isFinite(exp) ? exp : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function isExpiringSoon(token) {
+  const exp = expiryOf(token);
+  if (exp === null) return false;
+  return exp - Date.now() / 1000 <= REFRESH_LEEWAY_SECONDS;
+}
+
+/**
+ * One refresh per module at a time.
+ *
+ * Every request that notices the token is nearly out waits on the same
+ * promise. Without that, a screen firing six calls at once would send six
+ * refreshes, five of them presenting a refresh token the first has already
+ * rotated -- which is what "Invalid refresh token" in the logs is.
+ */
+const pendingRefresh = new Map();
+
+function refreshModuleToken(module) {
+  if (pendingRefresh.has(module)) return pendingRefresh.get(module);
+
+  const refreshToken = getRefreshToken(module);
+  if (!refreshToken) return Promise.resolve(null);
+
+  const run = (async () => {
+    // Relative when there is no baseURL, so the dev proxy works too, and
+    // plain axios so this does not re-enter the interceptors.
+    const refreshUrl = baseURL
+      ? `${baseURL}/food/auth/refresh-token`
+      : '/api/v1/food/auth/refresh-token';
+    const { data } = await axios.post(refreshUrl, { refreshToken }, { timeout: 10000 });
+    const newAccessToken = data?.data?.accessToken || data?.accessToken;
+    if (!newAccessToken) throw new Error("Refresh returned no token");
+
+    try {
+      localStorage.setItem(`${module}_accessToken`, newAccessToken);
+      window.dispatchEvent(new CustomEvent('authRefreshed', {
+        detail: { module, token: newAccessToken },
+      }));
+    } catch (_) {}
+
+    onRefreshed(newAccessToken, module);
+    return newAccessToken;
+  })()
+    .catch(() => {
+      // Only the reactive path signs the person out. Here the old token may
+      // still have seconds left on it, and one failed refresh -- a flaky
+      // network, a rotation race -- should not end the session.
+      return null;
+    })
+    .finally(() => {
+      pendingRefresh.delete(module);
+    });
+
+  pendingRefresh.set(module, run);
+  return run;
+}
+
 apiClient.interceptors.request.use(
-  (config) => {
+  async (config) => {
     config.contextModule = getModuleFromConfig(config);
 
     // Client-side RBAC safety net for sub-admins across all admin APIs.
@@ -355,7 +442,19 @@ apiClient.interceptors.request.use(
       }
     }
 
-    const token = getAccessToken(config);
+    let token = getAccessToken(config);
+
+    // Renew just before expiry rather than after it. The refresh call itself
+    // is exempt: it authenticates with the refresh token, and waiting on a
+    // refresh to send a refresh would deadlock.
+    const isRefreshCall = String(config.url || '').includes('/auth/refresh-token');
+    if (token && !isRefreshCall && isExpiringSoon(token)) {
+      const fresh = await refreshModuleToken(config.contextModule);
+      // A failed refresh leaves the old token in place: it may still have a
+      // few seconds on it, and if it does not, the 401 path below handles it.
+      if (fresh) token = fresh;
+    }
+
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -453,6 +552,17 @@ apiClient.interceptors.response.use(
     }
 
     original._retry = true;
+
+    // A refresh may already be in flight from the request interceptor; join
+    // it rather than starting a second one against a token it has rotated.
+    if (pendingRefresh.has(module)) {
+      const joined = await pendingRefresh.get(module);
+      if (joined) {
+        original.headers.Authorization = `Bearer ${joined}`;
+        return apiClient(original);
+      }
+    }
+
     isRefreshing = true;
 
     try {
