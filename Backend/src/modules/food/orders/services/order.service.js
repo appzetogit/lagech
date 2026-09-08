@@ -1192,6 +1192,20 @@ export async function autoDeliverStaleOrders() {
   return closed;
 }
 
+/**
+ * How long an unassigned order must have been silent before the hunt for it is
+ * taken to be dead.
+ *
+ * A running hunt re-queues itself every 45 seconds and writes to the row each
+ * round, so anything quiet for several rounds has stopped on its own -- the API
+ * restarted, the delayed job was lost, the queue was drained. Well clear of one
+ * round, so a hunt that is merely slow is never restarted underneath itself.
+ */
+const HUNT_DEAD_AFTER_MS = 3 * 60 * 1000;
+
+/** A ceiling per pass, so a backlog cannot fire a push storm at every rider. */
+const MAX_HUNTS_RESUMED_PER_PASS = 25;
+
 export async function recoverStuckOrders() {
   const now = Date.now();
   const FIVE_MIN = 5 * 60 * 1000;
@@ -1225,6 +1239,41 @@ export async function recoverStuckOrders() {
       where: { dispatchingAt: { lt: new Date(now - FIVE_MIN) } },
       data: { dispatchingAt: null },
     });
+
+    // 3. Restart hunts that died.
+    //
+    // Nothing above covers an order no rider was ever assigned to. Its hunt
+    // lives only in the delayed job it queued for itself, so when that job is
+    // lost the order stops dead in `preparing` and stays there -- three sat
+    // open for four days that way. Cancelling them is the last resort; trying
+    // again is what should happen first.
+    //
+    // The lock clear above runs first on purpose: an order abandoned mid-round
+    // still holds `dispatchingAt`, and tryAutoAssign would refuse it.
+    const { buildDeadHuntFilter, expiryWindows } = await import("./order-expiry.service.js");
+
+    const deadHunts = await prisma.foodOrder.findMany({
+      where: buildDeadHuntFilter(new Date(now), expiryWindows(), HUNT_DEAD_AFTER_MS),
+      select: { id: true, order_id: true, orderStatus: true },
+      // Oldest first: the order closest to being given up on gets the next try.
+      orderBy: { createdAt: "asc" },
+      take: MAX_HUNTS_RESUMED_PER_PASS,
+    });
+
+    if (deadHunts.length > 0) {
+      logger.warn(`Watchdog: Restarting the hunt for ${deadHunts.length} unassigned order(s).`);
+      for (const order of deadHunts) {
+        try {
+          await tryAutoAssign(order.id);
+        } catch (err) {
+          // One order that cannot be dispatched must not strand the rest.
+          logger.error(
+            `Watchdog: Could not restart the hunt for ${order.order_id || order.id}: ` +
+              `${err?.message || err}`,
+          );
+        }
+      }
+    }
   } catch (err) {
     logger.error(`Watchdog recovery error: ${err.message}`);
   }

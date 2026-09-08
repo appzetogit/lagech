@@ -16,10 +16,12 @@ import { logger } from '../../../../utils/logger.js';
  * rider was offered the order and never answered). An order that no rider was
  * ever assigned to does not match it, which is exactly the state these were in.
  *
- * Nothing here decides an order is stalled from its status alone -- it also has
- * to have gone quiet. `updatedAt` moves on every dispatch round, so an order
- * whose hunt is still running is never a candidate no matter how long it has
- * been open.
+ * Age is measured from when the order was meant to happen -- `scheduledAt` if
+ * the customer picked a time, otherwise when they placed it. Deliberately not
+ * `updatedAt`: the watchdog restarts the dispatch hunt, and a hunt touches the
+ * row, so an order that is being retried would keep resetting its own clock and
+ * never expire. What keeps a live order safe is the status and rider guards
+ * below, not the timestamp.
  */
 
 /** Restaurant has not answered yet. */
@@ -31,7 +33,20 @@ const AWAITING_RESTAURANT = ['created'];
  * `picked_up` and beyond are deliberately absent: a rider is holding the food,
  * so a human is already involved and cancelling under them would be wrong.
  */
-const AWAITING_RIDER = ['confirmed', 'preparing', 'ready_for_pickup', 'reached_pickup'];
+export const AWAITING_RIDER = ['confirmed', 'preparing', 'ready_for_pickup', 'reached_pickup'];
+
+/**
+ * Older than this, by the clock that matters to the customer.
+ *
+ * A scheduled order is not late until the time it was scheduled for, so an
+ * order placed at noon for 7pm must not be expired at half past twelve.
+ */
+const olderThan = (cutoff) => ({
+    OR: [
+        { scheduledAt: null, createdAt: { lt: cutoff } },
+        { scheduledAt: { lt: cutoff } },
+    ],
+});
 
 const minutes = (value, fallback) => {
     const parsed = Number(value);
@@ -66,7 +81,7 @@ export const buildStallFilters = (now = new Date(), windows = expiryWindows()) =
             note: 'The restaurant did not respond in time, so this order expired automatically.',
             where: {
                 orderStatus: { in: AWAITING_RESTAURANT },
-                updatedAt: { lt: cutoff(windows.awaitingRestaurantMinutes) },
+                ...olderThan(cutoff(windows.awaitingRestaurantMinutes)),
             },
         },
         {
@@ -77,10 +92,45 @@ export const buildStallFilters = (now = new Date(), windows = expiryWindows()) =
                 // Never had a rider accept. Once one has, the trip is somebody's
                 // job and a timer should not take it away from them.
                 dispatchAcceptedAt: null,
-                updatedAt: { lt: cutoff(windows.awaitingRiderMinutes) },
+                ...olderThan(cutoff(windows.awaitingRiderMinutes)),
             },
         },
     ];
+};
+
+/**
+ * Orders whose dispatch hunt has died and should be started again.
+ *
+ * A hunt lives only in the delayed job it queues for itself each round, so when
+ * that job is lost -- the API restarts, the queue is drained -- the order stops
+ * dead with no rider and nothing to wake it. Trying again is what should happen
+ * before giving up, so this sits alongside the expiry filters: the resume window
+ * ends exactly where the expiry window begins, and an order is only ever in one
+ * of them.
+ *
+ * @param {number} huntDeadAfterMs how long silent counts as "the hunt is gone"
+ */
+export const buildDeadHuntFilter = (now = new Date(), windows = expiryWindows(), huntDeadAfterMs = 3 * 60 * 1000) => {
+    const openedAfter = new Date(now.getTime() - windows.awaitingRiderMinutes * 60 * 1000);
+
+    return {
+        orderStatus: { in: AWAITING_RIDER },
+        dispatchStatus: 'unassigned',
+        // No rider holds this trip, by either half of the record.
+        dispatchAcceptedAt: null,
+        dispatchDeliveryPartnerId: null,
+        // Not in the middle of a round right now.
+        dispatchingAt: null,
+        // A live hunt writes to the row every round, so silence for several
+        // rounds is what says it has stopped rather than merely being slow.
+        updatedAt: { lt: new Date(now.getTime() - huntDeadAfterMs) },
+        // Past this the expiry pass is about to close the order, and waking every
+        // rider for it would only be a push nobody can act on.
+        OR: [
+            { scheduledAt: null, createdAt: { gte: openedAfter } },
+            { scheduledAt: { gte: openedAfter } },
+        ],
+    };
 };
 
 /**
@@ -102,7 +152,7 @@ export async function expireStalledOrders() {
     for (const group of buildStallFilters(new Date(), windows)) {
         const rows = await prisma.foodOrder.findMany({
             where: group.where,
-            select: { id: true, order_id: true, orderStatus: true, updatedAt: true },
+            select: { id: true, order_id: true, orderStatus: true, createdAt: true, scheduledAt: true },
         });
         if (!rows.length) continue;
 
@@ -120,7 +170,8 @@ export async function expireStalledOrders() {
                 expired += 1;
                 logger.info(
                     `[OrderExpiry] Expired ${row.order_id || row.id} ` +
-                        `(${row.orderStatus}, idle since ${row.updatedAt.toISOString()}): ${group.reason}`,
+                        `(${row.orderStatus}, open since ${(row.scheduledAt || row.createdAt).toISOString()}): ` +
+                        group.reason,
                 );
             } catch (err) {
                 // One bad order must not stop the rest from being cleaned up.
