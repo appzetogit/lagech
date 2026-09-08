@@ -229,7 +229,11 @@ export async function sendMessage(sender, dto) {
         },
     });
 
-    const payload = serializeMessage(message);
+    // Named here as well as in the history. A reply that reaches a colleague
+    // over the socket would otherwise arrive anonymous, and go on being
+    // anonymous until they reloaded -- which is the moment a desk most needs
+    // to know who is already answering.
+    const [payload] = await attachSenderNames([serializeMessage(message)]);
 
     // Live delivery — emit to the recipient's room and echo to the sender's own other devices.
     try {
