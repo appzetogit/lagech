@@ -35,7 +35,7 @@ if (!process.env.DATABASE_URL) {
         'DATABASE_URL is not set, and these tests run against a real Postgres.',
         [
             '  docker compose up -d          (or see Backend/prisma/README.md)',
-            '  export DATABASE_URL="postgresql://minto:minto@localhost:5433/minto?schema=public"',
+            '  export DATABASE_URL="postgresql://lagech:lagech@localhost:5433/lagech?schema=public"',
         ].join('\n'),
     );
 }

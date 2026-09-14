@@ -1,7 +1,7 @@
 # The database the test suite and local development run against.
 #
 #   docker compose up -d
-#   export DATABASE_URL="postgresql://minto:minto@localhost:5433/minto?schema=public"
+#   export DATABASE_URL="postgresql://lagech:lagech@localhost:5433/lagech?schema=public"
 #
 # 5433 rather than 5432 because a native Postgres install commonly holds 5432,
 # and two servers on one port fail in a way that reads like a bad password.
@@ -10,20 +10,20 @@ services:
     # postgis, not plain postgres: delivery zones are polygons and zone lookup
     # is a containment query the database answers.
     image: postgis/postgis:16-3.4
-    container_name: minto-pg
+    container_name: lagech-pg
     environment:
-      POSTGRES_USER: minto
-      POSTGRES_PASSWORD: minto
-      POSTGRES_DB: minto
+      POSTGRES_USER: lagech
+      POSTGRES_PASSWORD: lagech
+      POSTGRES_DB: lagech
     ports:
       - '5433:5432'
     volumes:
-      - minto-pgdata:/var/lib/postgresql/data
+      - lagech-pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U minto -d minto']
+      test: ['CMD-SHELL', 'pg_isready -U lagech -d lagech']
       interval: 5s
       timeout: 5s
       retries: 10
 
 volumes:
-  minto-pgdata:
+  lagech-pgdata:

@@ -11,22 +11,22 @@
 services:
   db:
     image: postgis/postgis:17-3.5
-    container_name: minto-dev-db
+    container_name: lagech-dev-db
     environment:
-      POSTGRES_USER: minto
-      POSTGRES_PASSWORD: minto
-      POSTGRES_DB: minto
+      POSTGRES_USER: lagech
+      POSTGRES_PASSWORD: lagech
+      POSTGRES_DB: lagech
     ports:
       - "5433:5432"
     volumes:
-      - minto-dev-db:/var/lib/postgresql/data
+      - lagech-dev-db:/var/lib/postgresql/data
     healthcheck:
       # Migrations and the API both wait on this; without it the first
       # connection races the server's own initialisation and fails.
-      test: ["CMD-SHELL", "pg_isready -U minto -d minto"]
+      test: ["CMD-SHELL", "pg_isready -U lagech -d lagech"]
       interval: 3s
       timeout: 3s
       retries: 20
 
 volumes:
-  minto-dev-db:
+  lagech-dev-db:

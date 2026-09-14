@@ -100,9 +100,9 @@ export const initRazorpayPayment = async (options) => {
       amount: options.amount,
       currency: options.currency || 'INR',
       order_id: options.order_id,
-      name: options.name || 'Minto Foods',
+      name: options.name || 'Lagech',
       description: options.description || 'Order Payment',
-      image: options.image || '/minto-logo.png',
+      image: options.image || '/lagech-logo.png',
       prefill: options.prefill || {},
       notes: options.notes || {},
       theme: {

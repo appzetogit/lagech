@@ -18,10 +18,10 @@
 # their next natural reload. Stale assets are pruned on a later deploy, once no
 # realistic session could still be holding them.
 #
-# Usage:  deploy-frontend.sh [document-root]      (default /srv/minto/admin)
+# Usage:  deploy-frontend.sh [document-root]      (default /srv/lagech/admin)
 set -euo pipefail
 
-ROOT="${1:-/srv/minto/admin}"
+ROOT="${1:-/srv/lagech/admin}"
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../Frontend" && pwd)"
 
 # How long an old chunk stays reachable.

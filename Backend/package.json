@@ -1,8 +1,8 @@
 {
-  "name": "minto-backend",
+  "name": "lagech-backend",
   "version": "1.0.0",
   "type": "module",
-  "description": "Minto Foods Product Backend",
+  "description": "Lagech Product Backend",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

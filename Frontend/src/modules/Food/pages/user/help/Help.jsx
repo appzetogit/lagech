@@ -408,10 +408,10 @@ export default function Help() {
                       We'll respond within 24 hours
                     </p>
                     <a
-                      href="mailto:support@mintofood.com"
+                      href="mailto:support@lagech.in"
                       className="text-sm text-primary hover:underline font-medium"
                     >
-                      support@mintofood.com
+                      support@lagech.in
                     </a>
                   </div>
                 </div>

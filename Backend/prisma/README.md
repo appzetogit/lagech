@@ -11,9 +11,9 @@ sometimes mid-test-run. WSL runs the same Postgres without any of that.
 
 ```bash
 wsl -d Ubuntu -- sudo apt-get install -y postgresql postgis postgresql-16-postgis-3
-wsl -d Ubuntu -- sudo -u postgres psql -c "CREATE ROLE minto LOGIN PASSWORD 'minto' SUPERUSER;"
-wsl -d Ubuntu -- sudo -u postgres createdb -O minto minto
-wsl -d Ubuntu -- sudo -u postgres psql -d minto -c 'CREATE EXTENSION postgis;'
+wsl -d Ubuntu -- sudo -u postgres psql -c "CREATE ROLE lagech LOGIN PASSWORD 'lagech' SUPERUSER;"
+wsl -d Ubuntu -- sudo -u postgres createdb -O lagech lagech
+wsl -d Ubuntu -- sudo -u postgres psql -d lagech -c 'CREATE EXTENSION postgis;'
 ```
 
 Then set `listen_addresses = '*'` and `port = 5434` in
@@ -25,7 +25,7 @@ Then set `listen_addresses = '*'` and `port = 5434` in
 container used 5433. WSL2 forwards localhost, so from Windows:
 
 ```
-DATABASE_URL="postgresql://minto:minto@localhost:5434/minto?schema=public"
+DATABASE_URL="postgresql://lagech:lagech@localhost:5434/lagech?schema=public"
 ```
 
 `wsl -d Ubuntu -- sudo service postgresql start` after a reboot. The container
@@ -35,8 +35,8 @@ that does not depend on it.
 ## Local setup
 
 ```bash
-docker run -d --name minto-pg \
-  -e POSTGRES_USER=minto -e POSTGRES_PASSWORD=minto -e POSTGRES_DB=minto \
+docker run -d --name lagech-pg \
+  -e POSTGRES_USER=lagech -e POSTGRES_PASSWORD=lagech -e POSTGRES_DB=lagech \
   -p 5433:5432 postgis/postgis:16-3.4
 ```
 
@@ -45,13 +45,13 @@ on Windows, and it answers first, which surfaces as a confusing
 `P1000: Authentication failed` rather than a connection refusal.
 
 ```
-DATABASE_URL="postgresql://minto:minto@localhost:5433/minto?schema=public"
+DATABASE_URL="postgresql://lagech:lagech@localhost:5433/lagech?schema=public"
 ```
 
 ### Planner tuning
 
 ```sql
-ALTER DATABASE minto SET random_page_cost = 1.1;
+ALTER DATABASE lagech SET random_page_cost = 1.1;
 ```
 
 Postgres defaults this to `4.0`, meaning "a random page read costs four
