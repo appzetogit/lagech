@@ -23,15 +23,15 @@ jobs:
         # postgis, matching docker-compose.yml: delivery zones are polygons.
         image: postgis/postgis:16-3.4
         env:
-          POSTGRES_USER: minto
-          POSTGRES_PASSWORD: minto
-          POSTGRES_DB: minto
+          POSTGRES_USER: lagech
+          POSTGRES_PASSWORD: lagech
+          POSTGRES_DB: lagech
         ports:
           - 5432:5432
         # Without the health check the first migration races the server's
         # startup and fails on a connection the runner has not opened yet.
         options: >-
-          --health-cmd "pg_isready -U minto -d minto"
+          --health-cmd "pg_isready -U lagech -d lagech"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
@@ -41,7 +41,7 @@ jobs:
         working-directory: Backend
 
     env:
-      DATABASE_URL: postgresql://minto:minto@localhost:5432/minto?schema=public
+      DATABASE_URL: postgresql://lagech:lagech@localhost:5432/lagech?schema=public
 
     steps:
       - uses: actions/checkout@v4

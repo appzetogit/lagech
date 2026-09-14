@@ -103,7 +103,7 @@ export default function DiningManagement() {
             let imageUrl = editingCategoryImageUrl
 
             if (categoryFile) {
-                const uploadResponse = await uploadAPI.uploadMedia(categoryFile, { folder: "minto/dining/categories" })
+                const uploadResponse = await uploadAPI.uploadMedia(categoryFile, { folder: "lagech/dining/categories" })
                 imageUrl = uploadResponse?.data?.data?.url || ""
             }
 

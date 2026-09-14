@@ -29,7 +29,7 @@ const QUEUES_ENABLED = backendEnv('BULLMQ_ENABLED') === 'true'
 module.exports = {
   apps: [
     {
-      name: 'uat-minto-api',
+      name: 'uat-lagech-api',
       cwd: BACKEND,
       script: 'server.js',
       // Fixed at 2, not 'max': UAT shares the box and must leave production
@@ -47,7 +47,7 @@ module.exports = {
       }
     },
     {
-      name: 'uat-minto-socket',
+      name: 'uat-lagech-socket',
       cwd: BACKEND,
       script: 'socket-server.js',
       instances: 1,
@@ -60,7 +60,7 @@ module.exports = {
       }
     },
     {
-      name: 'uat-minto-scheduler',
+      name: 'uat-lagech-scheduler',
       cwd: BACKEND,
       script: 'scripts/run-scheduled-jobs.js',
       instances: 1,
@@ -77,7 +77,7 @@ module.exports = {
 if (QUEUES_ENABLED) {
   module.exports.apps.push(
       {
-        name: 'uat-minto-worker-order',
+        name: 'uat-lagech-worker-order',
         cwd: BACKEND,
         script: 'src/queues/workers/order.worker.js',
         instances: 1,
@@ -89,7 +89,7 @@ if (QUEUES_ENABLED) {
         }
       },
       {
-        name: 'uat-minto-worker-tracking',
+        name: 'uat-lagech-worker-tracking',
         cwd: BACKEND,
         script: 'src/queues/workers/tracking.worker.js',
         instances: 1,

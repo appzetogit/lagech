@@ -12,7 +12,7 @@ import { resolveDeviceFcmToken, registerWebPushForCurrentModule } from "@food/ut
 import { useCompanyName } from "@food/hooks/useCompanyName"
 import { loadBusinessSettings, getModuleLogoUrl } from "@food/utils/businessSettings"
 import RestaurantPartnerHero from "@food/components/restaurant/auth/RestaurantPartnerHero"
-import mintoLogo from "@food/assets/minto-logo.png"
+import lagechLogo from "@food/assets/lagech-logo.png"
 
 const THEME = "#008078"
 
@@ -20,7 +20,7 @@ export default function RestaurantOTP() {
   const companyName = useCompanyName()
   const navigate = useNavigate()
   const prefersReducedMotion = useReducedMotion()
-  const [logoUrl, setLogoUrl] = useState(() => getModuleLogoUrl("restaurant") || mintoLogo)
+  const [logoUrl, setLogoUrl] = useState(() => getModuleLogoUrl("restaurant") || lagechLogo)
   const [otp, setOtp] = useState(["", "", "", ""])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState("")
@@ -319,7 +319,7 @@ export default function RestaurantOTP() {
                     className="h-full w-full scale-[1.65] object-contain"
                     loading="lazy"
                     onError={(e) => {
-                      if (e.target.src !== mintoLogo) e.target.src = mintoLogo
+                      if (e.target.src !== lagechLogo) e.target.src = lagechLogo
                     }}
                   />
                 </div>

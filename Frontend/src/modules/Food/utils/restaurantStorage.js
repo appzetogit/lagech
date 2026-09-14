@@ -4,7 +4,7 @@ const debugWarn = (...args) => {}
 const debugError = (...args) => {}
 
 
-const STORAGE_KEY = "minto_restaurants"
+const STORAGE_KEY = "lagech_restaurants"
 
 // Get restaurants from localStorage
 export const getRestaurants = () => {

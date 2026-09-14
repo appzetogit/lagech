@@ -339,10 +339,10 @@ export const useRestaurantNotifications = () => {
       let suggestedBackendUrl = null;
       
       // Common patterns:
-      // - If frontend is on admin.mintofood.com, backend might be api.mintofood.com or admin.mintofood.com
-      if (frontendHost.includes('admin.mintofood.com')) {
-        suggestedBackendUrl = `${frontendProtocol}//api.mintofood.com/api`;
-      } else if (frontendHost.includes('mintofood.com')) {
+      // - If frontend is on admin.lagech.in, backend might be api.lagech.in or admin.lagech.in
+      if (frontendHost.includes('admin.lagech.in')) {
+        suggestedBackendUrl = `${frontendProtocol}//api.lagech.in/api`;
+      } else if (frontendHost.includes('lagech.in')) {
         suggestedBackendUrl = `${frontendProtocol}//api.${frontendHost}/api`;
       }
       

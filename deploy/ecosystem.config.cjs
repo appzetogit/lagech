@@ -29,7 +29,7 @@ const QUEUES_ENABLED = backendEnv('BULLMQ_ENABLED') === 'true'
 module.exports = {
   apps: [
     {
-      name: 'minto-api',
+      name: 'lagech-api',
       cwd: BACKEND,
       script: 'server.js',
       instances: 'max',
@@ -45,7 +45,7 @@ module.exports = {
       }
     },
     {
-      name: 'minto-socket',
+      name: 'lagech-socket',
       cwd: BACKEND,
       script: 'socket-server.js',
       instances: 1,
@@ -58,7 +58,7 @@ module.exports = {
       }
     },
     {
-      name: 'minto-scheduler',
+      name: 'lagech-scheduler',
       cwd: BACKEND,
       script: 'scripts/run-scheduled-jobs.js',
       instances: 1,
@@ -75,7 +75,7 @@ module.exports = {
 if (QUEUES_ENABLED) {
   module.exports.apps.push(
       {
-        name: 'minto-worker-order',
+        name: 'lagech-worker-order',
         cwd: BACKEND,
         script: 'src/queues/workers/order.worker.js',
         instances: 1,
@@ -87,7 +87,7 @@ if (QUEUES_ENABLED) {
         }
       },
       {
-        name: 'minto-worker-tracking',
+        name: 'lagech-worker-tracking',
         cwd: BACKEND,
         script: 'src/queues/workers/tracking.worker.js',
         instances: 1,

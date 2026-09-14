@@ -55,7 +55,7 @@ import { adminAPI } from "@food/api"
 import { getCachedSettings, loadBusinessSettings } from "@food/utils/businessSettings"
 import { canAccessFeatureSettings, canAccessSuperPowers } from "@food/utils/adminPermissions"
 import { canAdminAccess, isSuperAdmin, resolvePermissionSectionByPath } from "@food/utils/adminRbac"
-import mintoLogo from "@food/assets/minto-logo.png"
+import lagechLogo from "@food/assets/lagech-logo.png"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -886,13 +886,13 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
                 <div className="w-24 h-12 rounded-lg flex items-center justify-center shadow-black/20">
                   {logoUrl ? (
                     <img
-                      src={logoUrl || mintoLogo}
+                      src={logoUrl || lagechLogo}
                       alt={companyName || "Company"}
                       className="w-24 h-10 object-contain"
                       loading="lazy"
                       onError={(e) => {
-                        if (e.target.src !== mintoLogo) {
-                          e.target.src = mintoLogo
+                        if (e.target.src !== lagechLogo) {
+                          e.target.src = lagechLogo
                         }
                       }}
                     />
@@ -901,7 +901,7 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
                       {companyName}
                     </span>
                   ) : (
-                    <img src={mintoLogo} alt="Company" className="w-24 h-10 object-contain" loading="lazy" />
+                    <img src={lagechLogo} alt="Company" className="w-24 h-10 object-contain" loading="lazy" />
                   )}
                 </div>
               </div>
@@ -911,18 +911,18 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
                 <div className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center shadow-lg shadow-black/20 ring-1 ring-white/10">
                   {logoUrl || companyName ? (
                     <img
-                      src={logoUrl || mintoLogo}
+                      src={logoUrl || lagechLogo}
                       alt={companyName || "Company"}
                       className="w-10 h-10 object-contain"
                       loading="lazy"
                       onError={(e) => {
-                        if (e.target.src !== mintoLogo) {
-                          e.target.src = mintoLogo
+                        if (e.target.src !== lagechLogo) {
+                          e.target.src = lagechLogo
                         }
                       }}
                     />
                   ) : (
-                    <img src={mintoLogo} alt="Company" className="w-10 h-10 object-contain" loading="lazy" />
+                    <img src={lagechLogo} alt="Company" className="w-10 h-10 object-contain" loading="lazy" />
                   )}
                 </div>
               </div>

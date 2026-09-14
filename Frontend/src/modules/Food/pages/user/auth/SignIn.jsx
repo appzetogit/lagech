@@ -7,7 +7,7 @@ import { Input } from "@food/components/ui/input"
 import { authAPI } from "@food/api"
 import { motion } from "framer-motion"
 import loginBanner from "@food/assets/loginbanner.png"
-import logoImg from "@food/assets/minto-logo copy.png"
+import logoImg from "@food/assets/lagech-logo copy.png"
 const debugLog = (...args) => { }
 const debugWarn = (...args) => { }
 const debugError = (...args) => { }
@@ -137,7 +137,7 @@ export default function SignIn() {
           </div>
           <div className="text-center">
             <h1 className="text-white font-black text-4xl tracking-tighter leading-none mb-1 italic">
-              MINTO<span className="opacity-60">FOODS</span>
+              LAGECH<span className="opacity-60">FOODS</span>
             </h1>
             <div className="h-0.5 w-12 bg-white/40 mx-auto rounded-full" />
           </div>

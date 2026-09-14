@@ -5,7 +5,7 @@ import { motion } from "framer-motion"
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@food/components/ui/card"
 import { Button } from "@food/components/ui/button"
 import { getCachedSettings, loadBusinessSettings } from "@food/utils/businessSettings"
-const mintoLogo = "/minto-logo.png"
+const lagechLogo = "/lagech-logo.png"
 
 export default function Home() {
   const navigate = useNavigate()
@@ -45,12 +45,12 @@ export default function Home() {
           <div className="flex justify-center mb-6">
             {logoUrl || companyName ? (
               <img
-                src={logoUrl || mintoLogo}
+                src={logoUrl || lagechLogo}
                 alt={companyName || "Logo"}
                 className="h-16 w-auto object-contain"
                 onError={(e) => {
-                  if (e.target.src !== mintoLogo) {
-                    e.target.src = mintoLogo
+                  if (e.target.src !== lagechLogo) {
+                    e.target.src = lagechLogo
                   }
                 }}
               />
@@ -60,7 +60,7 @@ export default function Home() {
               </div>
             )}
           </div>
-          <CardTitle className="text-3xl font-bold text-center">{companyName || "Minto Foods Food"}</CardTitle>
+          <CardTitle className="text-3xl font-bold text-center">{companyName || "Lagech Food"}</CardTitle>
           <CardDescription className="text-lg">
             Welcome to the Food Delivery Platform
           </CardDescription>

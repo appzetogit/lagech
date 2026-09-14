@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react"
 import { exportToCSV, exportToExcel, exportToPDF, exportToJSON } from "./ordersExportUtils"
-import mintoLogo from "@food/assets/minto-logo.png"
+import lagechLogo from "@food/assets/lagech-logo.png"
 import { getCachedSettings, loadBusinessSettings } from "@food/utils/businessSettings"
 import { restaurantLabel } from "@food/utils/entityLabels"
 const debugError = () => {}
@@ -303,8 +303,8 @@ export function useOrdersManagement(orders, statusKey, title, options = {}) {
         : (order.date || new Date().toLocaleDateString())
 
       const settings = getCachedSettings() || await loadBusinessSettings()
-      const companyName = settings?.companyName || "Minto Foods Food"
-      const logoUrl = settings?.logo?.url || mintoLogo
+      const companyName = settings?.companyName || "Lagech Food"
+      const logoUrl = settings?.logo?.url || lagechLogo
       const logoDataUrl = await imageUrlToDataUrl(logoUrl)
 
       const items = Array.isArray(order.items) ? order.items : []

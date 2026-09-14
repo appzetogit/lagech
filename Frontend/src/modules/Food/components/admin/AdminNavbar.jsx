@@ -40,7 +40,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@food/components/ui/popover";
-import mintoLogo from "@food/assets/minto-logo.png";
+import lagechLogo from "@food/assets/lagech-logo.png";
 import { adminAPI } from "@food/api";
 import { clearModuleAuth } from "@food/utils/auth";
 import { getCachedSettings, loadBusinessSettings } from "@food/utils/businessSettings";
@@ -289,7 +289,7 @@ export default function AdminNavbar({ onMenuClick }) {
                     loading="lazy"
                     onError={(e) => {
                       // Fallback to default logo if company logo fails to load
-                      e.target.src = mintoLogo;
+                      e.target.src = lagechLogo;
                     }}
                   />
                 ) : (
@@ -298,7 +298,7 @@ export default function AdminNavbar({ onMenuClick }) {
                       {businessSettings.companyName}
                     </span>
                   ) : (
-                    <img src={mintoLogo} alt={businessSettings?.companyName || "Company"} className="w-24 h-10 object-contain" loading="lazy" />
+                    <img src={lagechLogo} alt={businessSettings?.companyName || "Company"} className="w-24 h-10 object-contain" loading="lazy" />
                   )
                 )}
               </div>

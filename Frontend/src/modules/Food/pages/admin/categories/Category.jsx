@@ -355,7 +355,7 @@ export default function Category() {
       let imageUrl = String(formData.image || "").trim()
 
       if (selectedImageFile) {
-        const uploadRes = await uploadAPI.uploadMedia(selectedImageFile, { folder: "minto/categories" })
+        const uploadRes = await uploadAPI.uploadMedia(selectedImageFile, { folder: "lagech/categories" })
         const payload = uploadRes?.data?.data || uploadRes?.data
         imageUrl = payload?.url || imageUrl
       }

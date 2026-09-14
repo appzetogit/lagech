@@ -1,14 +1,14 @@
-# Go live on mintofood.com
+# Go live on lagech.in
 
-Target host: EC2 `minto-server` (`i-0da155967af299582`), `3.110.207.151`,
+Target host: EC2 `lagech-server` (`i-0da155967af299582`), `3.110.207.151`,
 ap-south-1. Ubuntu 26.04, 1 vCPU, 2 GB RAM, 8 GB EBS.
 
 | Host                      | Serves                    | Backed by                              |
 | ------------------------- | ------------------------- | -------------------------------------- |
-| `api.mintofood.com`       | prod API + socket + files | PM2 `minto-*`, ports 5000/5001    |
-| `admin.mintofood.com`     | prod web app (SPA)        | static build in `/srv/minto/admin`     |
-| `uat.api.mintofood.com`   | UAT API + socket + files  | PM2 `uat-minto-*`, ports 5100/5101     |
-| `uat.admin.mintofood.com` | UAT web app (SPA)         | static build in `/srv/minto-uat/admin` |
+| `api.lagech.in`       | prod API + socket + files | PM2 `lagech-*`, ports 5000/5001    |
+| `admin.lagech.in`     | prod web app (SPA)        | static build in `/srv/lagech/admin`     |
+| `uat.api.lagech.in`   | UAT API + socket + files  | PM2 `uat-lagech-*`, ports 5100/5101     |
+| `uat.admin.lagech.in` | UAT web app (SPA)         | static build in `/srv/lagech-uat/admin` |
 
 The repo is checked out at `/var/www`. Served content lives under `/srv`
 instead: serving out of a working tree exposes `.git` to anyone who guesses
@@ -20,12 +20,12 @@ the path, and a redeploy that touches the tree would take the uploads with it.
 - nginx reverse proxy for all four hosts, installed and validated. The stock
   `default_server` is removed, so the bare IP no longer answers.
 - certbot 4.0.0 installed.
-- Frontend built and deployed to `/srv/minto/admin`, with
-  `https://api.mintofood.com/api/v1` baked in.
+- Frontend built and deployed to `/srv/lagech/admin`, with
+  `https://api.lagech.in/api/v1` baked in.
 - `Backend/.env` written with generated JWT secrets, CORS, and upload paths.
 - TLS live on all four hosts, renewing over DNS-01, dry run passing.
 - Production origin refuses requests that did not come through Cloudflare.
-- Rebranded to Minto Foods; `admin.mintofood.com/` lands on `/admin`.
+- Rebranded to Lagech; `admin.lagech.in/` lands on `/admin`.
 
 ## Blocked
 
@@ -43,14 +43,14 @@ the path, and a redeploy that touches the tree would take the uploads with it.
 
 ## 1. DNS (client, in Cloudflare)
 
-    api.mintofood.com          A   3.110.207.151
-    admin.mintofood.com        A   3.110.207.151
-    uat.api.mintofood.com      A   3.110.207.151
-    uat.admin.mintofood.com    A   3.110.207.151
+    api.lagech.in          A   3.110.207.151
+    admin.lagech.in        A   3.110.207.151
+    uat.api.lagech.in      A   3.110.207.151
+    uat.admin.lagech.in    A   3.110.207.151
 
 Confirm before running certbot — it fails on a name that has not propagated:
 
-    dig +short api.mintofood.com
+    dig +short api.lagech.in
 
 **Ask whether these are proxied (orange cloud) or DNS-only (grey).** Proxied,
 every request arrives from a Cloudflare edge address, `$remote_addr` stops
@@ -120,7 +120,7 @@ the security group, using a managed prefix list rather than forty raw rules.
 Instance: `database-1-instance-1.cno8qkoa4p2p.ap-south-1.rds.amazonaws.com`.
 Port 5432 is reachable from the EC2 instance.
 
-    DATABASE_URL=postgresql://USER:PASS@HOST:5432/minto?schema=public&sslmode=require
+    DATABASE_URL=postgresql://USER:PASS@HOST:5432/lagech?schema=public&sslmode=require
 
     cd /var/www/Backend && npm run db:migrate
 
@@ -147,7 +147,7 @@ Four things that will bite otherwise:
 
 The app also wants its own database rather than the default `postgres` one:
 
-    CREATE DATABASE minto;
+    CREATE DATABASE lagech;
 
 ### Connection pool sizing
 
@@ -198,7 +198,7 @@ cross-origin and `CORS_ORIGINS` decides whether it is allowed. It must list
 **every** origin the SPA is served from -- the apex and the admin host serve the
 same build, so both call the same API:
 
-    CORS_ORIGINS=https://mintofood.com,https://www.mintofood.com,https://admin.mintofood.com,https://uat.admin.mintofood.com
+    CORS_ORIGINS=https://lagech.in,https://www.lagech.in,https://admin.lagech.in,https://uat.admin.lagech.in
 
 Worth knowing how this fails, because the error points somewhere else: when the
 backend is down, nginx answers with its own 502 page, and that page carries no
@@ -208,13 +208,13 @@ CORS list.
 
 ## 4c. Uploads (S3)
 
-Media goes to the `minto-media` bucket in ap-south-1, written by the EC2
+Media goes to the `lagech-media` bucket in ap-south-1, written by the EC2
 instance role -- no access keys anywhere. Set in `Backend/.env`:
 
     UPLOAD_DRIVER=s3
-    UPLOAD_S3_BUCKET=minto-media
+    UPLOAD_S3_BUCKET=lagech-media
     UPLOAD_S3_REGION=ap-south-1
-    UPLOAD_BASE_URL=https://minto-media.s3.ap-south-1.amazonaws.com
+    UPLOAD_BASE_URL=https://lagech-media.s3.ap-south-1.amazonaws.com
 
 `UPLOAD_DRIVER=local` switches back to disk; the code path is still there and
 nginx still serves `/uploads/` for anything written before the move.
@@ -222,10 +222,10 @@ nginx still serves `/uploads/` for anything written before the move.
 Two separate AWS settings are needed for customers to see the images, and
 turning off only the first leaves you with a 403 that looks like a broken
 policy: **Block Public Access off** removes the veto, and a **bucket policy**
-granting `s3:GetObject` on `arn:aws:s3:::minto-media/*` is what actually
+granting `s3:GetObject` on `arn:aws:s3:::lagech-media/*` is what actually
 grants the read. Neither works alone.
 
-Worth doing later: CloudFront in front of the bucket, on `cdn.mintofood.com`.
+Worth doing later: CloudFront in front of the bucket, on `cdn.lagech.in`.
 Cheaper egress and edge caching, and it needs no application change -- only a
 different `UPLOAD_BASE_URL`.
 
@@ -237,15 +237,15 @@ different `UPLOAD_BASE_URL`.
 
 ## 6. Verify
 
-    curl -sS https://api.mintofood.com/health
+    curl -sS https://api.lagech.in/health
 
     # CORS: header present on the first, absent on the second
-    curl -sSI -H 'Origin: https://admin.mintofood.com' https://api.mintofood.com/api/v1/health
-    curl -sSI -H 'Origin: https://evil.example.com'    https://api.mintofood.com/api/v1/health
+    curl -sSI -H 'Origin: https://admin.lagech.in' https://api.lagech.in/api/v1/health
+    curl -sSI -H 'Origin: https://evil.example.com'    https://api.lagech.in/api/v1/health
 
-Then at `https://admin.mintofood.com`: load `/admin`, sign in, open an order.
+Then at `https://admin.lagech.in`: load `/admin`, sign in, open an order.
 The console should show a `/socket.io/` upgrade and no CORS or mixed-content
-errors, and images should load from `api.mintofood.com/uploads/`.
+errors, and images should load from `api.lagech.in/uploads/`.
 
 ## Redeploying the frontend
 
