@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from "react"
 import {
   Loader2, Search, IndianRupee, AlertTriangle, CheckCircle2, Info, History, Landmark,
 } from "lucide-react"
+import { Link } from "react-router-dom"
 import { toast } from "sonner"
 import { adminAPI } from "@food/api"
 
@@ -309,6 +310,16 @@ export default function BalanceSheet() {
                         {money(row.payable)}
                       </td>
                       <td className="px-4 py-3 text-center">
+                        {isRestaurants ? (
+                          // Paying here never reduced the restaurant's own balance, so
+                          // the same money could be paid again as a payout or withdrawal.
+                          <Link
+                            to="/admin/food/restaurant-disbursements"
+                            className="px-3 py-1.5 text-xs font-medium rounded-lg border border-teal-700 text-teal-700 hover:bg-teal-50 inline-flex items-center gap-1"
+                          >
+                            Pay via Disbursement
+                          </Link>
+                        ) : (
                         <button
                           type="button"
                           disabled={payingId === row.entityId}
@@ -322,6 +333,7 @@ export default function BalanceSheet() {
                           )}
                           {row.payable < 0 ? "Settle" : "Mark paid"}
                         </button>
+                        )}
                       </td>
                     </tr>
                   ))}

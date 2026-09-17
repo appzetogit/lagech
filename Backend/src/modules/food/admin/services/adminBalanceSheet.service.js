@@ -290,6 +290,16 @@ export async function payoutEntity(entityType, entityId, body = {}) {
         throw new ValidationError('entityType must be "restaurant" or "rider"');
     }
 
+    // Restaurants are paid through their withdrawals and the daily payout run,
+    // which is what their balance is worked out from. A payout recorded here
+    // only closed these settlement flags: the restaurant's balance did not
+    // move, so the same money stayed payable there and could be paid twice.
+    if (entityType === 'restaurant') {
+        throw new ValidationError(
+            'Restaurants are paid from Restaurant Disbursement or their withdrawal requests, so their balance stays right. Nothing was recorded here.',
+        );
+    }
+
     const { start, end } = parsePeriod(body);
     const isRestaurant = entityType === 'restaurant';
     const shareField = isRestaurant ? 'restaurantShare' : 'riderShare';
