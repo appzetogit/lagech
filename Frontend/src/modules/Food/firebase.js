@@ -13,6 +13,9 @@ const firebaseConfig = {
   databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL || ""
 };
 
+/** Whether this build has the settings Firebase needs to start at all. */
+export const isFirebaseConfigured = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId);
+
 // Internal state
 let app;
 let firebaseAuth = null;
@@ -61,6 +64,11 @@ export function getGoogleAuthProvider() {
  */
 export function ensureFirebaseInitialized(options = {}) {
   const { enableAuth = false, enableRealtimeDb = true } = options;
+  // Without a key Firebase throws auth/invalid-api-key from inside getAuth,
+  // and that throw during render took down whole pages (admin Live Tracking)
+  // on any deployment built without Firebase settings. Callers treat null as
+  // "live tracking unavailable".
+  if (!isFirebaseConfigured) return null;
   const firebaseApp = initializeBaseApp();
 
   if (enableAuth) {
