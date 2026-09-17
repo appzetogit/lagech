@@ -1,3 +1,23 @@
+/**
+ * The admin sidebar, laid out like the previous (6amMart) admin panel: the same
+ * section order, grouping and names, so the team finds things where they are
+ * used to finding them.
+ *
+ * Only pages that actually work are listed. Features the old panel had that
+ * this one does not yet (bulk import/export, disbursements, expenses, collect
+ * cash, withdraw methods, advertisements, reels) get their entry when they are
+ * built -- a link to a page that loads and saves nothing is worse than no link.
+ * Pages the old panel never had (live tracking, duty log, subscriptions, ...)
+ * sit in the nearest old section rather than being dropped.
+ *
+ * Behaviour is keyed, not derived from the visible text, so renaming an entry
+ * can never change what it does:
+ *   badge    -- key into the /sidebar-badges counts
+ *   requires -- "superPowers" | "adminAccess": extra gate on top of RBAC
+ *   feature  -- "codControl" | "restaurantSubscription" | "unregisteredRestaurants"
+ *               | "featureSettings": hidden while that feature is switched off
+ * Permissions themselves still come from the path, via adminRbac.js.
+ */
 export const adminSidebarMenu = [
   {
     type: "link",
@@ -6,67 +26,10 @@ export const adminSidebarMenu = [
     icon: "LayoutDashboard",
   },
   {
-    type: "link",
-    label: "Point of Sale",
-    path: "/admin/food/point-of-sale",
-    icon: "CreditCard",
-  },
-  {
     type: "section",
-    label: "FOOD MANAGEMENT",
+    label: "POS SECTION",
     items: [
-      {
-        type: "link",
-        label: "Food Approval",
-        path: "/admin/food/food-approval",
-        icon: "CheckCircle2",
-      },
-      {
-        type: "expandable",
-        label: "Foods",
-        icon: "Utensils",
-        subItems: [
-          { label: "Restaurant Foods List", path: "/admin/food/foods" },
-          { label: "Restaurant Addons List", path: "/admin/food/addons" },
-        ],
-      },
-      {
-        type: "expandable",
-        label: "Categories",
-        icon: "FolderTree",
-        subItems: [
-          { label: "Category", path: "/admin/food/categories" },
-          { label: "Sub Category", path: "/admin/food/categories/sub" },
-        ],
-      },
-    ],
-  },
-  {
-    type: "section",
-    label: "RESTAURANT MANAGEMENT",
-    items: [
-      {
-        type: "link",
-        label: "Zone Setup",
-        path: "/admin/food/zone-setup",
-        icon: "MapPin",
-      },
-      {
-        type: "expandable",
-        label: "Restaurants",
-        icon: "UtensilsCrossed",
-        subItems: [
-          { label: "Restaurants List", path: "/admin/food/restaurants" },
-          { label: "New Joining Request", path: "/admin/food/restaurants/joining-request" },
-          { label: "Unregistered Restaurants", path: "/admin/food/restaurants/unregistered" },
-          { label: "Restaurant Reviews", path: "/admin/food/restaurants/reviews" },
-          { label: "Restaurant Complaints", path: "/admin/food/restaurants/complaints" },
-          { label: "Restaurant Settings", path: "/admin/food/restaurants/settings" },
-          { label: "Billing Mode", path: "/admin/food/restaurants/billing" },
-          { label: "Subscription Settings", path: "/admin/food/restaurants/subscription-settings" },
-          { label: "Subscription Billing", path: "/admin/food/restaurants/subscription-history" },
-        ],
-      },
+      { type: "link", label: "New Sale", path: "/admin/food/point-of-sale", icon: "CreditCard" },
     ],
   },
   {
@@ -79,124 +42,214 @@ export const adminSidebarMenu = [
         icon: "FileText",
         subItems: [
           { label: "All", path: "/admin/food/orders/all" },
-          { label: "Pending", path: "/admin/food/orders/pending" },
+          { label: "Pending", path: "/admin/food/orders/pending", badge: "orders" },
           { label: "Processing", path: "/admin/food/orders/processing" },
-          { label: "Food On The Way", path: "/admin/food/orders/food-on-the-way" },
+          { label: "Order On The Way", path: "/admin/food/orders/food-on-the-way" },
           { label: "Delivered", path: "/admin/food/orders/delivered" },
-          { label: "Cancelled", path: "/admin/food/orders/canceled" },
-          { label: "Restaurant cancelled", path: "/admin/food/orders/restaurant-cancelled" },
+          { label: "Canceled", path: "/admin/food/orders/canceled" },
+          { label: "Restaurant Canceled", path: "/admin/food/orders/restaurant-cancelled" },
           { label: "Payment Failed", path: "/admin/food/orders/payment-failed" },
           { label: "Refunded", path: "/admin/food/orders/refunded" },
-          { label: "Offline Payments", path: "/admin/food/orders/offline-payments" },
+          {
+            label: "Offline Payments",
+            path: "/admin/food/orders/offline-payments",
+            badge: "offlinePayments",
+            feature: "codControl",
+          },
           { label: "User Carts", path: "/admin/food/orders/user-carts" },
         ],
       },
       {
-        type: "link",
-        label: "Order Detect Delivery",
-        path: "/admin/food/order-detect-delivery",
-        icon: "Truck",
+        type: "expandable",
+        label: "Order Refunds",
+        icon: "Receipt",
+        subItems: [{ label: "Refund Requests", path: "/admin/food/order-refunds/new" }],
       },
+      { type: "link", label: "Order Detect Delivery", path: "/admin/food/order-detect-delivery", icon: "Truck" },
     ],
   },
   {
     type: "section",
-    label: "PROMOTIONS MANAGEMENT",
+    label: "PROMOTION MANAGEMENT",
     items: [
-      {
-        type: "link",
-        label: "Restaurant Coupons & Offers",
-        path: "/admin/food/coupons",
-        icon: "Gift",
-      },
-    ],
-  },
-  {
-    type: "section",
-    label: "REFERRAL & REWARDS",
-    items: [
+      { type: "link", label: "Banners", path: "/admin/food/hero-banner-management", icon: "Image" },
+      { type: "link", label: "Other Banners", path: "/admin/food/promotional-banner", icon: "Megaphone" },
+      { type: "link", label: "Coupons", path: "/admin/food/coupons", icon: "Gift" },
+      { type: "link", label: "Push Notification", path: "/admin/food/broadcast-notification", icon: "Bell" },
       { type: "link", label: "Referral Settings", path: "/admin/food/referral-settings", icon: "Gift" },
     ],
   },
   {
     type: "section",
-    label: "CUSTOMER MANAGEMENT",
+    label: "FOOD MANAGEMENT",
     items: [
-      {
-        type: "link",
-        label: "Customers",
-        path: "/admin/food/customers",
-        icon: "Users",
-      },
-      {
-        type: "link",
-        label: "Live Chat",
-        path: "/admin/food/chattings",
-        icon: "MessagesSquare",
-      },
-      {
-        type: "link",
-        label: "Support Tickets (User & Restaurant)",
-        path: "/admin/food/support-tickets",
-        icon: "MessageSquare",
-      },
-    ],
-  },
-  {
-    type: "section",
-    label: "DELIVERYMAN MANAGEMENT",
-    items: [
-      { type: "link", label: "Delivery & Platform Fee", path: "/admin/food/fee-settings", icon: "DollarSign" },
-      { type: "link", label: "Delivery Withdrawal", path: "/admin/food/delivery-withdrawal", icon: "Wallet" },
-      { type: "link", label: "Delivery boy Wallet", path: "/admin/food/delivery-boy-wallet", icon: "PiggyBank" },
-      { type: "link", label: "Delivery Emergency Help", path: "/admin/food/delivery-emergency-help", icon: "Phone" },
-      { type: "link", label: "Delivery Support Tickets", path: "/admin/food/delivery-support-tickets", icon: "MessageSquare" },
-      { type: "link", label: "Order Reassignment Requests", path: "/admin/food/delivery-order-reassignment-requests", icon: "AlertTriangle" },
       {
         type: "expandable",
-        label: "Deliveryman",
-        icon: "Package",
+        label: "Categories",
+        icon: "FolderTree",
         subItems: [
-          { label: "New Join Request", path: "/admin/food/delivery-partners/join-request" },
-          { label: "Deliveryman List", path: "/admin/food/delivery-partners" },
-          { label: "Live Tracking", path: "/admin/food/delivery-partners/live-tracking" },
-          { label: "Duty Log", path: "/admin/food/delivery-partners/duty-log" },
-          { label: "Deliveryman Reviews", path: "/admin/food/delivery-partners/reviews" },
-          { label: "Bonus", path: "/admin/food/delivery-partners/bonus" },
-          { label: "Earning Addon", path: "/admin/food/delivery-partners/earning-addon" },
-          { label: "Earning Addon History", path: "/admin/food/delivery-partners/earning-addon-history" },
-          { label: "Delivery Earning", path: "/admin/food/delivery-partners/earnings" },
+          { label: "Category", path: "/admin/food/categories" },
+          { label: "Sub Category", path: "/admin/food/categories/sub" },
+        ],
+      },
+      {
+        type: "expandable",
+        label: "Addons",
+        icon: "PlusCircle",
+        subItems: [{ label: "List", path: "/admin/food/addons" }],
+      },
+      {
+        type: "expandable",
+        label: "Food Setup",
+        icon: "Utensils",
+        badge: "foods",
+        subItems: [
+          { label: "List", path: "/admin/food/foods" },
+          { label: "New Food Request", path: "/admin/food/food-approval", badge: "foodApprovals" },
         ],
       },
     ],
   },
   {
     type: "section",
-    label: "HELP & SUPPORT",
+    label: "RESTAURANT MANAGEMENT",
     items: [
-      { type: "link", label: "User Feedback", path: "/admin/food/contact-messages", icon: "Mail" },
-      { type: "link", label: "Safety Emergency Reports", path: "/admin/food/safety-emergency-reports", icon: "AlertTriangle" },
+      { type: "link", label: "Zone Setup", path: "/admin/food/zone-setup", icon: "MapPin" },
+      {
+        type: "link",
+        label: "New Restaurants",
+        path: "/admin/food/restaurants/joining-request",
+        icon: "Store",
+        badge: "restaurants",
+      },
+      { type: "link", label: "Add New Restaurant", path: "/admin/food/restaurants/add", icon: "PlusCircle" },
+      {
+        type: "expandable",
+        label: "Restaurants",
+        icon: "UtensilsCrossed",
+        subItems: [
+          { label: "Restaurants List", path: "/admin/food/restaurants" },
+          {
+            label: "Unregistered Restaurants",
+            path: "/admin/food/restaurants/unregistered",
+            feature: "unregisteredRestaurants",
+          },
+          { label: "Reviews", path: "/admin/food/restaurants/reviews" },
+          {
+            label: "Complaints",
+            path: "/admin/food/restaurants/complaints",
+            badge: "restaurantComplaints",
+          },
+          { label: "Commission", path: "/admin/food/restaurants/commission" },
+          { label: "Restaurant Settings", path: "/admin/food/restaurants/settings" },
+          { label: "Billing Mode", path: "/admin/food/restaurants/billing" },
+          {
+            label: "Subscription Settings",
+            path: "/admin/food/restaurants/subscription-settings",
+            feature: "restaurantSubscription",
+          },
+          {
+            label: "Subscription Billing",
+            path: "/admin/food/restaurants/subscription-history",
+            feature: "restaurantSubscription",
+          },
+        ],
+      },
     ],
   },
   {
     type: "section",
-    label: "REPORT MANAGEMENT",
+    label: "DELIVERYMAN SECTION",
     items: [
-      { type: "link", label: "Transaction Report", path: "/admin/food/transaction-report", icon: "FileText" },
-      { type: "link", label: "Order Report", path: "/admin/food/order-report/regular", icon: "FileText" },
-      { type: "link", label: "Tax Report", path: "/admin/food/tax-report", icon: "Receipt" },
+      {
+        type: "link",
+        label: "New Delivery Man",
+        path: "/admin/food/delivery-partners/join-request",
+        icon: "UserPlus",
+        badge: "deliveryPartners",
+      },
+      { type: "link", label: "Deliveryman List", path: "/admin/food/delivery-partners", icon: "Package" },
+      { type: "link", label: "Reviews", path: "/admin/food/delivery-partners/reviews", icon: "Star" },
+      { type: "link", label: "Live Tracking", path: "/admin/food/delivery-partners/live-tracking", icon: "MapPin" },
+      { type: "link", label: "Duty Log", path: "/admin/food/delivery-partners/duty-log", icon: "Clock" },
       {
         type: "expandable",
-        label: "Restaurant Report",
-        icon: "FileText",
-        subItems: [{ label: "Restaurant Report", path: "/admin/food/restaurant-report" }],
+        label: "Earnings & Bonus",
+        icon: "IndianRupee",
+        subItems: [
+          { label: "Delivery Earning", path: "/admin/food/delivery-partners/earnings" },
+          { label: "Bonus", path: "/admin/food/delivery-partners/bonus" },
+          { label: "Earning Addon", path: "/admin/food/delivery-partners/earning-addon" },
+          {
+            label: "Earning Addon History",
+            path: "/admin/food/delivery-partners/earning-addon-history",
+            badge: "earningAddons",
+          },
+          { label: "Delivery Commission", path: "/admin/food/delivery-boy-commission" },
+          { label: "Delivery & Platform Fee", path: "/admin/food/fee-settings" },
+        ],
       },
       {
         type: "expandable",
-        label: "Customer Report",
-        icon: "FileText",
-        subItems: [{ label: "Feedback Experience", path: "/admin/food/customer-report/feedback-experience" }],
+        label: "Cash & Wallet",
+        icon: "PiggyBank",
+        subItems: [
+          { label: "Delivery Boy Wallet", path: "/admin/food/delivery-boy-wallet" },
+          { label: "Cash Limit", path: "/admin/food/delivery-cash-limit", feature: "codControl" },
+          { label: "Cash Limit Settlement", path: "/admin/food/cash-limit-settlement", feature: "codControl" },
+        ],
       },
+      {
+        type: "link",
+        label: "Emergency Help",
+        path: "/admin/food/delivery-emergency-help",
+        icon: "Phone",
+        badge: "emergencyHelp",
+      },
+      {
+        type: "link",
+        label: "Delivery Support Tickets",
+        path: "/admin/food/delivery-support-tickets",
+        icon: "MessageSquare",
+        badge: "deliverySupportTickets",
+      },
+      {
+        type: "link",
+        label: "Order Reassignment Requests",
+        path: "/admin/food/delivery-order-reassignment-requests",
+        icon: "AlertTriangle",
+      },
+    ],
+  },
+  {
+    type: "section",
+    label: "CUSTOMER SECTION",
+    items: [
+      { type: "link", label: "Customers", path: "/admin/food/customers", icon: "Users" },
+      { type: "link", label: "Live Chat", path: "/admin/food/chattings", icon: "MessagesSquare", badge: "liveChat" },
+      {
+        type: "link",
+        label: "Support Tickets",
+        path: "/admin/food/support-tickets",
+        icon: "MessageSquare",
+        badge: "userSupportTickets",
+      },
+      { type: "link", label: "Contact Messages", path: "/admin/food/contact-messages", icon: "Mail" },
+      {
+        type: "link",
+        label: "Safety Emergency Reports",
+        path: "/admin/food/safety-emergency-reports",
+        icon: "AlertTriangle",
+        badge: "safetyReports",
+      },
+    ],
+  },
+  {
+    type: "section",
+    label: "EMPLOYEE HANDLE",
+    items: [
+      // Roles are edited per employee, from this list.
+      { type: "link", label: "Employees", path: "/admin/food/employees", icon: "UserCog", requires: "adminAccess" },
     ],
   },
   {
@@ -205,64 +258,77 @@ export const adminSidebarMenu = [
     items: [
       {
         type: "link",
-        label: "Balance Sheet",
-        path: "/admin/food/balance-sheet",
-        icon: "Wallet",
+        label: "Withdraw Requests",
+        path: "/admin/food/restaurant-withdraws",
+        icon: "CreditCard",
+        badge: "restaurantWithdrawals",
       },
-      { type: "link", label: "Restaurant Withdraws", path: "/admin/food/restaurant-withdraws", icon: "CreditCard" },
+      {
+        type: "link",
+        label: "Deliveryman Withdraws",
+        path: "/admin/food/delivery-withdrawal",
+        icon: "Wallet",
+        badge: "deliveryWithdrawals",
+      },
+      { type: "link", label: "Balance Sheet", path: "/admin/food/balance-sheet", icon: "Wallet" },
     ],
   },
   {
     type: "section",
-    label: "BANNER SETTINGS",
+    label: "REPORT AND ANALYTICS",
     items: [
-      { type: "link", label: "Landing Page Management", path: "/admin/food/hero-banner-management", icon: "Image" },
-      { type: "link", label: "Promotional Banners", path: "/admin/food/promotional-banner", icon: "Megaphone" },
-// { type: "link", label: "General Banners", path: "/admin/food/banners", icon: "Image" },
+      { type: "link", label: "Transaction Report", path: "/admin/food/transaction-report", icon: "FileText" },
+      { type: "link", label: "Order Report", path: "/admin/food/order-report/regular", icon: "FileText" },
+      { type: "link", label: "Restaurant Wise Report", path: "/admin/food/restaurant-report", icon: "FileText" },
+      { type: "link", label: "Tax Report", path: "/admin/food/tax-report", icon: "Receipt" },
+      {
+        type: "link",
+        label: "Customer Feedback Report",
+        path: "/admin/food/customer-report/feedback-experience",
+        icon: "FileText",
+      },
     ],
   },
   {
     type: "section",
-    label: "DINING MANAGEMENT",
+    label: "BUSINESS SETTINGS",
     items: [
-      // { type: "link", label: "Dining Banners", path: "/admin/food/dining-management", icon: "UtensilsCrossed" },
-      // { type: "link", label: "Dining List", path: "/admin/food/dining-list", icon: "FileText" },
-    ],
-  },
-  {
-    type: "section",
-    label: "SYSTEM SETTINGS",
-    items: [
-      { type: "link", label: "Broadcast Notification", path: "/admin/food/broadcast-notification", icon: "Bell" },
       { type: "link", label: "Business Setup", path: "/admin/food/business-setup", icon: "Settings" },
-    ],
-  },
-  {
-    type: "section",
-    label: "SUPER POWERS",
-    items: [
-      { type: "link", label: "Feature Settings", path: "/admin/food/feature-settings", icon: "Settings" },
-      { type: "link", label: "Power Scanning", path: "/admin/food/power-scanning", icon: "Zap" },
-    ],
-  },
-  {
-    type: "section",
-    label: "ADMIN ACCESS",
-    items: [
-      { type: "link", label: "Sub Admin List", path: "/admin/food/employees", icon: "UserCog" },
+      {
+        type: "link",
+        label: "Feature Settings",
+        path: "/admin/food/feature-settings",
+        icon: "Settings",
+        requires: "superPowers",
+        feature: "featureSettings",
+      },
+      {
+        type: "link",
+        label: "Power Scanning",
+        path: "/admin/food/power-scanning",
+        icon: "Zap",
+        requires: "superPowers",
+      },
     ],
   },
   {
     type: "section",
     label: "PAGES & SOCIAL MEDIA",
     items: [
-      { type: "link", label: "About Us", path: "/admin/food/pages-social-media/about", icon: "Globe" },
-      { type: "link", label: "Terms & Conditions", path: "/admin/food/pages-social-media/terms", icon: "FileText" },
-      { type: "link", label: "Privacy Policy", path: "/admin/food/pages-social-media/privacy", icon: "Lock" },
-      { type: "link", label: "Support", path: "/admin/food/pages-social-media/support", icon: "Headset" },
-      { type: "link", label: "Refund Policy", path: "/admin/food/pages-social-media/refund", icon: "Receipt" },
-      { type: "link", label: "Shipping Policy", path: "/admin/food/pages-social-media/shipping", icon: "Truck" },
-      { type: "link", label: "Cancellation Policy", path: "/admin/food/pages-social-media/cancellation", icon: "X" },
+      {
+        type: "expandable",
+        label: "Business Pages",
+        icon: "Globe",
+        subItems: [
+          { label: "Terms And Condition", path: "/admin/food/pages-social-media/terms" },
+          { label: "Privacy Policy", path: "/admin/food/pages-social-media/privacy" },
+          { label: "About Us", path: "/admin/food/pages-social-media/about" },
+          { label: "Refund Policy", path: "/admin/food/pages-social-media/refund" },
+          { label: "Cancelation Policy", path: "/admin/food/pages-social-media/cancellation" },
+          { label: "Shipping Policy", path: "/admin/food/pages-social-media/shipping" },
+          { label: "Support", path: "/admin/food/pages-social-media/support" },
+        ],
+      },
     ],
   },
 ];

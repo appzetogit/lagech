@@ -64,6 +64,10 @@ const PATH_PREFIX_TO_SECTION = [
   { prefix: "/admin/food/delivery-emergency-help", section: "delivery_management" },
   { prefix: "/admin/food/delivery-support-tickets", section: "delivery_management" },
   { prefix: "/admin/food/delivery-order-reassignment-requests", section: "delivery_management" },
+  // Same sections the backend checks for these pages' API calls: refunds are
+  // /orders/..., commission rules are /delivery/... .
+  { prefix: "/admin/food/delivery-boy-commission", section: "delivery_management" },
+  { prefix: "/admin/food/order-refunds", section: "order_management" },
   { prefix: "/admin/food/food-approval", section: "food_management" },
   { prefix: "/admin/food/foods", section: "food_management" },
   { prefix: "/admin/food/addons", section: "food_management" },

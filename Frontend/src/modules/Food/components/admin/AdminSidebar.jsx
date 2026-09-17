@@ -47,6 +47,10 @@ import {
   IndianRupee,
   PiggyBank,
   Lock,
+  PlusCircle,
+  Star,
+  Store,
+  UserPlus,
 } from "lucide-react"
 import { cn } from "@food/utils/utils"
 import { Input } from "@food/components/ui/input"
@@ -104,6 +108,10 @@ const iconMap = {
   IndianRupee,
   PiggyBank,
   Lock,
+  PlusCircle,
+  Star,
+  Store,
+  UserPlus,
   X,
 }
 
@@ -279,59 +287,44 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
   }, [adminUser])
 
   const menuData = useMemo(() => {
-    const featureSettingsPath = "/admin/food/feature-settings"
-    const subscriptionSettingsPath = "/admin/food/restaurants/subscription-settings"
-    const subscriptionHistoryPath = "/admin/food/restaurants/subscription-history"
-    const deliveryCashLimitPath = "/admin/food/delivery-cash-limit"
-    const cashLimitSettlementPath = "/admin/food/cash-limit-settlement"
-    const offlinePaymentsPath = "/admin/food/orders/offline-payments"
+    // Behaviour comes from explicit keys on each entry (see adminSidebarMenu.js),
+    // never from its visible label: gating a section on its heading text meant
+    // renaming "SUPER POWERS" would quietly show it to every admin.
+    const featureOn = {
+      codControl: codControlEnabled,
+      restaurantSubscription: restaurantSubscriptionEnabled,
+      unregisteredRestaurants: rootLandingAndUnregisteredControlEnabled,
+      featureSettings: canViewFeatureSettings,
+    }
+    const gatePassed = {
+      superPowers: canAccessSuperPowers(adminUser),
+      adminAccess: adminAccessSectionEnabled,
+    }
+
+    // One check for a top-level link, a section item and a sub-item alike, so a
+    // feature switch or permission cannot apply in one place and be missed in
+    // another.
+    const isVisible = (entry) => {
+      if (entry.feature && featureOn[entry.feature] === false) return false
+      if (entry.requires && !gatePassed[entry.requires]) return false
+      if (!entry.path) return true
+      const permissionSection = resolvePermissionSectionByPath(entry.path)
+      if (!permissionSection) return isSuperAdmin(adminUser)
+      return canAdminAccess(adminUser, permissionSection, "view")
+    }
 
     const mapped = adminSidebarMenu.map((section) => {
-      if (section.type === "link") {
-        const permissionSection = resolvePermissionSectionByPath(section.path)
-        if (!permissionSection && !isSuperAdmin(adminUser)) {
-          return null
-        }
-        if (permissionSection && !canAdminAccess(adminUser, permissionSection, "view")) {
-          return null
-        }
-        return section
-      }
+      if (section.type === "link") return isVisible(section) ? section : null
 
       if (section.type !== "section" || !Array.isArray(section.items)) return section
       return {
         ...section,
         items: section.items
           .map((item) => {
-            if (section.label === "ADMIN ACCESS" && !adminAccessSectionEnabled) {
-              return null
-            }
-            if (section.label === "SUPER POWERS" && !canAccessSuperPowers(adminUser)) {
-              return null
-            }
-            if (item.type === "link" && item.path === featureSettingsPath && !canViewFeatureSettings) {
-              return null
-            }
-            if (item.type === "link") {
-              const permissionSection = resolvePermissionSectionByPath(item.path)
-              if (!permissionSection && !isSuperAdmin(adminUser)) return null
-              if (permissionSection && !canAdminAccess(adminUser, permissionSection, "view")) return null
-            }
-            if (item.type === "link" && !codControlEnabled && (item.path === deliveryCashLimitPath || item.path === cashLimitSettlementPath)) {
-              return null
-            }
+            if (!isVisible(item)) return null
             if (item.type === "expandable" && Array.isArray(item.subItems)) {
               const filteredSubItems = item.subItems
-                .filter((sub) => {
-                  if (!sub?.path) return false
-                  if ((sub.path === subscriptionSettingsPath || sub.path === subscriptionHistoryPath) && !restaurantSubscriptionEnabled) return false
-                  if (sub.path === offlinePaymentsPath && !codControlEnabled) return false
-                  if (sub.path === "/admin/food/restaurants/unregistered" && !rootLandingAndUnregisteredControlEnabled) return false
-                  const permissionSection = resolvePermissionSectionByPath(sub.path)
-                  if (!permissionSection && !isSuperAdmin(adminUser)) return false
-                  if (permissionSection && !canAdminAccess(adminUser, permissionSection, "view")) return false
-                  return true
-                })
+                .filter((sub) => Boolean(sub?.path) && isVisible(sub))
                 .map((sub) => ({
                   ...sub,
                   label: deriveMenuLabel(sub, item.label),
@@ -354,26 +347,8 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
     })
   }, [adminAccessSectionEnabled, adminUser, canViewFeatureSettings, codControlEnabled, restaurantSubscriptionEnabled, rootLandingAndUnregisteredControlEnabled])
 
-  const getBadgeCount = (label = "", path = "") => {
-    const l = label.toLowerCase()
-    const p = path?.toLowerCase() || ""
-
-    if (l.includes("food approval")) return badges.foodApprovals
-    if (l === "foods") return badges.foods
-    if (l === "restaurants" || l.includes("new joining request")) return badges.restaurants
-    if (l.includes("restaurant complaints")) return badges.restaurantComplaints
-    if (p.includes("orders/pending")) return badges.orders
-    if (p.includes("offline-payments")) return badges.offlinePayments
-    if (l === "live chat") return badges.liveChat
-    if (l.includes("support tickets")) return l.includes("delivery") ? badges.deliverySupportTickets : badges.userSupportTickets
-    if (l.includes("withdrawal")) return l.includes("delivery") ? badges.deliveryWithdrawals : badges.restaurantWithdrawals
-    if (l.includes("emergency help")) return badges.emergencyHelp
-    if (l.includes("earning addon history")) return badges.earningAddons
-    if (l.includes("safety emergency reports")) return badges.safetyReports
-    if (l === "deliveryman" && !p.includes("join-request")) return badges.deliveryPartners // expandable parent
-    if (l.includes("join-request")) return badges.deliveryPartners
-    return 0
-  }
+  /** An entry's badge is whatever count its `badge` key names. */
+  const getBadgeCount = (entry) => (entry?.badge ? Number(badges[entry.badge] || 0) : 0)
   const [logoUrl, setLogoUrl] = useState(() => getCachedSettings()?.logo?.url || null)
   const [companyName, setCompanyName] = useState(() => getCachedSettings()?.companyName || null)
 
@@ -681,14 +656,14 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
               <span className={cn("text-left truncate", isInSection ? "font-semibold" : "font-medium")}>
                 {displayLabel}
               </span>
-              {getBadgeCount(displayLabel, item.path) > 0 && (
+              {getBadgeCount(item) > 0 && (
                 <span className="shrink-0 bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full ml-1 min-w-[18px] text-center">
-                  {getBadgeCount(displayLabel, item.path) > 99 ? "99+" : getBadgeCount(displayLabel, item.path)}
+                  {getBadgeCount(item) > 99 ? "99+" : getBadgeCount(item)}
                 </span>
               )}
             </div>
           )}
-          {isCollapsed && getBadgeCount(displayLabel, item.path) > 0 && (
+          {isCollapsed && getBadgeCount(item) > 0 && (
             <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-600 rounded-full border-2 border-teal-800" />
           )}
         </Link>
@@ -713,7 +688,7 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
             >
               <div className="relative">
                 <Icon className="w-4 h-4 shrink-0 text-neutral-100 transition-transform duration-300" />
-                {getBadgeCount(item.label, item.path) > 0 && (
+                {getBadgeCount(item) > 0 && (
                   <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-600 rounded-full border-2 border-teal-800" />
                 )}
               </div>
@@ -734,9 +709,9 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
             <div className="flex items-center gap-2.5 text-left flex-1 min-w-0">
               <Icon className="w-4 h-4 shrink-0 text-neutral-100 transition-transform duration-300" />
               <span className="font-medium text-left truncate">{item.label}</span>
-              {getBadgeCount(item.label, item.path) > 0 && (
+              {getBadgeCount(item) > 0 && (
                 <span className="shrink-0 bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full ml-1 min-w-[18px] text-center">
-                  {getBadgeCount(item.label, item.path) > 99 ? "99+" : getBadgeCount(item.label, item.path)}
+                  {getBadgeCount(item) > 99 ? "99+" : getBadgeCount(item)}
                 </span>
               )}
             </div>
@@ -782,9 +757,9 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
                     >
                       {String(displaySubLabel || subItem?.label || subItem?.path || "Menu item")}
                     </span>
-                    {getBadgeCount(displaySubLabel, subItem.path) > 0 && (
+                    {getBadgeCount(subItem) > 0 && (
                       <span className="shrink-0 bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full ml-1 min-w-[18px] text-center">
-                        {getBadgeCount(displaySubLabel, subItem.path) > 99 ? "99+" : getBadgeCount(displaySubLabel, subItem.path)}
+                        {getBadgeCount(subItem) > 99 ? "99+" : getBadgeCount(subItem)}
                       </span>
                     )}
                   </Link>
