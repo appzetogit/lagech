@@ -21,11 +21,13 @@ import { ensureIdMap } from './idMap.mjs';
 import { importZones } from './steps/zones.mjs';
 import { importCategories } from './steps/categories.mjs';
 import { importRestaurants } from './steps/restaurants.mjs';
+import { importFoods } from './steps/foods.mjs';
 
 const STEPS = [
     ['zones', importZones],
     ['categories', importCategories],
     ['restaurants', importRestaurants],
+    ['foods', importFoods],
 ];
 
 const createReport = () => {
