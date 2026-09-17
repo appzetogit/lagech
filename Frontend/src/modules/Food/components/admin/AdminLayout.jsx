@@ -17,6 +17,37 @@ const debugError = (...args) => {}
  * grid -- which is not what is arriving and looks like the wrong app for the
  * moment it is on screen.
  */
+/** The hashed entry bundle a page of HTML loads, e.g. "assets/index-Ab12.js". */
+const entryBundleOf = (html) => (String(html || "").match(/assets\/index-[A-Za-z0-9_-]+\.js/) || [])[0] || ""
+
+let lastVersionCheckAt = 0
+
+/**
+ * Reloads into a newer build when one has been deployed.
+ *
+ * The panel is a single-page app: once open, clicking around never fetches
+ * the page again, so a tab opened before a deploy kept running the old code
+ * -- a fixed bug stayed broken there until someone thought to hard-refresh.
+ * On page changes (at most once a minute) this compares the entry bundle the
+ * server now serves with the one this tab is running, and reloads if they
+ * differ. It happens on navigation, so nothing the admin typed is lost.
+ */
+async function reloadIfNewBuild() {
+  const now = Date.now()
+  if (now - lastVersionCheckAt < 60 * 1000) return
+  lastVersionCheckAt = now
+  const running = [...document.scripts].map((script) => script.src).find((src) => /\/assets\/index-/.test(src)) || ""
+  if (!running) return
+  try {
+    const res = await fetch("/", { cache: "no-store", credentials: "same-origin" })
+    if (!res.ok) return
+    const served = entryBundleOf(await res.text())
+    if (served && !running.endsWith(served)) window.location.reload()
+  } catch (_e) {
+    // Offline or the server is restarting: try again on a later page change.
+  }
+}
+
 function AdminContentLoader() {
   return (
     <div
@@ -68,6 +99,10 @@ export default function AdminLayout() {
   const handleCollapseChange = (collapsed) => {
     setIsSidebarCollapsed(collapsed)
   }
+
+  useEffect(() => {
+    reloadIfNewBuild()
+  }, [location.pathname])
 
   // Ensure each admin route opens from top of the scrollable content area.
   useEffect(() => {
