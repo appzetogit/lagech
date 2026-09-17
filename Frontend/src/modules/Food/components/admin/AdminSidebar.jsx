@@ -603,10 +603,14 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
         }
       }
 
+      // Built from prev's keys, but the clicked section is set explicitly: prev
+      // comes from localStorage, saved under an older menu, and a section that
+      // did not exist then was never a key -- so it could not be opened at all.
       const next = {}
       Object.keys(prev).forEach((key) => {
-        next[key] = key === sectionKey
+        next[key] = false
       })
+      next[sectionKey] = true
       return next
     })
   }
