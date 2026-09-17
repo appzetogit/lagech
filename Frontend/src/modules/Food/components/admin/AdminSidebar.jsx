@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react"
 import { Link, useLocation } from "react-router-dom"
 import {
   Search,
@@ -141,6 +141,7 @@ const SIDEBAR_LABEL_BY_PATH = buildLabelDictionary(adminSidebarMenu)
 
 export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange }) {
   const location = useLocation()
+  const navRef = useRef(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [badges, setBadges] = useState({})
   const [restaurantSubscriptionEnabled, setRestaurantSubscriptionEnabled] = useState(true)
@@ -442,6 +443,35 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
     })
     return state
   })
+
+  // Keep the sidebar where the admin scrolled it. Anything that redraws the
+  // menu -- a reload, the menu briefly re-filtering, a page change -- could
+  // leave it at the top, so the admin had to scroll back down to the section
+  // they were working in after every click.
+  const SCROLL_KEY = "admin_sidebar_scroll"
+  const saveScroll = () => {
+    try {
+      if (navRef.current) sessionStorage.setItem(SCROLL_KEY, String(navRef.current.scrollTop))
+    } catch (_e) {
+      // Storage can be unavailable (private mode); the sidebar still works.
+    }
+  }
+  useLayoutEffect(() => {
+    const nav = navRef.current
+    if (!nav) return undefined
+    let saved = 0
+    try {
+      saved = Number(sessionStorage.getItem(SCROLL_KEY)) || 0
+    } catch (_e) {
+      saved = 0
+    }
+    if (saved > 0 && Math.abs(nav.scrollTop - saved) > 1) nav.scrollTop = saved
+    // Once more after the page's own render, which can reflow the menu.
+    const frame = requestAnimationFrame(() => {
+      if (navRef.current && saved > 0 && navRef.current.scrollTop === 0) navRef.current.scrollTop = saved
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [location.pathname])
 
   // Save states to consolidated localStorage and notify parent
   useEffect(() => {
@@ -965,7 +995,7 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
         </div>
 
         {/* Navigation Menu */}
-        <nav className="admin-sidebar-scroll flex-1 min-h-0 overflow-y-auto overscroll-y-contain px-3 py-3 space-y-2">
+        <nav ref={navRef} onScroll={saveScroll} className="admin-sidebar-scroll flex-1 min-h-0 overflow-y-auto overscroll-y-contain px-3 py-3 space-y-2">
           {filteredMenuData.length === 0 && searchQuery.trim() ? (
             <div className="px-3 py-12 text-left animate-[fadeIn_0.4s_ease-out]">
               <p className="text-neutral-100 text-sm font-medium text-left">No menu items found</p>
