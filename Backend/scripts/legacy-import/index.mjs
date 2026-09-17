@@ -20,10 +20,12 @@ import { prisma } from '../../src/config/prisma.js';
 import { ensureIdMap } from './idMap.mjs';
 import { importZones } from './steps/zones.mjs';
 import { importCategories } from './steps/categories.mjs';
+import { importRestaurants } from './steps/restaurants.mjs';
 
 const STEPS = [
     ['zones', importZones],
     ['categories', importCategories],
+    ['restaurants', importRestaurants],
 ];
 
 const createReport = () => {
