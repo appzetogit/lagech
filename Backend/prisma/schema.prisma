@@ -2076,6 +2076,14 @@ model FoodFeeSettings {
   /// GST on the delivery fee. Unset means it is not charged at all.
   deliveryFeeGstRate Decimal? @db.Decimal(5, 2)
 
+  /// Admin switches for the three optional charges. A rate can stay saved
+  /// while its switch is off, so GST can be turned on and off without
+  /// retyping it. Null on a zone row means "same as the default"; null on the
+  /// default row means off -- the previous system charged none of these.
+  gstEnabled            Boolean?
+  deliveryFeeGstEnabled Boolean?
+  platformFeeEnabled    Boolean?
+
   /// Null is the global default. A row scoped to a zone overrides it for
   /// orders in that zone; loadActiveFeeSettings falls back to the global row
   /// when a zone has none, so adding a zone never leaves it unpriced.

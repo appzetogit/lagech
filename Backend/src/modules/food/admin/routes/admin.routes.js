@@ -29,7 +29,7 @@ const router = express.Router();
 // ----- Public Business Settings (No Admin Required) -----
 router.get('/business-settings/public', businessSettingsController.getBusinessSettings);
 router.get('/power-scanning/public', businessSettingsController.getPowerScanningSettings);
-router.get('/fee-settings/public', adminController.getFeeSettings);
+router.get('/fee-settings/public', adminController.getPublicFeeSettings);
 router.get('/restaurant-subscription-settings/public', adminController.getRestaurantSubscriptionSettings);
 router.get('/feature-settings/public', adminController.getFeatureSettings);
 

@@ -1,6 +1,7 @@
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
+import { FEE_SWITCHES, applyFeeSwitches } from '../../orders/services/feeSwitches.js';
 
 /**
  * Fee settings, referral settings and the safety/emergency inbox, extracted
@@ -45,6 +46,19 @@ const serializeFeeSettings = (doc) => {
     };
 };
 
+/**
+ * What a customer is actually charged: a switched-off charge reads as 0, so
+ * the cart preview and the apps never show a fee the order will not include.
+ * The admin screen gets the stored row instead, rates and switches as saved.
+ */
+export async function getPublicFeeSettings(zoneId = null) {
+    const { feeSettings } = await getFeeSettings(zoneId);
+    if (!feeSettings) return { feeSettings };
+    // A zone row's unset switch follows the default row.
+    const fallback = feeSettings.zoneId ? (await getFeeSettings(null)).feeSettings : null;
+    return { feeSettings: applyFeeSwitches(feeSettings, fallback) };
+}
+
 const FEE_INCLUDE = { deliveryFeeBands: { orderBy: { minDistanceKm: 'asc' } } };
 
 /**
@@ -84,6 +98,10 @@ const feeColumns = (body = {}) => {
         body.deliveryFeeGstRate === null || body.deliveryFeeGstRate === undefined
             ? null
             : Number(body.deliveryFeeGstRate);
+
+    for (const key of Object.keys(FEE_SWITCHES)) {
+        if (body[key] !== undefined) data[key] = body[key] === null ? null : Boolean(body[key]);
+    }
 
     if (body.isActive !== undefined) data.isActive = Boolean(body.isActive);
     return data;

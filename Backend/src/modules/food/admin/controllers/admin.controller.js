@@ -1191,6 +1191,16 @@ export async function getFeeSettings(req, res, next) {
     }
 }
 
+/** The customer-facing view: switched-off charges read as 0. */
+export async function getPublicFeeSettings(req, res, next) {
+    try {
+        const data = await adminService.getPublicFeeSettings(req.query?.zoneId);
+        res.status(200).json({ success: true, message: 'Fee settings fetched successfully', data });
+    } catch (error) {
+        next(error);
+    }
+}
+
 export async function createOrUpdateFeeSettings(req, res, next) {
     try {
         const body = validateFeeSettingsUpsertDto(req.body || {});

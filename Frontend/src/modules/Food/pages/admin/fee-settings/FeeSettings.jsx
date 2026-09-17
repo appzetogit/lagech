@@ -9,6 +9,55 @@ const debugWarn = (...args) => {}
 const debugError = (...args) => {}
 
 
+/**
+ * The on/off switches for the optional charges, held as "on", "off" or ""
+ * (not set). On a zone "" means "same as the default"; on the default it is off.
+ */
+const SWITCH_KEYS = ["platformFeeEnabled", "gstEnabled", "deliveryFeeGstEnabled"]
+const EMPTY_SWITCHES = { platformFeeEnabled: "", gstEnabled: "", deliveryFeeGstEnabled: "" }
+const switchesFrom = (saved = {}) =>
+  Object.fromEntries(SWITCH_KEYS.map((key) => [key, saved[key] === true ? "on" : saved[key] === false ? "off" : ""]))
+const switchesPayload = (state) =>
+  Object.fromEntries(SWITCH_KEYS.map((key) => [key, state[key] === "on" ? true : state[key] === "off" ? false : null]))
+
+/**
+ * Charge / Don't charge, plus "Default" on a zone. A rate can stay filled in
+ * while this is off; it is simply not charged.
+ */
+function ChargeSwitch({ value, onChange, inheritLabel }) {
+  const options = [
+    ...(inheritLabel ? [["", inheritLabel]] : []),
+    ["on", "Charge"],
+    ["off", "Off"],
+  ]
+  // On the default row an unset switch is off, and is shown as such.
+  const current = !inheritLabel && value === "" ? "off" : value
+  return (
+    <div className="inline-flex rounded-md border border-slate-300 overflow-hidden text-xs" role="radiogroup">
+      {options.map(([key, text]) => (
+        <button
+          key={key || "default"}
+          type="button"
+          role="radio"
+          aria-checked={current === key}
+          onClick={() => onChange(key)}
+          className={`px-2.5 py-1 font-medium transition-colors ${
+            current === key
+              ? key === "on"
+                ? "bg-emerald-600 text-white"
+                : key === "off"
+                  ? "bg-slate-700 text-white"
+                  : "bg-blue-600 text-white"
+              : "bg-white text-slate-600 hover:bg-slate-50"
+          }`}
+        >
+          {text}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 // Fee Settings Component - Range-based delivery fee configuration
 export default function FeeSettings() {
   const [feeSettings, setFeeSettings] = useState({
@@ -18,6 +67,7 @@ export default function FeeSettings() {
     quickDeliveryFee: "",
     gstRate: "",
     deliveryFeeGstRate: "",
+    ...EMPTY_SWITCHES,
   })
   // Which scope is being edited. "" is the global default that applies to any
   // zone without fees of its own.
@@ -54,6 +104,7 @@ export default function FeeSettings() {
           quickDeliveryFee: response.data.data.feeSettings.quickDeliveryFee ?? "",
           gstRate: response.data.data.feeSettings.gstRate ?? "",
           deliveryFeeGstRate: response.data.data.feeSettings.deliveryFeeGstRate ?? "",
+          ...switchesFrom(response.data.data.feeSettings),
         })
       } else if (response.data.success && response.data.data.feeSettings === null) {
         setScopeConfigured(false)
@@ -65,6 +116,7 @@ export default function FeeSettings() {
           quickDeliveryFee: "",
           gstRate: "",
           deliveryFeeGstRate: "",
+          ...EMPTY_SWITCHES,
         })
       }
     } catch (error) {
@@ -128,6 +180,7 @@ export default function FeeSettings() {
         quickDeliveryFee: settingsToSave.quickDeliveryFee === "" ? undefined : Number(settingsToSave.quickDeliveryFee),
         gstRate: settingsToSave.gstRate === "" ? undefined : Number(settingsToSave.gstRate),
         deliveryFeeGstRate: settingsToSave.deliveryFeeGstRate === "" ? undefined : Number(settingsToSave.deliveryFeeGstRate),
+        ...switchesPayload(settingsToSave),
         isActive: true,
         // Without this a zone edit would land on the global row and change
         // the fees for every zone that inherits it.
@@ -154,6 +207,7 @@ export default function FeeSettings() {
             quickDeliveryFee: saved.quickDeliveryFee ?? "",
             gstRate: saved.gstRate ?? "",
             deliveryFeeGstRate: saved.deliveryFeeGstRate ?? "",
+            ...switchesFrom(saved),
           })
         }
         return true
@@ -737,9 +791,16 @@ export default function FeeSettings() {
 
                 {/* Platform Fee */}
                 <div className="space-y-2">
-                  <label className="block text-sm font-semibold text-slate-700">
-                    Platform Fee (₹)
-                  </label>
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="block text-sm font-semibold text-slate-700">
+                      Platform Fee (₹)
+                    </label>
+                    <ChargeSwitch
+                      value={feeSettings.platformFeeEnabled}
+                      onChange={(value) => setFeeSettings((prev) => ({ ...prev, platformFeeEnabled: value }))}
+                      inheritLabel={selectedZoneId ? "Default" : null}
+                    />
+                  </div>
                   <input
                     type="number"
                     value={feeSettings.platformFee}
@@ -751,7 +812,7 @@ export default function FeeSettings() {
                     placeholder="5"
                   />
                   <p className="text-xs text-slate-500">
-                    Platform service fee per order
+                    Platform service fee per order. Only charged while switched to Charge.
                   </p>
                   {feeErrors.platformFee ? (
                     <p className="text-xs font-medium text-red-600">{feeErrors.platformFee}</p>
@@ -783,9 +844,16 @@ export default function FeeSettings() {
 
                 {/* GST Rate */}
                 <div className="space-y-2">
-                  <label className="block text-sm font-semibold text-slate-700">
-                    GST Rate (%)
-                  </label>
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="block text-sm font-semibold text-slate-700">
+                      GST Rate (%)
+                    </label>
+                    <ChargeSwitch
+                      value={feeSettings.gstEnabled}
+                      onChange={(value) => setFeeSettings((prev) => ({ ...prev, gstEnabled: value }))}
+                      inheritLabel={selectedZoneId ? "Default" : null}
+                    />
+                  </div>
                   <input
                     type="number"
                     value={feeSettings.gstRate}
@@ -798,7 +866,7 @@ export default function FeeSettings() {
                     placeholder="5"
                   />
                   <p className="text-xs text-slate-500">
-                    GST percentage applied on order subtotal
+                    GST on the order subtotal after discount. Only charged while switched to Charge.
                   </p>
                   {feeErrors.gstRate ? (
                     <p className="text-xs font-medium text-red-600">{feeErrors.gstRate}</p>
@@ -807,9 +875,16 @@ export default function FeeSettings() {
 
                 {/* Delivery Fee GST Rate */}
                 <div className="space-y-2">
-                  <label className="block text-sm font-semibold text-slate-700">
-                    Delivery Fee GST Rate (%)
-                  </label>
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="block text-sm font-semibold text-slate-700">
+                      Delivery Fee GST Rate (%)
+                    </label>
+                    <ChargeSwitch
+                      value={feeSettings.deliveryFeeGstEnabled}
+                      onChange={(value) => setFeeSettings((prev) => ({ ...prev, deliveryFeeGstEnabled: value }))}
+                      inheritLabel={selectedZoneId ? "Default" : null}
+                    />
+                  </div>
                   <input
                     type="number"
                     value={feeSettings.deliveryFeeGstRate}
@@ -822,7 +897,7 @@ export default function FeeSettings() {
                     placeholder="0"
                   />
                   <p className="text-xs text-slate-500">
-                    GST percentage applied on the delivery fee. Leave blank or 0 to not charge it.
+                    GST on the delivery fee. Only charged while switched to Charge.
                   </p>
                   {feeErrors.deliveryFeeGstRate ? (
                     <p className="text-xs font-medium text-red-600">{feeErrors.deliveryFeeGstRate}</p>

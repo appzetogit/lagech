@@ -43,6 +43,9 @@ const rangeSchema = z.object({
     deliveryBoyBasePay: bounded('Base pay', MAX_AMOUNT).optional().default(0)
 });
 
+const onOff = (label) =>
+    z.boolean({ invalid_type_error: `${label} must be on or off` }).nullable().optional();
+
 const feeSettingsUpsertSchema = z.object({
     deliveryFee: bounded('Delivery fee', MAX_AMOUNT).nullable().optional(),
     deliveryFeeRanges: z.array(rangeSchema).optional(),
@@ -50,6 +53,10 @@ const feeSettingsUpsertSchema = z.object({
     quickDeliveryFee: bounded('Quick delivery extra', MAX_AMOUNT).nullable().optional(),
     gstRate: percentage('GST rate').nullable().optional(),
     deliveryFeeGstRate: percentage('Delivery fee GST rate').nullable().optional(),
+    // On/off switches. Null clears one: on a zone that means "same as default".
+    gstEnabled: onOff('GST switch'),
+    deliveryFeeGstEnabled: onOff('Delivery fee GST switch'),
+    platformFeeEnabled: onOff('Platform fee switch'),
     isActive: z.boolean().optional(),
     // Which zone these fees are for. Absent/null is the global default, which
     // is what every pre-zone caller means. Zod strips undeclared keys, so
@@ -57,6 +64,17 @@ const feeSettingsUpsertSchema = z.object({
     // overwrite the global row.
     zoneId: z.string().min(1).nullable().optional()
 });
+
+/**
+ * A switch as sent by a form: true/false, their string forms, or null to clear.
+ * Anything else is passed through for the schema to reject by name.
+ */
+const toSwitch = (value) => {
+    if (value === undefined || value === null || typeof value === 'boolean') return value;
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return value;
+};
 
 export const validateFeeSettingsUpsertDto = (body) => {
     const normalized = {
@@ -91,6 +109,9 @@ export const validateFeeSettingsUpsertDto = (body) => {
                 : body?.deliveryFeeGstRate !== undefined
                     ? Number(body.deliveryFeeGstRate)
                     : undefined,
+        gstEnabled: toSwitch(body?.gstEnabled),
+        deliveryFeeGstEnabled: toSwitch(body?.deliveryFeeGstEnabled),
+        platformFeeEnabled: toSwitch(body?.platformFeeEnabled),
         isActive: body?.isActive !== undefined ? Boolean(body.isActive) : undefined,
         zoneId: body?.zoneId ? String(body.zoneId) : body?.zoneId === null ? null : undefined
     };

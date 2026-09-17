@@ -107,3 +107,12 @@ test('the range rules that already existed still hold', () => {
         /must not overlap/,
     );
 });
+
+test('the on/off switches take booleans, their string forms, or null', () => {
+    const body = validateFeeSettingsUpsertDto({ gstEnabled: 'true', deliveryFeeGstEnabled: false, platformFeeEnabled: null });
+    assert.equal(body.gstEnabled, true);
+    assert.equal(body.deliveryFeeGstEnabled, false);
+    assert.equal(body.platformFeeEnabled, null, 'null clears a zone back to the default');
+    assert.equal(validateFeeSettingsUpsertDto({}).gstEnabled, undefined, 'unmentioned is left alone');
+    assert.match(rejects({ gstEnabled: 'yes' }) || '', /GST switch must be on or off/);
+});

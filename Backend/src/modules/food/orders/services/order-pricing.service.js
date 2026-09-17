@@ -10,6 +10,7 @@ import { fetchDrivingRoute } from '../utils/googleMaps.js';
 import { attachOutletTimingsToRestaurants } from '../../restaurant/services/outletTimings.service.js';
 import { getRestaurantAvailabilityStatus } from '../../restaurant/helpers/restaurantAvailability.helper.js';
 import { resolveOrderCartItems } from '../helpers/order-cart-items.helper.js';
+import { applyFeeSwitches } from './feeSwitches.js';
 
 const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
 
@@ -282,13 +283,26 @@ export async function loadActiveFeeSettings(zoneId = null) {
   // No bands of its own means the zone did not override the ladder either.
   const ranges = ownRanges.length > 0 ? ownRanges : toFeeRanges(global?.deliveryFeeBands);
 
+  // Switches resolve per field like the fees do: a zone's unset switch follows
+  // the default row. A switched-off charge is priced at 0 here, so every
+  // caller -- pricing, the order total, the transaction split -- agrees.
+  const switches = applyFeeSwitches(
+    {
+      gstEnabled: feeDoc.gstEnabled,
+      deliveryFeeGstEnabled: feeDoc.deliveryFeeGstEnabled,
+      platformFeeEnabled: feeDoc.platformFeeEnabled,
+      gstRate: inherit('gstRate'),
+      deliveryFeeGstRate: inherit('deliveryFeeGstRate'),
+      platformFee: inherit('platformFee'),
+    },
+    feeDoc === global ? null : global,
+  );
+
   return {
     ...feeDoc,
+    ...switches,
     deliveryFee: inherit('deliveryFee'),
-    platformFee: inherit('platformFee'),
     quickDeliveryFee: inherit('quickDeliveryFee'),
-    gstRate: inherit('gstRate'),
-    deliveryFeeGstRate: inherit('deliveryFeeGstRate'),
     deliveryFeeRanges: ranges,
     /// Which row actually priced this, so callers can report it.
     resolvedFromZone: Boolean(zoned),
