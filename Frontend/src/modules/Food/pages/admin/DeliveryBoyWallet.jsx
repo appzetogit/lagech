@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { Search, PiggyBank, Loader2, Package } from "lucide-react"
+import { Search, PiggyBank, Loader2, Package, X } from "lucide-react"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
 const debugLog = (...args) => {}
@@ -12,6 +12,127 @@ const formatCurrency = (amount) => {
   return `\u20B9${Number(amount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
+const COLLECTION_METHODS = [
+  ["cash", "Cash"],
+  ["upi", "UPI"],
+  ["bank_transfer", "Bank transfer"],
+  ["razorpay", "Online"],
+]
+
+/**
+ * Record money a rider handed over. It lowers their cash in hand, and lifts a
+ * cash suspension as soon as they are back under the limit.
+ */
+function CollectCashModal({ wallet, onClose, onSaved }) {
+  const [amount, setAmount] = useState(String(wallet.cashCollected || ""))
+  const [method, setMethod] = useState("cash")
+  const [note, setNote] = useState("")
+  const [saving, setSaving] = useState(false)
+  const held = Number(wallet.cashCollected) || 0
+
+  const submit = async (e) => {
+    e.preventDefault()
+    const value = Number(amount)
+    if (!Number.isFinite(value) || value < 1) return toast.error("Enter an amount of at least ₹1")
+    if (value > held) return toast.error(`Cannot collect more than the ${formatCurrency(held)} this rider holds`)
+    try {
+      setSaving(true)
+      const res = await adminAPI.collectDeliveryCash({
+        deliveryPartnerId: wallet.deliveryId,
+        amount: value,
+        method,
+        note: note.trim() || undefined,
+      })
+      toast.success(
+        `Collected ${formatCurrency(value)} from ${wallet.name}. Cash in hand now ${formatCurrency(res?.data?.data?.cashInHand)}`,
+      )
+      onSaved()
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to record the collection")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true">
+      <form onSubmit={submit} className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl space-y-4">
+        <div className="flex items-start justify-between">
+          <div>
+            <h3 className="text-lg font-bold text-slate-900">Collect cash</h3>
+            <p className="text-sm text-slate-600">
+              {wallet.name} · holding {formatCurrency(held)}
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="p-1 text-slate-500 hover:text-slate-800" aria-label="Close">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <label className="block space-y-1">
+          <span className="text-sm font-semibold text-slate-700">Amount (₹)</span>
+          <input
+            type="number"
+            min="1"
+            max={held}
+            step="0.01"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+            required
+          />
+        </label>
+        <div className="space-y-1">
+          <span className="text-sm font-semibold text-slate-700">Received by</span>
+          <div className="flex flex-wrap gap-2">
+            {COLLECTION_METHODS.map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setMethod(key)}
+                className={`rounded-lg border px-3 py-1.5 text-sm font-medium ${
+                  method === key
+                    ? "border-emerald-600 bg-emerald-600 text-white"
+                    : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <label className="block space-y-1">
+          <span className="text-sm font-semibold text-slate-700">Note (optional)</span>
+          <input
+            type="text"
+            value={note}
+            maxLength={200}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="UTR / reference, who received it"
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+          />
+        </label>
+        <div className="flex justify-end gap-2 pt-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={saving}
+            className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+          >
+            {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+            Record collection
+          </button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
 export default function DeliveryBoyWallet() {
   const [wallets, setWallets] = useState([])
   const [loading, setLoading] = useState(true)
@@ -19,6 +140,7 @@ export default function DeliveryBoyWallet() {
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
   const [pages, setPages] = useState(1)
+  const [collecting, setCollecting] = useState(null)
   const limit = 20
 
   const fetchWallets = async (overrides = {}) => {
@@ -113,12 +235,13 @@ export default function DeliveryBoyWallet() {
                     <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">Bonus</th>
                     <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">Total withdrawal</th>
                     <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">Cash in hand</th>
+                    <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">Action</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-slate-100">
                   {wallets.length === 0 ? (
                     <tr>
-                      <td colSpan={10} className="px-6 py-20 text-center">
+                      <td colSpan={11} className="px-6 py-20 text-center">
                         <div className="flex flex-col items-center justify-center">
                           <Package className="w-16 h-16 text-slate-400 mb-4" />
                           <p className="text-lg font-semibold text-slate-700">No wallets</p>
@@ -130,7 +253,24 @@ export default function DeliveryBoyWallet() {
                     wallets.map((w, i) => (
                       <tr key={w.walletId || w.deliveryId} className="hover:bg-slate-50 transition-colors">
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-700">{(page - 1) * limit + i + 1}</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-700">{w.name || "—"}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-700">
+                          {w.name || "—"}
+                          {w.cashSuspended ? (
+                            <span
+                              className="ml-2 rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-red-700"
+                              title="At or over the cash limit: cannot go online or take orders until the cash is settled"
+                            >
+                              Suspended
+                            </span>
+                          ) : w.cashLimitWarning ? (
+                            <span
+                              className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-amber-700"
+                              title="Past 90% of the cash limit"
+                            >
+                              Near limit
+                            </span>
+                          ) : null}
+                        </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-700">{w.deliveryIdString || "—"}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-700">{formatCurrency(w.remainingCashLimit)}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-700">{formatCurrency(w.pocketBalance)}</td>
@@ -139,6 +279,16 @@ export default function DeliveryBoyWallet() {
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-700">{formatCurrency(w.bonus)}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-700">{formatCurrency(w.totalWithdrawn)}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-700">{formatCurrency(w.cashCollected)}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm">
+                          <button
+                            type="button"
+                            onClick={() => setCollecting(w)}
+                            disabled={!(Number(w.cashCollected) > 0)}
+                            className="rounded-lg border border-emerald-600 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
+                          >
+                            Collect cash
+                          </button>
+                        </td>
                       </tr>
                     ))
                   )}
@@ -172,6 +322,16 @@ export default function DeliveryBoyWallet() {
           )}
         </div>
       </div>
+      {collecting && (
+        <CollectCashModal
+          wallet={collecting}
+          onClose={() => setCollecting(null)}
+          onSaved={() => {
+            setCollecting(null)
+            fetchWallets()
+          }}
+        />
+      )}
     </div>
   )
 }

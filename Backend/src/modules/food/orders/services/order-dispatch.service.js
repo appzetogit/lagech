@@ -15,6 +15,7 @@ import {
 } from './order.helpers.js';
 import { fetchDrivingRoute } from '../utils/googleMaps.js';
 import { parseGeoPoint } from '../../shared/geo.utils.js';
+import { getCashBlockedPartnerIds } from '../../delivery/services/riderCash.service.js';
 
 /** Everything a dispatch broadcast needs about the order. */
 const dispatchInclude = { ...orderInclude, restaurant: true, user: true };
@@ -137,45 +138,6 @@ function buildIncomingOrderPushData(order, payload, acceptanceDeadlineAt) {
     customerPhone: s(payload?.customerPhone || order?.customerPhone || ''),
     itemsCount: s(Array.isArray(order?.items) ? order.items.length : ''),
   };
-}
-
-/**
- * Riders already holding as much cash as they are allowed to.
- *
- * The limit existed as an admin setting and was shown to riders, but nothing
- * enforced it. Only applied to orders the rider physically collects money for —
- * a prepaid order adds nothing to their float. A limit of 0 means "no limit",
- * which is the default, so an unconfigured install excludes nobody.
- *
- * @returns {Promise<Set<string>>} partner ids to skip
- */
-async function getCashBlockedPartnerIds(partnerIds) {
-  if (!partnerIds.length) return new Set();
-
-  const settings = await prisma.foodDeliveryCashLimit.findFirst({
-    where: { isActive: true },
-    select: { deliveryCashLimit: true },
-  });
-  const limit = Number(settings?.deliveryCashLimit) || 0;
-  if (limit <= 0) return new Set();
-
-  // Wallets are one table now, keyed by (entityType, entityId).
-  const wallets = await prisma.wallet.findMany({
-    where: {
-      entityType: 'deliveryBoy',
-      entityId: { in: partnerIds.map(String) },
-      cashInHand: { gte: limit },
-    },
-    select: { entityId: true },
-  });
-
-  return new Set(wallets.map((w) => w.entityId));
-}
-
-/** Cash the rider has to physically collect, so it counts against their float. */
-function orderCollectsCash(order) {
-  const method = String(order?.payment?.method || order?.paymentMethod || '').toLowerCase();
-  return method === 'cash' || method === 'razorpay_qr';
 }
 
 async function listNearbyOnlineDeliveryPartners(restaurant, { maxKm = 15, limit = 25 } = {}) {
@@ -340,10 +302,9 @@ export async function tryAutoAssign(orderId, options = {}) {
       }
     }
 
-    // Riders at their cash ceiling are skipped for cash-collect orders only.
-    const cashBlockedIds = orderCollectsCash(order)
-      ? await getCashBlockedPartnerIds(partners.map((p) => p.partnerId))
-      : new Set();
+    // Riders suspended for cash are skipped for every order; a cash order also
+    // skips riders it would take to their limit.
+    const cashBlockedIds = await getCashBlockedPartnerIds(partners.map((p) => p.partnerId), order);
 
     const eligible = partners.filter((partner) => {
       const key = String(partner.partnerId);
@@ -358,7 +319,7 @@ export async function tryAutoAssign(orderId, options = {}) {
     if (cashBlockedIds.size > 0) {
       logger.warn(
         `[Dispatch] ${cashBlockedIds.size} rider(s) skipped for order ${id}: ` +
-          `cash-in-hand at or above the configured limit.`,
+          `cash suspension, or this cash order would take them to their limit.`,
       );
     }
 

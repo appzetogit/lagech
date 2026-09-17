@@ -135,6 +135,8 @@ export const PocketV2 = () => {
           cashInHand: Number(wallet.cashInHand ?? wallet.cash_in_hand ?? wallet.cashCollected) || 0,
           availableCashLimit: Number(wallet.availableCashLimit ?? wallet.available_cash_limit) || 0,
           totalCashLimit: Number(wallet.totalCashLimit ?? wallet.total_cash_limit) || 0,
+          cashLimitWarning: Boolean(wallet.cashLimitWarning),
+          cashSuspended: Boolean(wallet.cashSuspended),
           weeklyEarnings: Number(summary.totalEarnings) || 0,
           weeklyOrders: Number(summary.totalOrders) || 0,
           payoutAmount: Number(wallet.lastPayout?.amount || totalWithdrawn || 0),
@@ -272,6 +274,29 @@ export const PocketV2 = () => {
            </div>
          </div>
        </div>
+
+       {/* CASH LIMIT: suspended at the limit, warned from 90% of it */}
+       {(walletState.cashSuspended || walletState.cashLimitWarning) && (
+         <div
+           role="alert"
+           className={`mx-4 mb-6 rounded-[24px] border px-5 py-4 ${
+             walletState.cashSuspended ? "bg-red-50 border-red-200" : "bg-amber-50 border-amber-200"
+           }`}
+         >
+           <h3 className={`text-[13px] font-black uppercase tracking-wider mb-1 ${
+             walletState.cashSuspended ? "text-red-700" : "text-amber-800"
+           }`}>
+             {walletState.cashSuspended ? "Suspended: cash limit reached" : "Nearing your cash limit"}
+           </h3>
+           <p className={`text-[12px] font-semibold leading-snug ${
+             walletState.cashSuspended ? "text-red-600" : "text-amber-700"
+           }`}>
+             {walletState.cashSuspended
+               ? `You hold ₹${walletState.cashInHand} of your ₹${walletState.totalCashLimit} limit. You can't go online or take orders until you deposit your cash.`
+               : `You hold ₹${walletState.cashInHand} of your ₹${walletState.totalCashLimit} limit. Deposit your cash to keep taking cash orders.`}
+           </p>
+         </div>
+       )}
 
        {/* 1. BANK DETAILS BANNER */}
        {!walletState.bankDetailsFilled && (

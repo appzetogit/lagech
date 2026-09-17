@@ -6,6 +6,7 @@ import { getDeliveryCashLimitSettings } from '../../admin/services/admin.service
 import { upsertFirebaseDeviceToken } from '../../../../core/notifications/firebase.service.js';
 import { logger } from '../../../../utils/logger.js';
 import { collectDynamicRegistration } from './driverRegistrationField.service.js';
+import { assertRiderMayGoOnline, getRiderCashStatus } from './riderCash.service.js';
 
 const num = (v) => Number(v) || 0;
 
@@ -400,6 +401,25 @@ const closeOpenSessions = async (tx, partnerId, { bySystem = false, lat = null, 
     return open.length;
 };
 
+/**
+ * Takes a rider offline once their cash puts them at or over the limit, closing
+ * their shift as the system rather than the rider. Called after a cash delivery
+ * completes. Returns whether it did.
+ */
+export const takeRiderOfflineIfCashSuspended = async (partnerId) => {
+    const position = await getRiderCashStatus(partnerId);
+    if (!position.cashSuspended) return false;
+    const { count } = await prisma.$transaction(async (tx) => {
+        const result = await tx.foodDeliveryPartner.updateMany({
+            where: { id: String(partnerId), availabilityStatus: 'online' },
+            data: { availabilityStatus: 'offline' },
+        });
+        if (result.count) await closeOpenSessions(tx, String(partnerId), { bySystem: true });
+        return result;
+    });
+    return count > 0;
+};
+
 export const updateDeliveryAvailability = async (userId, payload) => {
     const partner = await requirePartner(userId);
 
@@ -428,6 +448,11 @@ export const updateDeliveryAvailability = async (userId, payload) => {
     // transition -- otherwise the log would be one row per ping.
     const wasOnline = partner.availabilityStatus === 'online';
     const isOnline = validStatus === 'online';
+
+    // Checked on the transition only: this is also the location heartbeat, and a
+    // rider who crosses the limit mid-shift is taken offline when that delivery
+    // completes (takeRiderOfflineIfCashSuspended).
+    if (!wasOnline && isOnline) await assertRiderMayGoOnline(partner.id);
 
     const updated = await prisma.$transaction(async (tx) => {
         const row = await tx.foodDeliveryPartner.update({ where: { id: partner.id }, data });
@@ -471,20 +496,14 @@ export const getDeliveryPartnerWallet = async (deliveryPartnerId) => {
     const totalCashLimit = num(cashLimitSettings.deliveryCashLimit);
     const deliveryWithdrawalLimit = num(cashLimitSettings.deliveryWithdrawalLimit) || 100;
 
-    const [earningsAgg, cashAgg, bonusAgg, paymentTxList, bonusTxList] = await Promise.all([
+    const [earningsAgg, cashPosition, bonusAgg, paymentTxList, bonusTxList] = await Promise.all([
         prisma.foodOrder.aggregate({
             where: { dispatchDeliveryPartnerId: partnerId, orderStatus: 'delivered' },
             _sum: { riderEarning: true },
         }),
-        prisma.foodOrder.aggregate({
-            where: {
-                dispatchDeliveryPartnerId: partnerId,
-                orderStatus: 'delivered',
-                paymentMethod: 'cash',
-                paymentStatus: 'paid',
-            },
-            _sum: { riderEarning: true },
-        }),
+        // Was the rider's EARNINGS on paid cash orders, reported as the cash they
+        // hold; now the same figure every other screen and check uses.
+        getRiderCashStatus(partnerId),
         prisma.deliveryBonusTransaction.aggregate({
             where: { deliveryPartnerId: partnerId },
             _sum: { amount: true },
@@ -506,7 +525,7 @@ export const getDeliveryPartnerWallet = async (deliveryPartnerId) => {
     ]);
 
     const totalEarned = num(earningsAgg?._sum?.riderEarning);
-    const cashInHand = num(cashAgg?._sum?.riderEarning);
+    const { cashInHand } = cashPosition;
     const totalBonus = num(bonusAgg?._sum?.amount);
 
     const paymentTransactions = (paymentTxList || []).map((o) => {
@@ -547,6 +566,9 @@ export const getDeliveryPartnerWallet = async (deliveryPartnerId) => {
         totalEarned,
         totalCashLimit,
         availableCashLimit: Math.max(0, totalCashLimit - cashInHand),
+        cashWarningAt: cashPosition.cashWarningAt,
+        cashLimitWarning: cashPosition.cashLimitWarning,
+        cashSuspended: cashPosition.cashSuspended,
         deliveryWithdrawalLimit,
         transactions: [...paymentTransactions, ...bonusTransactions].sort(
             (a, b) => new Date(b?.date || 0).getTime() - new Date(a?.date || 0).getTime(),

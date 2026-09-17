@@ -28,6 +28,8 @@ const formatDate = (d) => {
   }
 }
 
+const METHOD_LABELS = { cash: "Cash", upi: "UPI", bank_transfer: "Bank transfer", razorpay: "Online" }
+
 export default function CashLimitSettlement() {
   const [transactions, setTransactions] = useState([])
   const [loading, setLoading] = useState(true)
@@ -85,7 +87,7 @@ export default function CashLimitSettlement() {
             <h1 className="text-2xl font-bold text-slate-900">Cash limit settlement</h1>
           </div>
           <p className="text-sm text-slate-600 mt-1">
-            Deposit (cash limit settlement) transactions from delivery boys. Amount is added to available limit and deducted from cash in hand.
+            Cash handed in by delivery boys: their own online deposits, and collections an admin recorded from the Delivery boy Wallet page. Each one is deducted from cash in hand, and a rider suspended for cash is back on as soon as they are under the limit.
           </p>
         </div>
 
@@ -125,13 +127,14 @@ export default function CashLimitSettlement() {
                     <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">ID</th>
                     <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">Amount</th>
                     <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">Status</th>
-                    <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">Razorpay</th>
+                    <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">Method</th>
+                    <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">Reference</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-slate-100">
                   {transactions.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-6 py-20 text-center">
+                      <td colSpan={8} className="px-6 py-20 text-center">
                         <div className="flex flex-col items-center justify-center">
                           <Package className="w-16 h-16 text-slate-400 mb-4" />
                           <p className="text-lg font-semibold text-slate-700">No transactions</p>
@@ -168,8 +171,20 @@ export default function CashLimitSettlement() {
                             {tx.status || "—"}
                           </span>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-xs text-slate-500 font-mono">
-                          {tx.razorpayPaymentId ? tx.razorpayPaymentId.slice(0, 12) + "…" : "—"}
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">
+                          {METHOD_LABELS[tx.paymentMethod] || tx.paymentMethod || "—"}
+                          <span className="block text-[11px] text-slate-500">
+                            {tx.collectedByAdmin ? "Collected by admin" : "Paid by rider"}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-xs text-slate-500">
+                          {tx.adminNote ? (
+                            <span className="break-words">{tx.adminNote}</span>
+                          ) : tx.razorpayPaymentId && tx.razorpayPaymentId !== "-" ? (
+                            <span className="font-mono">{tx.razorpayPaymentId.slice(0, 18)}</span>
+                          ) : (
+                            "—"
+                          )}
                         </td>
                       </tr>
                     ))

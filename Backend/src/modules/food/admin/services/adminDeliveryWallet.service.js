@@ -3,6 +3,11 @@ import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { getBulkDeliveryPartnerStats } from './adminDeliveryPartner.service.js';
 import { ensureWallet, recordTransaction } from '../../../../core/payments/transaction.service.js';
+import {
+    describeCashPosition,
+    getCashInHandMap,
+    recordCashCollection,
+} from '../../delivery/services/riderCash.service.js';
 
 /**
  * Rider wallets and cash settlements, extracted from admin.service.js.
@@ -42,7 +47,8 @@ export async function getDeliveryWallets(query = {}) {
 
     const wallets = partners.map((p) => {
         const stats = statsMap.get(p.id) || {};
-        const cashInHand = stats.cashInHand || 0;
+        const position = describeCashPosition(Math.max(0, stats.cashInHand || 0), globalLimit);
+        const { cashInHand } = position;
 
         return {
             walletId: p.id,
@@ -57,6 +63,8 @@ export async function getDeliveryWallets(query = {}) {
             bonus: stats.bonus || 0,
             totalWithdrawn: stats.totalWithdrawn || 0,
             availableCashLimit: globalLimit,
+            cashLimitWarning: position.cashLimitWarning,
+            cashSuspended: position.cashSuspended,
             totalOrders: stats.totalOrders || 0,
         };
     });
@@ -80,9 +88,10 @@ const toPaise = (value) => Math.round(Number(value) * 100) / 100;
  * any other. recordTransaction moves the balance and writes the ledger row in
  * one database transaction; nothing else may write Wallet.balance.
  *
- * cashInHand is not ledger money — it is how much physical cash the rider is
- * holding from COD orders, reconciled against deposits rather than against the
- * wallet — so it is still a direct write.
+ * cashInHand is not a stored figure: it is cash orders delivered less deposits.
+ * Lowering it records the difference as cash the admin collected, exactly as
+ * the collect-cash entry does; it cannot be raised, because only a delivered
+ * cash order puts cash in a rider's hand.
  */
 export async function updateDeliveryBoyWallet(data = {}, actingAdminId = null) {
     const { deliveryId, pocketBalance, cashInHand, reason } = data;
@@ -129,15 +138,37 @@ export async function updateDeliveryBoyWallet(data = {}, actingAdminId = null) {
         if (!Number.isFinite(cash) || cash < 0) {
             throw new ValidationError('Cash in hand must be a number of zero or more');
         }
-        await prisma.wallet.update({
-            where: { entityType_entityId: { entityType: 'deliveryBoy', entityId: partner.id } },
-            data: { cashInHand: cash },
-        });
+        const current = (await getCashInHandMap([partner.id])).get(partner.id) || 0;
+        const collected = toPaise(current - cash);
+        if (collected < 0) {
+            throw new ValidationError(
+                `Cash in hand cannot be raised above the Rs.${current} this rider is holding`,
+            );
+        }
+        if (collected > 0) {
+            await recordCashCollection(
+                {
+                    deliveryPartnerId: partner.id,
+                    amount: collected,
+                    method: 'cash',
+                    note: String(reason || '').trim() || 'Cash in hand adjusted by admin',
+                },
+                actingAdminId,
+            );
+        }
     }
 
     return prisma.wallet.findUniqueOrThrow({
         where: { entityType_entityId: { entityType: 'deliveryBoy', entityId: partner.id } },
     });
+}
+
+/** An admin recording cash, UPI or a bank transfer a rider handed over. */
+export async function collectDeliveryCash(body = {}, actingAdminId = null) {
+    if (!isId(body.deliveryPartnerId)) throw new ValidationError('Delivery partner ID required');
+    const deposit = await recordCashCollection(body, actingAdminId);
+    const cashInHand = (await getCashInHandMap([deposit.deliveryPartnerId])).get(deposit.deliveryPartnerId) || 0;
+    return { deposit: { ...deposit, amount: Number(deposit.amount) }, cashInHand };
 }
 
 export async function getCashLimitSettlements(query = {}) {
@@ -178,6 +209,10 @@ export async function getCashLimitSettlements(query = {}) {
         amount: Number(d.amount || 0),
         status: d.status,
         razorpayPaymentId: d.razorpayPaymentId || '-',
+        paymentMethod: d.paymentMethod,
+        // Recorded by an admin collecting the cash, rather than paid by the rider.
+        collectedByAdmin: Boolean(d.adminId),
+        adminNote: d.adminNote || '',
     }));
 
     return { transactions, pagination: { total, page, limit, pages: Math.ceil(total / limit) || 1 } };

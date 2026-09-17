@@ -232,7 +232,7 @@ export default function FeedNavbar({ className = "" }) {
       debugError('? Error updating online status in backend:', error);
       // Revert state if backend update fails
       setIsOnline(!next);
-      toast.error('Failed to update status. Please try again.');
+      toast.error(error?.response?.data?.message || 'Failed to update status. Please try again.');
     }
   };
 

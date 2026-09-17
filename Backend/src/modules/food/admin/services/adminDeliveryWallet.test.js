@@ -6,6 +6,7 @@ import {
     getDeliveryWallets,
     updateDeliveryBoyWallet,
     getCashLimitSettlements,
+    collectDeliveryCash,
 } from './adminDeliveryWallet.service.js';
 import {
     updateDeliveryPartnerProfile,
@@ -121,6 +122,7 @@ test('a rider over the cap has no remaining limit, never a negative one', async 
 
     assert.equal(row.cashCollected, 900);
     assert.equal(row.remainingCashLimit, 0, 'clamped, so the UI never shows a negative allowance');
+    assert.equal(row.cashSuspended, true, 'over the limit is suspended until they settle');
 });
 
 test('a manual wallet adjustment creates the row if there is none', async () => {
@@ -129,16 +131,13 @@ test('a manual wallet adjustment creates the row if there is none', async () => 
     const created1 = await updateDeliveryBoyWallet({
         deliveryId: partner.id,
         pocketBalance: 250,
-        cashInHand: 100,
     });
     assert.equal(Number(created1.balance), 250);
-    assert.equal(Number(created1.cashInHand), 100);
     assert.equal(created1.entityType, 'deliveryBoy');
 
     // A second call edits the same row rather than adding another.
     const updated = await updateDeliveryBoyWallet({ deliveryId: partner.id, pocketBalance: 400 });
     assert.equal(Number(updated.balance), 400);
-    assert.equal(Number(updated.cashInHand), 100, 'an unmentioned field is left alone');
 
     const count = await prisma.wallet.count({ where: { entityId: partner.id } });
     assert.equal(count, 1);
@@ -180,15 +179,57 @@ test('re-submitting the same balance posts nothing', async () => {
     const partner = await makePartner();
 
     await updateDeliveryBoyWallet({ deliveryId: partner.id, pocketBalance: 100 });
-    await updateDeliveryBoyWallet({ deliveryId: partner.id, pocketBalance: 100, cashInHand: 40 });
+    await updateDeliveryBoyWallet({ deliveryId: partner.id, pocketBalance: 100 });
 
     // Saving the form twice is not two adjustments, and a zero-amount entry is
     // rejected by the ledger anyway.
     const count = await prisma.transaction.count({ where: { entityId: partner.id } });
     assert.equal(count, 1);
+});
 
-    const wallet = await prisma.wallet.findFirst({ where: { entityId: partner.id } });
-    assert.equal(Number(wallet.cashInHand), 40, 'cash in hand still saves');
+test('lowering cash in hand records the difference as cash the admin collected', async () => {
+    const partner = await makePartner();
+    await makeCodOrders(partner, [400, 200]);
+
+    await updateDeliveryBoyWallet({ deliveryId: partner.id, cashInHand: 250, reason: 'Handed in at office' }, 'admin-id-here');
+    const deposits = await prisma.foodDeliveryCashDeposit.findMany({ where: { deliveryPartnerId: partner.id } });
+    created.deposits.push(...deposits.map((d) => d.id));
+    assert.equal(deposits.length, 1);
+    assert.equal(Number(deposits[0].amount), 350, '600 held, 250 left: 350 collected');
+    assert.equal(deposits[0].status, 'Completed');
+    assert.equal(deposits[0].adminNote, 'Handed in at office');
+
+    await assert.rejects(
+        () => updateDeliveryBoyWallet({ deliveryId: partner.id, cashInHand: 1000 }),
+        /cannot be raised/,
+        "only a delivered cash order puts cash in a rider's hand",
+    );
+});
+
+test('collecting cash lowers cash in hand, and never below zero', async () => {
+    const partner = await makePartner();
+    await makeCodOrders(partner, [500]);
+
+    const { deposit, cashInHand } = await collectDeliveryCash(
+        { deliveryPartnerId: partner.id, amount: 300, method: 'upi', note: 'GPay' },
+        'admin-id-here',
+    );
+    created.deposits.push(deposit.id);
+    assert.equal(cashInHand, 200);
+    assert.equal(deposit.paymentMethod, 'upi');
+
+    await assert.rejects(
+        () => collectDeliveryCash({ deliveryPartnerId: partner.id, amount: 201 }),
+        /cannot be more than/,
+    );
+    await assert.rejects(
+        () => collectDeliveryCash({ deliveryPartnerId: partner.id, amount: 50, method: 'cheque' }),
+        /Method must be one of/,
+    );
+
+    const { transactions } = await getCashLimitSettlements({ search: partner.phone });
+    assert.equal(transactions[0].collectedByAdmin, true);
+    assert.equal(transactions[0].adminNote, 'GPay');
 });
 
 test('a wallet adjustment for an unknown rider is refused', async () => {

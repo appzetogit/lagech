@@ -309,6 +309,9 @@ Query: `type` (transaction-type filter), `limit`.
     "totalEarned": 5100,
     "totalCashLimit": 3000,
     "availableCashLimit": 1800,
+    "cashWarningAt": 2700,
+    "cashLimitWarning": false,
+    "cashSuspended": false,
     "deliveryWithdrawalLimit": 100,
     "joiningBonusClaimed": false,
     "joiningBonusAmount": 0,
@@ -329,6 +332,11 @@ Query: `type` (transaction-type filter), `limit`.
 }
 ```
 `totalWithdrawn` is hardcoded to 0 in this endpoint — use the withdrawal list for real withdrawal history.
+
+**Cash limit.** `cashInHand` is cash from delivered cash orders less deposits (the rider's own, and cash an admin recorded collecting). With `totalCashLimit` > 0 (0 = no limit):
+- `cashLimitWarning` is true from `cashWarningAt` (90% of the limit) — show a "deposit your cash" warning.
+- `cashSuspended` is true at or over the limit. The rider is offered no orders, `PATCH /availability` to online is refused (400 with a message), and accept is refused. It lifts by itself once a deposit or admin collection brings them under the limit.
+- A cash or QR order is refused on accept (400 with a message) when `cashInHand` + that order's total would reach the limit.
 
 ### `POST /food/delivery/wallet/withdraw`
 ```json

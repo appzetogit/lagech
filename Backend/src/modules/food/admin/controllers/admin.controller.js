@@ -1725,6 +1725,15 @@ export async function updateDeliveryBoyWallet(req, res, next) {
     }
 }
 
+export async function collectDeliveryCash(req, res, next) {
+    try {
+        const data = await adminService.collectDeliveryCash(req.body, req.user?.userId);
+        res.status(201).json({ success: true, message: 'Cash collection recorded', data });
+    } catch (error) {
+        next(error);
+    }
+}
+
 export async function updateDeliveryPartnerProfile(req, res, next) {
     try {
         const { id } = req.params;

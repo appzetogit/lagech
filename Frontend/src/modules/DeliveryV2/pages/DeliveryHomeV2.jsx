@@ -98,7 +98,7 @@ function BottomPopup({ isOpen, onClose, title, children, maxHeight = "85vh" }) {
  */
 export default function DeliveryHomeV2({ tab = 'feed' }) {
   const navigate = useNavigate();
-  const { isOnline, toggleOnline, activeOrder, tripStatus, setRiderLocation, setActiveOrder, updateTripStatus, clearActiveOrder, routeDurationMins } = useDeliveryStore();
+  const { isOnline, toggleOnline, setOnline, activeOrder, tripStatus, setRiderLocation, setActiveOrder, updateTripStatus, clearActiveOrder, routeDurationMins } = useDeliveryStore();
   const { isWithinRange, distanceToTarget, displayDistanceMeters, distanceLabel } = useProximityCheck();
   const { acceptOrder, reachPickup, pickUpOrder, reachDrop, completeDelivery, resetTrip } = useOrderManager();
   const { newOrder, clearNewOrder, clearAllOffers, orderStatusUpdate, clearOrderStatusUpdate, isConnected: isSocketConnected, emitLocation } = useDeliveryNotifications();
@@ -378,7 +378,16 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
 
   // 2. Online/Offline Status Sync (Low Frequency)
   useEffect(() => {
-    deliveryAPI.updateOnlineStatus(isOnline).catch(() => { });
+    deliveryAPI.updateOnlineStatus(isOnline).catch((err) => {
+      // The server refuses going online while the rider is suspended for cash;
+      // flip the switch back and say why, rather than show them online and
+      // offered nothing.
+      const message = err?.response?.data?.message;
+      if (isOnline && err?.response?.status === 400 && message) {
+        setOnline(false);
+        toast.error(message);
+      }
+    });
   }, [isOnline]);
 
   // 3. Location logic (Smart Frequency Tracking)

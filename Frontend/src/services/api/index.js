@@ -1081,6 +1081,11 @@ export const adminAPI = {
       params,
       contextModule: "admin",
     }),
+  /** Record cash, UPI or a bank transfer a rider handed over. */
+  collectDeliveryCash: (body) =>
+    apiClient.post("/food/admin/delivery/cash-collections", body, {
+      contextModule: "admin",
+    }),
 
   /** Restaurant Commission (admin) */
   getRestaurantCommissionBootstrap: () =>

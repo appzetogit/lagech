@@ -11,6 +11,7 @@ import {
 } from '../../orders/helpers/razorpay.helper.js';
 import { logger } from '../../../../utils/logger.js';
 import { recordTransaction } from '../../../../core/payments/transaction.service.js';
+import { getRiderCashStatus } from './riderCash.service.js';
 
 const num = (v) => Number(v) || 0;
 
@@ -36,8 +37,7 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
     const [
         cashLimitSettings,
         earningsAgg,
-        cashCollectedAgg,
-        cashDepositsAgg,
+        cashPosition,
         bonusAgg,
         withdrawalsByStatus,
         withdrawalsList,
@@ -51,20 +51,8 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
             where: { dispatchDeliveryPartnerId: partnerId, orderStatus: 'delivered' },
             _sum: { riderEarning: true },
         }),
-        // 2. Gross cash collected (COD orders)
-        prisma.foodOrder.aggregate({
-            where: {
-                dispatchDeliveryPartnerId: partnerId,
-                orderStatus: 'delivered',
-                paymentMethod: 'cash',
-            },
-            _sum: { total: true },
-        }),
-        // 3. Cash deposits (deduct from cash-in-hand)
-        prisma.foodDeliveryCashDeposit.aggregate({
-            where: { deliveryPartnerId: partnerId, status: 'Completed' },
-            _sum: { amount: true },
-        }),
+        // 2-3. Cash in hand, the limit, the 90% warning and suspension.
+        getRiderCashStatus(partnerId),
         // 4. Admin bonuses
         prisma.deliveryBonusTransaction.aggregate({
             where: { deliveryPartnerId: partnerId },
@@ -103,9 +91,6 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
         num(withdrawalsByStatus.find((r) => r.status === status)?._sum?.amount);
 
     const aggTotalEarned = num(earningsAgg?._sum?.riderEarning);
-    const grossCashCollected = num(cashCollectedAgg?._sum?.total);
-    const totalDepositedCash = num(cashDepositsAgg?._sum?.amount);
-    const computedCashInHand = Math.max(0, grossCashCollected - totalDepositedCash);
     const aggTotalBonus = num(bonusAgg?._sum?.amount);
     const aggTotalWithdrawn = byStatus('approved');
     const pendingWithdrawals = byStatus('pending');
@@ -114,7 +99,6 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
     // wallet adjustments are not lost behind stale pocket totals.
     const walletBalance = num(walletDoc?.balance);
     const walletLockedAmount = num(walletDoc?.lockedAmount);
-    const walletCashInHand = num(walletDoc?.cashInHand);
     const walletTotalEarnings = num(walletDoc?.totalEarnings);
     const walletTotalBonus = num(walletDoc?.totalBonus);
     const walletTotalSettled = num(walletDoc?.totalSettled);
@@ -122,7 +106,9 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
     const totalEarned = Math.max(aggTotalEarned, walletTotalEarnings);
     const totalBonus = Math.max(aggTotalBonus, walletTotalBonus);
     const totalWithdrawn = Math.max(aggTotalWithdrawn, walletTotalSettled);
-    const cashInHand = Math.max(computedCashInHand, walletCashInHand);
+    // Worked out from orders and deposits only. It used to take the larger of
+    // that and the wallet row's cashInHand column, which nothing kept current.
+    const { cashInHand } = cashPosition;
 
     const totalCashLimit = num(cashLimitSettings.deliveryCashLimit);
     const deliveryWithdrawalLimit = num(cashLimitSettings.deliveryWithdrawalLimit) || 100;
@@ -180,6 +166,9 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
         totalBonus,
         totalCashLimit,
         availableCashLimit: Math.max(0, totalCashLimit - cashInHand),
+        cashWarningAt: cashPosition.cashWarningAt,       // 90% of the limit
+        cashLimitWarning: cashPosition.cashLimitWarning, // at or past the warning
+        cashSuspended: cashPosition.cashSuspended,       // at or over the limit
         deliveryWithdrawalLimit,
         transactions: transactions.slice(0, 50),
     };

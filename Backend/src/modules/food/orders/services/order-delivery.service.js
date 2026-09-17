@@ -14,6 +14,7 @@ import { fetchDrivingRoute } from '../utils/googleMaps.js';
 import * as foodTransactionService from './foodTransaction.service.js';
 import * as dispatchService from './order-dispatch.service.js';
 import * as paymentService from './order-payment.service.js';
+import { assertRiderCanTakeOrder } from '../../delivery/services/riderCash.service.js';
 
 import {
   buildOrderIdentityFilter,
@@ -319,42 +320,6 @@ export async function listOrdersAvailableDelivery(deliveryPartnerId, query) {
   return buildPaginatedResult({ docs: paged, total, page, limit });
 }
 
-/**
- * Rejects an accept when the rider is already at their cash ceiling.
- *
- * Dispatch skips over-limit riders, but an offer sent a moment BEFORE they crossed
- * the line is still sitting on their phone — and a client-side block would be
- * trivially bypassed anyway. This is the authoritative check.
- *
- * Prepaid orders are unaffected. A limit of 0 means no limit, matching the default.
- */
-async function assertCashLimitAllows(deliveryPartnerId, order) {
-  const method = String(order?.payment?.method || order?.paymentMethod || '').toLowerCase();
-  if (method !== 'cash' && method !== 'razorpay_qr') return;
-
-  const [settings, wallet] = await Promise.all([
-    prisma.foodDeliveryCashLimit.findFirst({
-      where: { isActive: true },
-      select: { deliveryCashLimit: true },
-    }),
-    prisma.wallet.findUnique({
-      where: { entityType_entityId: { entityType: 'deliveryBoy', entityId: String(deliveryPartnerId) } },
-      select: { cashInHand: true },
-    }),
-  ]);
-
-  const limit = Number(settings?.deliveryCashLimit) || 0;
-  if (limit <= 0) return;
-
-  const inHand = Number(wallet?.cashInHand) || 0;
-  if (inHand >= limit) {
-    throw new ValidationError(
-      `You are holding Rs.${inHand} in cash, which is at your Rs.${limit} limit. ` +
-        'Deposit your cash to keep accepting cash orders.',
-    );
-  }
-}
-
 export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
   const identity = buildOrderIdentityFilter(orderId);
   if (!identity) throw new ValidationError('Order id required');
@@ -368,7 +333,7 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
 
   const requested = await prisma.foodOrder.findFirst({
     where: identity,
-    select: { id: true, paymentMethod: true, paymentStatus: true },
+    select: { id: true, paymentMethod: true, paymentStatus: true, total: true },
   });
   if (!requested) throw new NotFoundError('Order not found');
   const id = requested.id;
@@ -394,9 +359,10 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
     );
   }
 
-  // Refuse before claiming the order, not after: a rider already at their cash
-  // ceiling must not end up holding a cash trip they cannot be given.
-  await assertCashLimitAllows(partnerId, { paymentMethod: requested.paymentMethod });
+  // Refuse before claiming the order, not after. This is the authoritative
+  // check: dispatch skips blocked riders, but an offer sent a moment before a
+  // rider crossed the line can still be sitting on their phone.
+  await assertRiderCanTakeOrder(partnerId, requested);
 
   // Atomic claim. The guard replaces findOneAndUpdate's filter — only one rider
   // can flip the order to accepted.
@@ -993,6 +959,16 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
       creditDeliveryReferralOnFirstDelivery(String(deliveryPartnerId)),
     )
     .catch((e) => logger.warn(`referral credit hook failed: ${e?.message || e}`));
+
+  // A cash delivery can put the rider at their cash limit, which suspends them:
+  // take them offline now rather than leave them online and offered nothing.
+  // Loaded lazily -- delivery.service is a large module this one otherwise
+  // does not need.
+  if (payMethod === 'cash') {
+    import('../../delivery/services/delivery.service.js')
+      .then(({ takeRiderOfflineIfCashSuspended }) => takeRiderOfflineIfCashSuspended(String(deliveryPartnerId)))
+      .catch((e) => logger.warn(`cash suspension check failed: ${e?.message || e}`));
+  }
 
   // Customer cashback on the delivered order. Idempotent per order, never throws.
   import('../../user/services/cashback.service.js')
