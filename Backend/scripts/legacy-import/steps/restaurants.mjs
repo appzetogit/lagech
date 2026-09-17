@@ -268,4 +268,79 @@ export async function importRestaurants(mysql, report) {
         await recordId(ENTITY, row.id, restaurantId);
         report.done(ENTITY, exists ? 'updated' : 'created');
     }
+
+    await importDeletedRestaurants(mysql, report, { idMap, zoneMap, foodModuleId: foodModule.id, defaultCommission });
+}
+
+/**
+ * Restaurants the old admin deleted, whose orders, dishes and payouts are still
+ * in the data. The store and owner rows are gone, but the old system kept each
+ * store's name and address in `translations`; where those survive, the
+ * restaurant comes back as a rejected placeholder, so its order history and
+ * payouts have somewhere to belong. It cannot be logged into (no owner phone)
+ * and is never listed to customers. A deleted store with no surviving name is
+ * left out, as before.
+ */
+async function importDeletedRestaurants(mysql, report, { idMap, zoneMap, foodModuleId, defaultCommission }) {
+    const [rows] = await mysql.query(`
+        SELECT ref.id,
+               MAX(CASE WHEN t.\`key\` = 'name' THEN t.value END) AS name,
+               MAX(CASE WHEN t.\`key\` = 'address' THEN t.value END) AS address,
+               (SELECT o.zone_id FROM orders o WHERE o.store_id = ref.id ORDER BY o.id DESC LIMIT 1) AS zone_id,
+               (SELECT MIN(o.created_at) FROM orders o WHERE o.store_id = ref.id) AS first_order_at
+        FROM (
+            SELECT store_id AS id FROM orders WHERE module_id = ?
+            UNION SELECT store_id FROM items WHERE module_id = ?
+        ) ref
+        JOIN translations t
+          ON t.translationable_type = 'App\\\\Models\\\\Store' AND t.translationable_id = ref.id
+        WHERE ref.id NOT IN (SELECT id FROM stores)
+        GROUP BY ref.id`, [foodModuleId, foodModuleId]);
+
+    for (const row of rows) {
+        const name = String(row.name || '').trim();
+        if (!name) continue;
+        const address = String(row.address || '').trim();
+        const zoneId = zoneMap.get(String(row.zone_id)) || null;
+
+        const data = {
+            restaurantName: name,
+            ownerName: 'Unknown (deleted in the previous system)',
+            addressLine1: address || null,
+            formattedAddress: address || null,
+            zoneId,
+            status: 'rejected',
+            rejectedAt: new Date(),
+            rejectionReason: 'Deleted in the previous system; kept for its order history and payouts',
+            isAcceptingOrders: false,
+            ...deriveRestaurantFields({ restaurantName: name, ownerPhone: '', estimatedDeliveryTime: '' }),
+            ...(row.first_order_at ? { createdAt: row.first_order_at } : {}),
+        };
+
+        const existingId = idMap.get(String(row.id));
+        const exists = existingId && (await prisma.foodRestaurant.count({ where: { id: existingId } })) > 0;
+        const restaurant = exists
+            ? await prisma.foodRestaurant.update({ where: { id: existingId }, data, select: { id: true } })
+            : await prisma.foodRestaurant.create({ data, select: { id: true } });
+
+        if (defaultCommission !== null) {
+            const commission = {
+                commissionType: 'percentage',
+                commissionValue: defaultCommission,
+                notes: `Imported: previous platform default (${defaultCommission}%)`,
+                status: true,
+            };
+            await prisma.foodRestaurantCommission.upsert({
+                where: { restaurantId: restaurant.id },
+                create: { restaurantId: restaurant.id, ...commission },
+                update: commission,
+            });
+        }
+
+        await recordId(ENTITY, row.id, restaurant.id);
+        idMap.set(String(row.id), restaurant.id);
+        report.done(ENTITY, exists ? 'updated' : 'created');
+        report.warn(ENTITY, row.id, name,
+            'deleted in the old system; imported as a rejected placeholder from its surviving name and address, for order history and payouts');
+    }
 }

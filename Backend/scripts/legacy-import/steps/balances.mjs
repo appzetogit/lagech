@@ -211,6 +211,17 @@ async function importRestaurantMoney(mysql, report) {
     const withdrawalAdjust = await loadIdMap('restaurant_withdrawal_adjust');
     const [stores] = await mysql.query('SELECT id, vendor_id FROM stores');
     const storeByVendor = new Map(stores.map((s) => [String(s.vendor_id), String(s.id)]));
+    // A deleted store has no stores row to say whose it was, but its payouts
+    // do: a disbursement's withdrawal request names the vendor, and the
+    // disbursement line names the store.
+    const [payoutOwners] = await mysql.query(`
+        SELECT DISTINCT w.vendor_id, d.store_id
+        FROM withdraw_requests w
+        JOIN disbursement_details d ON d.id = w.transaction_note AND d.store_id IS NOT NULL
+        WHERE w.type = 'disbursement' AND w.vendor_id IS NOT NULL`);
+    for (const owner of payoutOwners) {
+        if (!storeByVendor.has(String(owner.vendor_id))) storeByVendor.set(String(owner.vendor_id), String(owner.store_id));
+    }
 
     const [requests] = await mysql.query('SELECT * FROM withdraw_requests WHERE vendor_id IS NOT NULL ORDER BY id');
     for (const row of requests) {
