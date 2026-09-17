@@ -335,7 +335,12 @@ export async function updateSubAdminPermissions(req, res, next) {
     try {
         if (!ensureSuperAdmin(req, res)) return;
         const normalized = normalizePermissionPayload(req.body?.permissions || {});
-        const data = await adminService.updateSubAdminPermissions(req.params.id, normalized, req.user?.userId);
+        const data = await adminService.updateSubAdminPermissions(
+            req.params.id,
+            normalized,
+            req.user?.userId,
+            Array.isArray(req.body?.menuPaths) ? req.body.menuPaths : undefined,
+        );
         res.status(200).json({ success: true, message: 'Sub-admin permissions updated', data: { subAdmin: data } });
     } catch (error) {
         next(error);

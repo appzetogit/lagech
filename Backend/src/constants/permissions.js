@@ -57,6 +57,19 @@ export const sanitizeAdminPermissions = (raw = {}) => {
     return normalized;
 };
 
+/**
+ * The sidebar pages chosen for a sub-admin: admin panel paths only, each once.
+ * Not a security boundary on its own -- the API is guarded by sections -- but
+ * stored clean because the panel routes by it.
+ */
+export const sanitizeAdminMenuPaths = (raw = []) => {
+    if (!Array.isArray(raw)) return [];
+    const paths = raw
+        .map((path) => String(path || '').trim().replace(/\/+$/, ''))
+        .filter((path) => /^\/admin\/food(\/[A-Za-z0-9_\-/]*)?$/.test(path));
+    return [...new Set(paths)].slice(0, 300);
+};
+
 export const isValidPermissionPayload = (payload = {}) => {
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false;
 

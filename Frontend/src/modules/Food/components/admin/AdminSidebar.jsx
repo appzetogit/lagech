@@ -58,7 +58,7 @@ import { adminSidebarMenu } from "@food/utils/adminSidebarMenu"
 import { adminAPI } from "@food/api"
 import { getCachedSettings, loadBusinessSettings } from "@food/utils/businessSettings"
 import { canAccessFeatureSettings, canAccessSuperPowers } from "@food/utils/adminPermissions"
-import { canAdminAccess, isSuperAdmin, resolvePermissionSectionByPath } from "@food/utils/adminRbac"
+import { canAdminAccess, canSeeMenuPath, isSuperAdmin, resolvePermissionSectionByPath } from "@food/utils/adminRbac"
 import lagechLogo from "@food/assets/lagech-logo.png"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
@@ -308,6 +308,7 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
       if (entry.feature && featureOn[entry.feature] === false) return false
       if (entry.requires && !gatePassed[entry.requires]) return false
       if (!entry.path) return true
+      if (!canSeeMenuPath(adminUser, entry.path)) return false
       const permissionSection = resolvePermissionSectionByPath(entry.path)
       if (!permissionSection) return isSuperAdmin(adminUser)
       return canAdminAccess(adminUser, permissionSection, "view")

@@ -5,6 +5,7 @@ import { hashAdminPassword } from '../../../../core/auth/adminPassword.util.js';
 import {
     ADMIN_FULL_PERMISSIONS,
     isValidPermissionPayload,
+    sanitizeAdminMenuPaths,
     sanitizeAdminPermissions,
 } from '../../../../constants/permissions.js';
 
@@ -23,7 +24,7 @@ import {
  */
 const SUB_ADMIN_SELECT = {
     id: true, email: true, name: true, phone: true, profileImage: true,
-    role: true, adminType: true, permissions: true,
+    role: true, adminType: true, permissions: true, menuPaths: true,
     isActive: true, isDeleted: true, servicesAccess: true,
     createdById: true, updatedById: true, createdAt: true, updatedAt: true,
 };
@@ -50,8 +51,11 @@ export async function createSubAdmin(payload = {}, actorId) {
                 phone: String(payload.phone || '').trim(),
                 role: 'ADMIN',
                 adminType: 'sub_admin',
-                // No permissions until an admin grants them.
-                permissions: {},
+                // What the creator ticked; nothing at all if they ticked nothing.
+                permissions: isValidPermissionPayload(payload.permissions || {})
+                    ? sanitizeAdminPermissions(payload.permissions || {})
+                    : {},
+                menuPaths: sanitizeAdminMenuPaths(payload.menuPaths),
                 isActive: true,
                 isDeleted: false,
                 createdById: isId(actorId) ? String(actorId) : null,
@@ -135,7 +139,7 @@ export async function updateSubAdminProfile(id, payload = {}, actorId) {
     }
 }
 
-export async function updateSubAdminPermissions(id, rawPermissions = {}, actorId) {
+export async function updateSubAdminPermissions(id, rawPermissions = {}, actorId, menuPaths = undefined) {
     if (!isValidPermissionPayload(rawPermissions)) {
         throw new ValidationError('Invalid permissions payload');
     }
@@ -143,6 +147,7 @@ export async function updateSubAdminPermissions(id, rawPermissions = {}, actorId
     return updateSubAdmin(id, {
         // Sanitised, not stored as sent: this decides what the account can reach.
         permissions: sanitizeAdminPermissions(rawPermissions),
+        ...(menuPaths !== undefined ? { menuPaths: sanitizeAdminMenuPaths(menuPaths) } : {}),
         updatedById: isId(actorId) ? String(actorId) : null,
     });
 }

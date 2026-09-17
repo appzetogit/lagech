@@ -451,10 +451,10 @@ export const adminAPI = {
     apiClient.get(`/food/admin/sub-admins/${String(id)}`, { contextModule: "admin" }),
   updateSubAdmin: (id, body = {}) =>
     apiClient.patch(`/food/admin/sub-admins/${String(id)}`, body ?? {}, { contextModule: "admin" }),
-  updateSubAdminPermissions: (id, permissions = {}) =>
+  updateSubAdminPermissions: (id, permissions = {}, menuPaths = undefined) =>
     apiClient.patch(
       `/food/admin/sub-admins/${String(id)}/permissions`,
-      { permissions },
+      { permissions, ...(Array.isArray(menuPaths) ? { menuPaths } : {}) },
       { contextModule: "admin" },
     ),
   updateSubAdminStatus: (id, isActive) =>

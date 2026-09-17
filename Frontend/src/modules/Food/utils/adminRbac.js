@@ -1,4 +1,5 @@
 import { getCurrentUser } from "@food/utils/auth";
+import { adminSidebarMenu } from "@food/utils/adminSidebarMenu";
 
 export const ADMIN_ACTIONS = ["view", "create", "edit", "delete", "export"];
 
@@ -128,6 +129,31 @@ export function canAdminAccess(adminUser, section, action = "view") {
   return actions.includes(action);
 }
 
+/**
+ * Whether a sub-admin was given this sidebar page. An empty list means the
+ * super admin never narrowed them to single pages, so their sections decide.
+ */
+/** Every page the sidebar links to, top-level links and sub-items alike. */
+export function listSidebarPaths(menu = adminSidebarMenu) {
+  const paths = [];
+  for (const entry of menu) {
+    if (entry?.type === "link" && entry.path) paths.push(entry.path);
+    for (const item of entry?.items || []) {
+      if (item.path) paths.push(item.path);
+      for (const sub of item.subItems || []) if (sub.path) paths.push(sub.path);
+    }
+  }
+  return paths;
+}
+
+export function canSeeMenuPath(adminUser, path) {
+  if (isSuperAdmin(adminUser)) return true;
+  const chosen = Array.isArray(adminUser?.menuPaths) ? adminUser.menuPaths : [];
+  if (!chosen.length) return true;
+  const normalized = String(path || "").replace(/\/+$/, "") || "/";
+  return chosen.includes(normalized);
+}
+
 export function resolvePermissionSectionByPath(pathname = "") {
   if (pathname === "/admin/food" || pathname === "/admin/food/") return "dashboard";
   const match = PATH_PREFIX_TO_SECTION.find((item) => pathname.startsWith(item.prefix));
@@ -136,6 +162,13 @@ export function resolvePermissionSectionByPath(pathname = "") {
 
 export function canAccessAdminPath(pathname, action = "view") {
   const adminUser = getCurrentUser("admin");
+  // A page that has its own sidebar entry, but not one this sub-admin was
+  // given, is closed even when typed into the address bar. Pages without an
+  // entry (an order's detail page, say) follow the section as before.
+  const normalizedPath = String(pathname || "").replace(/\/+$/, "") || "/";
+  if (listSidebarPaths().includes(normalizedPath) && !canSeeMenuPath(adminUser, normalizedPath)) {
+    return false;
+  }
   const section = resolvePermissionSectionByPath(pathname);
   if (!section) {
     if (isSuperAdmin(adminUser)) return true;
@@ -179,6 +212,9 @@ export function findFirstAllowedAdminPath(adminUser) {
   if (isSuperAdmin(adminUser)) {
     return "/admin/food";
   }
+
+  const chosen = Array.isArray(adminUser?.menuPaths) ? adminUser.menuPaths : [];
+  if (chosen.length) return chosen[0];
 
   for (const section of ADMIN_PERMISSION_SECTIONS) {
     if (canAdminAccess(adminUser, section, "view")) {

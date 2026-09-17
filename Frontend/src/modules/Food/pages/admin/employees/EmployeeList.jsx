@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Plus, Search, Shield, Trash2, ToggleLeft, ToggleRight } from "lucide-react";
 import { adminAPI } from "@food/api";
+import SidebarAccessPicker, { permissionsForPages } from "./SidebarAccessPicker";
 
 const SUBADMIN_EMAIL_REGEX = /^(?!.*\.\.)([A-Za-z0-9]+[._%+-]?)*[A-Za-z0-9]+@[A-Za-z0-9-]+\.[A-Za-z]{2,}$/;
 const INDIAN_MOBILE_REGEX = /^[6-9]\d{9}$/;
@@ -24,6 +25,8 @@ export default function EmployeeList() {
   const [form, setForm] = useState({ name: "", email: "", phone: "", password: "" });
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
+  const [pages, setPages] = useState(new Set());
+  const [level, setLevel] = useState("full");
 
   const validateForm = (payload) => {
     const nextErrors = {};
@@ -94,13 +97,22 @@ export default function EmployeeList() {
       password: String(form.password || ""),
     };
     const validationErrors = validateForm(normalizedForm);
+    // A sub admin with no pages logs in to an empty panel.
+    if (!pages.size) validationErrors.pages = "Tick at least one page this sub admin can see.";
     setErrors(validationErrors);
     if (Object.keys(validationErrors).length > 0) return;
 
     setSaving(true);
     try {
-      await adminAPI.createSubAdmin(normalizedForm);
+      const menuPaths = [...pages];
+      await adminAPI.createSubAdmin({
+        ...normalizedForm,
+        menuPaths,
+        permissions: permissionsForPages(menuPaths, level),
+      });
       setForm({ name: "", email: "", phone: "", password: "" });
+      setPages(new Set());
+      setLevel("full");
       setErrors({});
       await load();
     } finally {
@@ -123,7 +135,7 @@ export default function EmployeeList() {
     <div className="p-4 lg:p-6 bg-slate-50 min-h-screen space-y-6">
       <div className="bg-white border border-slate-200 rounded-xl p-5">
         <h1 className="text-2xl font-bold text-slate-900">Sub Admin Management</h1>
-        <p className="text-sm text-slate-600 mt-1">Create, disable, and delete sub admins. Permissions are managed per admin.</p>
+        <p className="text-sm text-slate-600 mt-1">Create, disable, and delete sub admins, and choose which sidebar pages each one can see.</p>
       </div>
 
       <form onSubmit={handleCreate} className="bg-white border border-slate-200 rounded-xl p-5 grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -178,6 +190,18 @@ export default function EmployeeList() {
           />
           {errors.password ? <p className="mt-1 text-xs text-red-600">{errors.password}</p> : null}
         </div>
+        <div className="md:col-span-2 border-t border-slate-200 pt-4">
+          <SidebarAccessPicker
+            selected={pages}
+            onChange={(next) => {
+              setPages(next);
+              if (errors.pages) setErrors((prev) => ({ ...prev, pages: "" }));
+            }}
+            level={level}
+            onLevelChange={setLevel}
+          />
+          {errors.pages ? <p className="mt-2 text-xs text-red-600">{errors.pages}</p> : null}
+        </div>
         <div className="md:col-span-2">
           <button disabled={saving} className="inline-flex items-center gap-2 px-4 py-2 bg-black text-white rounded-lg">
             <Plus className="w-4 h-4" /> Create Sub Admin
@@ -204,7 +228,7 @@ export default function EmployeeList() {
                 </div>
                 <div className="flex items-center gap-2">
                   <Link to={`/admin/food/employee-role?id=${item._id}`} className="inline-flex items-center gap-1 px-3 py-2 border rounded-lg text-sm">
-                    <Shield className="w-4 h-4" /> Permissions
+                    <Shield className="w-4 h-4" /> Access
                   </Link>
                   <button onClick={() => toggleStatus(item)} className="px-3 py-2 border rounded-lg text-sm inline-flex items-center gap-1">
                     {item.isActive ? <ToggleRight className="w-4 h-4 text-green-600" /> : <ToggleLeft className="w-4 h-4 text-slate-500" />}

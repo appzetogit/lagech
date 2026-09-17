@@ -935,6 +935,10 @@ model FoodAdmin {
   /// Section → allowed actions. Sections come from constants/permissions.js,
   /// so this stays Json rather than 20-odd enum array columns that drift.
   permissions Json @default("{}")
+  /// Sidebar pages a sub-admin is shown, chosen item by item. Empty means no
+  /// narrowing: they see every page their section permissions allow, which is
+  /// how sub-admins created before this list existed keep working.
+  menuPaths   String[] @default([])
 
   isActive  Boolean @default(true)
   isDeleted Boolean @default(false)
