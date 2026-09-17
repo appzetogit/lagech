@@ -7,6 +7,7 @@ import {
     getCategoryStats,
     normalizeCategoryFoodTypeScope,
     serializeCategoryForResponse,
+    toPrismaFoodTypeScope,
     zoneVisibilityFilter,
 } from '../../shared/categoryWorkflow.js';
 
@@ -18,6 +19,10 @@ const CATEGORY_SELECT = {
     isActive: true, sortOrder: true,
     requestedAt: true, approvedAt: true, rejectedAt: true, globalizedAt: true,
     createdAt: true, updatedAt: true,
+    // Two "Starter" sub-categories under different parents are otherwise
+    // indistinguishable in a restaurant's category picker.
+    parentId: true,
+    parent: { select: { name: true } },
 };
 
 const RESTAURANT_PARTY = { id: true, restaurantName: true, ownerName: true, ownerPhone: true };
@@ -120,11 +125,28 @@ export async function listPublicCategories(query = {}) {
         GLOBAL_CATEGORY_FILTER,
         APPROVED_CATEGORY_FILTER,
         zoneVisibilityFilter(zoneIdRaw),
+        // The app's category tabs are the top level; sub-categories live inside.
+        { parentId: null },
         // Only categories that actually have an approved dish — an empty
         // category is a dead tab in the app. This was a distinct() over
         // food_items followed by an $in; a relation filter does it in one query
         // instead of shipping every category id back to Node first.
-        { foodItems: { some: { approvalStatus: 'approved' } } },
+        //
+        // A dish filed under a sub-category counts for its parent, or a parent
+        // whose dishes all sit one level down would vanish from the app.
+        {
+            OR: [
+                { foodItems: { some: { approvalStatus: 'approved' } } },
+                {
+                    children: {
+                        some: {
+                            isActive: true,
+                            foodItems: { some: { approvalStatus: 'approved' } },
+                        },
+                    },
+                },
+            ],
+        },
     ];
     if (search) {
         AND.push({ name: { contains: search.slice(0, 80), mode: 'insensitive' } });
@@ -175,7 +197,7 @@ export async function createRestaurantCategory(restaurantId, body = {}) {
             name,
             image: typeof body.image === 'string' ? body.image.trim() : '',
             type: typeof body.type === 'string' ? body.type.trim() : '',
-            foodTypeScope,
+            foodTypeScope: toPrismaFoodTypeScope(foodTypeScope),
             isActive: body.isActive !== false,
             sortOrder: Number.isFinite(Number(body.sortOrder)) ? Number(body.sortOrder) : 0,
             restaurantId: context.restaurantId,
@@ -240,7 +262,7 @@ export async function updateRestaurantCategory(restaurantId, id, body = {}) {
                 `This category already has ${incompatibleFoods} food item(s) outside the selected diet type`
             );
         }
-        data.foodTypeScope = nextFoodTypeScope;
+        data.foodTypeScope = toPrismaFoodTypeScope(nextFoodTypeScope);
     }
 
     data.createdByRestaurantId = existing.createdByRestaurantId || context.restaurantId;

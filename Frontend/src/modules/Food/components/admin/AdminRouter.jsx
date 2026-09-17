@@ -280,7 +280,11 @@ export default function AdminRouter() {
             <Route path="restaurants/subscription-history" element={<SubscriptionHistory />} />
 
             {/* FOOD & CATEGORY MANAGEMENT */}
-            <Route path="categories" element={<Category />} />
+            {/* Same component, so the keys make React remount it when moving
+                between the two -- otherwise the first page's list and filters
+                would carry over into the second. */}
+            <Route path="categories" element={<Category key="categories" />} />
+            <Route path="categories/sub" element={<Category key="sub-categories" variant="sub" />} />
             <Route path="fee-settings" element={<FeeSettings />} />
             <Route path="referral-settings" element={<ReferralSettings />} />
             <Route path="foods" element={<FoodsList />} />

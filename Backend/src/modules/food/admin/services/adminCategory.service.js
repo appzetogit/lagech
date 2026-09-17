@@ -5,6 +5,7 @@ import {
     getCategoryStats,
     normalizeCategoryFoodTypeScope,
     serializeCategoryForResponse,
+    toPrismaFoodTypeScope,
 } from '../../shared/categoryWorkflow.js';
 
 /**
@@ -24,6 +25,64 @@ const RESTAURANT_PARTY = { id: true, restaurantName: true, ownerName: true, owne
 const WITH_PARTIES = {
     restaurant: { select: RESTAURANT_PARTY },
     createdByRestaurant: { select: RESTAURANT_PARTY },
+    parent: { select: { id: true, name: true } },
+    _count: { select: { children: true } },
+};
+
+/**
+ * Sub-categories: one level, under a global top-level parent.
+ *
+ * The previous system nested categories this way ("Hotel VEG" -> "Starter") and
+ * never used a third level, so neither does this. Global-only because a
+ * sub-category is shared structure: a global child under a restaurant's private
+ * parent would be visible to everyone while its parent was not.
+ *
+ * A child takes its parent's zone, and its diet scope must fit inside the
+ * parent's -- a Non-Veg sub-category under a Veg parent would put meat on a veg
+ * customer's category page.
+ */
+const scopeFitsParent = (parentScope, childScope) =>
+    parentScope === 'Both' || parentScope === childScope;
+
+/**
+ * Reads a parentId from a request body.
+ *
+ * Returns `undefined` when the body does not mention a parent (leave it alone),
+ * `null` when it asks for a top-level category, or the validated parent row.
+ */
+const resolveParent = async (raw, { selfId = null } = {}) => {
+    if (raw === undefined) return undefined;
+    const value = raw === null ? '' : String(raw).trim();
+    if (!value || value === 'root') return null;
+
+    if (!isId(value)) throw new ValidationError('Invalid parentId');
+    if (selfId && value === String(selfId)) {
+        throw new ValidationError('A category cannot be its own parent');
+    }
+
+    const parent = await prisma.foodCategory.findUnique({ where: { id: value } });
+    if (!parent) throw new ValidationError('Parent category not found');
+    if (parent.parentId) {
+        throw new ValidationError('Sub-categories can only be one level deep');
+    }
+    if (parent.restaurantId) {
+        throw new ValidationError('A sub-category needs a global parent category');
+    }
+    if (parent.approvalStatus !== 'approved') {
+        throw new ValidationError('The parent category must be approved');
+    }
+    return parent;
+};
+
+const assertScopeFitsParent = (parent, scope) => {
+    if (!parent) return;
+    // The parent row comes from Prisma ('NonVeg'); `scope` is already API form.
+    const parentScope = normalizeCategoryFoodTypeScope(parent.foodTypeScope, 'Both');
+    if (!scopeFitsParent(parentScope, scope)) {
+        throw new ValidationError(
+            `A ${scope} sub-category cannot sit under a ${parentScope} category`
+        );
+    }
 };
 
 /** 'global' means "no zone", which is a different filter from a zone id. */
@@ -47,6 +106,13 @@ export async function getCategories(query = {}) {
 
     const zone = zoneFilter(query.zoneId);
     if (zone) Object.assign(where, zone);
+
+    // 'root' = top-level only; 'sub' = every sub-category; an id = that
+    // category's sub-categories.
+    const parentRaw = String(query.parentId || '').trim();
+    if (parentRaw === 'root') where.parentId = null;
+    else if (parentRaw === 'sub') where.parentId = { not: null };
+    else if (isId(parentRaw)) where.parentId = parentRaw;
 
     // approvalStatus is a NOT NULL enum, so the old "status missing, fall back
     // to isApproved" branches are unreachable and collapse to one comparison.
@@ -90,13 +156,23 @@ export async function createCategory(body = {}) {
         zoneId = rawZone;
     }
 
+    const parent = await resolveParent(body.parentId);
+    const foodTypeScope = normalizeCategoryFoodTypeScope(
+        body.foodTypeScope,
+        // The fallback is returned as-is, so it must already be API form.
+        parent ? normalizeCategoryFoodTypeScope(parent.foodTypeScope, 'Both') : 'Both'
+    );
+    assertScopeFitsParent(parent, foodTypeScope);
+
     return prisma.foodCategory.create({
         data: {
             name,
             image: typeof body.image === 'string' ? body.image.trim() : '',
             type: typeof body.type === 'string' ? body.type.trim() : '',
-            foodTypeScope: normalizeCategoryFoodTypeScope(body.foodTypeScope, 'Both'),
-            zoneId,
+            foodTypeScope: toPrismaFoodTypeScope(foodTypeScope),
+            // A sub-category is visible exactly where its parent is.
+            zoneId: parent ? parent.zoneId : zoneId,
+            parentId: parent ? parent.id : null,
             isActive: body.isActive !== false,
             sortOrder: Number.isFinite(Number(body.sortOrder)) ? Number(body.sortOrder) : 0,
             // An admin creating a category is the approval; it is global and
@@ -200,10 +276,10 @@ export async function updateCategory(id, body = {}) {
     const category = await loadCategory(id);
     if (!category) return null;
 
-    const nextFoodTypeScope =
-        body.foodTypeScope !== undefined
-            ? normalizeCategoryFoodTypeScope(body.foodTypeScope, category.foodTypeScope || 'Both')
-            : normalizeCategoryFoodTypeScope(category.foodTypeScope, 'Both');
+    const currentScope = normalizeCategoryFoodTypeScope(category.foodTypeScope, 'Both');
+    const nextFoodTypeScope = body.foodTypeScope !== undefined
+        ? normalizeCategoryFoodTypeScope(body.foodTypeScope, currentScope)
+        : currentScope;
 
     if (body.foodTypeScope !== undefined && nextFoodTypeScope !== 'Both') {
         // Narrowing the diet scope must not strand dishes already filed here.
@@ -220,17 +296,57 @@ export async function updateCategory(id, body = {}) {
         }
     }
 
+    // ── tree position ──
+    const requestedParent = await resolveParent(body.parentId, { selfId: category.id });
+    const childCount = await prisma.foodCategory.count({ where: { parentId: category.id } });
+
+    if (requestedParent) {
+        if (category.restaurantId) {
+            throw new ValidationError('Only global categories can be sub-categories');
+        }
+        if (childCount > 0) {
+            throw new ValidationError(
+                'A category with sub-categories cannot itself become a sub-category'
+            );
+        }
+    }
+
+    // The parent this category will have once the update lands.
+    const effectiveParent = requestedParent !== undefined
+        ? requestedParent
+        : (category.parentId
+            ? await prisma.foodCategory.findUnique({ where: { id: category.parentId } })
+            : null);
+
+    assertScopeFitsParent(effectiveParent, nextFoodTypeScope);
+
+    // Narrowing a parent's scope must not leave a sub-category outside it.
+    if (body.foodTypeScope !== undefined && childCount > 0 && nextFoodTypeScope !== 'Both') {
+        const misfits = await prisma.foodCategory.count({
+            where: { parentId: category.id, foodTypeScope: { not: toPrismaFoodTypeScope(nextFoodTypeScope) } },
+        });
+        if (misfits > 0) {
+            throw new ValidationError(
+                `${misfits} sub-categor${misfits === 1 ? 'y is' : 'ies are'} outside the selected diet scope`
+            );
+        }
+    }
+
     const data = {};
     if (body.name !== undefined) data.name = String(body.name || '').trim();
     if (body.image !== undefined) data.image = String(body.image || '').trim();
     if (body.type !== undefined) data.type = String(body.type || '').trim();
-    if (body.foodTypeScope !== undefined) data.foodTypeScope = nextFoodTypeScope;
+    if (body.foodTypeScope !== undefined) data.foodTypeScope = toPrismaFoodTypeScope(nextFoodTypeScope);
     if (body.isActive !== undefined) data.isActive = body.isActive !== false;
     if (body.sortOrder !== undefined) data.sortOrder = Number(body.sortOrder) || 0;
+    if (requestedParent !== undefined) data.parentId = requestedParent ? requestedParent.id : null;
 
     // A promoted (global) category is never zone-bound, whatever the caller sends.
     if (!category.restaurantId && category.createdByRestaurantId) {
         data.zoneId = null;
+    } else if (effectiveParent) {
+        // A sub-category follows its parent's zone, whatever the caller sends.
+        data.zoneId = effectiveParent.zoneId;
     } else if (body.zoneId !== undefined) {
         const raw = String(body.zoneId || '').trim();
         if (!raw || raw === 'global') {
@@ -241,9 +357,20 @@ export async function updateCategory(id, body = {}) {
         }
     }
 
-    return prisma.foodCategory.update({
-        where: { id: category.id },
-        data: withProposer(category, data),
+    // A parent's zone change carries its sub-categories with it, in the same
+    // transaction, so a child is never briefly visible where its parent is not.
+    return prisma.$transaction(async (tx) => {
+        const updated = await tx.foodCategory.update({
+            where: { id: category.id },
+            data: withProposer(category, data),
+        });
+        if (childCount > 0 && data.zoneId !== undefined && data.zoneId !== category.zoneId) {
+            await tx.foodCategory.updateMany({
+                where: { parentId: category.id },
+                data: { zoneId: data.zoneId },
+            });
+        }
+        return updated;
     });
 }
 
@@ -256,6 +383,15 @@ export async function deleteCategory(id) {
     const deleted = await prisma.$transaction(async (tx) => {
         const category = await tx.foodCategory.findUnique({ where: { id: String(id) } });
         if (!category) return null;
+
+        // The foreign key would refuse this anyway; checking first turns an
+        // opaque constraint error into an instruction.
+        const children = await tx.foodCategory.count({ where: { parentId: category.id } });
+        if (children > 0) {
+            throw new ValidationError(
+                `Delete or move its ${children} sub-categor${children === 1 ? 'y' : 'ies'} first`
+            );
+        }
 
         await tx.foodItem.updateMany({
             where: { categoryId: category.id },

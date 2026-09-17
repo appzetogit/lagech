@@ -16,6 +16,8 @@ const listSchema = z.object({
     zoneId: z.string().optional(),
     isApproved: booleanQuerySchema.optional(),
     approvalStatus: z.enum(['pending', 'approved', 'rejected']).optional(),
+    // 'root' = top-level only; 'sub' = every sub-category; an id = its sub-categories.
+    parentId: z.string().max(100).optional(),
     page: z.coerce.number().int().min(1).optional(),
     limit: z.coerce.number().int().min(1).max(1000).optional()
 });
@@ -26,6 +28,8 @@ const upsertSchema = z.object({
     type: z.string().max(100).optional(),
     foodTypeScope: z.enum(['Veg', 'Non-Veg', 'Both']).optional(),
     zoneId: z.string().max(100).optional(),
+    // null or '' makes the category top-level again.
+    parentId: z.string().max(100).nullable().optional(),
     status: z.boolean().optional(),
     isActive: z.boolean().optional(),
     sortOrder: z.coerce.number().int().optional()

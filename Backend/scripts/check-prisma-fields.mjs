@@ -328,6 +328,23 @@ const checkBlock = (block, modelName, file, line, seen = 0, src = '') => {
     if (!def || seen > 4) return;
 
     for (const { key, block: nested, ident } of entries(block)) {
+        // `_count: { select: { children: true } }` counts relations. Not a
+        // column, so it would otherwise be flagged -- but the names inside it
+        // still have to be relations on this model, and a typo there throws at
+        // execution exactly like a bad select key.
+        if (key === '_count') {
+            const countSelect = nested && entries(nested).find((clause) => clause.key === 'select');
+            const counted = countSelect && (countSelect.block || constantBlock(src, countSelect.ident));
+            for (const { key: relation } of counted ? entries(counted) : []) {
+                if (!def.relations.has(relation)) {
+                    problems.push(
+                        `${path.relative(root, file)}:${line}  ${modelName} has no relation "${relation}" to _count`,
+                    );
+                }
+            }
+            continue;
+        }
+
         if (!def.fields.has(key)) {
             problems.push(
                 `${path.relative(root, file)}:${line}  ${modelName} has no field "${key}"`,

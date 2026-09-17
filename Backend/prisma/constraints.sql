@@ -7,6 +7,13 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS postgis;
 
+-- ─── category tree ───────────────────────────────────────────────────────────
+-- A category cannot be its own parent. Deeper cycles (A under B under A) are
+-- impossible while the tree is one level, which the service enforces.
+ALTER TABLE "food_categories" DROP CONSTRAINT IF EXISTS "food_category_not_own_parent";
+ALTER TABLE "food_categories" ADD CONSTRAINT "food_category_not_own_parent"
+  CHECK ("parentId" IS NULL OR "parentId" <> "id");
+
 -- ─── money guards ────────────────────────────────────────────────────────────
 -- The debit guard, moved out of transaction.service.js and into the database.
 -- Admin wallet is allowed to go negative (it was in Mongo too).

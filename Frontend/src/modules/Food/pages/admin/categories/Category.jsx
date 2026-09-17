@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
+import { Link, useSearchParams } from "react-router-dom"
 import { AnimatePresence, motion } from "framer-motion"
 import {
   BadgeCheck,
+  CornerDownRight,
   Download,
+  FolderTree,
   Globe,
   Loader2,
   Pencil,
@@ -25,7 +28,14 @@ const defaultFormData = {
   type: "",
   zoneId: "global",
   foodTypeScope: "Both",
+  parentId: "",
 }
+
+const SUB_CATEGORIES_PATH = "/admin/food/categories/sub"
+
+/** A sub-category's diet scope has to fit inside its parent's. */
+const scopesAllowedUnder = (parentScope) =>
+  parentScope === "Veg" ? ["Veg"] : parentScope === "Non-Veg" ? ["Non-Veg"] : ["Veg", "Non-Veg", "Both"]
 
 const approvalBadgeClass = (status) => {
   const value = String(status || "pending").toLowerCase()
@@ -52,7 +62,19 @@ const zoneLabel = (zone) => {
 
 const resolveCategoryId = (category) => String(category?._id || category?.id || "").trim()
 
-export default function Category() {
+/**
+ * The Category and Sub Category admin pages.
+ *
+ * One component with a variant rather than two copies, so moderation, upload
+ * and export cannot drift apart between them. `variant="sub"` lists every
+ * sub-category (or one parent's, via ?parent=), and its form asks for a parent
+ * instead of a zone -- a sub-category is visible wherever its parent is.
+ */
+export default function Category({ variant = "category" }) {
+  const isSub = variant === "sub"
+  const [searchParams, setSearchParams] = useSearchParams()
+  const parentFilter = isSub ? String(searchParams.get("parent") || "") : ""
+  const [parentOptions, setParentOptions] = useState([])
   const [searchQuery, setSearchQuery] = useState("")
   const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(true)
@@ -112,7 +134,32 @@ export default function Category() {
       fetchCategories()
     }, 300)
     return () => window.clearTimeout(timer)
-  }, [searchQuery, showPendingOnly])
+  }, [searchQuery, showPendingOnly, parentFilter])
+
+  // Parents a sub-category can sit under: approved, global and top-level. The
+  // backend enforces the same rule; this only keeps invalid choices off the list.
+  const loadParentOptions = async () => {
+    try {
+      const response = await adminAPI.getCategories({ parentId: "root", approvalStatus: "approved", limit: 1000 })
+      const list = response?.data?.data?.categories || response?.data?.categories || []
+      setParentOptions((Array.isArray(list) ? list : []).filter((category) => category?.isGlobal))
+    } catch {
+      setParentOptions([])
+    }
+  }
+
+  useEffect(() => {
+    if (isSub) loadParentOptions()
+  }, [isSub])
+
+  const selectedParent = useMemo(
+    () => parentOptions.find((parent) => resolveCategoryId(parent) === String(formData.parentId || "")) || null,
+    [parentOptions, formData.parentId],
+  )
+  const allowedScopes = isSub && selectedParent
+    ? scopesAllowedUnder(selectedParent.foodTypeScope)
+    : ["Veg", "Non-Veg", "Both"]
+  const filterParentName = parentOptions.find((parent) => resolveCategoryId(parent) === parentFilter)?.name || ""
 
   const filteredCategories = useMemo(() => {
     const query = String(searchQuery || "").trim().toLowerCase()
@@ -131,9 +178,11 @@ export default function Category() {
   const fetchCategories = async () => {
     try {
       setLoading(true)
-      const params = {}
+      // limit 1000: the default 100 would silently cut the list off.
+      const params = { limit: 1000 }
       if (searchQuery) params.search = searchQuery
-      if (showPendingOnly) params.approvalStatus = "pending"
+      if (showPendingOnly && !isSub) params.approvalStatus = "pending"
+      params.parentId = isSub ? parentFilter || "sub" : "root"
 
       const response = await adminAPI.getCategories(params)
       const list = response?.data?.data?.categories || response?.data?.categories || []
@@ -168,7 +217,13 @@ export default function Category() {
   const handleAddNew = () => {
     if (!ensureActionAccess("create")) return
     setEditingCategory(null)
-    setFormData(defaultFormData)
+    // Viewing one parent's sub-categories? A new one most likely belongs there.
+    const presetParent = parentOptions.find((parent) => resolveCategoryId(parent) === parentFilter)
+    setFormData({
+      ...defaultFormData,
+      parentId: presetParent ? parentFilter : "",
+      foodTypeScope: presetParent ? scopesAllowedUnder(presetParent.foodTypeScope)[0] : "Both",
+    })
     setSelectedImageFile(null)
     setImagePreview(null)
     setIsModalOpen(true)
@@ -189,10 +244,25 @@ export default function Category() {
       type: category?.type || "",
       zoneId: zoneIdValue || "global",
       foodTypeScope: category?.foodTypeScope || "Both",
+      parentId: category?.parentId || "",
     })
     setSelectedImageFile(null)
     setImagePreview(category?.image || null)
     setIsModalOpen(true)
+  }
+
+  // Picking a parent narrows the diet scopes on offer; a scope that no longer
+  // fits is replaced rather than left selected for the server to reject.
+  const handleParentChange = (parentId) => {
+    const parent = parentOptions.find((option) => resolveCategoryId(option) === parentId)
+    setFormData((prev) => {
+      const allowed = parent ? scopesAllowedUnder(parent.foodTypeScope) : ["Veg", "Non-Veg", "Both"]
+      return {
+        ...prev,
+        parentId,
+        foodTypeScope: allowed.includes(prev.foodTypeScope) ? prev.foodTypeScope : allowed[0],
+      }
+    })
   }
 
   const handleImageSelect = (event) => {
@@ -280,8 +350,13 @@ export default function Category() {
 
   const handleDelete = async (id) => {
     if (!ensureActionAccess("delete")) return
-    const categoryName =
-      categories.find((category) => resolveCategoryId(category) === String(id))?.name || "this category"
+    const target = categories.find((category) => resolveCategoryId(category) === String(id))
+    const categoryName = target?.name || "this category"
+    // The server refuses this too; saying so up front skips a pointless confirm.
+    if (Number(target?.childCount || 0) > 0) {
+      toast.error(`"${categoryName}" still has ${target.childCount} sub-categor${target.childCount === 1 ? "y" : "ies"}. Delete or move them first.`)
+      return
+    }
     if (!window.confirm(`Delete "${categoryName}"? This action cannot be undone.`)) return
 
     try {
@@ -308,7 +383,7 @@ export default function Category() {
       const doc = new jsPDF()
       doc.setFontSize(18)
       doc.setTextColor(30, 30, 30)
-      doc.text("Category List", 14, 20)
+      doc.text(isSub ? "Sub Category List" : "Category List", 14, 20)
       doc.setFontSize(10)
       doc.setTextColor(100, 100, 100)
       doc.text(`Generated on: ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}`, 14, 28)
@@ -316,6 +391,7 @@ export default function Category() {
       const tableData = filteredCategories.map((category, index) => [
         index + 1,
         category?.name || "N/A",
+        isSub ? category?.parentName || "-" : category?.childCount ?? 0,
         category?.foodTypeScope || "Both",
         category?.isGlobal ? "Global" : "Private",
         zoneLabel(category?.zoneId),
@@ -324,7 +400,15 @@ export default function Category() {
 
       autoTable(doc, {
         startY: 35,
-        head: [["SL", "Category", "Diet Scope", "Visibility", "Zone", "Approval"]],
+        head: [[
+          "SL",
+          isSub ? "Sub Category" : "Category",
+          isSub ? "Main Category" : "Sub Categories",
+          "Diet Scope",
+          "Visibility",
+          "Zone",
+          "Approval",
+        ]],
         body: tableData,
         theme: "striped",
         headStyles: {
@@ -339,7 +423,7 @@ export default function Category() {
         },
       })
 
-      doc.save(`Categories_${new Date().toISOString().split("T")[0]}.pdf`)
+      doc.save(`${isSub ? "Sub_Categories" : "Categories"}_${new Date().toISOString().split("T")[0]}.pdf`)
       toast.success("PDF exported successfully!")
     } catch {
       toast.error("Failed to export PDF")
@@ -349,6 +433,11 @@ export default function Category() {
   const handleSubmit = async (event) => {
     event.preventDefault()
     if (!ensureActionAccess(editingCategory ? "edit" : "create")) return
+    // Before the upload, so a missing parent does not leave an orphaned image.
+    if (isSub && !formData.parentId) {
+      toast.error("Select a main category")
+      return
+    }
 
     try {
       setUploadingImage(true)
@@ -365,16 +454,21 @@ export default function Category() {
         type: String(formData.type || "").trim(),
         status: Boolean(formData.status),
         image: imageUrl || undefined,
-        zoneId: formData.zoneId || "global",
         foodTypeScope: formData.foodTypeScope,
       }
+      // A sub-category's zone is its parent's, so only top-level ones send one.
+      // parentId is left out on the Category page, so saving there never moves
+      // a category in or out of the tree by accident.
+      if (isSub) payload.parentId = formData.parentId
+      else payload.zoneId = formData.zoneId || "global"
 
+      const noun = isSub ? "Sub category" : "Category"
       if (editingCategory) {
         const response = await adminAPI.updateCategory(editingCategory.id, payload)
-        if (response?.data?.success) toast.success("Category updated successfully")
+        if (response?.data?.success) toast.success(`${noun} updated successfully`)
       } else {
         const response = await adminAPI.createCategory(payload)
-        if (response?.data?.success) toast.success("Category created successfully")
+        if (response?.data?.success) toast.success(`${noun} created successfully`)
       }
 
       resetModal()
@@ -395,36 +489,61 @@ export default function Category() {
       <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">Categories</h1>
+            <h1 className="text-2xl font-bold text-slate-900">
+              {isSub ? (filterParentName ? `Sub Categories of ${filterParentName}` : "Sub Categories") : "Categories"}
+            </h1>
             <p className="mt-2 max-w-2xl text-sm text-slate-500">
-              Restaurant-created categories now move through approval, rejection, and optional globalization before every
-              restaurant can use them.
+              {isSub
+                ? "Sub categories sit under a main category and share its zone. Customers see the main category; dishes filed under a sub category still appear inside it."
+                : "Restaurant-created categories now move through approval, rejection, and optional globalization before every restaurant can use them."}
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2 rounded-full border border-slate-200 p-1">
-              <button
-                type="button"
-                onClick={() => setShowPendingOnly(false)}
-                className={`rounded-full px-3 py-2 text-xs font-semibold ${!showPendingOnly ? "bg-slate-900 text-white" : "text-slate-600"}`}
+            {isSub ? (
+              <select
+                value={parentFilter}
+                onChange={(event) => {
+                  const next = event.target.value
+                  setSearchParams(next ? { parent: next } : {})
+                }}
+                className="min-w-[200px] rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm outline-none focus:border-slate-900"
+                aria-label="Filter by main category"
               >
-                All
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowPendingOnly(true)}
-                className={`rounded-full px-3 py-2 text-xs font-semibold ${showPendingOnly ? "bg-amber-600 text-white" : "text-slate-600"}`}
-              >
-                Pending
-              </button>
-            </div>
+                <option value="">All main categories</option>
+                {parentOptions.map((parent) => {
+                  const id = resolveCategoryId(parent)
+                  return (
+                    <option key={id} value={id}>
+                      {parent.name}
+                    </option>
+                  )
+                })}
+              </select>
+            ) : (
+              <div className="flex items-center gap-2 rounded-full border border-slate-200 p-1">
+                <button
+                  type="button"
+                  onClick={() => setShowPendingOnly(false)}
+                  className={`rounded-full px-3 py-2 text-xs font-semibold ${!showPendingOnly ? "bg-slate-900 text-white" : "text-slate-600"}`}
+                >
+                  All
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowPendingOnly(true)}
+                  className={`rounded-full px-3 py-2 text-xs font-semibold ${showPendingOnly ? "bg-amber-600 text-white" : "text-slate-600"}`}
+                >
+                  Pending
+                </button>
+              </div>
+            )}
 
             <div className="relative min-w-[220px]">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input
                 type="text"
-                placeholder="Search categories"
+                placeholder={isSub ? "Search sub categories" : "Search categories"}
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
                 className="w-full rounded-xl border border-slate-300 bg-white py-2.5 pl-10 pr-4 text-sm outline-none focus:border-slate-900"
@@ -445,7 +564,7 @@ export default function Category() {
               className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white"
             >
               <Plus className="h-4 w-4" />
-              Add Category
+              {isSub ? "Add Sub Category" : "Add Category"}
             </button>
           </div>
         </div>
@@ -456,8 +575,12 @@ export default function Category() {
           <table className="min-w-full table-fixed">
             <thead className="border-b border-slate-200 bg-slate-50">
               <tr>
-                <th className="w-[25%] px-5 py-4 text-left text-[11px] font-bold uppercase tracking-wider text-slate-600">Category</th>
-                <th className="w-[17%] px-4 py-4 text-left text-[11px] font-bold uppercase tracking-wider text-slate-600">Owner</th>
+                <th className="w-[25%] px-5 py-4 text-left text-[11px] font-bold uppercase tracking-wider text-slate-600">
+                  {isSub ? "Sub Category" : "Category"}
+                </th>
+                <th className="w-[17%] px-4 py-4 text-left text-[11px] font-bold uppercase tracking-wider text-slate-600">
+                  {isSub ? "Main Category" : "Owner"}
+                </th>
                 <th className="w-[15%] px-4 py-4 text-left text-[11px] font-bold uppercase tracking-wider text-slate-600">Zone</th>
                 <th className="w-[10%] px-4 py-4 text-center text-[11px] font-bold uppercase tracking-wider text-slate-600">Diet</th>
                 <th className="w-[10%] px-4 py-4 text-center text-[11px] font-bold uppercase tracking-wider text-slate-600">Status</th>
@@ -476,8 +599,14 @@ export default function Category() {
               ) : filteredCategories.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-6 py-20 text-center">
-                    <p className="text-lg font-semibold text-slate-700">No categories found</p>
-                    <p className="mt-1 text-sm text-slate-500">Try a different search or create a new category.</p>
+                    <p className="text-lg font-semibold text-slate-700">
+                      {isSub ? "No sub categories found" : "No categories found"}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {isSub
+                        ? "Try a different main category or search, or add a sub category."
+                        : "Try a different search or create a new category."}
+                    </p>
                   </td>
                 </tr>
               ) : (
@@ -507,23 +636,49 @@ export default function Category() {
                               <span>{category?.type || "No type"}</span>
                               <span className="text-slate-300">•</span>
                               <span>Items linked: {category?.itemCount || 0}</span>
+                              {/* Sub-categories can only hang off a global parent. */}
+                              {!isSub && category?.isGlobal && (
+                                <>
+                                  <span className="text-slate-300">•</span>
+                                  <Link
+                                    to={`${SUB_CATEGORIES_PATH}?parent=${categoryId}`}
+                                    className="inline-flex items-center gap-1 font-medium text-blue-600 hover:underline"
+                                  >
+                                    <FolderTree className="h-3.5 w-3.5" />
+                                    {category?.childCount
+                                      ? `${category.childCount} sub categor${category.childCount === 1 ? "y" : "ies"}`
+                                      : "Add sub categories"}
+                                  </Link>
+                                </>
+                              )}
                             </div>
                           </div>
                         </div>
                       </td>
                       <td className="px-4 py-5 text-sm text-slate-600">
-                        <div className="space-y-1">
-                          <p className="font-medium leading-6 text-slate-800">{creatorName}</p>
-                          <p className="text-xs text-slate-400">
-                            {category?.isGlobal ? "Global category" : "Private to creator"}
-                          </p>
-                          {category?.isGlobal && isRestaurantCategory && (
-                            <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-[11px] font-semibold text-sky-700">
-                              <Globe className="mr-1 h-3.5 w-3.5" />
-                              Shared
-                            </span>
-                          )}
-                        </div>
+                        {isSub ? (
+                          <Link
+                            to={`${SUB_CATEGORIES_PATH}?parent=${category?.parentId || ""}`}
+                            className="inline-flex max-w-full items-center gap-1.5 font-medium leading-6 text-slate-800 hover:text-blue-600"
+                            title={`Show all sub categories of ${category?.parentName || "this category"}`}
+                          >
+                            <CornerDownRight className="h-4 w-4 shrink-0 text-slate-400" />
+                            <span className="truncate">{category?.parentName || "-"}</span>
+                          </Link>
+                        ) : (
+                          <div className="space-y-1">
+                            <p className="font-medium leading-6 text-slate-800">{creatorName}</p>
+                            <p className="text-xs text-slate-400">
+                              {category?.isGlobal ? "Global category" : "Private to creator"}
+                            </p>
+                            {category?.isGlobal && isRestaurantCategory && (
+                              <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-[11px] font-semibold text-sky-700">
+                                <Globe className="mr-1 h-3.5 w-3.5" />
+                                Shared
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-5">
                         <div className="max-w-[180px]">
@@ -627,9 +782,13 @@ export default function Category() {
                   >
                     <div className="flex items-center justify-between border-b px-6 py-4">
                       <div>
-                        <h2 className="text-xl font-bold text-slate-900">{editingCategory ? "Edit Category" : "Add Category"}</h2>
+                        <h2 className="text-xl font-bold text-slate-900">
+                          {`${editingCategory ? "Edit" : "Add"} ${isSub ? "Sub Category" : "Category"}`}
+                        </h2>
                         <p className="text-xs text-slate-500">
-                          Admin categories are approved immediately. Restaurant-created categories can also be updated here.
+                          {isSub
+                            ? "Sub categories are approved immediately and follow their main category's zone."
+                            : "Admin categories are approved immediately. Restaurant-created categories can also be updated here."}
                         </p>
                       </div>
                       <button onClick={resetModal} className="rounded-lg p-1 hover:bg-slate-100">
@@ -639,26 +798,58 @@ export default function Category() {
 
                     <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
                       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
-                        <div>
-                          <label className="mb-2 block text-sm font-medium text-slate-700">Zone</label>
-                          <select
-                            value={formData.zoneId}
-                            onChange={(event) => setFormData((prev) => ({ ...prev, zoneId: event.target.value }))}
-                            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none focus:border-slate-900"
-                          >
-                            <option value="global">Global (all zones)</option>
-                            {zonesLoading && <option value="" disabled>Loading zones...</option>}
-                            {zones.map((zone) => {
-                              const id = String(zone?._id || zone?.id || "")
-                              const label = zone?.name || zone?.zoneName || zone?.serviceLocation || id
-                              return (
-                                <option key={id} value={id}>
-                                  {label}
-                                </option>
-                              )
-                            })}
-                          </select>
-                        </div>
+                        {isSub ? (
+                          <div>
+                            <label htmlFor="category-parent" className="mb-2 block text-sm font-medium text-slate-700">
+                              Main Category <span className="text-rose-600">*</span>
+                            </label>
+                            <select
+                              id="category-parent"
+                              required
+                              value={formData.parentId}
+                              onChange={(event) => handleParentChange(event.target.value)}
+                              className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none focus:border-slate-900"
+                            >
+                              <option value="" disabled>Select a main category</option>
+                              {parentOptions.map((parent) => {
+                                const id = resolveCategoryId(parent)
+                                return (
+                                  <option key={id} value={id}>
+                                    {parent.name}
+                                  </option>
+                                )
+                              })}
+                            </select>
+                            <p className="mt-1.5 text-xs text-slate-500">
+                              {selectedParent
+                                ? `Visible in: ${zoneLabel(selectedParent.zoneId)} (from ${selectedParent.name})`
+                                : parentOptions.length === 0
+                                  ? "No approved global main categories yet. Create one on the Category page first."
+                                  : "The zone is taken from the main category."}
+                            </p>
+                          </div>
+                        ) : (
+                          <div>
+                            <label className="mb-2 block text-sm font-medium text-slate-700">Zone</label>
+                            <select
+                              value={formData.zoneId}
+                              onChange={(event) => setFormData((prev) => ({ ...prev, zoneId: event.target.value }))}
+                              className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none focus:border-slate-900"
+                            >
+                              <option value="global">Global (all zones)</option>
+                              {zonesLoading && <option value="" disabled>Loading zones...</option>}
+                              {zones.map((zone) => {
+                                const id = String(zone?._id || zone?.id || "")
+                                const label = zone?.name || zone?.zoneName || zone?.serviceLocation || id
+                                return (
+                                  <option key={id} value={id}>
+                                    {label}
+                                  </option>
+                                )
+                              })}
+                            </select>
+                          </div>
+                        )}
 
                         <div>
                           <label className="mb-2 block text-sm font-medium text-slate-700">Diet Scope</label>
@@ -667,10 +858,17 @@ export default function Category() {
                             onChange={(event) => setFormData((prev) => ({ ...prev, foodTypeScope: event.target.value }))}
                             className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none focus:border-slate-900"
                           >
-                            <option value="Veg">Veg</option>
-                            <option value="Non-Veg">Non-Veg</option>
-                            <option value="Both">Both</option>
+                            {allowedScopes.map((scope) => (
+                              <option key={scope} value={scope}>
+                                {scope}
+                              </option>
+                            ))}
                           </select>
+                          {isSub && selectedParent && allowedScopes.length === 1 && (
+                            <p className="mt-1.5 text-xs text-slate-500">
+                              Locked to {allowedScopes[0]} because {selectedParent.name} is {selectedParent.foodTypeScope}.
+                            </p>
+                          )}
                         </div>
 
                         <div>
@@ -685,19 +883,23 @@ export default function Category() {
                         </div>
 
                         <div>
-                          <label className="mb-2 block text-sm font-medium text-slate-700">Category Name</label>
+                          <label className="mb-2 block text-sm font-medium text-slate-700">
+                            {isSub ? "Sub Category Name" : "Category Name"}
+                          </label>
                           <input
                             type="text"
                             required
                             value={formData.name}
                             onChange={(event) => setFormData((prev) => ({ ...prev, name: event.target.value }))}
                             className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-slate-900"
-                            placeholder="Enter category name"
+                            placeholder={isSub ? "Examples: Starter, Main course, Rice" : "Enter category name"}
                           />
                         </div>
 
                         <div>
-                          <label className="mb-2 block text-sm font-medium text-slate-700">Category Image</label>
+                          <label className="mb-2 block text-sm font-medium text-slate-700">
+                            {isSub ? "Sub Category Image" : "Category Image"}
+                          </label>
                           <div className="space-y-3">
                             {(imagePreview || formData.image) && (
                               <div className="relative h-32 w-32 overflow-hidden rounded-2xl border border-slate-300">

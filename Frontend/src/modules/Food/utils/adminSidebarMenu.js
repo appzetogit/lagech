@@ -31,10 +31,13 @@ export const adminSidebarMenu = [
         ],
       },
       {
-        type: "link",
+        type: "expandable",
         label: "Categories",
         icon: "FolderTree",
-        path: "/admin/food/categories",
+        subItems: [
+          { label: "Category", path: "/admin/food/categories" },
+          { label: "Sub Category", path: "/admin/food/categories/sub" },
+        ],
       },
     ],
   },

@@ -78,8 +78,16 @@ export const searchUnified = async (query = {}, options = {}) => {
 
     // 2. Category filter — restaurants have no category, their dishes do.
     if (categoryFiltered) {
+        // A parent category covers the dishes filed under its sub-categories,
+        // since the app only ever offers the parent as a filter.
+        const subCategories = await prisma.foodCategory.findMany({
+            where: { parentId: String(categoryId), isActive: true },
+            select: { id: true },
+        });
+        const categoryIds = [String(categoryId), ...subCategories.map((sub) => sub.id)];
+
         const catFoodItems = await prisma.foodItem.findMany({
-            where: { categoryId: String(categoryId), approvalStatus: 'approved' },
+            where: { categoryId: { in: categoryIds }, approvalStatus: 'approved' },
             select: { restaurantId: true },
             distinct: ['restaurantId'],
             take: fetchLimit * 4,
@@ -220,6 +228,8 @@ export const getAdminCategories = async (query = {}) => {
         isActive: true,
         isApproved: true,
         restaurantId: null,
+        // Customer-facing category chips are the top level only.
+        parentId: null,
     };
 
     // A zone filter must NARROW the global set. The Mongo version assigned to

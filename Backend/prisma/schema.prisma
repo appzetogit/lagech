@@ -1702,6 +1702,11 @@ model FoodCategory {
   /// Set = visible only in that zone. Null = visible everywhere.
   zoneId String? @db.VarChar(24)
 
+  /// Set = a sub-category of that category. Null = a top-level category.
+  /// One level only: the parent is itself always top-level, which the service
+  /// enforces -- Prisma cannot express "the referenced row has parentId null".
+  parentId String? @db.VarChar(24)
+
   isActive  Boolean @default(true)
   sortOrder Int     @default(0)
 
@@ -1712,8 +1717,14 @@ model FoodCategory {
   createdByRestaurant FoodRestaurant? @relation("CategoryCreator", fields: [createdByRestaurantId], references: [id])
   zone                FoodZone?       @relation(fields: [zoneId], references: [id])
 
+  /// Restrict, not Cascade: deleting a category must never silently take its
+  /// sub-categories -- and the dishes filed under them -- along with it.
+  parent   FoodCategory?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children FoodCategory[] @relation("CategoryTree")
+
   foodItems FoodItem[]
 
+  @@index([parentId])
   @@index([name])
   @@index([isApproved, createdAt(sort: Desc)])
   @@index([restaurantId, isApproved, createdAt(sort: Desc)])

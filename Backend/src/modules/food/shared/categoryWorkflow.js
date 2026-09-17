@@ -31,9 +31,25 @@ export const normalizeCategoryApprovalStatus = (value, fallback = 'pending') => 
     return CATEGORY_APPROVAL_STATUSES.includes(normalized) ? normalized : fallback;
 };
 
+/**
+ * The API speaks 'Non-Veg'; Prisma's enum member is `NonVeg` (the column holds
+ * 'Non-Veg' through @map). So a scope read back from Prisma arrives as
+ * 'NonVeg', and a scope written to Prisma must be 'NonVeg' too.
+ *
+ * Normalising only the API spelling used to turn every Non-Veg category into
+ * 'Both' on read -- which also let a Non-Veg category accept any dish -- and
+ * writing 'Non-Veg' made Prisma throw, so no Non-Veg category could be created.
+ */
 export const normalizeCategoryFoodTypeScope = (value, fallback = 'Both') => {
     const normalized = String(value || '').trim();
+    if (normalized === 'NonVeg') return 'Non-Veg';
     return CATEGORY_FOOD_TYPE_SCOPES.includes(normalized) ? normalized : fallback;
+};
+
+/** API scope -> Prisma enum member, for anything passed into a query. */
+export const toPrismaFoodTypeScope = (scope) => {
+    const apiScope = normalizeCategoryFoodTypeScope(scope, 'Both');
+    return apiScope === 'Non-Veg' ? 'NonVeg' : apiScope;
 };
 
 export const normalizeFoodTypeForCategory = (value) =>
@@ -164,6 +180,13 @@ export const serializeCategoryForResponse = (category = {}, options = {}) => {
         restaurant: toParty(owner),
         createdByRestaurant: toParty(creator),
         zoneId: category.zoneId || null,
+        parentId: category.parentId || null,
+        parentName: category.parent?.name || '',
+        isSubCategory: Boolean(category.parentId),
+        // Only present when the query counted children; absent is not zero.
+        childCount: category._count?.children !== undefined
+            ? Number(category._count.children)
+            : undefined,
         sortOrder: category.sortOrder || 0,
         itemCount: options.includeCounts ? Number(stats?.totalFoods || 0) : undefined,
         approvedFoodCount: options.includeCounts ? Number(stats?.approvedFoods || 0) : undefined,
