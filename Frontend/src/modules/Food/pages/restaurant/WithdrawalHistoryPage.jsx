@@ -106,14 +106,14 @@ function WithdrawalCard({ request, index }) {
       <div className="flex items-start justify-between gap-3 pl-2">
         <div className="min-w-0 flex-1">
           <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#5c6775]">
-            Withdrawal
+            {request.source === "disbursement" ? "Daily payout" : "Withdrawal"}
           </p>
           <p className="mt-1 text-2xl font-black tracking-tight tabular-nums text-[#141820]">
             {formatAmount(request.amount)}
           </p>
           <div className="mt-3 space-y-1">
             <p className="text-xs text-[#5c6775]">
-              Requested · {formatDateTime(request.requestedAt)}
+              {request.source === "disbursement" ? "Created" : "Requested"} · {formatDateTime(request.requestedAt)}
             </p>
             {(request.status === "Approved" || request.status === "Processed" || request.status === "Rejected") && (
               <p className="text-xs text-[#5c6775]">
@@ -151,6 +151,7 @@ export default function WithdrawalHistoryPage() {
           amount: h.amount,
           status: normalizeStatus(h.status),
           requestedAt: h.createdAt || h.requestedAt,
+          source: h.source || "manual",
           processedAt: h.processedAt,
           rejectionReason: h.rejectionReason || h.reason || "",
         }))

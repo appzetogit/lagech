@@ -17,6 +17,8 @@ const EMPTY_FORM = {
   ifscCode: "",
   upiId: "",
   upiQrImage: "",
+  // "" lets the daily payout pick: the bank account when complete, else UPI.
+  payoutMethod: "",
 }
 
 export default function UpdateBankDetails() {
@@ -103,6 +105,7 @@ export default function UpdateBankDetails() {
         ifscCode: String(doc.ifscCode || "").toUpperCase(),
         upiId: String(doc.upiId || ""),
         upiQrImage,
+        payoutMethod: String(doc.payoutMethod || ""),
       })
       setLastUpdated(doc.updatedAt || "")
     } catch (error) {
@@ -157,6 +160,7 @@ export default function UpdateBankDetails() {
       ifscCode: String(form.ifscCode || "").trim().toUpperCase(),
       upiId: String(form.upiId || "").trim(),
       upiQrImage: String(form.upiQrImage || "").trim(),
+      payoutMethod: form.payoutMethod || "",
     }
 
     try {
@@ -210,6 +214,36 @@ export default function UpdateBankDetails() {
                 <p className="text-sm text-gray-500 mt-1">Last updated: {formattedUpdatedAt}</p>
               ) : null}
             </div>
+
+            <fieldset>
+              <legend className="text-sm font-semibold text-gray-800 mb-2">Receive daily payouts by</legend>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  ["bank", "Bank account"],
+                  ["upi", "UPI"],
+                ].map(([value, label]) => (
+                  <label
+                    key={value}
+                    className={`cursor-pointer rounded-xl border px-4 py-2 text-sm font-medium ${
+                      form.payoutMethod === value ? "border-gray-900 bg-gray-900 text-white" : "border-gray-300 bg-white text-gray-700"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="payoutMethod"
+                      value={value}
+                      checked={form.payoutMethod === value}
+                      onChange={() => setForm((p) => ({ ...p, payoutMethod: value }))}
+                      className="sr-only"
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+              <p className="text-xs text-gray-500 mt-2">
+                Your earnings are paid out every day. If the chosen method is not filled in, the other one is used.
+              </p>
+            </fieldset>
 
             <div className="grid gap-5 md:grid-cols-2">
               <div>

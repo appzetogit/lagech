@@ -385,6 +385,7 @@ const toRestaurantProfile = (doc) => {
         accountType: doc.accountType || '',
         upiId: doc.upiId || '',
         upiQrImage: doc.upiQrImage ? { url: doc.upiQrImage } : null,
+        payoutMethod: doc.payoutMethod || '',
         pureVegRestaurant: Boolean(doc.pureVegRestaurant),
         profileImage: doc.profileImage ? { url: doc.profileImage } : null,
         menuImages,
@@ -470,7 +471,7 @@ const PROFILE_SELECT = {
     profileImage: true, pureVegRestaurant: true, restaurantName: true,
     state: true, status: true, subscriptionAmount: true, subscriptionDueAmount: true,
     subscriptionPaidAmount: true, subscriptionPlan: true, subscriptionStatus: true,
-    subscriptionValidTill: true, updatedAt: true, upiId: true, upiQrImage: true,
+    subscriptionValidTill: true, updatedAt: true, upiId: true, upiQrImage: true, payoutMethod: true,
     zoneId: true,
     // The location-change approval flow reads these.
     pendingLatitude: true, pendingLongitude: true, pendingZoneId: true,
@@ -1234,6 +1235,15 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
     }
     if (body.upiId !== undefined) {
         update.upiId = String(body.upiId || '').trim();
+    }
+    // Which of the details above the daily payout uses. A preference between
+    // details already on file, so it does not send the restaurant for review.
+    if (body.payoutMethod !== undefined) {
+        const method = String(body.payoutMethod || '').trim().toLowerCase();
+        if (method && !['bank', 'upi'].includes(method)) {
+            throw new ValidationError('Payout method must be bank or upi');
+        }
+        update.payoutMethod = method || null;
     }
     if (body.upiQrImage !== undefined || body.upiQrCode !== undefined) {
         const qrImage = body.upiQrImage !== undefined ? body.upiQrImage : body.upiQrCode;

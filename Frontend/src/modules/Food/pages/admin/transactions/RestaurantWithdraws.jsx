@@ -361,6 +361,11 @@ export default function RestaurantWithdraws() {
                         </td>}
                         {visibleColumns.restaurant && <td className="px-6 py-4 whitespace-nowrap">
                           <span className="text-sm font-medium text-slate-700">{withdraw.restaurantName || 'N/A'}</span>
+                          {withdraw.source === 'disbursement' && (
+                            <span className="ml-2 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-blue-700" title="Created by the daily payout run">
+                              Daily payout
+                            </span>
+                          )}
                         </td>}
                         {visibleColumns.restaurantId && <td className="px-6 py-4 whitespace-nowrap">
                           <span className="text-sm font-medium text-slate-700">{withdraw.restaurantIdString || 'N/A'}</span>

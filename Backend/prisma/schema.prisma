@@ -709,6 +709,9 @@ model FoodRestaurant {
   accountType       String?
   upiId             String?
   upiQrImage        String?
+  /// Where the daily payout goes: 'bank' or 'upi'. Unset picks the bank
+  /// account when it is complete, otherwise the UPI id.
+  payoutMethod      String?  @db.VarChar(16)
 
   menuImages    String[]
   coverImages   String[]
@@ -2558,6 +2561,66 @@ model FoodSubscriptionBillingRun {
 // Payouts — withdrawals, cash deposits, bonuses, earning add-ons
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// One run of the restaurant payout job: a payout line (a withdrawal with
+/// source 'disbursement') for every restaurant owed money at the cut-off. The
+/// admin pays each line by bank or UPI and marks it; the batch status follows.
+model FoodRestaurantPayoutBatch {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  /// Human number, "Payout #1001".
+  number Int @unique @default(autoincrement())
+  /// The IST calendar day this run belongs to, 'YYYY-MM-DD'. Unique, so the
+  /// job cannot pay the same day twice however often it wakes up.
+  runDate String @unique @db.VarChar(10)
+  /// Earnings from orders placed before this moment were included.
+  cutoffAt DateTime
+
+  status          PayoutBatchStatus @default(pending)
+  totalAmount     Decimal           @default(0) @db.Decimal(14, 2)
+  restaurantCount Int               @default(0)
+  /// Restaurants owed money but left out, with why: [{ restaurantId, name, amount, reason }].
+  skipped         Json              @default("[]")
+  /// 'schedule' or the id of the admin who ran it by hand.
+  triggeredBy     String            @default("schedule") @db.VarChar(32)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payouts FoodRestaurantWithdrawal[]
+
+  @@index([createdAt(sort: Desc)])
+  @@map("food_restaurant_payout_batches")
+}
+
+enum PayoutBatchStatus {
+  pending
+  partially_completed
+  completed
+  canceled
+}
+
+/// Singleton. How and when restaurants are paid out automatically.
+model FoodRestaurantPayoutSettings {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  isEnabled   Boolean @default(true)
+  /// 'daily' or 'weekly'.
+  frequency   String  @default("daily") @db.VarChar(16)
+  /// For weekly: 0 = Sunday .. 6 = Saturday.
+  weekday     Int     @default(6)
+  /// IST, 'HH:MM'.
+  runTime     String  @default("03:05") @db.VarChar(5)
+  /// Earnings from the last this-many days are held back, so a late refund or
+  /// cancellation is settled before the money leaves.
+  waitingDays Int     @default(1)
+  minAmount   Decimal @default(1) @db.Decimal(14, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("food_restaurant_payout_settings")
+}
+
 model FoodRestaurantWithdrawal {
   id           String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
   restaurantId String @db.VarChar(24)
@@ -2575,12 +2638,19 @@ model FoodRestaurantWithdrawal {
   transactionId   String?
   processedAt     DateTime?
 
+  /// 'manual' when the restaurant asked for it; 'disbursement' when the daily
+  /// payout run created it, in which case batchId says which run.
+  source  String  @default("manual") @db.VarChar(16)
+  batchId String? @db.VarChar(24)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  restaurant FoodRestaurant @relation(fields: [restaurantId], references: [id])
+  restaurant FoodRestaurant             @relation(fields: [restaurantId], references: [id])
+  batch      FoodRestaurantPayoutBatch? @relation(fields: [batchId], references: [id])
 
   @@index([restaurantId])
+  @@index([batchId])
   @@index([status])
   @@index([createdAt(sort: Desc)])
   @@map("food_restaurant_withdrawals")

@@ -489,6 +489,19 @@ export const adminAPI = {
       params,
       contextModule: "admin",
     }),
+  /** Daily restaurant payout batches (admin). */
+  getRestaurantPayoutBatches: (params = {}) =>
+    apiClient.get("/food/admin/withdrawals/restaurant-payouts", { params, contextModule: "admin" }),
+  getRestaurantPayoutBatch: (batchId, params = {}) =>
+    apiClient.get(`/food/admin/withdrawals/restaurant-payouts/${batchId}`, { params, contextModule: "admin" }),
+  decideRestaurantPayouts: (batchId, body) =>
+    apiClient.patch(`/food/admin/withdrawals/restaurant-payouts/${batchId}/payouts`, body, { contextModule: "admin" }),
+  generateRestaurantPayouts: () =>
+    apiClient.post("/food/admin/withdrawals/restaurant-payouts/generate", {}, { contextModule: "admin" }),
+  getRestaurantPayoutSettings: () =>
+    apiClient.get("/food/admin/withdrawals/restaurant-payouts/settings", { contextModule: "admin" }),
+  updateRestaurantPayoutSettings: (body) =>
+    apiClient.put("/food/admin/withdrawals/restaurant-payouts/settings", body, { contextModule: "admin" }),
   /** List restaurant withdrawal requests (admin). */
   getWithdrawals: (params = {}) =>
     apiClient.get("/food/admin/withdrawals", {

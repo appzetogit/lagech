@@ -260,6 +260,13 @@ router.get('/withdrawals/balance-sheet/restaurants', adminController.getBalanceS
 router.get('/withdrawals/balance-sheet/riders', adminController.getBalanceSheetRiders);
 router.get('/withdrawals/balance-sheet/history', adminController.getBalanceSheetHistory);
 router.post('/withdrawals/balance-sheet/payout/:entityType/:entityId', adminController.payoutBalance);
+// Daily restaurant payouts. Settings and generate before :batchId.
+router.get('/withdrawals/restaurant-payouts', adminController.listRestaurantPayoutBatches);
+router.get('/withdrawals/restaurant-payouts/settings', adminController.getRestaurantPayoutSettings);
+router.put('/withdrawals/restaurant-payouts/settings', adminController.updateRestaurantPayoutSettings);
+router.post('/withdrawals/restaurant-payouts/generate', adminController.generateRestaurantPayoutsNow);
+router.get('/withdrawals/restaurant-payouts/:batchId', adminController.getRestaurantPayoutBatch);
+router.patch('/withdrawals/restaurant-payouts/:batchId/payouts', adminController.decideRestaurantPayouts);
 
 router.patch('/restaurants/:id/billing-mode', adminController.setRestaurantBillingMode);
 router.get('/restaurants/:id/item-commissions', adminController.getItemCommissions);

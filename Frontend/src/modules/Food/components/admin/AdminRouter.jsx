@@ -98,6 +98,8 @@ const TaxReport = lazy(() => import("@food/pages/admin/reports/TaxReport"));
 const RestaurantVATReport = lazy(() => import("@food/pages/admin/reports/RestaurantVATReport"));
 // Transaction Management
 const RestaurantWithdraws = lazy(() => import("@food/pages/admin/transactions/RestaurantWithdraws"));
+const RestaurantPayouts = lazy(() => import("@food/pages/admin/transactions/RestaurantPayouts"));
+const RestaurantPayoutBatch = lazy(() => import("@food/pages/admin/transactions/RestaurantPayoutBatch"));
 const WithdrawMethod = lazy(() => import("@food/pages/admin/transactions/WithdrawMethod"));
 // Employee Management
 const EmployeeRole = lazy(() => import("@food/pages/admin/employees/EmployeeRole"));
@@ -345,6 +347,8 @@ export default function AdminRouter() {
             <Route path="restaurant-vat-report" element={<RestaurantVATReport />} />
             
             <Route path="restaurant-withdraws" element={<RestaurantWithdraws />} />
+            <Route path="restaurant-disbursements" element={<RestaurantPayouts />} />
+            <Route path="restaurant-disbursements/:batchId" element={<RestaurantPayoutBatch />} />
             <Route path="balance-sheet" element={<BalanceSheet />} />
             <Route path="withdraw-method" element={<WithdrawMethod />} />
             

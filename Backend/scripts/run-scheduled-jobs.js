@@ -6,12 +6,14 @@ import { expireExpiredOffers } from '../src/modules/food/admin/services/admin.se
 import { syncExpiredFssaiNotifications } from '../src/modules/food/restaurant/services/fssaiExpiry.service.js';
 import { runBillingCatchUp } from '../src/modules/food/restaurant/services/subscriptionBilling.service.js';
 import { expireStalledOrders } from '../src/modules/food/orders/services/order-expiry.service.js';
+import { generateRestaurantPayouts } from '../src/modules/food/restaurant/services/restaurantPayout.service.js';
 import { logger } from '../src/utils/logger.js';
 
 let expireOffersInterval = null;
 let fssaiExpiryInterval = null;
 let subscriptionBillingInterval = null;
 let orderWatchdogInterval = null;
+let restaurantPayoutInterval = null;
 
 const shutdown = async (signal) => {
     logger.info(`${signal} received, stopping scheduled jobs`);
@@ -19,6 +21,7 @@ const shutdown = async (signal) => {
     if (fssaiExpiryInterval) clearInterval(fssaiExpiryInterval);
     if (subscriptionBillingInterval) clearInterval(subscriptionBillingInterval);
     if (orderWatchdogInterval) clearInterval(orderWatchdogInterval);
+    if (restaurantPayoutInterval) clearInterval(restaurantPayoutInterval);
 
     try {
         await disconnectDB();
@@ -86,15 +89,28 @@ const start = async () => {
             }
         };
 
+        const runRestaurantPayouts = async () => {
+            try {
+                // Checked every 10 minutes; creates the day's batch once it is
+                // past the configured time. A day already done is refused by
+                // the batch table itself, so a restart cannot pay twice.
+                await generateRestaurantPayouts();
+            } catch (err) {
+                logger.error(`Restaurant payout run error: ${err.message}`);
+            }
+        };
+
         await runExpire();
         await runFssaiExpirySync();
         await runSubscriptionBilling();
         await runOrderWatchdog();
+        await runRestaurantPayouts();
 
         expireOffersInterval = setInterval(runExpire, 5 * 60 * 1000);
         fssaiExpiryInterval = setInterval(runFssaiExpirySync, 60 * 60 * 1000);
         subscriptionBillingInterval = setInterval(runSubscriptionBilling, 6 * 60 * 60 * 1000);
         orderWatchdogInterval = setInterval(runOrderWatchdog, 5 * 60 * 1000);
+        restaurantPayoutInterval = setInterval(runRestaurantPayouts, 10 * 60 * 1000);
 
         logger.info('Scheduled jobs runner started');
     } catch (err) {

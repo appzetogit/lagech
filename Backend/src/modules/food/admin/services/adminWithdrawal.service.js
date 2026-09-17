@@ -2,6 +2,7 @@ import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { recordTransaction } from '../../../../core/payments/transaction.service.js';
+import { syncBatchStatus } from '../../restaurant/services/restaurantPayout.service.js';
 
 /**
  * Withdrawal approvals, extracted from admin.service.js.
@@ -75,6 +76,8 @@ export async function getWithdrawals(query = {}) {
         where.status = String(query.status).toLowerCase();
     }
     if (isId(query.restaurantId)) where.restaurantId = String(query.restaurantId);
+    // 'manual' (asked for by the restaurant) or 'disbursement' (daily payout run).
+    if (['manual', 'disbursement'].includes(query.source)) where.source = query.source;
 
     const [withdrawals, total] = await Promise.all([
         prisma.foodRestaurantWithdrawal.findMany({
@@ -123,6 +126,8 @@ export async function updateWithdrawalStatus(id, { status, adminNote, rejectionR
         where: { id: String(id) },
         include: { restaurant: { select: { id: true, restaurantName: true } } },
     });
+    // A payout line decided from this list still moves its batch along.
+    if (updated?.batchId) await syncBatchStatus(updated.batchId);
     return { ...updated, amount: Number(updated.amount) };
 }
 

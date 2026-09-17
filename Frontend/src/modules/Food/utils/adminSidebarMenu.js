@@ -263,6 +263,8 @@ export const adminSidebarMenu = [
         icon: "CreditCard",
         badge: "restaurantWithdrawals",
       },
+      // The old panel's "Store Disbursement": the daily payout batches.
+      { type: "link", label: "Restaurant Disbursement", path: "/admin/food/restaurant-disbursements", icon: "Receipt" },
       {
         type: "link",
         label: "Deliveryman Withdraws",

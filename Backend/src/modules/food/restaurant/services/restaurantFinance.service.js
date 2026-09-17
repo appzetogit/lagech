@@ -154,15 +154,17 @@ async function sumByRestaurant(delegate, where, column) {
  * for. This is the same arithmetic as getRestaurantFinance below, which now
  * shares it, so the two cannot disagree about what a restaurant is owed.
  */
-export async function getWalletSummaries(restaurantIds = [], { db = prisma } = {}) {
+export async function getWalletSummaries(restaurantIds = [], { db = prisma, earnedBefore = null } = {}) {
     const ids = [...new Set((restaurantIds || []).map((id) => String(id || '').trim()).filter(Boolean))];
     if (!ids.length) return new Map();
 
     const subscriptionEnabled = await isFeatureEnabled(FEATURE_KEYS.RESTAURANT_SUBSCRIPTION, true);
     const scoped = { restaurantId: { in: ids } };
 
-    const [earned, withdrawn, deducted, locked] = await Promise.all([
+    const [earned, earnedByCutoff, withdrawn, deducted, locked] = await Promise.all([
         earnedTotalsByRestaurant(ids, { db }),
+        // Only asked for by the payout run, which holds back recent earnings.
+        earnedBefore ? earnedTotalsByRestaurant(ids, { db, to: earnedBefore }) : null,
         // A pending request is money already spoken for, so it is subtracted
         // before it is approved — otherwise it could be withdrawn twice.
         sumByRestaurant(
@@ -191,15 +193,27 @@ export async function getWalletSummaries(restaurantIds = [], { db = prisma } = {
 
         // The full balance stays visible; only withdrawal is limited by the lock.
         const walletBalance = Math.max(0, totals.payout - totalWithdrawn - num(deducted.get(id)));
+        const netAvailable = Math.max(0, walletBalance - lockedAmount);
 
-        return [id, {
+        const summary = {
             totals,
             totalEarnings: totals.payout,
             totalWithdrawn,
             walletBalance,
-            netAvailable: Math.max(0, walletBalance - lockedAmount),
+            netAvailable,
             lockedAmount,
-        }];
+        };
+        if (earnedByCutoff) {
+            // What could be paid if only earnings from before the cut-off
+            // counted: those earnings less everything already taken, and never
+            // more than can be withdrawn today.
+            const payoutByCutoff = (earnedByCutoff.get(id) || ZERO_TOTALS).payout;
+            summary.availableBeforeCutoff = Math.max(0, Math.min(
+                netAvailable,
+                payoutByCutoff - totalWithdrawn - num(deducted.get(id)) - lockedAmount,
+            ));
+        }
+        return [id, summary];
     }));
 }
 

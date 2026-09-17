@@ -1,6 +1,7 @@
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import * as adminService from '../services/admin.service.js';
+import * as restaurantPayoutService from '../../restaurant/services/restaurantPayout.service.js';
 import * as featureSettingsService from '../services/featureSettings.service.js';
 import { validateCategoryListQuery, validateCategoryRejectDto, validateCategoryUpsertDto } from '../validators/category.validator.js';
 import { validateCreateOfferDto, validateUpdateOfferCartVisibilityDto } from '../validators/offer.validator.js';
@@ -1666,6 +1667,65 @@ export async function deleteZone(req, res, next) {
 // update. This file used to carry a second, unrouted refund handler that called
 // adminService.processRefund — a function that was never defined, so it could
 // only ever 500 if something had wired it up.
+
+// ----- Restaurant payouts (daily disbursement) -----
+const sendOk = (res, data, message = 'OK', code = 200) => res.status(code).json({ success: true, message, data });
+
+export async function listRestaurantPayoutBatches(req, res, next) {
+    try {
+        sendOk(res, await restaurantPayoutService.listPayoutBatches(req.query || {}));
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function getRestaurantPayoutBatch(req, res, next) {
+    try {
+        sendOk(res, await restaurantPayoutService.getPayoutBatch(req.params.batchId, req.query || {}));
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function decideRestaurantPayouts(req, res, next) {
+    try {
+        const data = await restaurantPayoutService.decidePayouts(req.params.batchId, req.body || {});
+        sendOk(res, data, `${data.updated} payout(s) updated`);
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function generateRestaurantPayoutsNow(req, res, next) {
+    try {
+        const result = await restaurantPayoutService.generateRestaurantPayouts({
+            force: true,
+            triggeredBy: String(req.user?.userId || 'admin'),
+        });
+        if (!result.created) {
+            return res.status(409).json({ success: false, message: `Not generated: ${result.reason}` });
+        }
+        sendOk(res, result, `Payout #${result.batch.number} created for ${result.batch.restaurantCount} restaurant(s)`, 201);
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function getRestaurantPayoutSettings(req, res, next) {
+    try {
+        sendOk(res, { settings: await restaurantPayoutService.getPayoutSettings() });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function updateRestaurantPayoutSettings(req, res, next) {
+    try {
+        sendOk(res, { settings: await restaurantPayoutService.updatePayoutSettings(req.body || {}) }, 'Payout settings saved');
+    } catch (error) {
+        next(error);
+    }
+}
 
 export async function getWithdrawals(req, res, next) {
     try {
