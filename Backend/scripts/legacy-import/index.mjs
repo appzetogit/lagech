@@ -28,6 +28,7 @@ import { importOrders } from './steps/orders.mjs';
 import { importBalances } from './steps/balances.mjs';
 import { importPaymentDetails } from './steps/paymentDetails.mjs';
 import { importSettings } from './steps/settings.mjs';
+import { importRatings } from './steps/ratings.mjs';
 
 const STEPS = [
     ['zones', importZones],
@@ -39,6 +40,7 @@ const STEPS = [
     ['payment-details', importPaymentDetails],
     ['orders', importOrders],
     ['balances', importBalances],
+    ['ratings', importRatings],
     ['settings', importSettings],
 ];
 
