@@ -23,6 +23,7 @@ import { importCategories } from './steps/categories.mjs';
 import { importRestaurants } from './steps/restaurants.mjs';
 import { importFoods } from './steps/foods.mjs';
 import { importCustomers } from './steps/customers.mjs';
+import { importDeliveryPartners } from './steps/deliveryPartners.mjs';
 
 const STEPS = [
     ['zones', importZones],
@@ -30,6 +31,7 @@ const STEPS = [
     ['restaurants', importRestaurants],
     ['foods', importFoods],
     ['customers', importCustomers],
+    ['riders', importDeliveryPartners],
 ];
 
 const createReport = () => {
