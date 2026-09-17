@@ -26,6 +26,8 @@ import { importCustomers } from './steps/customers.mjs';
 import { importDeliveryPartners } from './steps/deliveryPartners.mjs';
 import { importOrders } from './steps/orders.mjs';
 import { importBalances } from './steps/balances.mjs';
+import { importPaymentDetails } from './steps/paymentDetails.mjs';
+import { importSettings } from './steps/settings.mjs';
 
 const STEPS = [
     ['zones', importZones],
@@ -34,8 +36,10 @@ const STEPS = [
     ['foods', importFoods],
     ['customers', importCustomers],
     ['riders', importDeliveryPartners],
+    ['payment-details', importPaymentDetails],
     ['orders', importOrders],
     ['balances', importBalances],
+    ['settings', importSettings],
 ];
 
 const createReport = () => {
