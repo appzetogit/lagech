@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Plus, Search, Shield, Trash2, ToggleLeft, ToggleRight } from "lucide-react";
 import { adminAPI } from "@food/api";
 import SidebarAccessPicker, { permissionsForPages } from "./SidebarAccessPicker";
+import RoleSelect from "./RoleSelect";
 
 const SUBADMIN_EMAIL_REGEX = /^(?!.*\.\.)([A-Za-z0-9]+[._%+-]?)*[A-Za-z0-9]+@[A-Za-z0-9-]+\.[A-Za-z]{2,}$/;
 const INDIAN_MOBILE_REGEX = /^[6-9]\d{9}$/;
@@ -27,6 +28,7 @@ export default function EmployeeList() {
   const [saving, setSaving] = useState(false);
   const [pages, setPages] = useState(new Set());
   const [level, setLevel] = useState("full");
+  const [roleId, setRoleId] = useState("");
 
   const validateForm = (payload) => {
     const nextErrors = {};
@@ -98,18 +100,19 @@ export default function EmployeeList() {
     };
     const validationErrors = validateForm(normalizedForm);
     // A sub admin with no pages logs in to an empty panel.
-    if (!pages.size) validationErrors.pages = "Tick at least one page this sub admin can see.";
+    if (!roleId && !pages.size) validationErrors.pages = "Choose a role, or tick at least one page this sub admin can see.";
     setErrors(validationErrors);
     if (Object.keys(validationErrors).length > 0) return;
 
     setSaving(true);
     try {
       const menuPaths = [...pages];
-      await adminAPI.createSubAdmin({
-        ...normalizedForm,
-        menuPaths,
-        permissions: permissionsForPages(menuPaths, level),
-      });
+      await adminAPI.createSubAdmin(
+        roleId
+          ? { ...normalizedForm, roleId }
+          : { ...normalizedForm, menuPaths, permissions: permissionsForPages(menuPaths, level) },
+      );
+      setRoleId("");
       setForm({ name: "", email: "", phone: "", password: "" });
       setPages(new Set());
       setLevel("full");
@@ -190,7 +193,9 @@ export default function EmployeeList() {
           />
           {errors.password ? <p className="mt-1 text-xs text-red-600">{errors.password}</p> : null}
         </div>
-        <div className="md:col-span-2 border-t border-slate-200 pt-4">
+        <div className="md:col-span-2 border-t border-slate-200 pt-4 space-y-4">
+          <RoleSelect value={roleId} onChange={setRoleId} />
+          {!roleId && (
           <SidebarAccessPicker
             selected={pages}
             onChange={(next) => {
@@ -200,6 +205,7 @@ export default function EmployeeList() {
             level={level}
             onLevelChange={setLevel}
           />
+          )}
           {errors.pages ? <p className="mt-2 text-xs text-red-600">{errors.pages}</p> : null}
         </div>
         <div className="md:col-span-2">

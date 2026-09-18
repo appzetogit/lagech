@@ -343,12 +343,27 @@ export async function updateSubAdminPermissions(req, res, next) {
             normalized,
             req.user?.userId,
             Array.isArray(req.body?.menuPaths) ? req.body.menuPaths : undefined,
+            req.body?.roleId || undefined,
         );
         res.status(200).json({ success: true, message: 'Sub-admin permissions updated', data: { subAdmin: data } });
     } catch (error) {
         next(error);
     }
 }
+
+// ----- Sub-admin roles (super admin only, like sub-admins themselves) -----
+const superAdminOnly = (fn, status = 200, message = 'OK') => async (req, res, next) => {
+    try {
+        if (!ensureSuperAdmin(req, res)) return;
+        res.status(status).json({ success: true, message, data: await fn(req) });
+    } catch (error) {
+        next(error);
+    }
+};
+export const listAdminRoles = superAdminOnly(async () => ({ roles: await adminService.listAdminRoles() }));
+export const createAdminRole = superAdminOnly(async (req) => ({ role: await adminService.createAdminRole(req.body || {}) }), 201, 'Role created');
+export const updateAdminRole = superAdminOnly(async (req) => ({ role: await adminService.updateAdminRole(req.params.id, req.body || {}) }), 200, 'Role saved');
+export const deleteAdminRole = superAdminOnly(async (req) => adminService.deleteAdminRole(req.params.id), 200, 'Role deleted');
 
 export async function updateSubAdminStatus(req, res, next) {
     try {

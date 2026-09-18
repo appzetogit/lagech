@@ -143,6 +143,11 @@ router.use('/sidebar-badges', requireAdminPermission('dashboard', 'view'));
 router.post('/sub-admins', requireAdminPermission('sub_admin_management', 'create'), adminController.createSubAdmin);
 router.get('/sub-admins', adminController.listSubAdmins);
 router.get('/sub-admins/permission-catalog', adminController.getAdminPermissionCatalog);
+// Roles, before /sub-admins/:id so "roles" is not read as an id.
+router.get('/sub-admins/roles', adminController.listAdminRoles);
+router.post('/sub-admins/roles', requireAdminPermission('sub_admin_management', 'create'), adminController.createAdminRole);
+router.patch('/sub-admins/roles/:id', requireAdminPermission('sub_admin_management', 'edit'), adminController.updateAdminRole);
+router.delete('/sub-admins/roles/:id', requireAdminPermission('sub_admin_management', 'delete'), adminController.deleteAdminRole);
 router.get('/sub-admins/:id', adminController.getSubAdminDetails);
 router.patch('/sub-admins/:id', requireAdminPermission('sub_admin_management', 'edit'), adminController.updateSubAdminProfile);
 router.patch('/sub-admins/:id/permissions', requireAdminPermission('sub_admin_management', 'edit'), adminController.updateSubAdminPermissions);

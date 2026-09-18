@@ -253,6 +253,7 @@ export const adminSidebarMenu = [
     items: [
       // Roles are edited per employee, from this list.
       { type: "link", label: "Employees", path: "/admin/food/employees", icon: "UserCog", requires: "adminAccess" },
+      { type: "link", label: "Employee Roles", path: "/admin/food/employees/roles", icon: "Lock", requires: "adminAccess" },
     ],
   },
   {

@@ -7,6 +7,7 @@ import SidebarAccessPicker, {
   pagesFromSubAdmin,
   permissionsForPages,
 } from "./SidebarAccessPicker";
+import RoleSelect from "./RoleSelect";
 
 /** One sub-admin's access: the sidebar pages they see, and whether they can change things. */
 export default function EmployeeRole() {
@@ -16,6 +17,7 @@ export default function EmployeeRole() {
   const [subAdmin, setSubAdmin] = useState(null);
   const [pages, setPages] = useState(new Set());
   const [level, setLevel] = useState("full");
+  const [roleId, setRoleId] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -29,6 +31,7 @@ export default function EmployeeRole() {
         setSubAdmin(sa);
         setPages(pagesFromSubAdmin(sa));
         setLevel(accessLevelFromSubAdmin(sa));
+        setRoleId(sa?.roleId || "");
       })
       .catch(() => setSubAdmin(null))
       .finally(() => setLoading(false));
@@ -39,6 +42,12 @@ export default function EmployeeRole() {
     setSaving(true);
     try {
       const menuPaths = [...pages];
+      if (roleId) {
+        await adminAPI.updateSubAdminPermissions(subAdminId, {}, undefined, roleId);
+        toast.success("Saved: this sub admin now follows the role");
+        navigate("/admin/food/employees");
+        return;
+      }
       await adminAPI.updateSubAdminPermissions(subAdminId, permissionsForPages(menuPaths, level), menuPaths);
       toast.success(
         menuPaths.length
@@ -68,7 +77,14 @@ export default function EmployeeRole() {
         {loading ? (
           <p className="text-sm text-slate-500">Loading access...</p>
         ) : (
-          <SidebarAccessPicker selected={pages} onChange={setPages} level={level} onLevelChange={setLevel} />
+          <div className="space-y-4">
+            <RoleSelect value={roleId} onChange={setRoleId} />
+            {roleId ? (
+              <p className="text-sm text-slate-600">Their pages and access come from the role, and change when the role does.</p>
+            ) : (
+              <SidebarAccessPicker selected={pages} onChange={setPages} level={level} onLevelChange={setLevel} />
+            )}
+          </div>
         )}
       </div>
 

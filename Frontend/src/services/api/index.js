@@ -451,10 +451,10 @@ export const adminAPI = {
     apiClient.get(`/food/admin/sub-admins/${String(id)}`, { contextModule: "admin" }),
   updateSubAdmin: (id, body = {}) =>
     apiClient.patch(`/food/admin/sub-admins/${String(id)}`, body ?? {}, { contextModule: "admin" }),
-  updateSubAdminPermissions: (id, permissions = {}, menuPaths = undefined) =>
+  updateSubAdminPermissions: (id, permissions = {}, menuPaths = undefined, roleId = undefined) =>
     apiClient.patch(
       `/food/admin/sub-admins/${String(id)}/permissions`,
-      { permissions, ...(Array.isArray(menuPaths) ? { menuPaths } : {}) },
+      { permissions, ...(Array.isArray(menuPaths) ? { menuPaths } : {}), ...(roleId ? { roleId } : {}) },
       { contextModule: "admin" },
     ),
   updateSubAdminStatus: (id, isActive) =>
@@ -465,6 +465,10 @@ export const adminAPI = {
     ),
   deleteSubAdmin: (id) =>
     apiClient.delete(`/food/admin/sub-admins/${String(id)}`, { contextModule: "admin" }),
+  getAdminRoles: () => apiClient.get("/food/admin/sub-admins/roles", { contextModule: "admin" }),
+  createAdminRole: (body) => apiClient.post("/food/admin/sub-admins/roles", body, { contextModule: "admin" }),
+  updateAdminRole: (id, body) => apiClient.patch(`/food/admin/sub-admins/roles/${String(id)}`, body, { contextModule: "admin" }),
+  deleteAdminRole: (id) => apiClient.delete(`/food/admin/sub-admins/roles/${String(id)}`, { contextModule: "admin" }),
   getSubAdminPermissionCatalog: () =>
     apiClient.get("/food/admin/sub-admins/permission-catalog", { contextModule: "admin" }),
   /** List approved delivery partners (Deliveryman List page) */

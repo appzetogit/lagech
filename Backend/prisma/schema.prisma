@@ -916,6 +916,27 @@ model FoodDeliveryPartner {
   @@map("food_delivery_partners")
 }
 
+/// A reusable set of sidebar pages and an access level for sub-admins, like
+/// the old panel's employee roles: define "Order desk" once, give it to many
+/// staff, and change it in one place.
+model FoodAdminRole {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  name        String   @unique
+  menuPaths   String[] @default([])
+  /// Section permissions derived from menuPaths and the access level.
+  permissions Json     @default("{}")
+  /// 'full' or 'view'.
+  accessLevel String   @default("full") @db.VarChar(8)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  admins FoodAdmin[]
+
+  @@map("food_admin_roles")
+}
+
 model FoodAdmin {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 
@@ -939,6 +960,9 @@ model FoodAdmin {
   /// narrowing: they see every page their section permissions allow, which is
   /// how sub-admins created before this list existed keep working.
   menuPaths   String[] @default([])
+  /// The role this admin follows; editing the role updates every admin on it.
+  /// Null when their access was set by hand.
+  roleId      String?  @db.VarChar(24)
 
   isActive  Boolean @default(true)
   isDeleted Boolean @default(false)
@@ -952,6 +976,7 @@ model FoodAdmin {
   updatedAt DateTime @updatedAt
 
   createdBy FoodAdmin?  @relation("AdminCreatedBy", fields: [createdById], references: [id])
+  role      FoodAdminRole? @relation(fields: [roleId], references: [id], onDelete: SetNull)
   created   FoodAdmin[] @relation("AdminCreatedBy")
   updatedBy FoodAdmin?  @relation("AdminUpdatedBy", fields: [updatedById], references: [id])
   updated   FoodAdmin[] @relation("AdminUpdatedBy")
@@ -960,6 +985,7 @@ model FoodAdmin {
   resolvedEmergency DeliveryOrderEmergencyRequest[]
 
   @@index([adminType, isDeleted, isActive])
+  @@index([roleId])
   @@map("food_admins")
 }
 
