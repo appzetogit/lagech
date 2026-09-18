@@ -26,6 +26,7 @@ import { prisma } from '../../../src/config/prisma.js';
 import { config } from '../../../src/config/env.js';
 import { buildPublicUrl } from '../../../src/services/storage.service.js';
 import { loadIdMap, recordId } from '../idMap.mjs';
+import { normalizeTags } from '../../../src/modules/food/shared/tags.util.js';
 
 const ENTITY = 'food';
 const IMAGE_DIR = 'legacy/product';
@@ -116,6 +117,13 @@ export async function importFoods(mysql, report) {
         "SELECT id FROM modules WHERE module_type = 'food' ORDER BY status DESC, id LIMIT 1"
     );
     const [items] = await mysql.query('SELECT * FROM items WHERE module_id = ? ORDER BY id', [foodModule.id]);
+    // Search tags, tidied the way the admin form tidies them.
+    const [tagRows] = await mysql.query('SELECT it.item_id, t.tag FROM item_tag it JOIN tags t ON t.id = it.tag_id');
+    const tagsByItem = new Map();
+    for (const row of tagRows) {
+        const key = String(row.item_id);
+        tagsByItem.set(key, [...(tagsByItem.get(key) || []), row.tag]);
+    }
     const categoryNames = new Map(
         (await prisma.foodCategory.findMany({ select: { id: true, name: true } })).map((c) => [c.id, c.name])
     );
@@ -179,6 +187,7 @@ export async function importFoods(mysql, report) {
             foodType: item.veg === 1 ? 'Veg' : 'NonVeg',
             isAvailable: item.status === 1,
             isRecommended: item.recommended === 1,
+            tags: normalizeTags(tagsByItem.get(String(item.id)) || []),
             approvalStatus: item.is_approved === 1 ? 'approved' : 'pending',
             approvedAt: item.is_approved === 1 ? item.created_at || new Date() : null,
             rating: Math.min(5, Math.max(0, Math.round((Number(item.avg_rating) || 0) * 10) / 10)),

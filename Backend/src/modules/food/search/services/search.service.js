@@ -1,4 +1,5 @@
 import { prisma } from '../../../../config/prisma.js';
+import { normalizeTag } from '../../shared/tags.util.js';
 import { isId } from '../../../../utils/helpers.js';
 import { toRestaurant } from '../../restaurant/restaurant.mapper.js';
 import { restaurantIdsMatchingCuisine } from '../../shared/restaurantQuery.util.js';
@@ -132,7 +133,11 @@ export const searchUnified = async (query = {}, options = {}) => {
         const matchedFoods = await prisma.foodItem.findMany({
             where: {
                 approvalStatus: 'approved',
-                name: { contains: term, mode: 'insensitive' },
+                OR: [
+                    { name: { contains: term, mode: 'insensitive' } },
+                    // Tagged "healthy food" is found by searching it, not only by the dish's name.
+                    ...(normalizeTag(term) ? [{ tags: { has: normalizeTag(term) } }] : []),
+                ],
                 ...(isVeg === 'true' ? { foodType: 'Veg' } : {}),
             },
             select: FOOD_MATCH_SELECT,

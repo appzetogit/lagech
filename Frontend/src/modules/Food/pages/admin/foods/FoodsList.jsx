@@ -38,6 +38,7 @@ const createFoodForm = () => ({
   foodType: "Non-Veg",
   isAvailable: true,
   preparationTime: "",
+  tags: "",
 })
 
 const createVariantDraft = (variant = {}) => ({
@@ -212,6 +213,7 @@ export default function FoodsList() {
             approvalStatus: f.approvalStatus || "approved",
             description: f.description || "",
             preparationTime: f.preparationTime || "",
+            tags: Array.isArray(f.tags) ? f.tags : [],
             isAvailable: f.isAvailable !== false,
             createdAt: f.createdAt,
             updatedAt: f.updatedAt,
@@ -380,6 +382,7 @@ export default function FoodsList() {
       foodType: String(food.foodType || "Non-Veg"),
       isAvailable: food.isAvailable !== false,
       preparationTime: String(food.preparationTime || ""),
+      tags: Array.isArray(food.tags) ? food.tags.join(", ") : "",
     })
     setSelectedImageFile(null)
     setImagePreviewUrl(String(food.image || ""))
@@ -555,6 +558,7 @@ export default function FoodsList() {
         foodType: foodForm.foodType === "Veg" ? "Veg" : "Non-Veg",
         isAvailable: foodForm.isAvailable !== false,
         preparationTime: String(foodForm.preparationTime || "").trim(),
+        tags: String(foodForm.tags || ""),
       }
 
       if (foodFormMode === "edit") {
@@ -1347,6 +1351,16 @@ export default function FoodsList() {
                   Available
                 </label>
               </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Search tags</label>
+              <input
+                value={foodForm.tags}
+                onChange={(e) => setFoodForm((prev) => ({ ...prev, tags: e.target.value }))}
+                placeholder="e.g. healthy food, momos, spicy"
+                className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm bg-white"
+              />
+              <p className="mt-1 text-xs text-slate-500">Separate with commas. Customers searching any of these words find this dish.</p>
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>

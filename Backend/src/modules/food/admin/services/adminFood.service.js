@@ -1,4 +1,5 @@
 import { prisma } from '../../../../config/prisma.js';
+import { normalizeTags } from '../../shared/tags.util.js';
 import { toFoodTypeColumn, fromFoodTypeColumn } from '../../shared/foodType.util.js';
 import { dropMenuCache } from '../../shared/menuCache.util.js';
 import { isId } from '../../../../utils/helpers.js';
@@ -254,6 +255,7 @@ export async function createFood(body = {}) {
             foodType: toFoodTypeColumn(foodType),
             isAvailable: body.isAvailable !== false,
             preparationTime: typeof body.preparationTime === 'string' ? body.preparationTime.trim() : '',
+            tags: normalizeTags(body.tags),
             // An admin creating a dish is the approval.
             approvalStatus: 'approved',
         },
@@ -279,6 +281,7 @@ export async function updateFood(id, body = {}) {
     const data = {};
     if (body.name !== undefined) data.name = String(body.name || '').trim();
     if (body.description !== undefined) data.description = String(body.description || '').trim();
+    if (body.tags !== undefined) data.tags = normalizeTags(body.tags);
 
     const targetFoodType =
         body.foodType !== undefined
