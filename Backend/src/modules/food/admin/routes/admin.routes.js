@@ -518,9 +518,14 @@ router.get(
     ]),
     getUserCartPricingAdminController
 );
+// Before /orders/:orderId, which would otherwise take "dispatch-board" as an order id.
+router.get('/orders/dispatch-board', adminController.getDispatchBoard);
 router.get('/orders/:orderId', orderController.getOrderByIdAdminController);
 router.patch('/orders/:orderId/accept', orderController.acceptOrderAdminController);
 router.patch('/orders/:orderId/reject', orderController.rejectOrderAdminController);
+// Assigning a rider by hand. The controller existed but no route reached it,
+// so an admin had no way to hand an order to a rider.
+router.patch('/orders/:orderId/assign-rider', orderController.assignDeliveryPartnerController);
 router.patch(
     '/orders/:orderId/mark-delivered',
     requireAdminPermission('order_management', 'edit'),

@@ -70,6 +70,7 @@ const PATH_PREFIX_TO_SECTION = [
   { prefix: "/admin/food/delivery-boy-commission", section: "delivery_management" },
   { prefix: "/admin/food/order-refunds", section: "order_management" },
   { prefix: "/admin/food/order-cancel-reasons", section: "order_management" },
+  { prefix: "/admin/food/dispatch", section: "order_management" },
   { prefix: "/admin/food/food-approval", section: "food_management" },
   { prefix: "/admin/food/foods", section: "food_management" },
   { prefix: "/admin/food/addons", section: "food_management" },

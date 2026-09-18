@@ -65,6 +65,7 @@ export const adminSidebarMenu = [
         icon: "Receipt",
         subItems: [{ label: "Refund Requests", path: "/admin/food/order-refunds/new" }],
       },
+      { type: "link", label: "Dispatch", path: "/admin/food/dispatch", icon: "Truck" },
       { type: "link", label: "Cancel Reasons", path: "/admin/food/order-cancel-reasons", icon: "AlertTriangle" },
       { type: "link", label: "Order Detect Delivery", path: "/admin/food/order-detect-delivery", icon: "Truck" },
     ],

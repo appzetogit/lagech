@@ -26,6 +26,16 @@ import {
   Star,
 } from "lucide-react";
 import { toast } from "sonner";
+import { API_BASE_URL } from "@food/api/config";
+
+const DEFAULT_REJECT_REASONS = [
+  "Restaurant is too busy",
+  "Item not available",
+  "Outside delivery area",
+  "Kitchen closing soon",
+  "Technical issue",
+  "Other reason",
+];
 import { getRestaurantCookingNote } from "@food/utils/orderCookingNote";
 import BottomNavOrders from "@food/components/restaurant/BottomNavOrders";
 import RestaurantNavbar from "@food/components/restaurant/RestaurantNavbar";
@@ -1103,14 +1113,22 @@ export default function OrdersMain() {
   // Restaurant notifications hook for real-time orders
   const { newOrder, clearNewOrder } = useRestaurantNotifications();
 
-  const rejectReasons = [
-    "Restaurant is too busy",
-    "Item not available",
-    "Outside delivery area",
-    "Kitchen closing soon",
-    "Technical issue",
-    "Other reason",
-  ];
+  // The admin keeps the restaurant cancel reasons (Order Cancel Reasons in the
+  // admin panel). Until any are set, these defaults are offered.
+  const [rejectReasons, setRejectReasons] = useState(DEFAULT_REJECT_REASONS);
+  useEffect(() => {
+    let alive = true;
+    fetch(`${API_BASE_URL}/food/public/cancel-reasons?userType=restaurant`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body) => {
+        const list = (body?.data?.reasons || []).map((r) => r.reason).filter(Boolean);
+        if (alive && list.length) setRejectReasons([...list, "Other reason"]);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // Sync online/offline status for desktop header toggle
   useEffect(() => {

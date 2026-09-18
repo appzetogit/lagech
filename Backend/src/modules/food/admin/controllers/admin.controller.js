@@ -4,6 +4,7 @@ import * as adminService from '../services/admin.service.js';
 import * as restaurantPayoutService from '../../restaurant/services/restaurantPayout.service.js';
 import * as cancelReasonService from '../../orders/services/cancelReason.service.js';
 import * as adminReportsService from '../services/adminReports.service.js';
+import { getDispatchBoard as loadDispatchBoard } from '../../orders/services/dispatchBoard.service.js';
 import * as featureSettingsService from '../services/featureSettings.service.js';
 import { validateCategoryListQuery, validateCategoryRejectDto, validateCategoryUpsertDto } from '../validators/category.validator.js';
 import { validateCreateOfferDto, validateUpdateOfferCartVisibilityDto } from '../validators/offer.validator.js';
@@ -1729,6 +1730,15 @@ export async function getRestaurantPayoutSettings(req, res, next) {
 export async function updateRestaurantPayoutSettings(req, res, next) {
     try {
         sendOk(res, { settings: await restaurantPayoutService.updatePayoutSettings(req.body || {}) }, 'Payout settings saved');
+    } catch (error) {
+        next(error);
+    }
+}
+
+// ----- Dispatch board -----
+export async function getDispatchBoard(req, res, next) {
+    try {
+        res.status(200).json({ success: true, data: await loadDispatchBoard() });
     } catch (error) {
         next(error);
     }

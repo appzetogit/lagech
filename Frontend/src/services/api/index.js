@@ -489,6 +489,10 @@ export const adminAPI = {
       params,
       contextModule: "admin",
     }),
+  /** Dispatch board: orders waiting for a rider, on the way, and online riders (admin). */
+  getDispatchBoard: () => apiClient.get("/food/admin/orders/dispatch-board", { contextModule: "admin" }),
+  assignRider: (orderId, deliveryPartnerId) =>
+    apiClient.patch(`/food/admin/orders/${String(orderId)}/assign-rider`, { deliveryPartnerId }, { contextModule: "admin" }),
   /** Expense, admin earning and item reports (admin). */
   getExpenseReport: (params = {}) => apiClient.get("/food/admin/reports/expenses", { params, contextModule: "admin" }),
   getAdminEarningReport: (params = {}) => apiClient.get("/food/admin/reports/admin-earnings", { params, contextModule: "admin" }),
