@@ -19,7 +19,7 @@ const THEME = "#008078"
 
 const STEP_META = {
   1: { title: "Forgot password", subtitle: "Enter your email to receive a verification code" },
-  2: { title: "Verify OTP", subtitle: "Enter the 6-digit code sent to your email" },
+  2: { title: "Verify OTP", subtitle: "Enter the 4-digit code sent to your email" },
   3: { title: "Reset password", subtitle: "Choose a new password for your account" },
 }
 
@@ -55,7 +55,7 @@ export default function AdminForgotPassword() {
   const prefersReducedMotion = useReducedMotion()
   const [step, setStep] = useState(1)
   const [email, setEmail] = useState("")
-  const [otp, setOtp] = useState(["", "", "", "", "", ""])
+  const [otp, setOtp] = useState(["", "", "", ""])
   const [newPassword, setNewPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
@@ -65,7 +65,7 @@ export default function AdminForgotPassword() {
   const [resendTimer, setResendTimer] = useState(0)
   const [logoUrl, setLogoUrl] = useState(lagechLogo)
   const [themeColor, setThemeColor] = useState(THEME)
-  const inputRefs = useRef(Array(6).fill(null).map(() => null))
+  const inputRefs = useRef(Array(4).fill(null).map(() => null))
 
   useEffect(() => {
     const initBranding = async () => {
@@ -140,7 +140,7 @@ export default function AdminForgotPassword() {
     newOtp[index] = value.slice(-1)
     setOtp(newOtp)
 
-    if (value && index < 5) {
+    if (value && index < 3) {
       inputRefs.current[index + 1]?.focus()
     }
   }
@@ -154,16 +154,16 @@ export default function AdminForgotPassword() {
   const handleOtpPaste = (e) => {
     e.preventDefault()
     const pastedData = e.clipboardData.getData("text")
-    const digits = pastedData.replace(/\D/g, "").slice(0, 6).split("")
+    const digits = pastedData.replace(/\D/g, "").slice(0, 4).split("")
     const newOtp = [...otp]
     digits.forEach((digit, i) => {
-      if (i < 6) {
+      if (i < 4) {
         newOtp[i] = digit
       }
     })
     setOtp(newOtp)
-    if (digits.length === 6) {
-      inputRefs.current[5]?.focus()
+    if (digits.length === 4) {
+      inputRefs.current[3]?.focus()
     } else {
       inputRefs.current[digits.length]?.focus()
     }
@@ -174,8 +174,8 @@ export default function AdminForgotPassword() {
     setError("")
 
     const otpCode = otp.join("")
-    if (otpCode.length !== 6) {
-      setError("Please enter the complete 6-digit OTP")
+    if (otpCode.length !== 4) {
+      setError("Please enter the complete 4-digit OTP")
       return
     }
     setStep(3)
