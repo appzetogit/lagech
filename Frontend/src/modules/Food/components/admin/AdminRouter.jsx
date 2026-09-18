@@ -98,6 +98,8 @@ const TaxReport = lazy(() => import("@food/pages/admin/reports/TaxReport"));
 const RestaurantVATReport = lazy(() => import("@food/pages/admin/reports/RestaurantVATReport"));
 // Transaction Management
 const RestaurantWithdraws = lazy(() => import("@food/pages/admin/transactions/RestaurantWithdraws"));
+const AdminEarningReport = lazy(() => import("@food/pages/admin/reports/AdminEarningReport"));
+const ItemReport = lazy(() => import("@food/pages/admin/reports/ItemReport"));
 const OrderCancelReasons = lazy(() => import("@food/pages/admin/orders/OrderCancelReasons"));
 const RestaurantPayouts = lazy(() => import("@food/pages/admin/transactions/RestaurantPayouts"));
 const RestaurantPayoutBatch = lazy(() => import("@food/pages/admin/transactions/RestaurantPayoutBatch"));
@@ -338,6 +340,8 @@ export default function AdminRouter() {
             {/* REPORTS & SETTINGS */}
             <Route path="transaction-report" element={<TransactionReport />} />
             <Route path="expense-report" element={<ExpenseReport />} />
+            <Route path="admin-earning-report" element={<AdminEarningReport />} />
+            <Route path="item-report" element={<ItemReport />} />
             <Route path="disbursement-report/restaurants" element={<DisbursementReportRestaurants />} />
             <Route path="disbursement-report/deliverymen" element={<DisbursementReportDeliverymen />} />
             <Route path="order-report/regular" element={<RegularOrderReport />} />

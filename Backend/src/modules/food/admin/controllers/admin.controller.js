@@ -3,6 +3,7 @@ import { isId } from '../../../../utils/helpers.js';
 import * as adminService from '../services/admin.service.js';
 import * as restaurantPayoutService from '../../restaurant/services/restaurantPayout.service.js';
 import * as cancelReasonService from '../../orders/services/cancelReason.service.js';
+import * as adminReportsService from '../services/adminReports.service.js';
 import * as featureSettingsService from '../services/featureSettings.service.js';
 import { validateCategoryListQuery, validateCategoryRejectDto, validateCategoryUpsertDto } from '../validators/category.validator.js';
 import { validateCreateOfferDto, validateUpdateOfferCartVisibilityDto } from '../validators/offer.validator.js';
@@ -1732,6 +1733,18 @@ export async function updateRestaurantPayoutSettings(req, res, next) {
         next(error);
     }
 }
+
+// ----- Expense, admin earning and item reports -----
+const reportHandler = (fn) => async (req, res, next) => {
+    try {
+        res.status(200).json({ success: true, data: await fn(req.query || {}) });
+    } catch (error) {
+        next(error);
+    }
+};
+export const getExpenseReport = reportHandler(adminReportsService.getExpenseReport);
+export const getAdminEarningReport = reportHandler(adminReportsService.getAdminEarningReport);
+export const getItemReport = reportHandler(adminReportsService.getItemReport);
 
 // ----- Order cancel reasons -----
 export async function listCancelReasons(req, res, next) {

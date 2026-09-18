@@ -14,8 +14,14 @@
  * numbers the old wallets were built from:
  *
  *   restaurantShare = store_amount
- *   platform keeps  = admin_commission (food commission + its cut of delivery)
- *   rider earned    = delivery_charge - delivery_fee_comission + tips
+ *   platform keeps  = admin_commission (food commission + its cut of delivery,
+ *                     less what it spent on the order)
+ *   rider earned    = original_delivery_charge + tips -- the rider's share of
+ *                     delivery. Not delivery_charge less the platform's cut:
+ *                     on a free-delivery order the customer was charged 0 and
+ *                     the platform paid the rider, which that formula made 0.
+ *   discount split  = the old `expenses` rows, which record how much of each
+ *                     discount the platform bore and how much the restaurant
  *
  * Totals follow what the customer was charged: food at the unit price the old
  * app stored (base plus any option, before discount) times quantity, less the
@@ -95,6 +101,12 @@ export async function importOrders(mysql, report) {
     const [itemReviews] = await mysql.query('SELECT * FROM reviews ORDER BY id');
     const [riderReviews] = await mysql.query('SELECT * FROM d_m_reviews ORDER BY id');
     const [users] = await mysql.query('SELECT id, f_name, l_name, phone FROM users');
+    const [discountRows] = await mysql.query(`
+        SELECT order_id,
+               SUM(CASE WHEN created_by = 'admin' THEN amount ELSE 0 END) AS admin,
+               SUM(CASE WHEN created_by <> 'admin' THEN amount ELSE 0 END) AS restaurant
+          FROM expenses WHERE type = 'discount_on_product' GROUP BY order_id`);
+    const discountSplit = new Map(discountRows.map((row) => [String(row.order_id), row]));
 
     const group = (rows, key) => {
         const map = new Map();
@@ -178,13 +190,19 @@ export async function importOrders(mysql, report) {
         }
 
         const txn = ledgerByOrder.get(String(row.id));
-        const deliveryCut = money(txn?.delivery_fee_comission);
         const riderEarning = delivered && txn && row.delivery_man_id
-            ? money(Number(txn.delivery_charge) - deliveryCut + Number(txn.dm_tips || 0))
+            ? money(Number(txn.original_delivery_charge) + Number(txn.dm_tips || 0))
             : 0;
-        const restaurantCommission = delivered && txn ? money(Number(txn.admin_commission) - deliveryCut) : 0;
-        const platformProfit = delivered && txn ? money(txn.admin_commission) : 0;
         const restaurantShare = delivered && txn ? money(txn.store_amount) : 0;
+        // What the restaurant gave up on the food: its discounted food total
+        // less what it was paid. Taken this way, not from admin_commission,
+        // because that figure already has the platform's own spending on the
+        // order netted out of it.
+        const restaurantCommission = delivered && txn ? money(Math.max(0, subtotal - discount - restaurantShare)) : 0;
+        const platformProfit = delivered && txn ? money(txn.admin_commission) : 0;
+        const split = discountSplit.get(String(row.id));
+        const adminDiscountShare = delivered && split ? money(split.admin) : 0;
+        const restaurantDiscountShare = delivered ? (split ? money(split.restaurant) : discount) : 0;
 
         // ── payment ──
         const paymentMethod = PAYMENT_METHODS[row.payment_method] || 'cash';
@@ -360,8 +378,10 @@ export async function importOrders(mysql, report) {
             riderShare: riderEarning,
             platformNetProfit: platformProfit,
             taxAmount: tax,
-            restaurantDiscountShare: delivered ? discount : 0,
-            discountRestaurantBearPercentage: discount > 0 ? 100 : 0,
+            adminDiscountShare,
+            restaurantDiscountShare,
+            discountAdminBearPercentage: discount > 0 ? money((adminDiscountShare / discount) * 100) : 0,
+            discountRestaurantBearPercentage: discount > 0 ? money((restaurantDiscountShare / discount) * 100) : 0,
             createdAt: data.createdAt,
         };
 

@@ -489,6 +489,10 @@ export const adminAPI = {
       params,
       contextModule: "admin",
     }),
+  /** Expense, admin earning and item reports (admin). */
+  getExpenseReport: (params = {}) => apiClient.get("/food/admin/reports/expenses", { params, contextModule: "admin" }),
+  getAdminEarningReport: (params = {}) => apiClient.get("/food/admin/reports/admin-earnings", { params, contextModule: "admin" }),
+  getItemReport: (params = {}) => apiClient.get("/food/admin/reports/items", { params, contextModule: "admin" }),
   /** Cashback on delivered orders (admin). */
   getCashbackSettings: () => apiClient.get("/food/admin/cashback-settings", { contextModule: "admin" }),
   updateCashbackSettings: (body) => apiClient.put("/food/admin/cashback-settings", body, { contextModule: "admin" }),

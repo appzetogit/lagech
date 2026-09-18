@@ -284,6 +284,9 @@ export const adminSidebarMenu = [
       { type: "link", label: "Transaction Report", path: "/admin/food/transaction-report", icon: "FileText" },
       { type: "link", label: "Order Report", path: "/admin/food/order-report/regular", icon: "FileText" },
       { type: "link", label: "Restaurant Wise Report", path: "/admin/food/restaurant-report", icon: "FileText" },
+      { type: "link", label: "Admin Earning Report", path: "/admin/food/admin-earning-report", icon: "IndianRupee" },
+      { type: "link", label: "Expense Report", path: "/admin/food/expense-report", icon: "Receipt" },
+      { type: "link", label: "Item Report", path: "/admin/food/item-report", icon: "Utensils" },
       { type: "link", label: "Tax Report", path: "/admin/food/tax-report", icon: "Receipt" },
       {
         type: "link",
