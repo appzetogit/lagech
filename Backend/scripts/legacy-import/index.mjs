@@ -29,6 +29,7 @@ import { importBalances } from './steps/balances.mjs';
 import { importPaymentDetails } from './steps/paymentDetails.mjs';
 import { importSettings } from './steps/settings.mjs';
 import { importRatings } from './steps/ratings.mjs';
+import { importBanners } from './steps/banners.mjs';
 
 const STEPS = [
     ['zones', importZones],
@@ -41,6 +42,7 @@ const STEPS = [
     ['orders', importOrders],
     ['balances', importBalances],
     ['ratings', importRatings],
+    ['banners', importBanners],
     ['settings', importSettings],
 ];
 
