@@ -211,8 +211,10 @@ async function accessFrom(payload = {}) {
     }
     return {
         roleId: null,
-        permissions: isValidPermissionPayload(payload.permissions || {})
-            ? sanitizeAdminPermissions(payload.permissions || {})
+        // Nothing granted stays {}: access is given explicitly, never by default.
+        permissions: payload.permissions && Object.keys(payload.permissions).length
+            && isValidPermissionPayload(payload.permissions)
+            ? sanitizeAdminPermissions(payload.permissions)
             : {},
         menuPaths: sanitizeAdminMenuPaths(payload.menuPaths),
     };

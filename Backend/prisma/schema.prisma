@@ -978,7 +978,7 @@ model FoodAdmin {
   updatedAt DateTime @updatedAt
 
   createdBy FoodAdmin?  @relation("AdminCreatedBy", fields: [createdById], references: [id])
-  role      FoodAdminRole? @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  adminRole FoodAdminRole? @relation(fields: [roleId], references: [id], onDelete: SetNull)
   created   FoodAdmin[] @relation("AdminCreatedBy")
   updatedBy FoodAdmin?  @relation("AdminUpdatedBy", fields: [updatedById], references: [id])
   updated   FoodAdmin[] @relation("AdminUpdatedBy")
@@ -1679,6 +1679,7 @@ model FoodItem {
   @@index([isRecommended])
   @@index([stockResumeAt])
   @@index([categoryId])
+  @@index([tags], type: Gin)
   @@map("food_items")
 }
 
