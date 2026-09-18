@@ -69,6 +69,7 @@ const PATH_PREFIX_TO_SECTION = [
   // /orders/..., commission rules are /delivery/... .
   { prefix: "/admin/food/delivery-boy-commission", section: "delivery_management" },
   { prefix: "/admin/food/order-refunds", section: "order_management" },
+  { prefix: "/admin/food/order-cancel-reasons", section: "order_management" },
   { prefix: "/admin/food/food-approval", section: "food_management" },
   { prefix: "/admin/food/foods", section: "food_management" },
   { prefix: "/admin/food/addons", section: "food_management" },
@@ -78,6 +79,7 @@ const PATH_PREFIX_TO_SECTION = [
   { prefix: "/admin/food/orders", section: "order_management" },
   { prefix: "/admin/food/order-detect-delivery", section: "order_management" },
   { prefix: "/admin/food/coupons", section: "promotions_management" },
+  { prefix: "/admin/food/cashback", section: "promotions_management" },
   { prefix: "/admin/food/referral-settings", section: "referral_rewards" },
   { prefix: "/admin/food/customers", section: "customer_management" },
   { prefix: "/admin/food/support-tickets", section: "customer_management" },

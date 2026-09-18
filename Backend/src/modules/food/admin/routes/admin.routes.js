@@ -77,8 +77,9 @@ const resolveSectionFromRequest = (path = '', method = '') => {
         path.startsWith('/zones')
     ) return 'restaurant_management';
     if (path.startsWith('/categories') || path.startsWith('/addons') || path.startsWith('/foods')) return 'food_management';
-    if (path.startsWith('/offers')) return 'promotions_management';
-    if (path.startsWith('/orders') || path.startsWith('/order-detect-delivery')) return 'order_management';
+    // Cashback settings were unguarded: any sub-admin could change what every order pays out.
+    if (path.startsWith('/offers') || path.startsWith('/cashback-settings')) return 'promotions_management';
+    if (path.startsWith('/orders') || path.startsWith('/order-detect-delivery') || path.startsWith('/order-cancel-reasons')) return 'order_management';
     if (path.startsWith('/delivery')) return 'delivery_management';
     if (path.startsWith('/withdrawals')) return 'transaction_management';
     if (path.startsWith('/feedback-experiences')) return 'report_management';
@@ -399,6 +400,11 @@ router.patch('/withdrawals/:id', adminController.updateWithdrawalStatus);
 router.get('/delivery/withdrawals', adminController.getDeliveryWithdrawals);
 router.patch('/delivery/withdrawals/:id', adminController.updateDeliveryWithdrawalStatus);
 router.get('/delivery/cash-limit-settlements', adminController.getCashLimitSettlements);
+// Order cancel reasons; guarded as order management by resolveSectionFromRequest.
+router.get('/order-cancel-reasons', adminController.listCancelReasons);
+router.post('/order-cancel-reasons', adminController.createCancelReason);
+router.patch('/order-cancel-reasons/:id', adminController.updateCancelReason);
+router.delete('/order-cancel-reasons/:id', adminController.deleteCancelReason);
 router.post('/delivery/cash-collections', adminController.collectDeliveryCash);
 
 // ----- Delivery partners & general -----

@@ -57,6 +57,7 @@ router.get('/v1/food/admin/restaurant-subscription-settings/public', adminContro
 router.get('/v1/food/admin/feature-settings/public', adminController.getFeatureSettings);
 router.get('/v1/food/admin/fee-settings/public', adminController.getPublicFeeSettings);
 router.get('/v1/food/admin/cashback-settings/public', getCashbackSettingsPublicController);
+router.get('/v1/food/public/cancel-reasons', adminController.getPublicCancelReasons);
 
 router.use('/v1/food/admin', authMiddleware, requireRoles('ADMIN'), restaurantAdminRoutes);
 router.use('/v1/food/user', authMiddleware, requireRoles('USER'), userRoutes);

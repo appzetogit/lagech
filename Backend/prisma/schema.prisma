@@ -2625,6 +2625,25 @@ model FoodRestaurantPayoutSettings {
   @@map("food_restaurant_payout_settings")
 }
 
+/// Reasons offered when an order is cancelled, per who is cancelling. The
+/// admin keeps the list; the panels and apps show it as a choice instead of an
+/// empty box, so cancellations can be counted by cause.
+model FoodCancelReason {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  reason    String
+  /// 'admin', 'restaurant', 'customer' or 'rider'.
+  userType  String  @default("admin") @db.VarChar(16)
+  isActive  Boolean @default(true)
+  sortOrder Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userType, isActive, sortOrder])
+  @@map("food_cancel_reasons")
+}
+
 model FoodRestaurantWithdrawal {
   id           String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
   restaurantId String @db.VarChar(24)

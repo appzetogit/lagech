@@ -2,6 +2,7 @@ import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import * as adminService from '../services/admin.service.js';
 import * as restaurantPayoutService from '../../restaurant/services/restaurantPayout.service.js';
+import * as cancelReasonService from '../../orders/services/cancelReason.service.js';
 import * as featureSettingsService from '../services/featureSettings.service.js';
 import { validateCategoryListQuery, validateCategoryRejectDto, validateCategoryUpsertDto } from '../validators/category.validator.js';
 import { validateCreateOfferDto, validateUpdateOfferCartVisibilityDto } from '../validators/offer.validator.js';
@@ -1727,6 +1728,52 @@ export async function getRestaurantPayoutSettings(req, res, next) {
 export async function updateRestaurantPayoutSettings(req, res, next) {
     try {
         sendOk(res, { settings: await restaurantPayoutService.updatePayoutSettings(req.body || {}) }, 'Payout settings saved');
+    } catch (error) {
+        next(error);
+    }
+}
+
+// ----- Order cancel reasons -----
+export async function listCancelReasons(req, res, next) {
+    try {
+        res.status(200).json({ success: true, data: { reasons: await cancelReasonService.listCancelReasons(req.query || {}) } });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function createCancelReason(req, res, next) {
+    try {
+        const reason = await cancelReasonService.createCancelReason(req.body || {});
+        res.status(201).json({ success: true, message: 'Cancel reason added', data: { reason } });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function updateCancelReason(req, res, next) {
+    try {
+        const reason = await cancelReasonService.updateCancelReason(req.params.id, req.body || {});
+        res.status(200).json({ success: true, message: 'Cancel reason saved', data: { reason } });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function deleteCancelReason(req, res, next) {
+    try {
+        await cancelReasonService.deleteCancelReason(req.params.id);
+        res.status(200).json({ success: true, message: 'Cancel reason deleted' });
+    } catch (error) {
+        next(error);
+    }
+}
+
+/** Public: the active reasons for one kind of user (?userType=customer|restaurant|rider|admin). */
+export async function getPublicCancelReasons(req, res, next) {
+    try {
+        const reasons = await cancelReasonService.listActiveCancelReasons(req.query?.userType || 'customer');
+        res.status(200).json({ success: true, data: { reasons } });
     } catch (error) {
         next(error);
     }

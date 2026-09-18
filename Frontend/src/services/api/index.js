@@ -489,6 +489,18 @@ export const adminAPI = {
       params,
       contextModule: "admin",
     }),
+  /** Cashback on delivered orders (admin). */
+  getCashbackSettings: () => apiClient.get("/food/admin/cashback-settings", { contextModule: "admin" }),
+  updateCashbackSettings: (body) => apiClient.put("/food/admin/cashback-settings", body, { contextModule: "admin" }),
+  /** Order cancel reasons (admin). */
+  getCancelReasons: (params = {}) =>
+    apiClient.get("/food/admin/order-cancel-reasons", { params, contextModule: "admin" }),
+  createCancelReason: (body) =>
+    apiClient.post("/food/admin/order-cancel-reasons", body, { contextModule: "admin" }),
+  updateCancelReason: (id, body) =>
+    apiClient.patch(`/food/admin/order-cancel-reasons/${String(id)}`, body, { contextModule: "admin" }),
+  deleteCancelReason: (id) =>
+    apiClient.delete(`/food/admin/order-cancel-reasons/${String(id)}`, { contextModule: "admin" }),
   /** Daily restaurant payout batches (admin). */
   getRestaurantPayoutBatches: (params = {}) =>
     apiClient.get("/food/admin/withdrawals/restaurant-payouts", { params, contextModule: "admin" }),

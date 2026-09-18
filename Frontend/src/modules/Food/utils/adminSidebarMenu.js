@@ -65,6 +65,7 @@ export const adminSidebarMenu = [
         icon: "Receipt",
         subItems: [{ label: "Refund Requests", path: "/admin/food/order-refunds/new" }],
       },
+      { type: "link", label: "Cancel Reasons", path: "/admin/food/order-cancel-reasons", icon: "AlertTriangle" },
       { type: "link", label: "Order Detect Delivery", path: "/admin/food/order-detect-delivery", icon: "Truck" },
     ],
   },
@@ -74,6 +75,7 @@ export const adminSidebarMenu = [
     items: [
       { type: "link", label: "Banners", path: "/admin/food/hero-banner-management", icon: "Image" },
       { type: "link", label: "Other Banners", path: "/admin/food/promotional-banner", icon: "Megaphone" },
+      { type: "link", label: "Cashback", path: "/admin/food/cashback", icon: "IndianRupee" },
       { type: "link", label: "Coupons", path: "/admin/food/coupons", icon: "Gift" },
       { type: "link", label: "Push Notification", path: "/admin/food/broadcast-notification", icon: "Bell" },
       { type: "link", label: "Referral Settings", path: "/admin/food/referral-settings", icon: "Gift" },

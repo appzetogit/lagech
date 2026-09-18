@@ -30,6 +30,7 @@ import { importPaymentDetails } from './steps/paymentDetails.mjs';
 import { importSettings } from './steps/settings.mjs';
 import { importRatings } from './steps/ratings.mjs';
 import { importBanners } from './steps/banners.mjs';
+import { importCancelReasons } from './steps/cancelReasons.mjs';
 
 const STEPS = [
     ['zones', importZones],
@@ -43,6 +44,7 @@ const STEPS = [
     ['balances', importBalances],
     ['ratings', importRatings],
     ['banners', importBanners],
+    ['cancel-reasons', importCancelReasons],
     ['settings', importSettings],
 ];
 

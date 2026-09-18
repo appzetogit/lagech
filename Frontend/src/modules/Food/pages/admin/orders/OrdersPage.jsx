@@ -4,7 +4,8 @@ import io from "socket.io-client"
 import { FileText, Package } from "lucide-react"
 import { adminAPI } from "@food/api"
 import { API_BASE_URL } from "@food/api/config"
-import { toast } from "sonner"
+import { toast } from "sonner"
+
 import { usePaginationParams } from "@food/hooks/usePaginationParams"
 import OrdersTopbar from "@food/components/admin/orders/OrdersTopbar"
 import OrdersTable from "@food/components/admin/orders/OrdersTable"
@@ -12,6 +13,7 @@ import FilterPanel from "@food/components/admin/orders/FilterPanel"
 import ViewOrderDialog from "@food/components/admin/orders/ViewOrderDialog"
 import SettingsDialog from "@food/components/admin/orders/SettingsDialog"
 import RefundModal from "@food/components/admin/orders/RefundModal"
+import CancelOrderDialog from "@food/components/admin/orders/CancelOrderDialog"
 import { useOrdersManagement } from "@food/components/admin/orders/useOrdersManagement"
 import { Loader2 } from "lucide-react"
 import { OrdersDashboardSkeleton } from "@food/components/ui/loading-skeletons"
@@ -1032,63 +1034,43 @@ export default function OrdersPage({ statusKey = "all" }) {
     }
   }
 
-  const handleRejectOrder = async (order) => {
-    const orderIdToUse = order.id || order._id || order.orderId
-    if (!orderIdToUse) {
+  // Cancel and reject both go through the reason dialog; the action runs once
+  // a reason is chosen there.
+  const [cancelDialog, setCancelDialog] = useState(null)
+
+  const handleRejectOrder = (order) => {
+    if (!(order.id || order._id || order.orderId)) {
       toast.error("Order ID not found")
       return
     }
-
-    const reason = prompt(
-      `Enter rejection reason for order ${order.orderId}:`,
-      "Order rejected by admin",
-    )
-
-    if (reason === null) return
-
-    try {
-      setProcessingActionOrderId(order.id || order.orderId)
-      const response = await adminAPI.rejectOrder(orderIdToUse, reason)
-      if (response.data?.success) {
-        toast.success(response.data?.message || `Order ${order.orderId} rejected`)
-        await fetchOrdersRef.current({ silent: true, withRingCheck: false, force: true })
-      } else {
-        toast.error(response.data?.message || "Failed to reject order")
-      }
-    } catch (error) {
-      debugError("Error rejecting order:", error)
-      toast.error(error.response?.data?.message || "Failed to reject order")
-    } finally {
-      setProcessingActionOrderId(null)
-    }
+    setCancelDialog({ order, mode: "reject" })
   }
 
-  const handleCancelOrder = async (order) => {
-    const orderIdToUse = order.id || order._id || order.orderId
-    if (!orderIdToUse) {
+  const handleCancelOrder = (order) => {
+    if (!(order.id || order._id || order.orderId)) {
       toast.error("Order ID not found")
       return
     }
+    setCancelDialog({ order, mode: "cancel" })
+  }
 
-    const reason = prompt(
-      `Enter cancellation reason for order ${order.orderId}:`,
-      "Order cancelled by admin",
-    )
-
-    if (reason === null) return
-
+  const confirmCancel = async (reason) => {
+    const { order, mode } = cancelDialog
+    const orderIdToUse = order.id || order._id || order.orderId
+    const done = mode === "reject" ? "rejected" : "cancelled"
     try {
       setProcessingActionOrderId(order.id || order.orderId)
       const response = await adminAPI.rejectOrder(orderIdToUse, reason)
       if (response.data?.success) {
-        toast.success(response.data?.message || `Order ${order.orderId} cancelled`)
+        toast.success(`Order ${order.orderId} ${done}`)
+        setCancelDialog(null)
         await fetchOrdersRef.current({ silent: true, withRingCheck: false, force: true })
       } else {
-        toast.error(response.data?.message || "Failed to cancel order")
+        toast.error(response.data?.message || `Failed to ${mode} order`)
       }
     } catch (error) {
-      debugError("Error cancelling order:", error)
-      toast.error(error.response?.data?.message || "Failed to cancel order")
+      debugError(`Error trying to ${mode} order:`, error)
+      toast.error(error.response?.data?.message || `Failed to ${mode} order`)
     } finally {
       setProcessingActionOrderId(null)
     }
@@ -1445,6 +1427,14 @@ export default function OrdersPage({ statusKey = "all" }) {
           statusKey === "food-on-the-way"
         }
       />
+      {cancelDialog && (
+        <CancelOrderDialog
+          order={cancelDialog.order}
+          mode={cancelDialog.mode}
+          onClose={() => setCancelDialog(null)}
+          onConfirm={confirmCancel}
+        />
+      )}
     </div>
   )
 }
