@@ -493,6 +493,16 @@ export const adminAPI = {
       params,
       contextModule: "admin",
     }),
+  /** Advertisements and reels (admin). */
+  getAdvertisements: (params = {}) => apiClient.get("/food/admin/advertisements", { params, contextModule: "admin" }),
+  createAdvertisement: (body) => apiClient.post("/food/admin/advertisements", body, { contextModule: "admin" }),
+  updateAdvertisement: (id, body) => apiClient.patch(`/food/admin/advertisements/${String(id)}`, body, { contextModule: "admin" }),
+  decideAdvertisement: (id, body) => apiClient.patch(`/food/admin/advertisements/${String(id)}/status`, body, { contextModule: "admin" }),
+  deleteAdvertisement: (id) => apiClient.delete(`/food/admin/advertisements/${String(id)}`, { contextModule: "admin" }),
+  getReels: () => apiClient.get("/food/admin/reels", { contextModule: "admin" }),
+  createReel: (body) => apiClient.post("/food/admin/reels", body, { contextModule: "admin" }),
+  updateReel: (id, body) => apiClient.patch(`/food/admin/reels/${String(id)}`, body, { contextModule: "admin" }),
+  deleteReel: (id) => apiClient.delete(`/food/admin/reels/${String(id)}`, { contextModule: "admin" }),
   /** Dispatch board: orders waiting for a rider, on the way, and online riders (admin). */
   getDispatchBoard: () => apiClient.get("/food/admin/orders/dispatch-board", { contextModule: "admin" }),
   assignRider: (orderId, deliveryPartnerId) =>
@@ -1422,6 +1432,10 @@ export const restaurantAPI = {
     apiClient.get("/food/restaurant/withdrawals", {
       contextModule: "restaurant"
     }),
+  /** Advertisement requests: sent here, decided by the admin. */
+  getMyAdvertisements: () => apiClient.get("/food/restaurant/advertisements", { contextModule: "restaurant" }),
+  requestAdvertisement: (body) => apiClient.post("/food/restaurant/advertisements", body, { contextModule: "restaurant" }),
+  withdrawAdvertisement: (id) => apiClient.delete(`/food/restaurant/advertisements/${String(id)}`, { contextModule: "restaurant" }),
   /** Calendar-month postpaid subscription billing */
   getSubscriptionOverview: () =>
     apiClient.get("/food/restaurant/subscription/overview", {
@@ -2802,6 +2816,29 @@ export const uploadAPI = {
     }
 
     return response;
+  },
+
+  /**
+   * Upload a video (reels, video ads). Signed-in admins and restaurants only.
+   * @param {File} file
+   * @param {{ folder: string, contextModule?: "admin"|"restaurant" }} options
+   */
+  uploadVideo: async (file, options = {}) => {
+    if (!file) return Promise.reject(new Error("File is required for upload"))
+    const folder = String(options.folder || "").trim()
+    if (!folder) return Promise.reject(new Error("Folder is required for upload"))
+    const formData = new FormData()
+    formData.append("folder", folder)
+    formData.append("file", file)
+    const response = await apiClient.post("/uploads/video", formData, {
+      params: { folder },
+      headers: { "Content-Type": "multipart/form-data" },
+      contextModule: options.contextModule || "admin",
+      timeout: 5 * 60 * 1000,
+    })
+    const payload = response?.data?.data
+    if (payload?.url) payload.url = resolveMediaUrl(payload.url)
+    return response
   },
 };
 /** Order API (user app – Bearer USER token). Minimal calls: single create/verify, list/details cached by caller. */

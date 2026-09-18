@@ -352,3 +352,23 @@ Rooms: `user:<userId>`, `tracking:<orderId>`.
 
 REST is authoritative. Treat socket events as a signal to refetch, not as the
 source of truth.
+
+## 13. Promotions and cancel reasons — public, no login
+
+### `GET /v1/food/public/advertisements`
+Restaurant ads running now, best priority first. Show as a carousel; tapping one opens the restaurant.
+```json
+{ "ads": [ { "id": "…", "type": "restaurant | video", "title": "…", "description": "…",
+  "coverImage": "/uploads/…", "logoImage": "/uploads/…", "videoUrl": "",
+  "restaurant": { "id": "…", "name": "…", "area": "…", "rating": 4.3, "totalRatings": 42 } } ] }
+```
+`rating` / `totalRatings` are omitted when the ad hides them.
+
+### `GET /v1/food/public/reels`
+Reels showing now: `{ reels: [ { id, description, videoUrl, thumbnail, views, likes, restaurant: { id, name, logo } } ] }`.
+
+### `POST /v1/food/public/reels/:id/view` · `/like` · `/visit`
+Count a view (once per play), a like, or a tap through to the restaurant. `{ counted: true }`.
+
+### `GET /v1/food/public/cancel-reasons?userType=customer`
+The reasons to offer when a customer cancels: `{ reasons: [ { id, reason } ] }`. Send the chosen text as `reason` to `PATCH /v1/food/orders/:orderId/cancel`.

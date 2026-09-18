@@ -18,4 +18,20 @@ export const imageUpload = multer({
     }
 });
 
+/** Videos for reels and video ads: larger, and only a few types. */
+export const videoUpload = multer({
+    storage: memoryStorage,
+    limits: {
+        fileSize: Number(process.env.UPLOAD_MAX_VIDEO_SIZE_MB || 50) * 1024 * 1024,
+        files: 1
+    },
+    fileFilter: (_req, file, cb) => {
+        const mimeType = String(file.mimetype || '').toLowerCase();
+        if (!['video/mp4', 'video/quicktime', 'video/webm'].includes(mimeType)) {
+            return cb(new Error('Only MP4, MOV and WebM videos are allowed'));
+        }
+        return cb(null, true);
+    }
+});
+
 export { uploadRateLimiter } from '../../../middleware/rateLimit.js';

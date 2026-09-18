@@ -100,6 +100,8 @@ const RestaurantVATReport = lazy(() => import("@food/pages/admin/reports/Restaur
 const RestaurantWithdraws = lazy(() => import("@food/pages/admin/transactions/RestaurantWithdraws"));
 const AdminEarningReport = lazy(() => import("@food/pages/admin/reports/AdminEarningReport"));
 const ItemReport = lazy(() => import("@food/pages/admin/reports/ItemReport"));
+const AdminAdvertisements = lazy(() => import("@food/pages/admin/promotions/Advertisements"));
+const AdminReels = lazy(() => import("@food/pages/admin/promotions/Reels"));
 const DispatchBoard = lazy(() => import("@food/pages/admin/orders/DispatchBoard"));
 const OrderCancelReasons = lazy(() => import("@food/pages/admin/orders/OrderCancelReasons"));
 const RestaurantPayouts = lazy(() => import("@food/pages/admin/transactions/RestaurantPayouts"));
@@ -356,6 +358,8 @@ export default function AdminRouter() {
             <Route path="restaurant-withdraws" element={<RestaurantWithdraws />} />
             <Route path="order-cancel-reasons" element={<OrderCancelReasons />} />
             <Route path="dispatch" element={<DispatchBoard />} />
+            <Route path="advertisements" element={<AdminAdvertisements />} />
+            <Route path="reels" element={<AdminReels />} />
             <Route path="restaurant-disbursements" element={<RestaurantPayouts />} />
             <Route path="restaurant-disbursements/:batchId" element={<RestaurantPayoutBatch />} />
             <Route path="balance-sheet" element={<BalanceSheet />} />

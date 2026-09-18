@@ -565,6 +565,14 @@ Query passes through to the admin complaint service (pagination + filters). → 
 ### `POST /food/restaurant/feedback-experience`
 Dashboard NPS/feedback submission.
 
+### Advertisements — ask Lagech to feature the restaurant
+- `GET /food/restaurant/advertisements` → `{ ads: [ { id, type, title, description, coverImage, videoUrl, startDate, endDate, state, note } ] }`. `state` is `pending`, `scheduled`, `running`, `paused`, `expired` or `denied`; `note` says why when denied or paused.
+- `POST /food/restaurant/advertisements` `{ type: "restaurant" | "video", title, description, coverImage | videoUrl, startDate, endDate }` → 201, waits for approval. Upload media first: images to `POST /uploads/image`, videos (MP4/MOV/WebM, 50 MB) to `POST /uploads/video` with the restaurant token.
+- `DELETE /food/restaurant/advertisements/:id` withdraws a request still `pending`.
+
+### Cancel / reject reasons
+`GET /food/public/cancel-reasons?userType=restaurant` → `{ reasons: [ { id, reason } ] }`, kept by the admin. Offer these when rejecting an order.
+
 ---
 
 ## 11. Push notifications

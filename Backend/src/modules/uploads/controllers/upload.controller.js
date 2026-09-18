@@ -1,4 +1,4 @@
-import { saveImageFile, sanitizeUploadFolder } from '../../../services/storage.service.js';
+import { saveImageFile, saveVideoFile, sanitizeUploadFolder } from '../../../services/storage.service.js';
 import { sendResponse } from '../../../utils/response.js';
 import { ValidationError } from '../../../core/auth/errors.js';
 
@@ -31,6 +31,16 @@ export const uploadImage = async (req, res, next) => {
             mimeType: saved.mimeType,
             size: saved.size
         });
+    } catch (error) {
+        return next(error);
+    }
+};
+
+export const uploadVideo = async (req, res, next) => {
+    try {
+        if (!req.file) throw new ValidationError('File is required');
+        const saved = await saveVideoFile(req.file, resolveFolder(req));
+        return sendResponse(res, 200, 'Video uploaded successfully', saved);
     } catch (error) {
         return next(error);
     }

@@ -807,6 +807,8 @@ model FoodRestaurant {
   itemCommissions      FoodItemCommission[]
   supportTickets       FoodRestaurantSupportTicket[]
   withdrawals          FoodRestaurantWithdrawal[]
+  advertisements       FoodAdvertisement[]
+  reels                FoodReel[]
   subscriptionInvoices FoodSubscriptionInvoice[]
   subscriptionTxns     FoodSubscriptionTransaction[]
   subscriptionHistory  FoodRestaurantSubscriptionHistory[]
@@ -2656,6 +2658,72 @@ model FoodRestaurantPayoutSettings {
 /// Reasons offered when an order is cancelled, per who is cancelling. The
 /// admin keeps the list; the panels and apps show it as a choice instead of an
 /// empty box, so cancellations can be counted by cause.
+/// A paid or requested promotion of one restaurant: a banner-style card
+/// ("restaurant") or a video. Restaurants request them; the admin approves,
+/// denies or pauses them, or creates them directly.
+model FoodAdvertisement {
+  id           String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  restaurantId String @db.VarChar(24)
+
+  /// 'restaurant' (cover + logo card) or 'video'.
+  type        String    @default("restaurant") @db.VarChar(16)
+  title       String
+  description String    @default("")
+  coverImage  String    @default("")
+  logoImage   String    @default("")
+  videoUrl    String    @default("")
+  startDate   DateTime
+  endDate     DateTime
+  /// Lower shows first; null sorts after every set priority.
+  priority    Int?
+  showRating  Boolean   @default(true)
+  showReviews Boolean   @default(true)
+  /// 'pending', 'approved', 'paused' or 'denied'. Running and expired are
+  /// read from the dates, so they can never be stale.
+  status      String    @default("pending") @db.VarChar(16)
+  /// Why it was denied or paused.
+  note        String    @default("")
+  /// 'admin' or 'restaurant'.
+  createdBy   String    @default("restaurant") @db.VarChar(16)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant FoodRestaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@index([status, startDate, endDate])
+  @@index([restaurantId])
+  @@map("food_advertisements")
+}
+
+/// A short video from a restaurant, shown in the customer app's reels.
+model FoodReel {
+  id           String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  restaurantId String @db.VarChar(24)
+
+  description     String    @default("")
+  videoUrl        String
+  thumbnail       String    @default("")
+  /// Shown with no dates; otherwise only between startDate and endDate.
+  alwaysVisible   Boolean   @default(true)
+  startDate       DateTime?
+  endDate         DateTime?
+  isActive        Boolean   @default(true)
+  views           Int       @default(0)
+  likes           Int       @default(0)
+  restaurantVisits Int      @default(0)
+  sortOrder       Int       @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant FoodRestaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@index([isActive, sortOrder])
+  @@index([restaurantId])
+  @@map("food_reels")
+}
+
 model FoodCancelReason {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 

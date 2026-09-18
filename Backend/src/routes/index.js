@@ -1,4 +1,5 @@
 import express from 'express';
+import * as promotionsController from '../modules/food/promotions/promotions.controller.js';
 import authRoutes from '../core/auth/auth.routes.js';
 import deliveryRoutes from '../modules/food/delivery/routes/delivery.routes.js';
 import restaurantRoutes from '../modules/food/restaurant/routes/restaurant.routes.js';
@@ -58,6 +59,9 @@ router.get('/v1/food/admin/feature-settings/public', adminController.getFeatureS
 router.get('/v1/food/admin/fee-settings/public', adminController.getPublicFeeSettings);
 router.get('/v1/food/admin/cashback-settings/public', getCashbackSettingsPublicController);
 router.get('/v1/food/public/cancel-reasons', adminController.getPublicCancelReasons);
+router.get('/v1/food/public/advertisements', promotionsController.listRunningAds);
+router.get('/v1/food/public/reels', promotionsController.listShowingReels);
+router.post('/v1/food/public/reels/:id/:event', promotionsController.countReelEvent);
 
 router.use('/v1/food/admin', authMiddleware, requireRoles('ADMIN'), restaurantAdminRoutes);
 router.use('/v1/food/user', authMiddleware, requireRoles('USER'), userRoutes);

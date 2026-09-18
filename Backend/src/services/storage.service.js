@@ -259,6 +259,39 @@ export const saveImageFile = async (file, folder) => {
     };
 };
 
+/**
+ * What a video file really is, from its first bytes rather than the name or
+ * the browser's claim: an MP4/MOV carries "ftyp" at byte 4, a WebM starts with
+ * the EBML magic. Anything else is refused.
+ */
+const sniffVideo = (buffer) => {
+    if (buffer.length >= 12 && buffer.toString('ascii', 4, 8) === 'ftyp') {
+        const brand = buffer.toString('ascii', 8, 12);
+        return brand.startsWith('qt') ? { extension: 'mov', mimeType: 'video/quicktime' } : { extension: 'mp4', mimeType: 'video/mp4' };
+    }
+    if (buffer.length >= 4 && buffer.readUInt32BE(0) === 0x1a45dfa3) return { extension: 'webm', mimeType: 'video/webm' };
+    return null;
+};
+
+/** Store a video as uploaded (no re-encoding) for reels and video ads. */
+export const saveVideoFile = async (file, folder) => {
+    if (!file?.buffer?.length) throw new ValidationError('File is required');
+    const kind = sniffVideo(file.buffer);
+    if (!kind) throw new ValidationError('Only MP4, MOV and WebM videos are allowed');
+
+    const safeFolder = sanitizeUploadFolder(folder);
+    const filename = buildFilename(kind.extension);
+    const relativePath = path.posix.join(safeFolder, filename);
+
+    if (useS3) {
+        await putObject(relativePath, file.buffer, kind.mimeType);
+    } else {
+        await ensureUploadStorageReady(safeFolder);
+        await fs.writeFile(getAbsolutePath(relativePath), file.buffer);
+    }
+    return { url: buildPublicUrl(relativePath), path: relativePath, filename, mimeType: kind.mimeType, size: file.buffer.length };
+};
+
 export const saveImageBuffer = async (buffer, folder, options = {}) => {
     return saveImageFile(
         {

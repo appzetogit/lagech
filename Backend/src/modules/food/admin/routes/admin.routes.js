@@ -1,4 +1,5 @@
 import express from 'express';
+import * as promotionsController from '../../promotions/promotions.controller.js';
 import { AuthError } from '../../../../core/auth/errors.js';
 import * as adminController from '../controllers/admin.controller.js';
 import * as foodApprovalController from '../controllers/foodApproval.controller.js';
@@ -78,7 +79,8 @@ const resolveSectionFromRequest = (path = '', method = '') => {
     ) return 'restaurant_management';
     if (path.startsWith('/categories') || path.startsWith('/addons') || path.startsWith('/foods')) return 'food_management';
     // Cashback settings were unguarded: any sub-admin could change what every order pays out.
-    if (path.startsWith('/offers') || path.startsWith('/cashback-settings')) return 'promotions_management';
+    if (path.startsWith('/offers') || path.startsWith('/cashback-settings')
+        || path.startsWith('/advertisements') || path.startsWith('/reels')) return 'promotions_management';
     if (path.startsWith('/orders') || path.startsWith('/order-detect-delivery') || path.startsWith('/order-cancel-reasons')) return 'order_management';
     if (path.startsWith('/delivery')) return 'delivery_management';
     if (path.startsWith('/withdrawals')) return 'transaction_management';
@@ -408,6 +410,16 @@ router.patch('/withdrawals/:id', adminController.updateWithdrawalStatus);
 router.get('/delivery/withdrawals', adminController.getDeliveryWithdrawals);
 router.patch('/delivery/withdrawals/:id', adminController.updateDeliveryWithdrawalStatus);
 router.get('/delivery/cash-limit-settlements', adminController.getCashLimitSettlements);
+// Advertisements and reels; promotions management by resolveSectionFromRequest.
+router.get('/advertisements', promotionsController.listAdsAdmin);
+router.post('/advertisements', promotionsController.createAdAdmin);
+router.patch('/advertisements/:id', promotionsController.updateAdAdmin);
+router.patch('/advertisements/:id/status', promotionsController.decideAd);
+router.delete('/advertisements/:id', promotionsController.deleteAd);
+router.get('/reels', promotionsController.listReelsAdmin);
+router.post('/reels', promotionsController.createReel);
+router.patch('/reels/:id', promotionsController.updateReel);
+router.delete('/reels/:id', promotionsController.deleteReel);
 // Order cancel reasons; guarded as order management by resolveSectionFromRequest.
 router.get('/order-cancel-reasons', adminController.listCancelReasons);
 router.post('/order-cancel-reasons', adminController.createCancelReason);

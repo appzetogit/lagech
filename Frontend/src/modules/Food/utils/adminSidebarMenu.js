@@ -76,6 +76,8 @@ export const adminSidebarMenu = [
     items: [
       { type: "link", label: "Banners", path: "/admin/food/hero-banner-management", icon: "Image" },
       { type: "link", label: "Other Banners", path: "/admin/food/promotional-banner", icon: "Megaphone" },
+      { type: "link", label: "Advertisements", path: "/admin/food/advertisements", icon: "Megaphone", badge: "pendingAds" },
+      { type: "link", label: "Reels", path: "/admin/food/reels", icon: "Camera" },
       { type: "link", label: "Cashback", path: "/admin/food/cashback", icon: "IndianRupee" },
       { type: "link", label: "Coupons", path: "/admin/food/coupons", icon: "Gift" },
       { type: "link", label: "Push Notification", path: "/admin/food/broadcast-notification", icon: "Bell" },

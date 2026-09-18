@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import { useNavigate } from "react-router-dom"
 import {
   ArrowLeft,
+  Megaphone,
   Search,
   User,
   UserRound,
@@ -668,6 +669,7 @@ export default function ExploreMore() {
     // { id: 3, label: "Dining Reservations", icon: Calendar, route: "/food/restaurant/reservations" }, // Hidden from UI for now
     { id: 4, label: "Menu categories", icon: Settings, route: "/food/restaurant/menu-categories" },
     { id: "coupons-nav", label: "Offers & Coupons", icon: FileCheck, route: "/food/restaurant/coupon" },
+    { id: "advertise-nav", label: "Advertise", icon: Megaphone, route: "/food/restaurant/advertise" },
   ]
 
   const settingsItems = [

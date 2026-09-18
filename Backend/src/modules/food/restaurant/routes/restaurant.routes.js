@@ -1,4 +1,5 @@
 import express from 'express';
+import * as promotionsController from '../../promotions/promotions.controller.js';
 import { upload } from '../../../../middleware/upload.js';
 import { imageUpload, uploadRateLimiter } from '../../../uploads/middleware/upload.middleware.js';
 import {
@@ -159,6 +160,10 @@ router.put('/outlet-timings', authMiddleware, requireRestaurant, upsertCurrentRe
 router.get('/finance', authMiddleware, requireRestaurant, getRestaurantFinanceController);
 router.post('/withdraw', authMiddleware, requireRestaurant, createWithdrawalRequestController);
 router.get('/withdrawals', authMiddleware, requireRestaurant, listMyWithdrawalsController);
+// Advertisement requests: the restaurant asks, the admin decides.
+router.get('/advertisements', authMiddleware, requireRestaurant, promotionsController.listMyAds);
+router.post('/advertisements', authMiddleware, requireRestaurant, promotionsController.requestAd);
+router.delete('/advertisements/:id', authMiddleware, requireRestaurant, promotionsController.withdrawAdRequest);
 router.get('/subscription-history', authMiddleware, requireRestaurant, getRestaurantSubscriptionHistoryController);
 // New calendar-month postpaid subscription endpoints
 router.get('/subscription/overview', authMiddleware, requireRestaurant, getSubscriptionOverviewController);
