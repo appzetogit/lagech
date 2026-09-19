@@ -684,6 +684,15 @@ export const createRestaurantOnboardingFeeOrder = async ({ ownerPhone }) => {
     };
 };
 
+/** A date string from a form ("2031-10-18") as a Date, or null when blank. */
+const parseOptionalDate = (value) => {
+    const raw = String(value ?? '').trim();
+    if (!raw) return null;
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) throw new ValidationError('FSSAI expiry date is invalid');
+    return parsed;
+};
+
 export const registerRestaurant = async (payload, files) => {
     const {
         restaurantName,
@@ -940,7 +949,8 @@ export const registerRestaurant = async (payload, files) => {
                     gstLegalName,
                     gstAddress,
                     fssaiNumber,
-                    fssaiExpiry,
+                    // The form sends a plain date ("2031-10-18"); the column is a DateTime.
+                    fssaiExpiry: parseOptionalDate(fssaiExpiry),
                     accountNumber,
                     ifscCode,
                     accountHolderName,
