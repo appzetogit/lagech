@@ -42,6 +42,7 @@ const ADMIN_PERMISSION_PATH_MAP = [
   { prefix: "/food/admin/order-detect-delivery", section: "order_management" },
   { prefix: "/food/admin/sidebar-badges", section: "dashboard" },
   { prefix: "/food/admin/dashboard-stats", section: "dashboard" },
+  { prefix: "/food/admin/dashboard-insights", section: "dashboard" },
   { prefix: "/food/admin/referral-settings", section: "referral_rewards" },
   { prefix: "/food/admin/delivery", section: "delivery_management" },
   { prefix: "/food/admin/fee-settings", section: "delivery_management" },

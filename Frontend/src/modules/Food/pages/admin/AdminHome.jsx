@@ -25,6 +25,7 @@ import {
 } from "recharts"
 import { Activity, ArrowUpRight, ShoppingBag, CreditCard, Truck, Receipt, DollarSign, Store, UserCheck, Package, UserCircle, Clock, CheckCircle, Plus, XCircle } from "lucide-react"
 import { adminAPI } from "@food/api"
+import DashboardInsights from "./dashboard/DashboardInsights"
 const debugLog = () => {}
 const debugError = () => {}
 
@@ -610,6 +611,8 @@ export default function AdminHome() {
               </CardContent>
             </Card>
           </div>
+
+          <DashboardInsights zoneId={selectedZone} period={selectedPeriod} />
         </div>
       </div>
     </div>

@@ -9,7 +9,7 @@ import { isId } from '../../../../utils/helpers.js';
  * a count per order state.
  *
  * Sales and "top" lists read delivered orders only. `zoneId` narrows to the
- * restaurants of one zone; `period` is all | year | month | week.
+ * restaurants of one zone; `period` is all | year | month | week | today.
  */
 
 const LIMIT = 6;
@@ -18,6 +18,7 @@ const int = (value) => Number(value) || 0;
 
 export function periodStart(period, now = new Date()) {
     const d = new Date(now);
+    if (period === 'today') return new Date(d.getFullYear(), d.getMonth(), d.getDate());
     if (period === 'week') return new Date(d.getTime() - 6 * 24 * 60 * 60 * 1000);
     if (period === 'month') return new Date(d.getFullYear(), d.getMonth(), 1);
     if (period === 'year') return new Date(d.getFullYear(), 0, 1);
