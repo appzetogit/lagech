@@ -96,7 +96,7 @@ const resolveSectionFromRequest = (path = '', method = '') => {
     if (path.startsWith('/contact-messages') || path.startsWith('/safety-emergency-reports')) return 'support_management';
     if (path.startsWith('/hero-banners') || path.startsWith('/top-banners') || path.startsWith('/promotion-banners')) return 'banner_management';
     if (path.startsWith('/point-of-sale') || path.startsWith('/pos')) return 'point_of_sale';
-    if (path.startsWith('/sidebar-badges') || path.startsWith('/dashboard-stats')) return 'dashboard';
+    if (path.startsWith('/sidebar-badges') || path.startsWith('/dashboard-stats') || path.startsWith('/dashboard-insights')) return 'dashboard';
     return null;
 };
 
@@ -203,6 +203,7 @@ router.get(
     adminController.getRestaurants
 );
 router.get('/dashboard-stats', adminController.getDashboardStats);
+router.get('/dashboard-insights', adminController.getDashboardInsights);
 router.get('/reports/restaurants', adminController.getRestaurantReport);
 router.get('/reports/transactions', adminController.getTransactionReport);
 router.get('/reports/tax', adminController.getTaxReport);

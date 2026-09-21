@@ -488,6 +488,8 @@ export const adminAPI = {
       contextModule: "admin",
     }),
   /** Dashboard summary stats (admin home) */
+  getDashboardInsights: (params = {}) =>
+    apiClient.get("/food/admin/dashboard-insights", { params, contextModule: "admin" }),
   getDashboardStats: (params = {}) =>
     apiClient.get("/food/admin/dashboard-stats", {
       params,
