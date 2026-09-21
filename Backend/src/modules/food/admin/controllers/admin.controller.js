@@ -257,6 +257,15 @@ export async function getRestaurantReport(req, res, next) {
     }
 }
 
+export async function getDashboardInsights(req, res, next) {
+    try {
+        const data = await adminService.getDashboardInsights(req.query || {});
+        res.status(200).json({ success: true, message: 'Dashboard insights fetched', data });
+    } catch (error) {
+        next(error);
+    }
+}
+
 export async function getDashboardStats(req, res, next) {
     try {
         const data = await adminService.getDashboardStats(req.query || {});
