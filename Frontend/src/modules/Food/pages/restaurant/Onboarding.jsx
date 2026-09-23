@@ -75,6 +75,7 @@ let onboardingFileCache = {
   step2: {
     menuImages: [],
     profileImage: null,
+    coverImage: null,
   },
   step3: {
     panImage: null,
@@ -259,6 +260,11 @@ const saveOnboardingToLocalStorage = (step1, step2, step3, currentStep, step4Sta
       menuImages: (step2.menuImages || []).filter(
         (img) => !isUploadableFile(img) && (img?.url || (typeof img === "string" && img.trim()))
       ),
+      coverImage:
+        !isUploadableFile(step2.coverImage) &&
+        (step2.coverImage?.url || (typeof step2.coverImage === "string" && step2.coverImage.trim()))
+          ? step2.coverImage
+          : null,
       profileImage:
         !isUploadableFile(step2.profileImage) &&
         (step2.profileImage?.url || (typeof step2.profileImage === "string" && step2.profileImage.trim()))
@@ -324,6 +330,7 @@ const syncOnboardingFileCache = (step2, step3) => {
     step2: {
       menuImages: (step2?.menuImages || []).filter((img) => isUploadableFile(img)),
       profileImage: isUploadableFile(step2?.profileImage) ? step2.profileImage : null,
+      coverImage: isUploadableFile(step2?.coverImage) ? step2.coverImage : null,
     },
     step3: {
       panImage: isUploadableFile(step3?.panImage) ? step3.panImage : null,
@@ -338,6 +345,7 @@ const clearOnboardingFileCache = () => {
     step2: {
       menuImages: [],
       profileImage: null,
+    coverImage: null,
     },
     step3: {
       panImage: null,
@@ -611,6 +619,8 @@ export default function RestaurantOnboarding() {
       if (url) {
         if (fieldName === 'profileImage') {
            setStep2(prev => ({ ...prev, profileImage: url }))
+        } else if (fieldName === 'coverImage') {
+           setStep2(prev => ({ ...prev, coverImage: url }))
         } else if (fieldName === 'panImage') {
            setStep3(prev => ({ ...prev, panImage: url }))
         } else if (fieldName === 'gstImage') {
@@ -685,6 +695,7 @@ export default function RestaurantOnboarding() {
   const [step2, setStep2] = useState({
     menuImages: [],
     profileImage: null,
+    coverImage: null,
     cuisines: [],
     estimatedDeliveryTime: "",
     openingTime: "",
@@ -721,6 +732,7 @@ export default function RestaurantOnboarding() {
   const mapsScriptLoadedRef = useRef(false)
   const menuImagesInputRef = useRef(null)
   const profileImageInputRef = useRef(null)
+  const coverImageInputRef = useRef(null)
   const panImageInputRef = useRef(null)
   const gstImageInputRef = useRef(null)
   const fssaiImageInputRef = useRef(null)
@@ -860,6 +872,13 @@ export default function RestaurantOnboarding() {
     void triggerBackgroundUpload(file, 'profile', 'profileImage')
   }
 
+  const handleCoverImageSelected = (file) => {
+    if (!file) return
+    setStep2((prev) => ({ ...prev, coverImage: file }))
+    void saveFileToDB("coverImage", file)
+    void triggerBackgroundUpload(file, 'cover', 'coverImage')
+  }
+
   const handlePanImageSelected = (file) => {
     if (!file) return
     setStep3((prev) => ({ ...prev, panImage: file }))
@@ -949,6 +968,7 @@ export default function RestaurantOnboarding() {
     setStep2((prev) => ({
       ...prev,
       profileImage: null,
+    coverImage: null,
     }))
 
     if (!isPersistedImageValue(currentProfileImage)) {
@@ -1063,6 +1083,7 @@ export default function RestaurantOnboarding() {
 
           // Restore Images from IndexedDB
           const restoredProfileImage = await getFileFromDB("profileImage")
+          const restoredCoverImage = await getFileFromDB("coverImage")
           const restoredPanImage = await getFileFromDB("panImage")
           const restoredGstImage = await getFileFromDB("gstImage")
           const restoredFssaiImage = await getFileFromDB("fssaiImage")
@@ -1085,6 +1106,11 @@ export default function RestaurantOnboarding() {
                 restoredProfileImage ||
                 (typeof localData.step2.profileImage === "string" || localData.step2.profileImage?.url
                   ? localData.step2.profileImage
+                  : null),
+              coverImage:
+                restoredCoverImage ||
+                (typeof localData.step2.coverImage === "string" || localData.step2.coverImage?.url
+                  ? localData.step2.coverImage
                   : null),
               cuisines: localData.step2.cuisines || [],
               estimatedDeliveryTime: localData.step2.estimatedDeliveryTime || "",
@@ -1669,6 +1695,11 @@ export default function RestaurantOnboarding() {
     if (!step2.profileImage) throw new Error('Restaurant profile image is required')
     if (isUploadableFile(step2.profileImage)) formData.append('profileImage', step2.profileImage)
     else formData.append('profileImage', typeof step2.profileImage === 'string' ? step2.profileImage : step2.profileImage.url)
+
+    if (step2.coverImage) {
+      if (isUploadableFile(step2.coverImage)) formData.append('coverImage', step2.coverImage)
+      else formData.append('coverImage', typeof step2.coverImage === 'string' ? step2.coverImage : step2.coverImage.url)
+    }
 
     formData.append('panNumber', step3.panNumber || '')
     formData.append('nameOnPan', step3.nameOnPan || '')
@@ -2734,6 +2765,85 @@ export default function RestaurantOnboarding() {
                 handleProfileImageSelected(file)
               }
               // Reset input to allow selecting same file again
+              e.target.value = ''
+            }}
+          />
+        </div>
+
+        {/* Cover image: the wide banner on the restaurant page. Optional. */}
+        <div className="space-y-2">
+          <Label className={ONBOARDING_LABEL}>Cover image</Label>
+          <div className="flex items-center gap-4">
+            <div className="relative">
+              <div className="h-16 w-28 rounded-lg bg-gray-100 flex items-center justify-center overflow-hidden border border-gray-200">
+                {step2.coverImage ? (
+                  (() => {
+                    const imageSrc = getPreviewImageUrl(step2.coverImage)
+
+                    return imageSrc ? (
+                      <img src={imageSrc} alt="Restaurant cover" className="w-full h-full object-cover" />
+                    ) : (
+                      <ImageIcon className="w-6 h-6 text-gray-500" />
+                    );
+                  })()
+                ) : (
+                  <ImageIcon className="w-6 h-6 text-gray-500" />
+                )}
+                {uploadingAttachments.coverImage && (
+                  <div className="absolute inset-0 bg-black/40 z-20 flex items-center justify-center">
+                    <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
+                  </div>
+                )}
+              </div>
+              {step2.coverImage && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setStep2((prev) => ({ ...prev, coverImage: null }))
+                    void deleteFileFromDB("coverImage")
+                  }}
+                  className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-1 shadow-md hover:bg-red-600 transition-colors z-10"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+            <div className="flex-1 flex-col flex items-center justify-between gap-3">
+              <div className="flex flex-col">
+                <span className="text-sm font-medium text-gray-900">Upload cover image</span>
+                <span className="text-[11px] text-gray-500">
+                  The wide banner at the top of your restaurant page. Landscape works best.
+                </span>
+              </div>
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            className={`w-full ${ONBOARDING_UPLOAD_BTN}`}
+            onClick={() =>
+              openImageSourcePicker({
+                title: "Upload cover image",
+                fileNamePrefix: "cover-image",
+                fallbackInputRef: coverImageInputRef,
+                onSelectFile: handleCoverImageSelected,
+              })
+            }
+          >
+            <Upload className="w-4 h-4 mr-1.5" />
+            Upload
+          </Button>
+          <input
+            id="coverImageInput"
+            type="file"
+            accept={LOCAL_IMAGE_FILE_ACCEPT}
+            className="hidden"
+            ref={coverImageInputRef}
+            onChange={(e) => {
+              const file = e.target.files?.[0] || null
+              if (file) handleCoverImageSelected(file)
               e.target.value = ''
             }}
           />

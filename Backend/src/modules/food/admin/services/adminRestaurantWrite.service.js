@@ -325,6 +325,10 @@ export async function createRestaurantByAdmin(body = {}) {
                 accountType: toStr(body.accountType),
                 menuImages: toUrlList(body.menuImages, 10),
                 profileImage: toUrl(body.profileImage) ?? '',
+                coverImage: toUrl(body.coverImage) ?? '',
+                // The public restaurant page reads the array; the single column
+                // is the hero. Seed both so a new restaurant is not blank.
+                coverImages: toUrl(body.coverImage) ? [toUrl(body.coverImage)] : [],
                 panImage: toUrl(body.panImage) ?? '',
                 gstImage: toUrl(body.gstImage) ?? '',
                 fssaiImage: toUrl(body.fssaiImage) ?? '',

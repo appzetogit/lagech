@@ -191,6 +191,7 @@ export default function AddRestaurant() {
   const [step2, setStep2] = useState({
     menuImages: [],
     profileImage: null,
+    coverImage: null,
     cuisines: [],
     estimatedDeliveryTime: "",
     openingTime: "",
@@ -258,8 +259,9 @@ export default function AddRestaurant() {
           }
         }
 
-        const [profileImage, panImage, gstImage, fssaiImage] = await Promise.all([
+        const [profileImage, coverImage, panImage, gstImage, fssaiImage] = await Promise.all([
           getFileFromDB("profileImage"),
+          getFileFromDB("coverImage"),
           getFileFromDB("panImage"),
           getFileFromDB("gstImage"),
           getFileFromDB("fssaiImage"),
@@ -269,6 +271,7 @@ export default function AddRestaurant() {
 
         if (!cancelled) {
           if (profileImage) setStep2((prev) => ({ ...prev, profileImage }))
+          if (coverImage) setStep2((prev) => ({ ...prev, coverImage }))
           if (menuFilesFromDB.length) {
             setStep2((prev) => ({ ...prev, menuImages: [...(prev.menuImages || []), ...menuFilesFromDB] }))
           }
@@ -302,6 +305,11 @@ export default function AddRestaurant() {
           !isUploadableFile(step2.profileImage) &&
           (step2.profileImage?.url || (typeof step2.profileImage === "string" && step2.profileImage.trim()))
             ? step2.profileImage
+            : null,
+        coverImage:
+          !isUploadableFile(step2.coverImage) &&
+          (step2.coverImage?.url || (typeof step2.coverImage === "string" && step2.coverImage.trim()))
+            ? step2.coverImage
             : null,
       }
 
@@ -352,12 +360,17 @@ export default function AddRestaurant() {
 
   useEffect(() => {
     if (!isHydrated) return
+    if (isUploadableFile(step2.coverImage)) {
+      void saveFileToDB("coverImage", step2.coverImage)
+    } else {
+      void deleteFileFromDB("coverImage")
+    }
     if (isUploadableFile(step2.profileImage)) {
       void saveFileToDB("profileImage", step2.profileImage)
     } else {
       void deleteFileFromDB("profileImage")
     }
-  }, [isHydrated, step2.profileImage])
+  }, [isHydrated, step2.profileImage, step2.coverImage])
 
   useEffect(() => {
     if (!isHydrated) return
@@ -568,6 +581,13 @@ export default function AddRestaurant() {
         profileImageData = step2.profileImage
       }
 
+      let coverImageData = null
+      if (step2.coverImage instanceof File) {
+        coverImageData = await handleUpload(step2.coverImage, "lagech/restaurant/cover")
+      } else if (step2.coverImage?.url) {
+        coverImageData = step2.coverImage
+      }
+
       let menuImagesData = []
       for (const file of step2.menuImages.filter(f => f instanceof File)) {
         const uploaded = await handleUpload(file, "lagech/restaurant/menu")
@@ -613,6 +633,7 @@ export default function AddRestaurant() {
         // Step 2
         menuImages: menuImagesData,
         profileImage: profileImageData,
+        coverImage: coverImageData,
         cuisines: step2.cuisines,
         estimatedDeliveryTime: step2.estimatedDeliveryTime,
         openingTime: step2.openingTime,
@@ -1212,6 +1233,47 @@ export default function AddRestaurant() {
               onChange={(e) => {
                 const file = e.target.files?.[0] || null
                 if (file) setStep2((prev) => ({ ...prev, profileImage: file }))
+                e.target.value = ''
+              }}
+            />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label className="text-xs font-medium text-gray-700">Cover image</Label>
+          <p className="text-[11px] text-gray-500">The wide banner at the top of the restaurant's page in the customer app. Landscape works best.</p>
+          <div className="flex items-center gap-4">
+            <div className="h-16 w-28 rounded-md bg-gray-100 flex items-center justify-center overflow-hidden">
+              {step2.coverImage ? (
+                (() => {
+                  const imageSrc = step2.coverImage instanceof File ? URL.createObjectURL(step2.coverImage) : (step2.coverImage?.url || step2.coverImage)
+                  return imageSrc ? <img src={imageSrc} alt="Cover" className="w-full h-full object-cover" /> : <ImageIcon className="w-6 h-6 text-gray-500" />
+                })()
+              ) : (
+                <ImageIcon className="w-6 h-6 text-gray-500" />
+              )}
+            </div>
+            <label htmlFor="coverImageInput" className="inline-flex justify-center items-center gap-1.5 px-3 py-1.5 rounded-sm bg-white text-black border-black text-xs font-medium cursor-pointer">
+              <Upload className="w-4.5 h-4.5" />
+              <span>Upload</span>
+            </label>
+            {step2.coverImage && (
+              <button
+                type="button"
+                onClick={() => setStep2((prev) => ({ ...prev, coverImage: null }))}
+                className="text-xs text-gray-500 underline"
+              >
+                Remove
+              </button>
+            )}
+            <input
+              id="coverImageInput"
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0] || null
+                if (file) setStep2((prev) => ({ ...prev, coverImage: file }))
                 e.target.value = ''
               }}
             />
