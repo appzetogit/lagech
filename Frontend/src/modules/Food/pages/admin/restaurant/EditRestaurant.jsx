@@ -36,6 +36,7 @@ const imageUrlList = (value) =>
  * public page's banner array.
  */
 const normalizeMediaFormFromRestaurant = (restaurant) => ({
+  profileImage: imageUrlOf(restaurant?.profileImage) || "",
   coverImage: imageUrlOf(restaurant?.coverImage) || imageUrlList(restaurant?.coverImages)[0] || "",
   galleryImages: imageUrlList(restaurant?.galleryImages),
   menuImages: imageUrlList(restaurant?.menuImages),
@@ -371,6 +372,19 @@ export default function EditRestaurant() {
     return url
   }
 
+  const handleProfileUpload = async (file) => {
+    if (!file) return
+    try {
+      setUploadingMedia("profile")
+      const url = await uploadOne(file, "food/restaurants/profile")
+      setMediaForm((p) => ({ ...p, profileImage: url }))
+    } catch (e) {
+      alert(e?.response?.data?.message || e?.message || "Profile image upload failed")
+    } finally {
+      setUploadingMedia("")
+    }
+  }
+
   const handleCoverUpload = async (file) => {
     if (!file) return
     try {
@@ -423,6 +437,7 @@ export default function EditRestaurant() {
     try {
       setSavingMedia(true)
       const payload = {
+        profileImage: mediaForm.profileImage,
         coverImage: mediaForm.coverImage,
         // Kept in step with coverImage: the public restaurant page reads the array,
         // the rider's pickup screen reads the single field, and leaving them to
@@ -629,6 +644,50 @@ export default function EditRestaurant() {
               </p>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <Label>Profile Image</Label>
+                  <p className="text-xs text-slate-500 mt-1">
+                    The logo on listing cards and search results.
+                  </p>
+                  <div className="mt-2">
+                    {mediaForm.profileImage ? (
+                      <div className="relative w-40 h-40 rounded-lg overflow-hidden border border-slate-200 bg-slate-50">
+                        <img src={mediaForm.profileImage} alt="Restaurant profile" className="w-full h-full object-cover" />
+                        <button
+                          type="button"
+                          onClick={() => setMediaForm((p) => ({ ...p, profileImage: "" }))}
+                          className="absolute top-2 right-2 p-1.5 rounded-md bg-white/90 hover:bg-white border border-slate-200"
+                          title="Remove profile image"
+                        >
+                          <Trash2 className="w-4 h-4 text-red-600" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="w-40 h-40 rounded-lg border border-dashed border-slate-300 bg-slate-50 flex items-center justify-center text-sm text-slate-400">
+                        No profile image
+                      </div>
+                    )}
+                  </div>
+                  <label className="mt-3 inline-flex items-center gap-2 px-3 py-2 rounded-md border border-slate-300 text-sm cursor-pointer hover:bg-slate-50">
+                    {uploadingMedia === "profile" ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Upload className="w-4 h-4" />
+                    )}
+                    {mediaForm.profileImage ? "Replace profile image" : "Upload profile image"}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      disabled={Boolean(uploadingMedia)}
+                      onChange={(e) => {
+                        handleProfileUpload(e.target.files?.[0])
+                        e.target.value = ""
+                      }}
+                    />
+                  </label>
+                </div>
+
                 <div>
                   <Label>Cover Image</Label>
                   <p className="text-xs text-slate-500 mt-1">
