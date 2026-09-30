@@ -24,6 +24,7 @@ import { requireAdminPermission } from '../core/roles/adminPermission.middleware
 import { getCashbackSettingsPublicController } from '../modules/food/user/controllers/cashback.controller.js';
 import { config } from '../config/env.js';
 import { getRateLimitSummary } from '../middleware/rateLimit.js';
+import { getRestaurantReviews } from '../modules/food/restaurant/services/restaurantReviews.service.js';
 
 const router = express.Router();
 
@@ -59,6 +60,13 @@ router.get('/v1/food/admin/feature-settings/public', adminController.getFeatureS
 router.get('/v1/food/admin/fee-settings/public', adminController.getPublicFeeSettings);
 router.get('/v1/food/admin/cashback-settings/public', getCashbackSettingsPublicController);
 router.get('/v1/food/public/cancel-reasons', adminController.getPublicCancelReasons);
+router.get('/v1/food/public/restaurants/:restaurantId/reviews', async (req, res, next) => {
+    try {
+        res.status(200).json({ success: true, data: await getRestaurantReviews(req.params.restaurantId, req.query || {}) });
+    } catch (error) {
+        next(error);
+    }
+});
 router.get('/v1/food/public/advertisements', promotionsController.listRunningAds);
 router.get('/v1/food/public/reels', promotionsController.listShowingReels);
 router.post('/v1/food/public/reels/:id/:event', promotionsController.countReelEvent);
