@@ -48,7 +48,8 @@ export async function findZoneForPoint(latitude, longitude) {
  * The zone a customer listing is for: the zoneId the app sent, otherwise the
  * zone containing the lat/lng it sent.
  *
- * `outOfService` when coordinates were given and fall in no active zone. The
+ * `outOfService` when coordinates were given, zones exist, and the point is in
+ * none of them. The
  * old app showed nothing there; without this, an app that had no zone to send
  * got every restaurant in every city, hundreds of km from the customer.
  * With neither a zone nor coordinates nothing is known, and nothing is filtered.
@@ -65,7 +66,14 @@ export async function resolveListingZone(query = {}) {
     }
 
     const zone = await findZoneForPoint(lat, lng);
-    return zone ? { zoneId: zone.id, outOfService: false } : { zoneId: null, outOfService: true };
+    if (zone) return { zoneId: zone.id, outOfService: false };
+
+    // Outside every zone only means "out of service" once zones are set up at
+    // all; a platform with none has no coverage map to be outside of.
+    const [{ count }] = await prisma.$queryRaw`
+        SELECT COUNT(*)::int AS count FROM "food_zones"
+        WHERE "isActive" = true AND "boundary" IS NOT NULL`;
+    return { zoneId: null, outOfService: count > 0 };
 }
 
 /**
