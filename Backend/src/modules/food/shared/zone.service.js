@@ -1,4 +1,5 @@
 import { prisma } from '../../../config/prisma.js';
+import { isId } from '../../../utils/helpers.js';
 
 /**
  * Which service zone a point falls in.
@@ -41,6 +42,30 @@ export async function findZoneForPoint(latitude, longitude) {
     `;
 
     return rows[0] || null;
+}
+
+/**
+ * The zone a customer listing is for: the zoneId the app sent, otherwise the
+ * zone containing the lat/lng it sent.
+ *
+ * `outOfService` when coordinates were given and fall in no active zone. The
+ * old app showed nothing there; without this, an app that had no zone to send
+ * got every restaurant in every city, hundreds of km from the customer.
+ * With neither a zone nor coordinates nothing is known, and nothing is filtered.
+ */
+export async function resolveListingZone(query = {}) {
+    const explicit = String(query.zoneId || '').trim();
+    if (isId(explicit)) return { zoneId: explicit, outOfService: false };
+
+    const hasPoint = query.lat != null && query.lng != null && query.lat !== '' && query.lng !== '';
+    const lat = Number(query.lat);
+    const lng = Number(query.lng);
+    if (!hasPoint || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return { zoneId: null, outOfService: false };
+    }
+
+    const zone = await findZoneForPoint(lat, lng);
+    return zone ? { zoneId: zone.id, outOfService: false } : { zoneId: null, outOfService: true };
 }
 
 /**

@@ -3,6 +3,7 @@ import { normalizeTag } from '../../shared/tags.util.js';
 import { isId } from '../../../../utils/helpers.js';
 import { toRestaurant } from '../../restaurant/restaurant.mapper.js';
 import { restaurantIdsMatchingCuisine } from '../../shared/restaurantQuery.util.js';
+import { resolveListingZone } from '../../shared/zone.service.js';
 
 /** Columns the search cards need, plus the address columns toRestaurant() rebuilds `location` from. */
 const RESTAURANT_SEARCH_SELECT = {
@@ -53,8 +54,14 @@ const addDistanceScore = (restaurant, userLat, userLng) => {
 export const searchUnified = async (query = {}, options = {}) => {
     const {
         q, lat, lng, categoryId, minRating, maxDeliveryTime,
-        isVeg, page = 1, limit = 20, zoneId, strictZone,
+        isVeg, page = 1, limit = 20,
     } = query;
+
+    // The customer's zone: the one the app sent, else the one containing their
+    // coordinates. Outside every zone nothing can be delivered, so nothing is
+    // found — the old app did the same.
+    const listingZone = await resolveListingZone(query);
+    const zoneId = listingZone.zoneId;
 
     const pageNumber = Math.max(parseInt(page, 10) || 1, 1);
     const limitNumber = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 50);
@@ -66,6 +73,12 @@ export const searchUnified = async (query = {}, options = {}) => {
     const fetchLimit = Math.min(limitNumber * 3, 120);
 
     const zoneFiltered = isId(zoneId);
+    if (listingZone.outOfService) {
+        return {
+            success: true,
+            data: { restaurants: [], total: 0, page: 1, limit: 20, zoneFiltered: false, outOfService: true },
+        };
+    }
     const categoryFiltered = isId(categoryId);
 
     // 1. Base filter
@@ -210,18 +223,8 @@ export const searchUnified = async (query = {}, options = {}) => {
         },
     };
 
-    // Nothing in this zone: widen once rather than showing an empty screen.
-    const shouldSkipZoneFallback =
-        strictZone === true || strictZone === 'true' || categoryFiltered;
-
-    if (!shouldSkipZoneFallback && !results.length && zoneFiltered) {
-        const fallbackResults = await searchUnified({ ...query, zoneId: null }, options);
-        if (fallbackResults.data.total > 0) {
-            fallbackResults.data.wasFallback = true;
-            return fallbackResults;
-        }
-    }
-
+    // No widening to other zones when this one has no match: those restaurants
+    // cannot deliver here, so offering them only leads to a failed checkout.
     return finalResult;
 };
 

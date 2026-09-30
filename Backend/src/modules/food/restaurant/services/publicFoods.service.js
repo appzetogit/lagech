@@ -1,5 +1,5 @@
 import { prisma } from '../../../../config/prisma.js';
-import { isId } from '../../../../utils/helpers.js';
+import { resolveListingZone } from '../../shared/zone.service.js';
 import {
     getFoodDisplayOtherPrice,
     getFoodDisplayPrice,
@@ -20,7 +20,8 @@ const isSwitch99Price = (price) => String(price ?? '').includes('99');
 
 export async function listPublicFoods(query = {}) {
     const limit = Math.min(Math.max(parseInt(query.limit, 10) || 500, 1), 1000);
-    const zoneIdRaw = String(query.zoneId || '').trim();
+    const listingZone = await resolveListingZone(query);
+    if (listingZone.outOfService) return { foods: [], total: 0, outOfService: true };
     const categorySlug = String(query.categorySlug || query.category || '').trim().toLowerCase();
     const promo = String(query.promo || query.promoSlug || '').trim().toLowerCase();
     const isSwitch99Promo = promo === 'switch99' || promo === 'under-250' || promo === 'under250';
@@ -28,7 +29,7 @@ export async function listPublicFoods(query = {}) {
     const restaurants = await prisma.foodRestaurant.findMany({
         where: {
             status: 'approved',
-            ...(isId(zoneIdRaw) ? { zoneId: zoneIdRaw } : {}),
+            ...(listingZone.zoneId ? { zoneId: listingZone.zoneId } : {}),
         },
         select: {
             id: true, restaurantName: true, zoneId: true, profileImage: true,

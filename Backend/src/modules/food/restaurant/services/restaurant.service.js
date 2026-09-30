@@ -4,7 +4,7 @@ import { isId } from '../../../../utils/helpers.js';
 import { uploadImageBuffer } from '../../../../services/cloudinary.service.js';
 import { normalizeMediaUrlForStorage } from '../../../../services/storage.service.js';
 import { ValidationError, NotFoundError } from '../../../../core/auth/errors.js';
-import { findZoneForPoint } from '../../shared/zone.service.js';
+import { findZoneForPoint, resolveListingZone } from '../../shared/zone.service.js';
 import {
     restaurantIdsMatchingCuisine,
     restaurantsNearPoint,
@@ -1778,9 +1778,12 @@ export const listApprovedRestaurants = async (query = {}) => {
         }
     }
 
-    // A zone filter is strict: only restaurants mapped to that zone.
-    const zoneIdRaw = String(query.zoneId || '').trim();
-    if (isId(zoneIdRaw)) AND.push({ zoneId: zoneIdRaw });
+    // A zone filter is strict: only restaurants mapped to that zone. Without an
+    // explicit zone, the customer's coordinates decide it; outside every zone
+    // there is nothing to show.
+    const listingZone = await resolveListingZone(query);
+    if (listingZone.outOfService) return { restaurants: [], total: 0, page, limit, outOfService: true };
+    if (listingZone.zoneId) AND.push({ zoneId: listingZone.zoneId });
 
     const where = { status: 'approved', ...(AND.length ? { AND } : {}) };
 
