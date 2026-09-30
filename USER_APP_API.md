@@ -372,3 +372,17 @@ Count a view (once per play), a like, or a tap through to the restaurant. `{ cou
 
 ### `GET /v1/food/public/cancel-reasons?userType=customer`
 The reasons to offer when a customer cancels: `{ reasons: [ { id, reason } ] }`. Send the chosen text as `reason` to `PATCH /v1/food/orders/:orderId/cancel`.
+
+## 14. Restaurant reviews — public, no login
+
+### `GET /v1/food/public/restaurants/:restaurantId/reviews?page=1&limit=20&withComments=true`
+Real customer ratings of the restaurant, newest first. `withComments=true` returns only ratings that have a written comment; the summary always covers all ratings.
+```json
+{ "summary": { "rating": 4.3, "totalRatings": 42, "totalReviews": 16,
+               "breakdown": { "5": 30, "4": 4, "3": 4, "2": 0, "1": 4 } },
+  "reviews": [ { "id": "…", "userName": "Prathamesh C.", "rating": 5, "comment": "Best service",
+                 "ratedAt": "2026-09-08T21:11:08.000Z", "dishName": "Maharaja burger",
+                 "dishImage": "/uploads/legacy/product/….png" } ],
+  "pagination": { "page": 1, "limit": 20, "total": 16, "pages": 1 } }
+```
+`userName` is the first name and last initial only. A restaurant with no ratings returns `rating: 0` and empty lists — show "No reviews yet", never sample data.
