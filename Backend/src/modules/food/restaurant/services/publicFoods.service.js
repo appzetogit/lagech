@@ -1,5 +1,6 @@
 import { prisma } from '../../../../config/prisma.js';
 import { resolveListingZone } from '../../shared/zone.service.js';
+import { isId } from '../../../../utils/helpers.js';
 import {
     getFoodDisplayOtherPrice,
     getFoodDisplayPrice,
@@ -16,15 +17,30 @@ const buildCategoryKeywords = (categorySlug) => {
     return [...new Set([raw, normalized, ...words])];
 };
 
-const isSwitch99Price = (price) => String(price ?? '').includes('99');
+/** The price each promo slug stands for: "₹99 store" means ₹99 or less. */
+const PROMO_MAX_PRICE = { switch99: 99, under99: 99, 'under-99': 99, under250: 250, 'under-250': 250 };
+
+/**
+ * The most a dish may cost for this request: an explicit `maxPrice`, else the
+ * cap a promo slug stands for, else none.
+ *
+ * The promo used to test String(price).includes('99'), so the "₹99 store" held
+ * ₹199 and ₹999 dishes and left out every ₹50 one.
+ */
+export function priceCapFor(query = {}) {
+    const raw = query.maxPrice;
+    const explicit = Number(raw);
+    if (raw != null && raw !== '' && Number.isFinite(explicit) && explicit > 0) return explicit;
+    const promo = String(query.promo || query.promoSlug || '').trim().toLowerCase();
+    return PROMO_MAX_PRICE[promo] ?? null;
+}
 
 export async function listPublicFoods(query = {}) {
     const limit = Math.min(Math.max(parseInt(query.limit, 10) || 500, 1), 1000);
     const listingZone = await resolveListingZone(query);
     if (listingZone.outOfService) return { foods: [], total: 0, outOfService: true };
     const categorySlug = String(query.categorySlug || query.category || '').trim().toLowerCase();
-    const promo = String(query.promo || query.promoSlug || '').trim().toLowerCase();
-    const isSwitch99Promo = promo === 'switch99' || promo === 'under-250' || promo === 'under250';
+    const priceCap = priceCapFor(query);
 
     const restaurants = await prisma.foodRestaurant.findMany({
         where: {
@@ -54,6 +70,8 @@ export async function listPublicFoods(query = {}) {
         isAvailable: true,
     };
 
+    if (isId(query.categoryId)) where.categoryId = String(query.categoryId);
+
     const keywords = buildCategoryKeywords(categorySlug);
     if (keywords.length > 0) {
         // Substring match on either the dish name or its category label. The Mongo
@@ -70,7 +88,10 @@ export async function listPublicFoods(query = {}) {
         // include silently returns dishes that look like they have no sizes.
         include: { variants: { orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] } },
         orderBy: { createdAt: 'desc' },
-        take: isSwitch99Promo ? Math.max(limit, 2000) : limit,
+        // With a price cap the cheap dishes can be anywhere in the catalog, so
+        // read it all and cap after pricing; taking the newest N first dropped
+        // every older cheap dish.
+        ...(priceCap === null ? { take: limit } : {}),
     });
 
     const foods = list
@@ -113,7 +134,7 @@ export async function listPublicFoods(query = {}) {
         })
         .filter((food) => {
             if (food.isAvailable === false) return false;
-            if (isSwitch99Promo) return isSwitch99Price(food.price);
+            if (priceCap !== null) return Number(food.price) <= priceCap;
             return true;
         })
         .slice(0, limit);
