@@ -33,6 +33,8 @@ import { importBanners } from './steps/banners.mjs';
 import { importCancelReasons } from './steps/cancelReasons.mjs';
 import { importPromotions } from './steps/promotions.mjs';
 import { importFavorites } from './steps/favorites.mjs';
+import { importWithdrawalMethods } from './steps/withdrawalMethods.mjs';
+import { importSocialMedia } from './steps/socialMedia.mjs';
 
 const STEPS = [
     ['zones', importZones],
@@ -42,6 +44,7 @@ const STEPS = [
     ['customers', importCustomers],
     ['riders', importDeliveryPartners],
     ['payment-details', importPaymentDetails],
+    ['withdrawal-methods', importWithdrawalMethods],
     ['orders', importOrders],
     ['balances', importBalances],
     ['ratings', importRatings],
@@ -49,6 +52,7 @@ const STEPS = [
     ['cancel-reasons', importCancelReasons],
     ['promotions', importPromotions],
     ['favorites', importFavorites],
+    ['social-media', importSocialMedia],
     ['settings', importSettings],
 ];
 

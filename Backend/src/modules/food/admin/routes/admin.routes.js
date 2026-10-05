@@ -24,6 +24,7 @@ import { requireAdminPermission, requireAnyAdminPermission } from '../../../../c
 import * as driverRegField from '../../delivery/controllers/driverRegistrationField.controller.js';
 import * as cashbackSettings from '../controllers/cashbackSettings.controller.js';
 import * as restaurantAppBanner from '../controllers/restaurantAppBanner.controller.js';
+import adminSystemExtrasRoutes from './adminSystemExtras.routes.js';
 
 const router = express.Router();
 
@@ -87,7 +88,8 @@ const resolveSectionFromRequest = (path = '', method = '') => {
     if (path.startsWith('/feedback-experiences')) return 'report_management';
     if (path.startsWith('/reports')) return 'report_management';
     if (path.startsWith('/feature-settings') || path.startsWith('/business-settings') || path.startsWith('/power-scanning') || path.startsWith('/notifications')) return 'system_settings';
-    if (path.startsWith('/pages-social-media')) return 'pages_social_media';
+    if (path.startsWith('/pages-social-media') || path.startsWith('/social-media')) return 'pages_social_media';
+    if (path.startsWith('/email-templates') || path.startsWith('/system-settings') || path.startsWith('/gallery')) return 'system_settings';
     // These four sections were grantable in the role editor but appeared in no
     // guard, so ticking their boxes did nothing at all. The sidebar hid the menu
     // entry, which made them look enforced -- the API was open to any sub-admin
@@ -141,6 +143,9 @@ router.use('/power-scanning', requireAdminPermission('system_settings', 'view'))
 router.use('/notifications', requireAdminPermission('system_settings', 'view'));
 router.use('/pages-social-media', requireAdminPermission('pages_social_media', 'view'));
 router.use('/sidebar-badges', requireAdminPermission('dashboard', 'view'));
+// Withdrawal methods, restaurant payments, money reports, email templates,
+// system settings, social media, gallery -- guarded by the mapping above.
+router.use(adminSystemExtrasRoutes);
 
 router.post('/sub-admins', requireAdminPermission('sub_admin_management', 'create'), adminController.createSubAdmin);
 router.get('/sub-admins', adminController.listSubAdmins);
