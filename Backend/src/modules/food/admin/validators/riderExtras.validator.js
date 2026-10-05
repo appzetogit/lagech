@@ -29,13 +29,16 @@ const aadharRegex = /^[0-9]{12}$/;
 const drivingLicenseRegex = /^[A-Z]{2}[0-9A-Z]{8,16}$/;
 const ifscRegex = /^[A-Z]{4}0[A-Z0-9]{6}$/;
 
+/** Empty, or matching the pattern -- with this field's own message, not zod's union one. */
+const blankOr = (regex, message) => z.string().refine((v) => !v || regex.test(v), message);
+
 const upper = (v) => (typeof v === 'string' ? v.replace(/[\s-]/g, '').toUpperCase() : v);
 
 const newRiderSchema = z.object({
     name: z.string().min(1, 'Name is required').max(100, 'Name must be at most 100 characters'),
     phone: z.string({ required_error: 'Phone is required' }).nullable()
         .refine((v) => Boolean(v), 'Enter a 10-digit phone number'),
-    email: z.union([z.literal(''), z.string().email('Enter a valid email')]),
+    email: blankOr(/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/, 'Enter a valid email'),
     zoneId: id('Choose a zone'),
     address: optionalText(500, 'Address'),
     city: optionalText(100, 'City'),
@@ -43,21 +46,18 @@ const newRiderSchema = z.object({
     vehicleType: z.string().min(1, 'Choose a vehicle type').max(64),
     vehicleName: optionalText(100, 'Vehicle name'),
     vehicleNumber: optionalText(20, 'Vehicle number'),
-    panNumber: z.union([z.literal(''), z.string().regex(panRegex, 'PAN must look like ABCDE1234F')]),
-    aadharNumber: z.union([z.literal(''), z.string().regex(aadharRegex, 'Aadhaar must be 12 digits')]),
-    drivingLicenseNumber: z.union([
-        z.literal(''),
-        z.string().regex(drivingLicenseRegex, 'Driving licence must be 2 letters followed by 8 to 16 letters or digits'),
-    ]),
+    panNumber: blankOr(panRegex, 'PAN must look like ABCDE1234F'),
+    aadharNumber: blankOr(aadharRegex, 'Aadhaar must be 12 digits'),
+    drivingLicenseNumber: blankOr(drivingLicenseRegex, 'Driving licence must be 2 letters followed by 8 to 16 letters or digits'),
     profilePhoto: optionalText(1000, 'Profile photo'),
     aadharPhoto: optionalText(1000, 'Aadhaar photo'),
     panPhoto: optionalText(1000, 'PAN photo'),
     drivingLicensePhoto: optionalText(1000, 'Driving licence photo'),
     bankAccountHolderName: optionalText(100, 'Account holder name'),
-    bankAccountNumber: z.union([z.literal(''), z.string().regex(/^[0-9]{6,20}$/, 'Account number must be 6 to 20 digits')]),
-    bankIfscCode: z.union([z.literal(''), z.string().regex(ifscRegex, 'IFSC must look like SBIN0001234')]),
+    bankAccountNumber: blankOr(/^[0-9]{6,20}$/, 'Account number must be 6 to 20 digits'),
+    bankIfscCode: blankOr(ifscRegex, 'IFSC must look like SBIN0001234'),
     bankName: optionalText(100, 'Bank name'),
-    upiId: z.union([z.literal(''), z.string().regex(/^[\w.\-]{2,256}@[a-zA-Z]{2,64}$/, 'Enter a valid UPI id')]),
+    upiId: blankOr(/^[\w.\-]{2,256}@[a-zA-Z]{2,64}$/, 'Enter a valid UPI id'),
 });
 
 /** The admin's "Add Delivery Man" form. Empty optional fields come back as ''. */
