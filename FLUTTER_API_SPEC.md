@@ -92,6 +92,23 @@ Call on cold start — these drive feature flags, fee display, and CMS content.
 | GET | `/food/referral-settings` | reward + limit per role |
 | GET | `/food/pages/:key` | CMS page — `about`, `terms`, `privacy`, … |
 | GET | `/v1/health` | health probe (full path `/api/v1/health`) |
+| GET | `/food/public/app-settings` | minimum/latest app versions and store links; sign-in options (below) |
+| GET | `/food/public/social-media` | `{ links: [ { platform, url } ] }` |
+| GET | `/food/public/landing` | website landing page: hero, features, app links, testimonials, social links, website status |
+| GET | `/food/public/page-meta` | `{ pages: { [page]: { title, description, keywords, image } } }` for SEO |
+
+`GET /food/public/app-settings`:
+```json
+{
+  "apps": {
+    "customer":   { "android": { "minVersion": "", "latestVersion": "", "storeUrl": "" }, "ios": { … } },
+    "restaurant": { … }, "rider": { … }
+  },
+  "login": { "customer": { "otpLogin": true, "googleLogin": false, "appleLogin": false }, "restaurant": { … }, "rider": { … } },
+  "updatedAt": "…"
+}
+```
+Force update: compare the app's version with `apps.customer.<android|ios>`. Older than `minVersion` → block and open `storeUrl`; older than `latestVersion` → offer the update; empty string → not set. Compare dotted versions part by part as numbers (`2.10.0` > `2.9.9`). Phone OTP is the only sign-in the backend supports; `googleLogin` / `appleLogin` are the admin's saved preference for when the app adds them.
 
 `GET /food/landing/settings/public` returns the landing settings spread at the top level, with `recommendedRestaurantIds` replaced by hydrated docs:
 ```json
