@@ -68,6 +68,11 @@ const PATH_PREFIX_TO_SECTION = [
   // Same sections the backend checks for these pages' API calls: refunds are
   // /orders/..., commission rules are /delivery/... .
   { prefix: "/admin/food/delivery-boy-commission", section: "delivery_management" },
+  // Before the broad "/admin/food/delivery" entry below, which these also start
+  // with: paying riders is a transaction, their earnings are a report.
+  { prefix: "/admin/food/deliveryman-disbursements", section: "transaction_management" },
+  { prefix: "/admin/food/deliveryman-payments", section: "transaction_management" },
+  { prefix: "/admin/food/deliveryman-earning-report", section: "report_management" },
   { prefix: "/admin/food/order-refunds", section: "order_management" },
   { prefix: "/admin/food/order-cancel-reasons", section: "order_management" },
   { prefix: "/admin/food/dispatch", section: "order_management" },
