@@ -25,6 +25,60 @@ export function periodStart(period, now = new Date()) {
     return null;
 }
 
+/**
+ * The old panel's dashboard header: totals with how many are new in the
+ * selected period (the last 30 days when the period is "all"), and its eight
+ * order-state tiles.
+ */
+async function getDashboardSummary({ zoneId, start }) {
+    const zone = zoneId ? Prisma.sql`AND r."zoneId" = ${zoneId}` : Prisma.empty;
+    const newSince = start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const since = start ? Prisma.sql`AND o."createdAt" >= ${start}` : Prisma.empty;
+    const live = Prisma.sql`o."orderStatus" IN ('confirmed', 'preparing', 'ready_for_pickup', 'reached_pickup')`;
+
+    const [[totals], [tiles]] = await Promise.all([
+        prisma.$queryRaw`
+            SELECT
+              (SELECT COUNT(*)::int FROM food_items f JOIN food_restaurants r ON r.id = f."restaurantId"
+                WHERE f."approvalStatus" = 'approved' ${zone}) AS foods,
+              (SELECT COUNT(*)::int FROM food_items f JOIN food_restaurants r ON r.id = f."restaurantId"
+                WHERE f."approvalStatus" = 'approved' AND f."createdAt" >= ${newSince} ${zone}) AS "foodsNew",
+              (SELECT COUNT(*)::int FROM food_orders o JOIN food_restaurants r ON r.id = o."restaurantId"
+                WHERE TRUE ${zone}) AS orders,
+              (SELECT COUNT(*)::int FROM food_orders o JOIN food_restaurants r ON r.id = o."restaurantId"
+                WHERE o."createdAt" >= ${newSince} ${zone}) AS "ordersNew",
+              (SELECT COUNT(*)::int FROM food_restaurants r WHERE r.status = 'approved' ${zone}) AS restaurants,
+              (SELECT COUNT(*)::int FROM food_restaurants r WHERE r.status = 'approved' AND r."createdAt" >= ${newSince} ${zone}) AS "restaurantsNew",
+              (SELECT COUNT(*)::int FROM food_users) AS customers,
+              (SELECT COUNT(*)::int FROM food_users WHERE "createdAt" >= ${newSince}) AS "customersNew"`,
+        prisma.$queryRaw`
+            SELECT
+              COUNT(*) FILTER (WHERE ${live} AND o."dispatchStatus" <> 'accepted')::int AS unassigned,
+              COUNT(*) FILTER (WHERE ${live} AND o."dispatchStatus" = 'accepted')::int AS "acceptedByRider",
+              COUNT(*) FILTER (WHERE o."orderStatus" = 'preparing')::int AS cooking,
+              COUNT(*) FILTER (WHERE o."orderStatus" IN ('picked_up', 'reached_drop'))::int AS "outForDelivery",
+              COUNT(*) FILTER (WHERE o."orderStatus" = 'delivered')::int AS delivered,
+              COUNT(*) FILTER (WHERE o."orderStatus" IN ('cancelled_by_user', 'cancelled_by_restaurant', 'cancelled_by_admin'))::int AS canceled,
+              COUNT(*) FILTER (WHERE o."refundStatus" = 'processed' OR o."paymentStatus" = 'refunded')::int AS refunded,
+              COUNT(*) FILTER (WHERE o."paymentStatus" = 'failed')::int AS "paymentFailed"
+            FROM food_orders o
+            JOIN food_restaurants r ON r.id = o."restaurantId"
+            WHERE TRUE ${since} ${zone}`,
+    ]);
+
+    const asInts = (row) => Object.fromEntries(Object.entries(row || {}).map(([k, v]) => [k, int(v)]));
+    const t = asInts(totals);
+    return {
+        totals: {
+            foods: { total: t.foods, new: t.foodsNew },
+            orders: { total: t.orders, new: t.ordersNew },
+            restaurants: { total: t.restaurants, new: t.restaurantsNew },
+            customers: { total: t.customers, new: t.customersNew },
+        },
+        tiles: asInts(tiles),
+    };
+}
+
 export async function getDashboardInsights(query = {}) {
     const zoneId = isId(query.zoneId) ? String(query.zoneId) : null;
     const start = periodStart(String(query.period || 'all'));
@@ -44,6 +98,7 @@ export async function getDashboardInsights(query = {}) {
         scheduledRows,
         splitRows,
         monthRows,
+        summary,
     ] = await Promise.all([
         prisma.$queryRaw`
             SELECT i."itemId" AS id, MAX(i.name) AS name,
@@ -134,6 +189,7 @@ export async function getDashboardInsights(query = {}) {
               ${zone}
             GROUP BY 1
             ORDER BY 1`,
+        getDashboardSummary({ zoneId, start }),
     ]);
 
     const byStatus = Object.fromEntries(statusRows.map((row) => [row.status, int(row.count)]));
@@ -159,6 +215,7 @@ export async function getDashboardInsights(query = {}) {
     const split = splitRows[0] || {};
     return {
         filters: { zoneId, period: start ? String(query.period) : 'all', since: start },
+        summary,
         orderStatus: {
             pending: count('pending_payment', 'created'),
             confirmed: count('confirmed'),

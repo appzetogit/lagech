@@ -26,6 +26,7 @@ import {
 import { Activity, ArrowUpRight, ShoppingBag, CreditCard, Truck, Receipt, DollarSign, Store, UserCheck, Package, UserCircle, Clock, CheckCircle, Plus, XCircle } from "lucide-react"
 import { adminAPI } from "@food/api"
 import DashboardInsights from "./dashboard/DashboardInsights"
+import DashboardSummary from "./dashboard/DashboardSummary"
 const debugLog = () => {}
 const debugError = () => {}
 
@@ -172,7 +173,7 @@ export default function AdminHome() {
 
   return (
     <div className="px-4 pb-10 lg:px-6 pt-4">
-      <div className="relative overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-[0_30px_120px_-60px_rgba(0,0,0,0.28)]">
+      <div className="relative">
         {isLoading && (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/70 backdrop-blur-sm">
             <div className="flex items-center gap-3 rounded-full bg-white px-4 py-2 text-sm text-neutral-700 ring-1 ring-neutral-200">
@@ -182,44 +183,32 @@ export default function AdminHome() {
           </div>
         )}
 
-        <div className="flex flex-col gap-4 border-b border-neutral-200 bg-linear-to-br from-white via-neutral-50 to-neutral-100 px-6 py-5 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center gap-4">
+        <div className="flex flex-col gap-4 px-6 pt-6 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center gap-3">
+            <img src="/admin-theme/dashboard/orders.svg" alt="" className="h-10 w-10" />
             <div>
-              <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Admin Overview</p>
-              <h1 className="text-2xl font-semibold text-neutral-900">Operations Command</h1>
+              <h1 className="text-xl font-semibold text-[#1E2022]">Food Dashboard.</h1>
+              <p className="text-sm text-[#677788]">Hello, here you can manage your food orders by zone.</p>
             </div>
-
           </div>
-          <div className="flex flex-wrap gap-3">
-            <Select value={selectedZone} onValueChange={setSelectedZone}>
-              <SelectTrigger className="min-w-[160px] border-neutral-300 bg-white text-neutral-900">
-                <SelectValue placeholder="All zones" />
-              </SelectTrigger>
-              <SelectContent className="border-neutral-200 bg-white text-neutral-900">
-                <SelectItem value="all">All zones</SelectItem>
-                {zones.map((zone) => (
-                  <SelectItem key={zone._id} value={zone._id}>
-                    {zone.zoneName || zone.name || "Unnamed Zone"}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>
-              <SelectTrigger className="min-w-[140px] border-neutral-300 bg-white text-neutral-900">
-                <SelectValue placeholder="Overall" />
-              </SelectTrigger>
-              <SelectContent className="border-neutral-200 bg-white text-neutral-900">
-                <SelectItem value="overall">Overall</SelectItem>
-                <SelectItem value="today">Today</SelectItem>
-                <SelectItem value="week">This week</SelectItem>
-                <SelectItem value="month">This month</SelectItem>
-                <SelectItem value="year">This year</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          <Select value={selectedZone} onValueChange={setSelectedZone}>
+            <SelectTrigger className="min-w-[220px] border-[#E7EAF3] bg-white text-[#334257]">
+              <SelectValue placeholder="All zones" />
+            </SelectTrigger>
+            <SelectContent className="border-neutral-200 bg-white text-neutral-900">
+              <SelectItem value="all">All Zones</SelectItem>
+              {zones.map((zone) => (
+                <SelectItem key={zone._id} value={zone._id}>
+                  {zone.zoneName || zone.name || "Unnamed Zone"}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         <div className="space-y-6 px-6 py-6">
+          <DashboardSummary zoneId={selectedZone} period={selectedPeriod} onPeriodChange={setSelectedPeriod} />
+
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <MetricCard
               title="Gross revenue"
@@ -276,12 +265,7 @@ export default function AdminHome() {
               icon={<DollarSign className="h-5 w-5 text-green-600" />}
               accent="bg-green-200/40"
               path="/admin/food/transaction-report"
-            />
-            <MetricCard
-              title="Total restaurants"
-              value={totalRestaurants.toLocaleString("en-IN")}
-              helper="Approved restaurants"
-              icon={<Store className="h-5 w-5 text-blue-600" />}
+            />}
               accent="bg-blue-200/40"
               path="/admin/food/restaurants"
             />
@@ -308,12 +292,7 @@ export default function AdminHome() {
               icon={<Clock className="h-5 w-5 text-yellow-600" />}
               accent="bg-yellow-200/40"
               path="/admin/food/delivery-partners/join-request"
-            />
-            <MetricCard
-              title="Total foods"
-              value={totalFoods.toLocaleString("en-IN")}
-              helper="Approved menu items"
-              icon={<Package className="h-5 w-5 text-purple-600" />}
+            />}
               accent="bg-purple-200/40"
               path="/admin/food/foods"
             />
@@ -324,28 +303,13 @@ export default function AdminHome() {
               icon={<Plus className="h-5 w-5 text-pink-600" />}
               accent="bg-pink-200/40"
               path="/admin/food/addons"
-            />
-            <MetricCard
-              title="Total customers"
-              value={totalCustomers.toLocaleString("en-IN")}
-              helper="Registered users"
-              icon={<UserCircle className="h-5 w-5 text-cyan-600" />}
+            />}
               accent="bg-cyan-200/40"
               path="/admin/food/customers"
-            />
-            <MetricCard
-              title="Pending orders"
-              value={pendingOrders.toLocaleString("en-IN")}
-              helper="Orders awaiting processing"
-              icon={<Clock className="h-5 w-5 text-red-600" />}
+            />}
               accent="bg-red-200/40"
               path="/admin/food/orders/pending"
-            />
-            <MetricCard
-              title="Completed orders"
-              value={completedOrders.toLocaleString("en-IN")}
-              helper="Successfully delivered"
-              icon={<CheckCircle className="h-5 w-5 text-emerald-600" />}
+            />}
               accent="bg-emerald-200/40"
               path="/admin/food/orders/delivered"
             />
