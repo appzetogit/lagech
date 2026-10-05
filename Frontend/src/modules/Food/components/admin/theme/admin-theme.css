@@ -88,6 +88,9 @@
 .admin-theme main table thead th {
   color: var(--admin-title);
   font-weight: 600;
+  font-size: 14px;
+  text-transform: none;
+  letter-spacing: normal;
 }
 
 /* Inputs: the old panel's light border and teal focus. */

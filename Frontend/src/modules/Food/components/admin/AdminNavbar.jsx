@@ -278,8 +278,8 @@ export default function AdminNavbar({ onMenuClick }) {
             >
               <Menu className="w-5 h-5" />
             </button>
-            {/* Logo */}
-            <div className="flex items-center gap-2">
+            {/* Logo: only while the sidebar (which carries it) is hidden */}
+            <div className="flex items-center gap-2 lg:hidden">
               <div className="w-24 h-12 rounded-lg bg-white flex items-center justify-center ring-neutral-200">
                 {businessSettings?.logo?.url ? (
                   <img
