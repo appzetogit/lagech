@@ -209,6 +209,8 @@ export default function AdminHome() {
         <div className="space-y-6 px-6 py-6">
           <DashboardSummary zoneId={selectedZone} period={selectedPeriod} onPeriodChange={setSelectedPeriod} />
 
+          <DashboardInsights zoneId={selectedZone} period={selectedPeriod} />
+
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <MetricCard
               title="Gross revenue"
@@ -561,7 +563,6 @@ export default function AdminHome() {
             </Card>
           </div>
 
-          <DashboardInsights zoneId={selectedZone} period={selectedPeriod} />
         </div>
       </div>
     </div>

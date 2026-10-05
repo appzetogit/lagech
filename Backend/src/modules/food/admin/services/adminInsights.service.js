@@ -178,6 +178,7 @@ export async function getDashboardInsights(query = {}) {
               (SELECT COUNT(*)::int FROM food_delivery_partners WHERE status = 'approved') AS riders`,
         prisma.$queryRaw`
             SELECT to_char(date_trunc('month', o."createdAt"), 'YYYY-MM') AS month,
+                   SUM(o."total") AS "grossSale",
                    SUM(o."restaurantCommission") AS commission,
                    SUM(o."deliveryFee" - o."riderEarning") AS "deliveryMargin",
                    SUM(o."platformFee") AS "platformFee",
@@ -205,6 +206,7 @@ export async function getDashboardInsights(query = {}) {
         const row = months.get(key) || {};
         earnings.push({
             month: key,
+            grossSale: num(row.grossSale),
             commission: num(row.commission),
             deliveryMargin: num(row.deliveryMargin),
             platformFee: num(row.platformFee),
