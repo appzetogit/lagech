@@ -23,6 +23,7 @@ Steps run in this order whatever order they are named in.
 | `categories` | Categories and sub-categories, with images |
 | `restaurants` | Restaurants, approval state, per-day hours, commission, logo and cover |
 | `foods` | Dishes, variations as variants, other option groups as add-ons |
+| `nutrition` | Each dish's nutrition tags (`nutritions` / `item_nutrition`) and allergens (`allergies` / `item_allergy`, when present) |
 | `customers` | Customers (10-digit phones, as login matches) and addresses |
 | `riders` | Riders; riders the old admin deleted become deactivated placeholders |
 | `payment-details` | Restaurant and rider bank/UPI details (fills blanks only) |
@@ -40,7 +41,7 @@ LEGACY_MYSQL_URL='mysql://legacy_ro:<pass>@127.0.0.1:3306/legacy_lagech' \
 DATABASE_URL='postgresql://<user>:<pass>@127.0.0.1:5432/<database>?schema=public' \
 UPLOAD_STORAGE_ROOT=/srv/lagech/uploads UPLOAD_BASE_URL=/uploads \
 REDIS_URL= NODE_ENV=development \
-node scripts/legacy-import/index.mjs zones categories restaurants foods customers riders \
+node scripts/legacy-import/index.mjs zones categories restaurants foods nutrition customers riders \
   payment-details orders balances ratings settings
 ```
 

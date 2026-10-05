@@ -8,6 +8,11 @@ import { NotFoundError } from '../../../../core/auth/errors.js';
  * customer gave the restaurant after an order, with their comment and the first
  * dish in that order. Only the reviewer's first name and last initial are
  * shown, never their phone.
+ *
+ * A review an admin has hidden stays out. Hiding is done on a dish review
+ * (food_order_item_ratings.isHidden); this list is of order-level restaurant
+ * reviews, so an order is left out when any of its dish reviews was hidden --
+ * it is the same customer's write-up of the same meal.
  */
 
 const MAX_LIMIT = 50;
@@ -32,6 +37,7 @@ export async function getRestaurantReviews(restaurantId, query = {}) {
     const limit = Math.min(MAX_LIMIT, Math.max(1, Number.parseInt(query.limit, 10) || 20));
     const withComments = query.withComments === 'true';
     const commentFilter = withComments ? Prisma.sql`AND o."restaurantRatingComment" <> ''` : Prisma.empty;
+    const notHidden = Prisma.sql`AND NOT EXISTS (SELECT 1 FROM food_order_item_ratings h WHERE h."orderId" = o.id AND h."isHidden")`;
 
     const [rows, stats] = await Promise.all([
         prisma.$queryRaw`
@@ -44,14 +50,14 @@ export async function getRestaurantReviews(restaurantId, query = {}) {
                      WHERE i."orderId" = o.id ORDER BY i.price DESC LIMIT 1) AS "dishImage"
             FROM food_orders o
             LEFT JOIN food_users u ON u.id = o."userId"
-            WHERE o."restaurantId" = ${restaurant.id} AND o."restaurantRating" IS NOT NULL ${commentFilter}
+            WHERE o."restaurantId" = ${restaurant.id} AND o."restaurantRating" IS NOT NULL ${commentFilter} ${notHidden}
             ORDER BY COALESCE(o."restaurantRatedAt", o."deliveredAt", o."createdAt") DESC
             LIMIT ${limit} OFFSET ${(page - 1) * limit}`,
         prisma.$queryRaw`
             SELECT o."restaurantRating" AS stars, COUNT(*)::int AS count,
                    COUNT(*) FILTER (WHERE o."restaurantRatingComment" <> '')::int AS "withComment"
             FROM food_orders o
-            WHERE o."restaurantId" = ${restaurant.id} AND o."restaurantRating" IS NOT NULL
+            WHERE o."restaurantId" = ${restaurant.id} AND o."restaurantRating" IS NOT NULL ${notHidden}
             GROUP BY o."restaurantRating"`,
     ]);
 

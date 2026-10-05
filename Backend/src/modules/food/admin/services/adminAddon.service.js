@@ -38,6 +38,8 @@ const serializeAddon = (a) => ({
     approvedAt: a.approvedAt,
     rejectedAt: a.rejectedAt,
     isAvailable: a.isAvailable !== false,
+    categoryId: a.categoryId || null,
+    category: a.category ? { id: a.category.id, name: a.category.name } : null,
     draft: a.draft || null,
     published: a.published || null,
     createdAt: a.createdAt,
@@ -46,6 +48,7 @@ const serializeAddon = (a) => ({
 
 const WITH_RESTAURANT = {
     restaurant: { select: { id: true, restaurantName: true, ownerName: true, ownerPhone: true } },
+    category: { select: { id: true, name: true } },
 };
 
 /** Approving flips draft → published, which is what the public feed serves. */
@@ -66,6 +69,9 @@ export async function getRestaurantAddonsAdmin(query = {}) {
     const approvalStatus = String(query.approvalStatus || '').trim();
     if (ADDON_STATUSES.includes(approvalStatus)) where.approvalStatus = approvalStatus;
     if (isId(query.restaurantId)) where.restaurantId = String(query.restaurantId);
+    // An addon category id, or 'none' for add-ons in no category.
+    if (query.categoryId === 'none') where.categoryId = null;
+    else if (isId(query.categoryId)) where.categoryId = String(query.categoryId);
 
     if (query.search && String(query.search).trim()) {
         const term = String(query.search).trim().slice(0, 80);

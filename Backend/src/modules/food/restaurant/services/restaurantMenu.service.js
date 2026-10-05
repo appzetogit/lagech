@@ -7,6 +7,7 @@ import {
     serializeFoodVariants,
 } from '../../admin/services/foodVariant.service.js';
 import { restoreExpiredFoodAvailability } from './foodAvailability.service.js';
+import { serializeNutrition } from '../../shared/nutrition.util.js';
 import { findApprovedRestaurant } from './restaurantLookup.helper.js';
 
 const buildMenuFromFoods = async (foods = []) => {
@@ -69,6 +70,7 @@ const buildMenuFromFoods = async (foods = []) => {
             approvedAt: food.approvedAt,
             rejectedAt: food.rejectedAt,
             preparationTime: food.preparationTime || '',
+            ...serializeNutrition(food),
             createdAt: food.createdAt,
             updatedAt: food.updatedAt,
         });

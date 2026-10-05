@@ -2145,6 +2145,12 @@ export async function listOrdersAdmin(query) {
         where.paymentMethod = "cash";
         where.orderStatus = { in: ["created", "confirmed", "delivered"] };
         break;
+      case "scheduled":
+        // Placed for later: the delivery time is still ahead, and the order
+        // is neither finished nor waiting on payment.
+        where.scheduledAt = { gt: new Date() };
+        where.orderStatus = { notIn: ["delivered", "pending_payment", ...terminalCancelledStatuses] };
+        break;
       default:
         break;
     }
@@ -2184,7 +2190,8 @@ export async function listOrdersAdmin(query) {
     prisma.foodOrder.findMany({
       where,
       include: withRelations(RESTAURANT_ADMIN, PARTNER_CARD),
-      orderBy: { createdAt: 'desc' },
+      // Scheduled orders read soonest-due first; everything else newest first.
+      orderBy: rawStatus === "scheduled" ? [{ scheduledAt: 'asc' }, { createdAt: 'desc' }] : { createdAt: 'desc' },
       skip,
       take: limit,
     }),

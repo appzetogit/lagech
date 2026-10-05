@@ -7,6 +7,7 @@ import {
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { normalizeFoodImages } from '../../admin/services/foodImages.util.js';
+import { nutritionFields } from '../../shared/nutrition.util.js';
 import {
     extractRawFoodVariants,
     getFoodDisplayOtherPrice,
@@ -275,6 +276,7 @@ export async function createRestaurantFood(restaurantId, body = {}) {
             isAvailable: body.isAvailable !== false,
             isRecommended: body.isRecommended === true,
             preparationTime: toStr(body.preparationTime),
+            ...nutritionFields(body),
             approvalStatus: 'pending',
             requestedAt: new Date(),
         },
@@ -325,6 +327,7 @@ export async function updateRestaurantFood(restaurantId, foodId, body = {}) {
     Object.assign(update, buildAvailabilityUpdate(body));
     if (body.preparationTime !== undefined) update.preparationTime = toStr(body.preparationTime);
     if (body.isRecommended !== undefined) update.isRecommended = body.isRecommended === true;
+    Object.assign(update, nutritionFields(body));
 
     const targetFoodType =
         body.foodType !== undefined

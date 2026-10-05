@@ -756,6 +756,11 @@ model FoodRestaurant {
   rating       Decimal @default(0) @db.Decimal(2, 1)
   totalRatings Int     @default(0)
 
+  /// Picked by the admin for the customer app's "Recommended" row, shown in
+  /// recommendedSortOrder (lowest first).
+  isRecommended        Boolean @default(false)
+  recommendedSortOrder Int     @default(0)
+
   diningEnabled   Boolean @default(false)
   diningMaxGuests Int     @default(6)
   diningType      String  @default("family-dining")
@@ -819,6 +824,8 @@ model FoodRestaurant {
   emergencyRequests    DeliveryOrderEmergencyRequest[]
   feedback             FeedbackExperience[]
   offers               FoodOffer[]
+  campaignEntries      FoodCampaignRestaurant[]
+  itemCampaigns        FoodItemCampaign[]
 
   @@unique([restaurantNameNormalized, ownerPhoneLast10])
   @@index([ownerPhone])
@@ -830,6 +837,7 @@ model FoodRestaurant {
   @@index([zoneId])
   @@index([estimatedDeliveryTimeMinutes])
   @@index([rating])
+  @@index([isRecommended, recommendedSortOrder])
   @@map("food_restaurants")
 }
 
@@ -1467,10 +1475,16 @@ model OrderItemRating {
   comment String   @default("")
   ratedAt DateTime @default(now())
 
+  /// Hidden by an admin (abusive or irrelevant). The customer's own order still
+  /// shows it; public review listings leave it out.
+  isHidden Boolean   @default(false)
+  hiddenAt DateTime?
+
   order FoodOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([orderId])
   @@index([itemId])
+  @@index([ratedAt(sort: Desc)])
   @@map("food_order_item_ratings")
 }
 
@@ -1656,6 +1670,11 @@ model FoodItem {
   preparationTime String  @default("")
   /// Search tags ("healthy food", "momos"), normalised by shared/tags.util.js.
   tags            String[] @default([])
+  /// Free-text nutrition facts ("Calories 250 kcal", "High protein"),
+  /// tidied by shared/nutrition.util.js. Shown on the dish, not searched.
+  nutrition       String[] @default([])
+  /// Allergens the dish contains ("Peanuts", "Gluten"), tidied the same way.
+  allergens       String[] @default([])
 
   approvalStatus  ApprovalStatus @default(approved)
   rejectionReason String         @default("")
@@ -1776,7 +1795,10 @@ model FoodCategory {
 model FoodAddon {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 
-  restaurantId String @db.VarChar(24)
+  restaurantId String  @db.VarChar(24)
+  /// Admin grouping for the add-on list ("Drinks", "Extra toppings"). Optional;
+  /// the customer app still groups add-ons by groupName.
+  categoryId   String? @db.VarChar(24)
 
   /// Menu items this add-on attaches to. EMPTY MEANS RESTAURANT-WIDE.
   /// ponytail: array of ids rather than a join table, matching the Mongo access
@@ -1812,13 +1834,34 @@ model FoodAddon {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  restaurant FoodRestaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  restaurant FoodRestaurant     @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  /// SetNull: deleting a category leaves its add-ons uncategorised, never deleted.
+  category   FoodAddonCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
 
   @@index([restaurantId, isDeleted, createdAt(sort: Desc)])
   @@index([approvalStatus, isDeleted, requestedAt(sort: Desc)])
   @@index([restaurantId, approvalStatus, isDeleted, requestedAt(sort: Desc)])
   @@index([restaurantId, approvalStatus, isAvailable])
+  @@index([categoryId])
   @@map("food_addons")
+}
+
+/// Admin-managed grouping for add-ons, as on the previous panel's
+/// "Addon Category" page.
+model FoodAddonCategory {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  name      String
+  isActive  Boolean @default(true)
+  sortOrder Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  addons FoodAddon[]
+
+  @@index([isActive, sortOrder])
+  @@map("food_addon_categories")
 }
 
 model FoodRestaurantMenu {
@@ -2723,6 +2766,70 @@ model FoodReel {
   @@index([isActive, sortOrder])
   @@index([restaurantId])
   @@map("food_reels")
+}
+
+/// A basic campaign: a promotion restaurants take part in ("Weekend Feast").
+/// Running while switched on and between startsAt and endsAt.
+model FoodCampaign {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  title       String
+  description String   @default("")
+  image       String   @default("")
+  startsAt    DateTime
+  endsAt      DateTime
+  isActive    Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurants FoodCampaignRestaurant[]
+
+  @@index([isActive, startsAt, endsAt])
+  @@map("food_campaigns")
+}
+
+/// A restaurant taking part in a basic campaign. Added by the admin for now.
+model FoodCampaignRestaurant {
+  id           String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  campaignId   String @db.VarChar(24)
+  restaurantId String @db.VarChar(24)
+
+  joinedAt DateTime @default(now())
+
+  campaign   FoodCampaign   @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  restaurant FoodRestaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, restaurantId])
+  @@index([restaurantId])
+  @@map("food_campaign_restaurants")
+}
+
+/// A food campaign: one special dish from one restaurant, on offer for a while.
+model FoodItemCampaign {
+  id           String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  restaurantId String @db.VarChar(24)
+
+  title        String
+  description  String   @default("")
+  image        String   @default("")
+  price        Decimal  @db.Decimal(14, 2)
+  /// 'percent' or 'amount'; a discount of 0 means none.
+  discountType String   @default("percent") @db.VarChar(16)
+  discount     Decimal  @default(0) @db.Decimal(14, 2)
+  foodType     FoodType @default(Veg)
+  startsAt     DateTime
+  endsAt       DateTime
+  isActive     Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant FoodRestaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@index([isActive, startsAt, endsAt])
+  @@index([restaurantId])
+  @@map("food_item_campaigns")
 }
 
 model FoodCancelReason {
