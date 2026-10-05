@@ -24,6 +24,7 @@ import { requireAdminPermission, requireAnyAdminPermission } from '../../../../c
 import * as driverRegField from '../../delivery/controllers/driverRegistrationField.controller.js';
 import * as cashbackSettings from '../controllers/cashbackSettings.controller.js';
 import * as restaurantAppBanner from '../controllers/restaurantAppBanner.controller.js';
+import adminRiderExtrasRoutes from './adminRiderExtras.routes.js';
 
 const router = express.Router();
 
@@ -141,6 +142,7 @@ router.use('/power-scanning', requireAdminPermission('system_settings', 'view'))
 router.use('/notifications', requireAdminPermission('system_settings', 'view'));
 router.use('/pages-social-media', requireAdminPermission('pages_social_media', 'view'));
 router.use('/sidebar-badges', requireAdminPermission('dashboard', 'view'));
+router.use(adminRiderExtrasRoutes); // Add Delivery Man, vehicle categories, rider payouts and earning report.
 
 router.post('/sub-admins', requireAdminPermission('sub_admin_management', 'create'), adminController.createSubAdmin);
 router.get('/sub-admins', adminController.listSubAdmins);
