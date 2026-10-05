@@ -265,9 +265,6 @@ export default function AdminHome() {
               icon={<DollarSign className="h-5 w-5 text-green-600" />}
               accent="bg-green-200/40"
               path="/admin/food/transaction-report"
-            />}
-              accent="bg-blue-200/40"
-              path="/admin/food/restaurants"
             />
             <MetricCard
               title="Restaurant request pending"
@@ -292,9 +289,6 @@ export default function AdminHome() {
               icon={<Clock className="h-5 w-5 text-yellow-600" />}
               accent="bg-yellow-200/40"
               path="/admin/food/delivery-partners/join-request"
-            />}
-              accent="bg-purple-200/40"
-              path="/admin/food/foods"
             />
             <MetricCard
               title="Total addons"
@@ -303,15 +297,6 @@ export default function AdminHome() {
               icon={<Plus className="h-5 w-5 text-pink-600" />}
               accent="bg-pink-200/40"
               path="/admin/food/addons"
-            />}
-              accent="bg-cyan-200/40"
-              path="/admin/food/customers"
-            />}
-              accent="bg-red-200/40"
-              path="/admin/food/orders/pending"
-            />}
-              accent="bg-emerald-200/40"
-              path="/admin/food/orders/delivered"
             />
           </div>
 
