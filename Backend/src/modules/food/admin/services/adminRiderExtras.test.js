@@ -165,7 +165,7 @@ test('a disbursement pays each rider their balance once; paid debits, failed giv
     }
 
     const r1 = await decideRiderPayouts(first.batch.id, { ids: [lineOf(paid.id).id], status: 'paid', reference: 'UTR-1' });
-    assert.equal(r1.updated, 1);
+    assert.equal(r1.updated, 1, JSON.stringify(r1));
     const r2 = await decideRiderPayouts(first.batch.id, { ids: [lineOf(paid.id).id], status: 'paid' });
     assert.equal(r2.updated, 0, 'a paid line is not paid again');
     assert.equal(r2.notPending, 1);
