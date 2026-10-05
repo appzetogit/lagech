@@ -33,6 +33,7 @@ export const TIO_BY_LABEL = {
   "Deliveryman List": "filter-list",
   Reviews: "star-outlined",
   Customers: "poi-user",
+  "User Overview": "home-vs-1-outlined",
   "Customer Wallet": "wallet",
   "Customer Loyalty Point": "medal",
   "Subscribed Mail List": "email-outlined",
