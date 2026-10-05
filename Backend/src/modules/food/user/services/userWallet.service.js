@@ -10,6 +10,7 @@ import {
     getRazorpayKeyId,
     isRazorpayConfigured
 } from '../../orders/helpers/razorpay.helper.js';
+import { findWalletTopupBonus } from './walletBonus.service.js';
 
 /**
  * User wallet operations.
@@ -138,24 +139,55 @@ export const verifyWalletTopupPayment = async (userId, payload) => {
     // which replaces the previous scan of the embedded array for a matching
     // razorpayOrderId — that scan raced with itself, so a double-submitted
     // callback could credit the top-up twice.
-    await recordTransaction({
-        entityType: 'user',
-        entityId: id,
-        type: 'credit',
-        amount: creditedInr,
-        description: isRazorpayConfigured() ? 'Wallet top-up' : 'Wallet top-up (dev)',
-        category: 'wallet_topup',
-        idempotencyKey: `wallet_topup:${orderId}`,
-        metadata: {
-            source: 'wallet_topup',
-            mode: isRazorpayConfigured() ? 'razorpay' : 'dev',
-            razorpayOrderId: orderId,
-            razorpayPaymentId: paymentId,
-            claimedAmount: amount
+    const topupKey = `wallet_topup:${orderId}`;
+    // A replayed callback changes nothing — including not picking up a bonus
+    // rule that was switched on after the original top-up.
+    const alreadyCredited = await prisma.transaction.findUnique({ where: { idempotencyKey: topupKey }, select: { id: true } });
+    if (alreadyCredited) return { wallet: await getUserWallet(id) };
+
+    const bonus = await findWalletTopupBonus(creditedInr);
+
+    // The top-up and its bonus commit together: two ledger entries, one
+    // database transaction, each with its own idempotency key.
+    await prisma.$transaction(async (tx) => {
+        await recordTransaction({
+            entityType: 'user',
+            entityId: id,
+            type: 'credit',
+            amount: creditedInr,
+            description: isRazorpayConfigured() ? 'Wallet top-up' : 'Wallet top-up (dev)',
+            category: 'wallet_topup',
+            idempotencyKey: topupKey,
+            metadata: {
+                source: 'wallet_topup',
+                mode: isRazorpayConfigured() ? 'razorpay' : 'dev',
+                razorpayOrderId: orderId,
+                razorpayPaymentId: paymentId,
+                claimedAmount: amount
+            }
+        }, { client: tx });
+
+        if (bonus) {
+            await recordTransaction({
+                entityType: 'user',
+                entityId: id,
+                type: 'credit',
+                amount: bonus.amount,
+                description: `Top-up bonus: ${bonus.rule.title}`,
+                category: 'wallet_topup',
+                idempotencyKey: `wallet_bonus:${orderId}`,
+                metadata: {
+                    source: 'wallet_bonus',
+                    bonusId: bonus.rule.id,
+                    bonusTitle: bonus.rule.title,
+                    topupAmount: creditedInr,
+                    razorpayOrderId: orderId
+                }
+            }, { client: tx });
         }
     });
 
-    return { wallet: await getUserWallet(id) };
+    return { wallet: await getUserWallet(id), bonus: bonus ? { title: bonus.rule.title, amount: bonus.amount } : null };
 };
 
 export const deductWalletBalance = async (userId, amountInr, description = 'Order payment', metadata = {}) => {
