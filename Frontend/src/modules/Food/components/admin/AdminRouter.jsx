@@ -63,6 +63,8 @@ const Customers = lazy(() => import("@food/pages/admin/Customers"));
 const SupportTickets = lazy(() => import("@food/pages/admin/SupportTickets"));
 const AddFund = lazy(() => import("@food/pages/admin/wallet/AddFund"));
 const Bonus = lazy(() => import("@food/pages/admin/wallet/Bonus"));
+const WalletReport = lazy(() => import("@food/pages/admin/wallet/Report"));
+const UserOverview = lazy(() => import("@food/pages/admin/UserOverview"));
 const LoyaltyPointReport = lazy(() => import("@food/pages/admin/loyalty-point/Report"));
 const SubscribedMailList = lazy(() => import("@food/pages/admin/SubscribedMailList"));
 // Deliveryman Management
@@ -319,6 +321,8 @@ export default function AdminRouter() {
             <Route path="support-tickets" element={<SupportTickets />} />
             <Route path="wallet/add-fund" element={<AddFund />} />
             <Route path="wallet/bonus" element={<Bonus />} />
+            <Route path="wallet/report" element={<WalletReport />} />
+            <Route path="user-overview" element={<UserOverview />} />
             <Route path="loyalty-point/report" element={<LoyaltyPointReport />} />
             <Route path="subscribed-mail-list" element={<SubscribedMailList />} />
 

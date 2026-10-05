@@ -386,3 +386,51 @@ Real customer ratings of the restaurant, newest first. `withComments=true` retur
   "pagination": { "page": 1, "limit": 20, "total": 16, "pages": 1 } }
 ```
 `userName` is the first name and last initial only. A restaurant with no ratings returns `rating: 0` and empty lists — show "No reviews yet", never sample data.
+
+## 15. Wallet bonus and loyalty points — `/v1/food/user`
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/v1/food/user/wallet/bonuses` | Top-up bonus offers running now |
+| GET | `/v1/food/user/loyalty-points?page=1&limit=20` | Points balance, rules and history |
+| POST | `/v1/food/user/loyalty-points/convert` | Convert points into wallet balance |
+
+### `GET /v1/food/user/wallet/bonuses`
+Show on the "Add money" screen, e.g. "Add ₹500 or more, get 10% extra (up to ₹50)".
+```json
+{ "bonuses": [ { "id": "…", "title": "Diwali top-up", "description": "",
+  "bonusType": "percentage | amount", "bonusAmount": 10, "minimumAddAmount": 500,
+  "maximumBonus": 50, "startDate": "…", "endDate": "…", "state": "running" } ] }
+```
+`maximumBonus` is 0 when uncapped (always 0 for `amount`). Nothing to send at top-up: when
+`POST /wallet/topup/verify` succeeds, the running offer that pays the most is credited as
+its own wallet entry ("Top-up bonus: <title>"), and the verify response carries
+`bonus: { title, amount }` (or `bonus: null`). A replayed verify credits nothing more.
+
+### `GET /v1/food/user/loyalty-points`
+```json
+{ "enabled": true, "points": 120, "worth": 12, "totalEarned": 220, "totalConverted": 100,
+  "settings": { "pointsPerHundred": 5, "pointsPerRupee": 10, "minimumConvertPoints": 50 },
+  "transactions": [ { "id": "…", "type": "credit | debit", "points": 25, "balanceAfter": 120,
+                      "source": "order | conversion", "orderId": "…", "walletAmount": 0,
+                      "note": "Order FOD-…", "createdAt": "…" } ],
+  "pagination": { "page": 1, "limit": 20, "total": 3, "pages": 1 } }
+```
+Points are earned when an order is **delivered**: `pointsPerHundred` points per ₹100 of the
+order total, rounded down. `worth` is what the current points convert into, in rupees.
+Hide the section when `enabled` is false.
+
+### `POST /v1/food/user/loyalty-points/convert`
+Body: `{ "points": 100, "requestId": "<uuid made once per tap>" }`. Converts at
+`pointsPerRupee` points per ₹1 (rounded down to paise) and credits the wallet in the same
+step. Returns the `GET /loyalty-points` shape plus `wallet` (as `GET /wallet`). Sending the
+same `requestId` again does nothing, so a retry after a timeout is safe. `400` with a
+message to show when: points are switched off, fewer than `minimumConvertPoints`, more than
+the balance, or not a whole number.
+
+## 16. Newsletter — public, no login
+
+### `POST /v1/food/public/newsletter/subscribe`
+Body: `{ "email": "asha@example.com" }` → `{ "subscribed": true }`. The email is stored
+lower-cased; subscribing an address that is already on the list answers the same way and
+adds nothing. `400` "Enter a valid email address" for anything that is not an email.

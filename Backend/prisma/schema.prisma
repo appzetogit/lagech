@@ -2056,6 +2056,107 @@ model FoodCashbackSettings {
   @@map("food_cashback_settings")
 }
 
+/// Bonus rules for wallet top-ups (the old panel's Customer Wallet → Bonus).
+/// When a customer's top-up succeeds, the matching running rule that pays the
+/// most is credited as its own ledger entry (metadata.source 'wallet_bonus').
+model FoodWalletBonus {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  title       String
+  description String @default("")
+  /// 'percentage' (of the amount added) or 'amount' (fixed rupees).
+  bonusType   String  @default("percentage") @db.VarChar(16)
+  bonusAmount Decimal @db.Decimal(14, 2)
+  /// The top-up must be at least this much to earn the bonus.
+  minimumAddAmount Decimal @default(0) @db.Decimal(14, 2)
+  /// Cap on a percentage bonus. 0 = uncapped.
+  maximumBonus     Decimal @default(0) @db.Decimal(14, 2)
+
+  startDate DateTime
+  endDate   DateTime
+  isActive  Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, startDate, endDate])
+  @@map("food_wallet_bonuses")
+}
+
+/// Loyalty programme settings, one row (like the cashback and referral settings).
+model FoodLoyaltySettings {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  isEnabled            Boolean @default(false)
+  /// Points earned for every ₹100 of a delivered order's total.
+  pointsPerHundred     Decimal @default(0) @db.Decimal(10, 2)
+  /// Points that convert into ₹1 of wallet balance.
+  pointsPerRupee       Int     @default(0)
+  /// Fewest points a customer may convert at once.
+  minimumConvertPoints Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("food_loyalty_settings")
+}
+
+/// A customer's current points. Kept as a row so a conversion can guard the
+/// balance in its WHERE clause, the way the wallet does.
+model FoodLoyaltyPointAccount {
+  userId String @id @db.VarChar(24)
+
+  points         Int @default(0)
+  totalEarned    Int @default(0)
+  totalConverted Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("food_loyalty_point_accounts")
+}
+
+/// Points ledger: every earn and every conversion.
+model FoodLoyaltyPointTransaction {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  userId       String  @db.VarChar(24)
+  /// 'credit' (earned) or 'debit' (converted).
+  type         String  @db.VarChar(8)
+  points       Int
+  balanceAfter Int
+  /// 'order' or 'conversion'.
+  source       String  @db.VarChar(16)
+  orderId      String? @db.VarChar(24)
+  /// Wallet rupees a conversion paid out; 0 for an earn.
+  walletAmount Decimal @default(0) @db.Decimal(14, 2)
+  note         String  @default("")
+
+  /// `loyalty_earn:<orderId>` or `loyalty_convert:<request>` — unique, so a
+  /// replayed delivery or a double-tapped conversion is applied once.
+  idempotencyKey String? @unique
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+  @@map("food_loyalty_point_transactions")
+}
+
+/// Newsletter subscribers (the old panel's Subscribed Mail List).
+model FoodNewsletterSubscriber {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  /// Stored lower-cased; unique so subscribing twice is a no-op.
+  email String @unique @db.VarChar(255)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([createdAt(sort: Desc)])
+  @@map("food_newsletter_subscribers")
+}
+
 model FoodReferralSettings {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 

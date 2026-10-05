@@ -230,7 +230,25 @@ export const adminSidebarMenu = [
     type: "section",
     label: "CUSTOMER SECTION",
     items: [
+      { type: "link", label: "User Overview", path: "/admin/food/user-overview", icon: "LayoutDashboard" },
       { type: "link", label: "Customers", path: "/admin/food/customers", icon: "Users" },
+      {
+        type: "expandable",
+        label: "Customer Wallet",
+        icon: "Wallet",
+        subItems: [
+          { label: "Add Fund", path: "/admin/food/wallet/add-fund" },
+          { label: "Report", path: "/admin/food/wallet/report" },
+          { label: "Bonus", path: "/admin/food/wallet/bonus" },
+        ],
+      },
+      {
+        type: "expandable",
+        label: "Customer Loyalty Point",
+        icon: "Award",
+        subItems: [{ label: "Report", path: "/admin/food/loyalty-point/report" }],
+      },
+      { type: "link", label: "Subscribed Mail List", path: "/admin/food/subscribed-mail-list", icon: "Mail" },
       { type: "link", label: "Live Chat", path: "/admin/food/chattings", icon: "MessagesSquare", badge: "liveChat" },
       {
         type: "link",

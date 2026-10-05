@@ -22,6 +22,7 @@ import searchRoutes from '../modules/food/search/routes/search.routes.js';
 import chatRoutes from '../modules/food/chat/routes/chat.routes.js';
 import { requireAdminPermission } from '../core/roles/adminPermission.middleware.js';
 import { getCashbackSettingsPublicController } from '../modules/food/user/controllers/cashback.controller.js';
+import { subscribeNewsletterController } from '../modules/food/user/controllers/customerRewards.controller.js';
 import { config } from '../config/env.js';
 import { getRateLimitSummary } from '../middleware/rateLimit.js';
 import { getRestaurantReviews } from '../modules/food/restaurant/services/restaurantReviews.service.js';
@@ -70,6 +71,7 @@ router.get('/v1/food/public/restaurants/:restaurantId/reviews', async (req, res,
 router.get('/v1/food/public/advertisements', promotionsController.listRunningAds);
 router.get('/v1/food/public/reels', promotionsController.listShowingReels);
 router.post('/v1/food/public/reels/:id/:event', promotionsController.countReelEvent);
+router.post('/v1/food/public/newsletter/subscribe', subscribeNewsletterController);
 
 router.use('/v1/food/admin', authMiddleware, requireRoles('ADMIN'), restaurantAdminRoutes);
 router.use('/v1/food/user', authMiddleware, requireRoles('USER'), userRoutes);

@@ -33,6 +33,7 @@ import { importBanners } from './steps/banners.mjs';
 import { importCancelReasons } from './steps/cancelReasons.mjs';
 import { importPromotions } from './steps/promotions.mjs';
 import { importFavorites } from './steps/favorites.mjs';
+import { importNewsletter } from './steps/newsletter.mjs';
 
 const STEPS = [
     ['zones', importZones],
@@ -49,6 +50,7 @@ const STEPS = [
     ['cancel-reasons', importCancelReasons],
     ['promotions', importPromotions],
     ['favorites', importFavorites],
+    ['newsletter', importNewsletter],
     ['settings', importSettings],
 ];
 

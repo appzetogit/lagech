@@ -29,6 +29,7 @@ Steps run in this order whatever order they are named in.
 | `orders` | Orders as `FOD-<old id>`, items, history, reviews, the old ledger's split |
 | `balances` | Rider cash collections, withdrawals and payouts; restaurant withdrawals and payouts; opening-balance adjustments so every wallet equals the old one |
 | `ratings` | Restaurant and rider star ratings recomputed from rated orders |
+| `newsletter` | Newsletter subscribers (Subscribed Mail List), emails lower-cased |
 | `settings` | Restaurant subscriptions off (old system was commission-only); rider cash limit |
 
 ## Running it

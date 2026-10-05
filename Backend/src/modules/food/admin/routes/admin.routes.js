@@ -24,6 +24,7 @@ import { requireAdminPermission, requireAnyAdminPermission } from '../../../../c
 import * as driverRegField from '../../delivery/controllers/driverRegistrationField.controller.js';
 import * as cashbackSettings from '../controllers/cashbackSettings.controller.js';
 import * as restaurantAppBanner from '../controllers/restaurantAppBanner.controller.js';
+import adminCustomerExtrasRoutes from './adminCustomerExtras.routes.js';
 
 const router = express.Router();
 
@@ -63,6 +64,8 @@ const resolveSectionFromRequest = (path = '', method = '') => {
     if (path.startsWith('/sub-admins')) return 'sub_admin_management';
     if (path === '/customers' && String(method).toUpperCase() === 'GET') return null;
     if (path.startsWith('/customers') || path.startsWith('/support-tickets')) return 'customer_management';
+    if (path.startsWith('/customer-wallet') || path.startsWith('/loyalty-points')
+        || path.startsWith('/newsletter-subscribers') || path.startsWith('/user-overview')) return 'customer_management';
     if (path === '/zones' && String(method).toUpperCase() === 'GET') return null;
     if (/^\/zones\/[^/]+$/.test(path) && String(method).toUpperCase() === 'GET') return null;
     if (path === '/restaurants' && String(method).toUpperCase() === 'GET') return null;
@@ -163,6 +166,9 @@ router.get('/notifications/broadcast', notificationBroadcastController.getBroadc
 // system_settings guard the broadcast routes already carry.
 router.get('/notifications/lapsed-customers', notificationBroadcastController.getLapsedCustomersController);
 router.delete('/notifications/broadcast/:id', notificationBroadcastController.deleteBroadcastNotificationController);
+
+// ----- Customer wallet, loyalty points, newsletter list, user overview -----
+router.use(adminCustomerExtrasRoutes);
 
 // ----- Customers -----
 router.get(
