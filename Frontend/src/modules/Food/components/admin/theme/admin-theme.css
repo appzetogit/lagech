@@ -1,0 +1,109 @@
+/*
+ * Admin theme matching the previous (6amMart) Lagech admin panel.
+ *
+ * Values were measured on the live old panel: Inter, a #FCFCFC page, white
+ * cards with 12px corners and a soft shadow, #006161 buttons, #00868F links,
+ * #1E2022 titles and #677788 body text.
+ *
+ * Everything is scoped to .admin-theme (set on AdminLayout). Tailwind v4
+ * utilities read colours from CSS variables, so re-pointing the blue and slate
+ * scales here restyles every admin page without editing them one by one.
+ */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+@import "./tio-icons.css";
+
+.admin-theme {
+  /* Primary: blue was the admin's action colour, the old panel's is teal. */
+  --color-blue-50: #e8f4f4;
+  --color-blue-100: #d0e9e9;
+  --color-blue-200: #a2d3d3;
+  --color-blue-300: #6fb9bb;
+  --color-blue-400: #3a9da1;
+  --color-blue-500: #00868f;
+  --color-blue-600: #006161;
+  --color-blue-700: #005555;
+  --color-blue-800: #004646;
+  --color-blue-900: #003838;
+
+  /* Text and surfaces. */
+  --color-slate-50: #f9fafc;
+  --color-slate-100: #f3f4f8;
+  --color-slate-200: #e7eaf3;
+  --color-slate-300: #dbe0ea;
+  --color-slate-400: #99a7ba;
+  --color-slate-500: #677788;
+  --color-slate-600: #677788;
+  --color-slate-700: #334257;
+  --color-slate-800: #1e2022;
+  --color-slate-900: #1e2022;
+
+  /* The theme's own tokens, for components written against it. */
+  --admin-primary: #006161;
+  --admin-primary-hover: #005555;
+  --admin-link: #00868f;
+  --admin-mint: #5affba;
+  --admin-sidebar: #005555;
+  --admin-sidebar-text: #e9f3ff;
+  --admin-sidebar-muted: #99a7ba;
+  --admin-title: #1e2022;
+  --admin-text: #677788;
+  --admin-border: #e7eaf3;
+  --admin-page: #fcfcfc;
+
+  font-family: "Inter", sans-serif;
+  color: var(--admin-text);
+  background-color: var(--admin-page);
+}
+
+.admin-theme h1,
+.admin-theme h2,
+.admin-theme h3 {
+  color: var(--admin-title);
+}
+
+/* Cards: white, 12px corners, the old panel's soft shadow. */
+.admin-theme main .rounded-xl.bg-white,
+.admin-theme main .rounded-2xl.bg-white,
+.admin-theme main .bg-white.shadow-sm,
+.admin-theme main .bg-white.shadow {
+  border-radius: 12px;
+  border-color: var(--admin-border);
+  box-shadow: 0 6px 12px rgba(140, 152, 164, 0.075);
+}
+
+/* Primary buttons: slate-900 was the other dark action colour. */
+.admin-theme main .bg-slate-900 {
+  background-color: var(--admin-primary);
+}
+.admin-theme main .hover\:bg-slate-800:hover,
+.admin-theme main .hover\:bg-slate-700:hover {
+  background-color: var(--admin-primary-hover);
+}
+.admin-theme main button.rounded-lg,
+.admin-theme main a.rounded-lg {
+  border-radius: 5px;
+}
+
+/* Tables: plain header row, as in the old order list. */
+.admin-theme main table thead th {
+  color: var(--admin-title);
+  font-weight: 600;
+}
+
+/* Inputs: the old panel's light border and teal focus. */
+.admin-theme main input:focus,
+.admin-theme main select:focus,
+.admin-theme main textarea:focus {
+  border-color: var(--admin-link);
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(0, 134, 143, 0.15);
+}
+
+/* TIO icon used inside the sidebar and headers. */
+.admin-theme .tio-nav-icon {
+  font-size: 18px;
+  line-height: 1;
+  width: 20px;
+  text-align: center;
+  flex-shrink: 0;
+}

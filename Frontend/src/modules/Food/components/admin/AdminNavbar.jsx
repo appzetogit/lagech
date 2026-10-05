@@ -267,7 +267,7 @@ export default function AdminNavbar({ onMenuClick }) {
 
   return (
     <>
-      <header className="sticky top-0 z-50 bg-white border-b border-neutral-200 shadow-sm">
+      <header className="sticky top-0 z-50 bg-white shadow-[0_4px_10px_rgba(0,0,0,0.05)]">
         <div className="flex items-center justify-between px-6 py-3">
           {/* Left: Logo and Mobile Menu */}
           <div className="flex items-center gap-3">
