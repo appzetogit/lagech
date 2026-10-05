@@ -109,6 +109,12 @@ const OrderCancelReasons = lazy(() => import("@food/pages/admin/orders/OrderCanc
 const RestaurantPayouts = lazy(() => import("@food/pages/admin/transactions/RestaurantPayouts"));
 const RestaurantPayoutBatch = lazy(() => import("@food/pages/admin/transactions/RestaurantPayoutBatch"));
 const WithdrawMethod = lazy(() => import("@food/pages/admin/transactions/WithdrawMethod"));
+// Delivery man: vehicle categories, disbursements, payments, earning report
+const VehicleCategories = lazy(() => import("@food/pages/admin/delivery-partners/VehicleCategories"));
+const DeliveryDisbursements = lazy(() => import("@food/pages/admin/transactions/DeliveryDisbursements"));
+const DeliveryDisbursementBatch = lazy(() => import("@food/pages/admin/transactions/DeliveryDisbursementBatch"));
+const DeliveryPayments = lazy(() => import("@food/pages/admin/transactions/DeliveryPayments"));
+const DeliverymanEarningReport = lazy(() => import("@food/pages/admin/reports/DeliverymanEarningReport"));
 // Employee Management
 const EmployeeRole = lazy(() => import("@food/pages/admin/employees/EmployeeRole"));
 const AddEmployee = lazy(() => import("@food/pages/admin/employees/AddEmployee"));
@@ -344,6 +350,11 @@ export default function AdminRouter() {
             <Route path="delivery-partners/earning-addon-history" element={<EarningAddonHistory />} />
             <Route path="delivery-partners/earnings" element={<DeliveryEarnings />} />
             <Route path="delivery-partners/duty-log" element={<DutyLog />} />
+            <Route path="delivery-partners/vehicle-categories" element={<VehicleCategories />} />
+            <Route path="deliveryman-disbursements" element={<DeliveryDisbursements />} />
+            <Route path="deliveryman-disbursements/:batchId" element={<DeliveryDisbursementBatch />} />
+            <Route path="deliveryman-payments" element={<DeliveryPayments />} />
+            <Route path="deliveryman-earning-report" element={<DeliverymanEarningReport />} />
 
             {/* REPORTS & SETTINGS */}
             <Route path="transaction-report" element={<TransactionReport />} />

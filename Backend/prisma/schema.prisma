@@ -844,6 +844,9 @@ model FoodDeliveryPartner {
   address String?
   city    String?
   state   String?
+  /// The zone the rider works in, chosen when an admin adds them. Riders who
+  /// registered from the app have none.
+  zoneId  String? @db.VarChar(24)
 
   vehicleType   String?
   vehicleName   String?
@@ -915,6 +918,7 @@ model FoodDeliveryPartner {
   @@index([referralCode])
   @@index([referredById])
   @@index([availabilityStatus, status])
+  @@index([zoneId])
   @@map("food_delivery_partners")
 }
 
@@ -2894,15 +2898,70 @@ model FoodDeliveryWithdrawal {
   transactionId   String?
   processedAt     DateTime?
 
+  /// 'manual' when the rider asked for it; 'disbursement' when an admin's
+  /// payout batch created it (batchId says which); 'admin_payment' when an
+  /// admin recorded a payment made to the rider; 'balance_sheet' when it was
+  /// paid from the balance sheet. Every kind counts against the same balance.
+  source      String  @default("manual") @db.VarChar(16)
+  batchId     String? @db.VarChar(24)
+  /// The admin who created or recorded it, for admin-made rows.
+  processedBy String? @db.VarChar(24)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  deliveryPartner FoodDeliveryPartner @relation(fields: [deliveryPartnerId], references: [id])
+  deliveryPartner FoodDeliveryPartner      @relation(fields: [deliveryPartnerId], references: [id])
+  batch           FoodDeliveryPayoutBatch? @relation(fields: [batchId], references: [id])
 
   @@index([deliveryPartnerId])
   @@index([status])
   @@index([createdAt(sort: Desc)])
+  @@index([batchId])
+  @@index([source, createdAt(sort: Desc)])
   @@map("food_delivery_withdrawals")
+}
+
+/// One delivery man disbursement: a payout line (a withdrawal with source
+/// 'disbursement') for every rider whose withdrawable balance was at least the
+/// minimum when an admin generated it. The admin pays each line and marks it
+/// paid or failed; the batch status is worked out from its lines.
+model FoodDeliveryPayoutBatch {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  /// Human number, "Disbursement #1001".
+  number      Int     @unique @default(autoincrement())
+  totalAmount Decimal @default(0) @db.Decimal(14, 2)
+  riderCount  Int     @default(0)
+  /// Riders below this balance were left for a later batch.
+  minAmount   Decimal @default(1) @db.Decimal(14, 2)
+  /// Riders owed money but left out, with why: [{ deliveryPartnerId, name, amount, reason }].
+  skipped     Json    @default("[]")
+  createdById String? @db.VarChar(24)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payouts FoodDeliveryWithdrawal[]
+
+  @@index([createdAt(sort: Desc)])
+  @@map("food_delivery_payout_batches")
+}
+
+/// A kind of vehicle riders may use, and how far it may deliver: up to
+/// startingCoverageKm at the normal rate, up to maxCoverageKm with extraCharges.
+model FoodDeliveryVehicleCategory {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  type               String  @unique @db.VarChar(64)
+  startingCoverageKm Decimal @default(0) @db.Decimal(8, 2)
+  maxCoverageKm      Decimal @db.Decimal(8, 2)
+  extraCharges       Decimal @default(0) @db.Decimal(14, 2)
+  isActive           Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("food_delivery_vehicle_categories")
 }
 
 model FoodDeliveryCashDeposit {

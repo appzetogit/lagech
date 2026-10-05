@@ -166,6 +166,8 @@ export const adminSidebarMenu = [
     type: "section",
     label: "DELIVERYMAN SECTION",
     items: [
+      { type: "link", label: "Vehicles Category", path: "/admin/food/delivery-partners/vehicle-categories", icon: "Car" },
+      { type: "link", label: "Add Delivery Man", path: "/admin/food/delivery-partners/add", icon: "UserPlus" },
       {
         type: "link",
         label: "New Delivery Man",
@@ -296,6 +298,8 @@ export const adminSidebarMenu = [
         icon: "Wallet",
         badge: "deliveryWithdrawals",
       },
+      { type: "link", label: "Delivery Man Disbursement", path: "/admin/food/deliveryman-disbursements", icon: "Wallet" },
+      { type: "link", label: "Delivery Man Payments", path: "/admin/food/deliveryman-payments", icon: "Send" },
       { type: "link", label: "Balance Sheet", path: "/admin/food/balance-sheet", icon: "Wallet" },
     ],
   },
@@ -307,6 +311,12 @@ export const adminSidebarMenu = [
       { type: "link", label: "Order Report", path: "/admin/food/order-report/regular", icon: "FileText" },
       { type: "link", label: "Restaurant Wise Report", path: "/admin/food/restaurant-report", icon: "FileText" },
       { type: "link", label: "Admin Earning Report", path: "/admin/food/admin-earning-report", icon: "IndianRupee" },
+      {
+        type: "link",
+        label: "Deliveryman Earning Report",
+        path: "/admin/food/deliveryman-earning-report",
+        icon: "IndianRupee",
+      },
       { type: "link", label: "Expense Report", path: "/admin/food/expense-report", icon: "Receipt" },
       { type: "link", label: "Item Report", path: "/admin/food/item-report", icon: "Utensils" },
       { type: "link", label: "Tax Report", path: "/admin/food/tax-report", icon: "Receipt" },
