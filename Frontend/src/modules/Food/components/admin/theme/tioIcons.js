@@ -59,7 +59,7 @@ export const TIO_BY_LABEL = {
   "Tax Report": "albums",
   "Restaurant VAT Report": "american-express",
   // Lagech-only items.
-  Dispatch: "navigate-outlined",
+  Dispatch: "bike",
   "Cancel Reasons": "clear-circle-outlined",
   "Order Detect Delivery": "map",
   "Referral Settings": "share-vs",
@@ -91,7 +91,7 @@ export const TIO_BY_ICON_KEY = {
   CreditCard: "shopping-basket-outlined",
   FileText: "chart-bar-4",
   Receipt: "receipt",
-  Truck: "navigate-outlined",
+  Truck: "bike",
   AlertTriangle: "warning-outlined",
   Image: "image",
   Megaphone: "tv-old",
