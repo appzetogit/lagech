@@ -253,6 +253,82 @@ POST /v1/food/orders/verify-payment
 { "orderId": "...", "razorpayOrderId": "...", "razorpayPaymentId": "...", "razorpaySignature": "..." }
 ```
 
+### Offline payment (bank transfer, UPI, ...)
+
+The admin sets up offline methods (System Settings → 3rd Party & Configurations →
+Offline Payment Setup) and can switch the whole feature off. Show "Offline payment"
+at checkout only when `enabled` is `true` and `methods` is not empty.
+
+```jsonc
+GET /v1/food/public/offline-payment-methods        // public, no login
+{
+  "data": {
+    "enabled": true,
+    "methods": [
+      {
+        "id": "3f9c0a1b2c3d4e5f",
+        "name": "Bank transfer",
+        // Show these to the customer: where to send the money.
+        "paymentInfo": [
+          { "label": "Account number", "value": "..." },
+          { "label": "IFSC", "value": "..." }
+        ],
+        // The customer fills these in after paying. type: text | number | email.
+        // A number field is digits only (leading zeros kept); send it as a string.
+        "fields": [
+          { "key": "transaction_id", "label": "Transaction id", "type": "text", "required": true, "placeholder": "" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Place the order with `paymentMethod: "offline"` and the method's `id`, with the
+customer's values keyed by each field's `key`:
+
+```jsonc
+POST /v1/food/orders
+{
+  // ...cart as above...
+  "paymentMethod": "offline",
+  "offlinePayment": {
+    "methodId": "3f9c0a1b2c3d4e5f",
+    "fields": { "transaction_id": "UTR123456789" },
+    "note": "Paid from my SBI account"          // optional, max 300
+  }
+}
+```
+
+- 400 with a readable message when offline payment is off, the method is not
+  active, or a required field is blank (`"Transaction id is required"`).
+- No `verify-payment` call and no Razorpay. The order comes back with
+  `orderStatus: "pending_payment"`, `payment.method: "offline"`,
+  `payment.status: "created"`, and `offlinePayment`:
+  ```jsonc
+  "offlinePayment": {
+    "status": "pending",                  // pending | verified | rejected
+    "methodId": "...", "methodName": "Bank transfer",
+    "paymentInfo": [ ... ],               // as shown at checkout, frozen on the order
+    "fields": [ { "key": "transaction_id", "label": "Transaction id", "value": "UTR123456789" } ],
+    "customerNote": "", "submittedAt": "2026-10-06T10:00:00.000Z",
+    "decidedAt": null, "adminNote": ""    // set once the admin decides
+  }
+  ```
+- Unlike an unpaid Razorpay order, an offline order **is listed** in
+  `GET /v1/food/orders` while it waits, so show it with a "Payment being verified"
+  state. The restaurant does not see it yet. It is never auto-deleted, and
+  `DELETE /:orderId/pending-payment` is refused for it (the customer may already
+  have paid); the customer contacts support instead.
+- The admin then either:
+  - **verifies** it: `payment.status` → `paid`, `offlinePayment.status` → `verified`,
+    `orderStatus` → `created`, and from here it is an ordinary paid order (the
+    restaurant gets it, tracking etc. as usual). Push `data.type: "order_created"`.
+  - **rejects** it: `payment.status` → `failed`, `orderStatus` → `cancelled_by_admin`,
+    `offlinePayment.status` → `rejected` with the reason in `offlinePayment.adminNote`.
+    Push `data.type: "payment_failed"` and socket `order_status_update`.
+- Refunds of a verified offline payment are not automatic; support handles them.
+
 ---
 
 ## 6. Live tracking
@@ -404,6 +480,18 @@ User-facing pushes carry `data.type = "order_status_update"` with `orderId`,
 `high_importance_channel` — which the user app already creates at
 `Importance.max`. Keep that channel id, or Android silently downgrades the
 notification to a non-heads-up default channel.
+
+Other order pushes: `order_created` (order placed / offline payment verified),
+`order_cancelled`, `refund_processed`, `delivery_accepted` (rider assigned) and
+`payment_failed` (an online payment that could not be confirmed, or an offline
+payment the admin rejected). The title and body of these can be reworded or
+switched off by the admin (Firebase Notification page), so the app should show
+the `title`/`body` it receives rather than building its own text from the type.
+
+Analytics ids the admin set (Analytics Script page) are in
+`GET /v1/food/public/app-settings` → `data.analytics`
+(`{ "googleAnalytics": "G-…", "googleTagManager": "GTM-…", "metaPixel": "123…" }`,
+only the tools switched on), and alone at `GET /v1/food/public/analytics`.
 
 ---
 

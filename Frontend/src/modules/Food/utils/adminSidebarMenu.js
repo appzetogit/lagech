@@ -316,8 +316,17 @@ export const adminSidebarMenu = [
     type: "section",
     label: "EMPLOYEE HANDLE",
     items: [
-      // Roles are edited per employee, from this list.
-      { type: "link", label: "Employees", path: "/admin/food/employees", icon: "UserCog", requires: "adminAccess" },
+      // Access is edited per employee, from the list.
+      {
+        type: "expandable",
+        label: "Employees",
+        icon: "UserCog",
+        requires: "adminAccess",
+        subItems: [
+          { label: "Add new", path: "/admin/food/employees/add" },
+          { label: "List", path: "/admin/food/employees" },
+        ],
+      },
       { type: "link", label: "Employee Roles", path: "/admin/food/employees/roles", icon: "Lock", requires: "adminAccess" },
     ],
   },
@@ -411,6 +420,19 @@ export const adminSidebarMenu = [
       { type: "link", label: "Website", path: "/admin/food/react-site", icon: "Globe" },
       { type: "link", label: "Page Meta Data", path: "/admin/food/page-meta-data", icon: "Globe" },
       { type: "link", label: "Gallery", path: "/admin/food/gallery", icon: "Image" },
+      // As on the old panel. AI Setup and the Join Us page setup are left out:
+      // no feature here uses an AI key, and the signup forms have no custom
+      // fields to configure.
+      {
+        type: "expandable",
+        label: "3rd Party & Configurations",
+        icon: "Settings",
+        subItems: [
+          { label: "Firebase Notification", path: "/admin/food/3rd-party-configurations/firebase" },
+          { label: "Offline Payment Setup", path: "/admin/food/3rd-party-configurations/offline-payment" },
+          { label: "Analytics Script", path: "/admin/food/3rd-party-configurations/analytics" },
+        ],
+      },
     ],
   },
   {

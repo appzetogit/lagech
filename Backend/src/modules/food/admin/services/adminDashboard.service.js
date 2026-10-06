@@ -315,13 +315,12 @@ export async function getSidebarBadges() {
             prisma.foodDeliveryPartner.count({ where: { status: 'pending' } }),
             prisma.foodItem.count({ where: { approvalStatus: 'pending' } }),
             prisma.foodAddon.count({ where: { approvalStatus: 'pending' } }),
-            // Both of these filtered on values that do not exist: there is no
-            // 'pending' order status and no 'offline_payment' method, so Mongo
-            // matched nothing and both badges have always read zero. Counted
-            // against the real statuses now — orders awaiting action, and
-            // orders waiting on a QR payment.
+            // Orders awaiting action, and offline payments awaiting the
+            // admin's check (the Offline Payments tab).
             prisma.foodOrder.count({ where: { orderStatus: { in: PENDING_ORDER_STATUSES } } }),
-            prisma.foodOrder.count({ where: { paymentStatus: 'pending_qr' } }),
+            prisma.foodOrder.count({
+                where: { paymentMethod: 'offline', orderStatus: 'pending_payment', paymentStatus: 'created' },
+            }),
             prisma.foodRestaurantWithdrawal.count({ where: { status: 'pending' } }),
             prisma.foodDeliveryWithdrawal.count({ where: { status: 'pending' } }),
             // A customer's ticket has no restaurant attached; a restaurant's does.

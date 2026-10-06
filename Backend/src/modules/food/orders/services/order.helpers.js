@@ -42,6 +42,8 @@ export function generateFourDigitDeliveryOtp() {
 export function sanitizeOrderForExternal(orderDoc) {
   const o = { ...(orderDoc || {}) };
   delete o.deliveryOtp;
+  // What the customer typed to prove an offline payment is for the admin only.
+  delete o.offlinePayment;
   const dv = o.deliveryVerification;
   if (dv && dv.dropOtp != null) {
     const d = dv.dropOtp;

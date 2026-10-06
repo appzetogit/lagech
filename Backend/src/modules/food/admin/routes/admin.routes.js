@@ -579,6 +579,10 @@ router.post(
     orderController.resendDeliveryNotificationAdminController
 );
 router.post('/orders/:orderId/refund', orderController.processRefundAdminController);
+// Offline payments: the admin confirms the money arrived, or says why not.
+// Under /orders, so order_management (edit) guards them like the rest.
+router.patch('/orders/:orderId/offline-payment/verify', orderController.verifyOfflinePaymentAdminController);
+router.patch('/orders/:orderId/offline-payment/reject', orderController.rejectOfflinePaymentAdminController);
 router.delete('/orders/:orderId', orderController.deleteOrderAdminController);
 
 // ----- CMS Pages (About + legal) -----

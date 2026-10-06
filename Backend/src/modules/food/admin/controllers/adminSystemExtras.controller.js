@@ -112,3 +112,5 @@ export const publicSocialMedia = handle(200, 'Social media', () => extras.getPub
 export const publicAppSettings = handle(200, 'App settings', () => extras.getPublicAppSettings());
 export const publicLanding = handle(200, 'Landing page', () => extras.getPublicLanding());
 export const publicPageMeta = handle(200, 'Page meta data', () => extras.getPublicPageMeta());
+export const publicAnalytics = handle(200, 'Analytics', () => extras.getPublicAnalytics());
+export const publicOfflinePaymentMethods = handle(200, 'Offline payment methods', () => extras.getPublicOfflinePaymentMethods());
