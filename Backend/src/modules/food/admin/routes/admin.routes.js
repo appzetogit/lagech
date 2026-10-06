@@ -176,6 +176,8 @@ router.get('/notifications/broadcast', notificationBroadcastController.getBroadc
 // system_settings guard the broadcast routes already carry.
 router.get('/notifications/lapsed-customers', notificationBroadcastController.getLapsedCustomersController);
 router.delete('/notifications/broadcast/:id', notificationBroadcastController.deleteBroadcastNotificationController);
+router.post('/notifications/broadcast/:id/resend', notificationBroadcastController.resendBroadcastNotificationController);
+router.patch('/notifications/broadcast/:id/status', notificationBroadcastController.setBroadcastNotificationStatusController);
 
 // ----- Customer wallet, loyalty points, newsletter list, user overview -----
 router.use(adminCustomerExtrasRoutes);

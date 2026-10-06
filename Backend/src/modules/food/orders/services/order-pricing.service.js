@@ -12,6 +12,7 @@ import { getRestaurantAvailabilityStatus } from '../../restaurant/helpers/restau
 import { resolveOrderCartItems } from '../helpers/order-cart-items.helper.js';
 import { applyFeeSwitches } from './feeSwitches.js';
 import { evaluateCoupon, requiresFirstOrder, USED_ORDER_WHERE } from './couponRules.js';
+import { resolveOrderZoneId, getZonePaymentOptions } from '../../shared/zonePayment.js';
 
 const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
 
@@ -471,7 +472,8 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
   // Zone comes from the restaurant, matching how an order records its zone
   // (order.service.js falls back to restaurant.zoneId), so the quote a
   // customer sees and the price they are charged resolve the same fee row.
-  const pricingZoneId = dto?.zoneId || restaurant?.zoneId || null;
+  // A restaurant with no zone falls back to the default zone, as createOrder does.
+  const pricingZoneId = await resolveOrderZoneId(dto?.zoneId, restaurant);
   const feeSettings = await loadActiveFeeSettings(pricingZoneId);
 
   const packagingFee = 0;
@@ -615,6 +617,9 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
   return {
     items,
     priceChanges,
+    // Which of cash / online the order's zone accepts, so checkout can hide
+    // the methods createOrder would refuse.
+    paymentOptions: await getZonePaymentOptions(pricingZoneId),
     pricing: {
       ...pricing,
       deliveryFeeBreakdown: {

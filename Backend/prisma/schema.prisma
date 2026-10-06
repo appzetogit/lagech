@@ -2003,9 +2003,22 @@ model FoodZone {
 
   isActive Boolean @default(true)
 
+  /// The old Zone setup's per-zone payment switches, enforced when an order is
+  /// placed in this zone (see shared/zonePayment.js). Wallet and offline
+  /// payment are not governed by these.
+  cashOnDelivery Boolean @default(true)
+  /// Online payment: razorpay, card and razorpay_qr.
+  digitalPayment Boolean @default(true)
+  /// The zone an order falls back to when neither the request nor the
+  /// restaurant names one. At most one row is true (partial unique index
+  /// food_zones_one_default, in the migration).
+  isDefault      Boolean @default(false)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  heroBanners             FoodHeroBanner[]
+  broadcasts              NotificationBroadcast[]
   restaurants             FoodRestaurant[]         @relation("RestaurantZone")
   pendingRestaurants      FoodRestaurant[]         @relation("RestaurantPendingZone")
   orders                  FoodOrder[]
@@ -3513,8 +3526,19 @@ model NotificationBroadcast {
   createdById String  @db.VarChar(24)
   targetCount Int     @default(0)
 
+  /// Shown as the push's big picture and carried on each inbox row's metadata.
+  image      String    @default("")
+  /// Audience narrowed to one zone; null = everywhere.
+  zoneId     String?   @db.VarChar(24)
+  /// Off hides it from every recipient's inbox (the old list's Status switch).
+  isActive   Boolean   @default(true)
+  /// How many times it has been pushed: 1 on create, +1 per Resend.
+  sendCount  Int       @default(1)
+  lastSentAt DateTime?
+
   createdAt DateTime @default(now())
 
+  zone          FoodZone?          @relation(fields: [zoneId], references: [id], onDelete: SetNull)
   createdBy     FoodAdmin          @relation(fields: [createdById], references: [id])
   notifications FoodNotification[]
 
@@ -3612,14 +3636,33 @@ model FoodHeroBanner {
   /// ponytail: id array, matching the Mongo access pattern.
   linkedRestaurantIds String[]
 
+  /// What tapping the banner opens: a restaurant (linkedRestaurantIds), a dish
+  /// (linkedFoodId) or the ctaLink. The old panel's store wise / item wise /
+  /// default banner types.
+  bannerType   HeroBannerType @default(restaurant)
+  /// Plain id, no FK: a deleted dish just stops being returned.
+  linkedFoodId String?        @db.VarChar(24)
+  /// Null = shown in every zone.
+  zoneId       String?        @db.VarChar(24)
+  isFeatured   Boolean        @default(false)
+
   sortOrder Int     @default(0)
   isActive  Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  zone FoodZone? @relation(fields: [zoneId], references: [id], onDelete: SetNull)
+
   @@index([isActive, sortOrder])
+  @@index([zoneId, isActive])
   @@map("food_hero_banners")
+}
+
+enum HeroBannerType {
+  restaurant
+  food
+  link
 }
 
 model FoodUnder250Banner {

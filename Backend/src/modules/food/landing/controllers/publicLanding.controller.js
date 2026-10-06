@@ -9,6 +9,8 @@ import {
     isValidLongitude,
 } from '../../shared/geo.utils.js';
 import { getPublicHomePromotionBanners } from '../services/homePromotionBanner.service.js';
+import { listPublicHeroBanners } from '../services/heroBanner.service.js';
+import { resolveListingZone } from '../../shared/zone.service.js';
 
 const ACTIVE_BY_ORDER = {
     where: { isActive: true },
@@ -54,9 +56,24 @@ const hydrateRestaurants = async (ids, select, extraWhere = {}) => {
     );
 };
 
+/**
+ * GET /hero-banners/public?zoneId=|lat=&lng=&featured=true
+ *
+ * Filtered to the customer's zone like the other listings: banners for every
+ * zone plus that zone's own. Every field the app already read is unchanged;
+ * bannerType, linkedRestaurantIds, linkedFoodId, linkedFood, zoneId and
+ * isFeatured are additive.
+ */
 export const getPublicHeroBannersController = async (req, res, next) => {
     try {
-        const docs = await prisma.foodHeroBanner.findMany(ACTIVE_BY_ORDER);
+        const listingZone = await resolveListingZone(req.query || {});
+        if (listingZone.outOfService) {
+            return sendResponse(res, 200, 'Hero banners fetched', { banners: [], outOfService: true });
+        }
+        const docs = await listPublicHeroBanners({
+            zoneId: listingZone.zoneId,
+            featured: String(req.query?.featured || '') === 'true',
+        });
 
         // One query for every banner's links, rather than one per banner.
         const linked = await hydrateRestaurants(
@@ -65,14 +82,25 @@ export const getPublicHeroBannersController = async (req, res, next) => {
         );
         const byId = new Map(linked.map((r) => [r.id, r]));
 
+        const foodIds = [...new Set(docs.map((b) => b.linkedFoodId).filter(isId))];
+        const foods = foodIds.length
+            ? await prisma.foodItem.findMany({
+                where: { id: { in: foodIds }, approvalStatus: 'approved', restaurant: { status: 'approved' } },
+                select: { id: true, name: true, image: true, price: true, foodType: true, restaurantId: true },
+            })
+            : [];
+        const foodById = new Map(foods.map((f) => [f.id, { ...f, price: Number(f.price) || 0 }]));
+
         const banners = docs.map(({ linkedRestaurantIds, ...rest }) => ({
             ...rest,
+            linkedRestaurantIds: linkedRestaurantIds || [],
             linkedRestaurants: (linkedRestaurantIds || [])
                 .map((id) => byId.get(String(id)))
                 .filter(Boolean),
+            linkedFood: rest.linkedFoodId ? foodById.get(rest.linkedFoodId) || null : null,
         }));
 
-        return sendResponse(res, 200, 'Hero banners fetched', { banners });
+        return sendResponse(res, 200, 'Hero banners fetched', { banners, zoneId: listingZone.zoneId });
     } catch (error) {
         next(error);
     }

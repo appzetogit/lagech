@@ -25,6 +25,7 @@ import {
   assertRestaurantOpenForOrdering,
 } from './order-pricing.service.js';
 import { normalizeDeliveryAddress } from '../../shared/geo.utils.js';
+import { resolveOrderZoneId, assertZoneAllowsPayment } from '../../shared/zonePayment.js';
 import { getOfflinePaymentSettings } from '../../admin/services/adminSystemExtras.service.js';
 import { buildOfflinePaymentRecord, decideOfflinePayment, OFFLINE_STATUS } from './offlinePayment.util.js';
 import * as dispatchService from './order-dispatch.service.js';
@@ -503,10 +504,20 @@ export async function createOrder(userId, dto) {
         ? buildOfflinePaymentRecord(await getOfflinePaymentSettings(), dto.offlinePayment)
         : null;
 
+    // The zone the order is stamped with (sent zone, else the restaurant's, else
+    // the default zone), and that zone's Cash On Delivery / Digital Payment
+    // switches -- checked before anything is priced or written.
+    const orderZoneId = await resolveOrderZoneId(
+      dto.zoneId ? requireId(dto.zoneId, 'Zone ID') : null,
+      restaurant,
+    );
+    await assertZoneAllowsPayment(orderZoneId, paymentMethod);
+
     const pricingResult = await calculateOrderPricing(
       userId,
       {
         restaurantId,
+        zoneId: orderZoneId,
         items: dto.items || [],
         deliveryAddress,
         couponCode: dto.pricing?.couponCode || undefined,
@@ -581,7 +592,6 @@ export async function createOrder(userId, dto) {
     }
 
     // Same zone the order is about to be stamped with, a few lines below.
-    const orderZoneId = dto.zoneId || restaurant.zoneId || null;
     const feeSettings = await loadActiveFeeSettings(orderZoneId);
     const riderEarning = calculateRiderEarning(feeSettings, distanceKm) || 0;
 
@@ -614,7 +624,7 @@ export async function createOrder(userId, dto) {
       ...fromOrder({ pricing: normalizedPricing, payment, deliveryAddress }),
       userId: requireId(userId, 'User ID'),
       restaurantId,
-      zoneId: dto.zoneId ? requireId(dto.zoneId, 'Zone ID') : restaurant.zoneId || null,
+      zoneId: orderZoneId,
       customerName: String(dto.customerName || deliveryAddress.fullName || ""),
       customerPhone: String(dto.customerPhone || deliveryAddress.phone || ""),
       orderStatus: initialStatus,
