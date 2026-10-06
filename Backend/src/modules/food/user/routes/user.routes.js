@@ -42,6 +42,11 @@ import {
     getCashbackHistoryController,
     getRefundHistoryController
 } from '../controllers/cashback.controller.js';
+import {
+    convertLoyaltyPointsController,
+    getMyLoyaltyPointsController,
+    listWalletBonusesController
+} from '../controllers/customerRewards.controller.js';
 
 const router = express.Router();
 
@@ -54,6 +59,11 @@ router.delete('/profile', deleteCurrentUserAccountController);
 router.get('/wallet', getUserWalletController);
 router.post('/wallet/topup/order', createWalletTopupOrderController);
 router.post('/wallet/topup/verify', verifyWalletTopupPaymentController);
+router.get('/wallet/bonuses', listWalletBonusesController);
+
+// Loyalty points (Bearer USER)
+router.get('/loyalty-points', getMyLoyaltyPointsController);
+router.post('/loyalty-points/convert', convertLoyaltyPointsController);
 
 // Wallet sub-ledgers (both derived from the wallet/order records, no separate store)
 router.get('/cashback', getCashbackHistoryController);

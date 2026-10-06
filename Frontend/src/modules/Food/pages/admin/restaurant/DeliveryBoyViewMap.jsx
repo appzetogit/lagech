@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react"
 import { useNavigate } from "react-router-dom"
-import { MapPin, ArrowLeft, Search, Bike } from "lucide-react"
+import { MapPin, ArrowLeft, Search, Bike } from "@food/components/admin/theme/icons"
 import { adminAPI } from "@food/api"
 import { getGoogleMapsApiKey } from "@food/utils/googleMapsApiKey"
 import { Loader } from "@googlemaps/js-api-loader"

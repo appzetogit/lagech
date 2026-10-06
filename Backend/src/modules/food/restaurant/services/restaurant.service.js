@@ -1647,6 +1647,7 @@ const PUBLIC_CARD_SELECT = {
     offer: true, featuredDish: true, featuredPrice: true,
     rating: true, totalRatings: true, isAcceptingOrders: true, status: true,
     pureVegRestaurant: true, createdAt: true,
+    isRecommended: true, recommendedSortOrder: true,
     openingTime: true, closingTime: true, openDays: true,
     latitude: true, longitude: true, formattedAddress: true,
     addressLine1: true, addressLine2: true, state: true, pincode: true, landmark: true,
@@ -1761,6 +1762,9 @@ export const listApprovedRestaurants = async (query = {}) => {
     if (maxPrice !== null) AND.push({ featuredPrice: { lte: Math.max(0, maxPrice) } });
 
     if (query.topRated === 'true') AND.push({ rating: { gte: 4.5 } });
+    // The admin's hand-picked list (Recommended Restaurants), in the admin's order.
+    const recommendedOnly = query.recommended === 'true';
+    if (recommendedOnly) AND.push({ isRecommended: true });
     if (query.trusted === 'true') AND.push({ totalRatings: { gte: 100 } });
 
     if (query.search && String(query.search).trim()) {
@@ -1846,7 +1850,9 @@ export const listApprovedRestaurants = async (query = {}) => {
 
         const sorted = rows
             .map((r) => ({ ...toPublicCard(r), distanceInKm: distanceById.get(r.id) ?? null }))
-            .sort(sorters[sortBy] || byDistance);
+            .sort(sorters[sortBy] || (recommendedOnly
+                ? (a, b) => a.recommendedSortOrder - b.recommendedSortOrder || byDistance(a, b)
+                : byDistance));
 
         return finish(sorted.slice(skip, skip + limit), sorted.length);
     }
@@ -1860,7 +1866,9 @@ export const listApprovedRestaurants = async (query = {}) => {
             'price-low': [{ featuredPrice: 'asc' }, { createdAt: 'desc' }],
             'price-high': [{ featuredPrice: 'desc' }, { createdAt: 'desc' }],
             deliveryTime: [{ estimatedDeliveryTimeMinutes: 'asc' }, { createdAt: 'desc' }],
-        }[sortBy] || [{ createdAt: 'desc' }];
+        }[sortBy] || (recommendedOnly
+            ? [{ recommendedSortOrder: 'asc' }, { createdAt: 'desc' }]
+            : [{ createdAt: 'desc' }]);
 
     const [rows, total] = await Promise.all([
         prisma.foodRestaurant.findMany({

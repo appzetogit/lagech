@@ -1,4 +1,4 @@
-import { TrendingUp } from "lucide-react"
+import { TrendingUp } from "@food/components/admin/theme/icons"
 import { adminAPI } from "@food/api"
 import ReportShell, { rupees } from "./ReportShell"
 

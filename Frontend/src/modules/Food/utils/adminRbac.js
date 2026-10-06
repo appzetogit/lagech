@@ -68,6 +68,11 @@ const PATH_PREFIX_TO_SECTION = [
   // Same sections the backend checks for these pages' API calls: refunds are
   // /orders/..., commission rules are /delivery/... .
   { prefix: "/admin/food/delivery-boy-commission", section: "delivery_management" },
+  // Before the broad "/admin/food/delivery" entry below, which these also start
+  // with: paying riders is a transaction, their earnings are a report.
+  { prefix: "/admin/food/deliveryman-disbursements", section: "transaction_management" },
+  { prefix: "/admin/food/deliveryman-payments", section: "transaction_management" },
+  { prefix: "/admin/food/deliveryman-earning-report", section: "report_management" },
   { prefix: "/admin/food/order-refunds", section: "order_management" },
   { prefix: "/admin/food/order-cancel-reasons", section: "order_management" },
   { prefix: "/admin/food/dispatch", section: "order_management" },
@@ -83,9 +88,14 @@ const PATH_PREFIX_TO_SECTION = [
   { prefix: "/admin/food/cashback", section: "promotions_management" },
   { prefix: "/admin/food/advertisements", section: "promotions_management" },
   { prefix: "/admin/food/reels", section: "promotions_management" },
+  { prefix: "/admin/food/campaigns", section: "promotions_management" },
   { prefix: "/admin/food/referral-settings", section: "referral_rewards" },
   { prefix: "/admin/food/customers", section: "customer_management" },
   { prefix: "/admin/food/support-tickets", section: "customer_management" },
+  { prefix: "/admin/food/user-overview", section: "customer_management" },
+  { prefix: "/admin/food/wallet", section: "customer_management" },
+  { prefix: "/admin/food/loyalty-point", section: "customer_management" },
+  { prefix: "/admin/food/subscribed-mail-list", section: "customer_management" },
   // Live chat rides on the same section as the rest of support. It is not
   // under /food/admin, so it needs saying explicitly.
   { prefix: "/admin/food/chattings", section: "customer_management" },
@@ -104,6 +114,19 @@ const PATH_PREFIX_TO_SECTION = [
   { prefix: "/admin/food/restaurant-withdraws", section: "transaction_management" },
   { prefix: "/admin/food/restaurant-disbursements", section: "transaction_management" },
   { prefix: "/admin/food/balance-sheet", section: "transaction_management" },
+  { prefix: "/admin/food/restaurant-payments", section: "transaction_management" },
+  { prefix: "/admin/food/withdraw-method", section: "transaction_management" },
+  { prefix: "/admin/food/restaurant-earning-report", section: "report_management" },
+  { prefix: "/admin/food/disbursement-report", section: "report_management" },
+  { prefix: "/admin/food/restaurant-vat-report", section: "report_management" },
+  { prefix: "/admin/food/app-web-settings", section: "system_settings" },
+  { prefix: "/admin/food/login-setup", section: "system_settings" },
+  { prefix: "/admin/food/notification-channels", section: "system_settings" },
+  { prefix: "/admin/food/email-template", section: "system_settings" },
+  { prefix: "/admin/food/landing-page-settings", section: "system_settings" },
+  { prefix: "/admin/food/react-site", section: "system_settings" },
+  { prefix: "/admin/food/page-meta-data", section: "system_settings" },
+  { prefix: "/admin/food/gallery", section: "system_settings" },
   { prefix: "/admin/food/hero-banner-management", section: "banner_management" },
   { prefix: "/admin/food/promotional-banner", section: "banner_management" },
   { prefix: "/admin/food/feature-settings", section: "system_settings" },

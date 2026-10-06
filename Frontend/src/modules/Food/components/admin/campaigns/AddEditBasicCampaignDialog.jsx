@@ -1,4 +1,4 @@
-import { Plus, Pencil, Calendar, Clock } from "lucide-react"
+import { Plus, Pencil, Calendar, Clock } from "@food/components/admin/theme/icons"
 import { useState, useEffect } from "react"
 import {
   Dialog,

@@ -1,5 +1,5 @@
 import { motion, useReducedMotion } from "framer-motion"
-import { Shield, BarChart3 } from "lucide-react"
+import { Shield, BarChart3 } from "@food/components/admin/theme/icons"
 import { useCompanyName } from "@food/hooks/useCompanyName"
 import lagechLogo from "@food/assets/lagech-logo.png"
 

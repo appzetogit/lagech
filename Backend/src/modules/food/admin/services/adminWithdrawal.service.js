@@ -76,8 +76,11 @@ export async function getWithdrawals(query = {}) {
         where.status = String(query.status).toLowerCase();
     }
     if (isId(query.restaurantId)) where.restaurantId = String(query.restaurantId);
-    // 'manual' (asked for by the restaurant) or 'disbursement' (daily payout run).
-    if (['manual', 'disbursement'].includes(query.source)) where.source = query.source;
+    // 'manual' (asked for by the restaurant), 'disbursement' (daily payout run)
+    // or 'admin_payment' (recorded on Restaurant Payments). Those payments were
+    // never requests, so the request list leaves them out unless asked.
+    if (['manual', 'disbursement', 'admin_payment'].includes(query.source)) where.source = query.source;
+    else where.source = { not: 'admin_payment' };
 
     const [withdrawals, total] = await Promise.all([
         prisma.foodRestaurantWithdrawal.findMany({
@@ -214,6 +217,16 @@ export async function updateDeliveryWithdrawalStatus(
         const locked = Number(wallet?.lockedAmount) || 0;
 
         if (next === 'approved') {
+            // Release the reservation first: a payout of the whole balance
+            // would otherwise leave lockedAmount above the new balance for a
+            // moment, which wallet_locked_within_balance rejects.
+            if (locked > 0) {
+                await tx.wallet.update({
+                    where: walletKey,
+                    data: { lockedAmount: { decrement: Math.min(locked, amount) } },
+                });
+            }
+
             // The debit and its ledger entry share this transaction, so an
             // approved withdrawal always leaves a matching row in the rider's
             // transaction history. recordTransaction's own WHERE-clause guard
@@ -242,7 +255,7 @@ export async function updateDeliveryWithdrawalStatus(
 
             await tx.wallet.updateMany({
                 where: { entityType: 'deliveryBoy', entityId: claimed.deliveryPartnerId },
-                data: { totalSettled: { increment: amount }, lockedAmount: { decrement: Math.min(locked, amount) } },
+                data: { totalSettled: { increment: amount } },
             });
         }
 

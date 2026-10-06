@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Plus, Trash2, Settings, ChevronDown } from "lucide-react"
+import { Plus, Trash2, Settings, ChevronDown } from "@food/components/admin/theme/icons"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}

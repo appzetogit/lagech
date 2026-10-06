@@ -73,6 +73,9 @@ export default function ItemDetailsPage() {
   const [otherPrice, setOtherPrice] = useState("")
   const [variants, setVariants] = useState([])
   const [preparationTime, setPreparationTime] = useState("")
+  // Free text, comma-separated; the server tidies it into a list. Allergens
+  // reuse the `allergens` state declared below.
+  const [nutrition, setNutrition] = useState("")
   const [gst, setGst] = useState("5.0")
   const [isRecommended, setIsRecommended] = useState(false)
   const [isInStock, setIsInStock] = useState(true)
@@ -130,6 +133,7 @@ export default function ItemDetailsPage() {
     setBasePrice(itemVariants.length === 0 ? item.price?.toString() || "" : "")
     setOtherPrice(itemVariants.length === 0 ? item.otherPrice?.toString() || "" : "")
     setPreparationTime(item.preparationTime || "")
+    setNutrition(Array.isArray(item.nutrition) ? item.nutrition.join(", ") : "")
     setGst(item.gst?.toString() || "5.0")
     setIsRecommended(item.isRecommended || false)
     setIsInStock(item.isAvailable !== false)
@@ -174,7 +178,9 @@ export default function ItemDetailsPage() {
       })
     }
 
-    if (item.allergies && Array.isArray(item.allergies) && item.allergies.length > 0) {
+    if (Array.isArray(item.allergens) && item.allergens.length > 0) {
+      setAllergens(item.allergens.join(", "))
+    } else if (item.allergies && Array.isArray(item.allergies) && item.allergies.length > 0) {
       setAllergens(item.allergies.join(", "))
     }
   }
@@ -726,6 +732,8 @@ export default function ItemDetailsPage() {
           foodType: foodType,
           isAvailable: isInStock,
           preparationTime: preparationTime || "",
+          nutrition,
+          allergens,
           categoryId: categoryId || undefined,
           categoryName,
           isRecommended,
@@ -753,6 +761,8 @@ export default function ItemDetailsPage() {
           foodType: foodType,
           isAvailable: isInStock,
           preparationTime: preparationTime || "",
+          nutrition,
+          allergens,
           categoryId: categoryId || undefined,
           categoryName,
           isRecommended,
@@ -1260,6 +1270,24 @@ export default function ItemDetailsPage() {
                   </select>
                   <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500 pointer-events-none" />
                 </div>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">Nutrition (separate with commas)</label>
+                <input
+                  value={nutrition}
+                  onChange={(e) => setNutrition(e.target.value)}
+                  placeholder="e.g. Calories 250 kcal, High protein"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm text-gray-900 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">Allergens (separate with commas)</label>
+                <input
+                  value={allergens}
+                  onChange={(e) => setAllergens(e.target.value)}
+                  placeholder="e.g. Peanuts, Gluten, Dairy"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm text-gray-900 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
               </div>
               {/* <div>
                 <label className="block text-xs text-gray-600 mb-1">GST</label>

@@ -11,7 +11,7 @@ import {
 } from "@food/components/ui/card"
 import { Input } from "@food/components/ui/input"
 import { Label } from "@food/components/ui/label"
-import { Mail, User, Lock, Eye, EyeOff, ArrowLeft, Shield } from "lucide-react"
+import { Mail, User, Lock, Eye, EyeOff, ArrowLeft, Shield } from "@food/components/admin/theme/icons"
 import lagechLogo from "@food/assets/lagech-logo.png"
 import { authAPI, adminAPI } from "@food/api"
 import { setAuthData } from "@food/utils/auth"

@@ -24,6 +24,10 @@ import { requireAdminPermission, requireAnyAdminPermission } from '../../../../c
 import * as driverRegField from '../../delivery/controllers/driverRegistrationField.controller.js';
 import * as cashbackSettings from '../controllers/cashbackSettings.controller.js';
 import * as restaurantAppBanner from '../controllers/restaurantAppBanner.controller.js';
+import adminCustomerExtrasRoutes from './adminCustomerExtras.routes.js';
+import adminRiderExtrasRoutes from './adminRiderExtras.routes.js';
+import adminSystemExtrasRoutes from './adminSystemExtras.routes.js';
+import adminCatalogExtrasRoutes from './adminCatalogExtras.routes.js';
 
 const router = express.Router();
 
@@ -63,6 +67,8 @@ const resolveSectionFromRequest = (path = '', method = '') => {
     if (path.startsWith('/sub-admins')) return 'sub_admin_management';
     if (path === '/customers' && String(method).toUpperCase() === 'GET') return null;
     if (path.startsWith('/customers') || path.startsWith('/support-tickets')) return 'customer_management';
+    if (path.startsWith('/customer-wallet') || path.startsWith('/loyalty-points')
+        || path.startsWith('/newsletter-subscribers') || path.startsWith('/user-overview')) return 'customer_management';
     if (path === '/zones' && String(method).toUpperCase() === 'GET') return null;
     if (/^\/zones\/[^/]+$/.test(path) && String(method).toUpperCase() === 'GET') return null;
     if (path === '/restaurants' && String(method).toUpperCase() === 'GET') return null;
@@ -80,14 +86,16 @@ const resolveSectionFromRequest = (path = '', method = '') => {
     if (path.startsWith('/categories') || path.startsWith('/addons') || path.startsWith('/foods')) return 'food_management';
     // Cashback settings were unguarded: any sub-admin could change what every order pays out.
     if (path.startsWith('/offers') || path.startsWith('/cashback-settings')
-        || path.startsWith('/advertisements') || path.startsWith('/reels')) return 'promotions_management';
+        || path.startsWith('/advertisements') || path.startsWith('/reels')
+        || path.startsWith('/campaigns')) return 'promotions_management';
     if (path.startsWith('/orders') || path.startsWith('/order-detect-delivery') || path.startsWith('/order-cancel-reasons')) return 'order_management';
     if (path.startsWith('/delivery')) return 'delivery_management';
     if (path.startsWith('/withdrawals')) return 'transaction_management';
     if (path.startsWith('/feedback-experiences')) return 'report_management';
     if (path.startsWith('/reports')) return 'report_management';
     if (path.startsWith('/feature-settings') || path.startsWith('/business-settings') || path.startsWith('/power-scanning') || path.startsWith('/notifications')) return 'system_settings';
-    if (path.startsWith('/pages-social-media')) return 'pages_social_media';
+    if (path.startsWith('/pages-social-media') || path.startsWith('/social-media')) return 'pages_social_media';
+    if (path.startsWith('/email-templates') || path.startsWith('/system-settings') || path.startsWith('/gallery')) return 'system_settings';
     // These four sections were grantable in the role editor but appeared in no
     // guard, so ticking their boxes did nothing at all. The sidebar hid the menu
     // entry, which made them look enforced -- the API was open to any sub-admin
@@ -141,6 +149,11 @@ router.use('/power-scanning', requireAdminPermission('system_settings', 'view'))
 router.use('/notifications', requireAdminPermission('system_settings', 'view'));
 router.use('/pages-social-media', requireAdminPermission('pages_social_media', 'view'));
 router.use('/sidebar-badges', requireAdminPermission('dashboard', 'view'));
+router.use(adminRiderExtrasRoutes); // Add Delivery Man, vehicle categories, rider payouts and earning report.
+// Withdrawal methods, restaurant payments, money reports, email templates,
+// system settings, social media, gallery -- guarded by the mapping above.
+router.use(adminSystemExtrasRoutes);
+router.use(adminCatalogExtrasRoutes); // reviews, gallery, addon categories, recommended, bulk import/export, campaigns
 
 router.post('/sub-admins', requireAdminPermission('sub_admin_management', 'create'), adminController.createSubAdmin);
 router.get('/sub-admins', adminController.listSubAdmins);
@@ -163,6 +176,9 @@ router.get('/notifications/broadcast', notificationBroadcastController.getBroadc
 // system_settings guard the broadcast routes already carry.
 router.get('/notifications/lapsed-customers', notificationBroadcastController.getLapsedCustomersController);
 router.delete('/notifications/broadcast/:id', notificationBroadcastController.deleteBroadcastNotificationController);
+
+// ----- Customer wallet, loyalty points, newsletter list, user overview -----
+router.use(adminCustomerExtrasRoutes);
 
 // ----- Customers -----
 router.get(

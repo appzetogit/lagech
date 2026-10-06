@@ -18,7 +18,7 @@ import {
   FileSpreadsheet,
   Code,
   Calendar,
-} from "lucide-react";
+} from "@food/components/admin/theme/icons";
 import { emptyCampaignOrderReports, emptyCampaignOrderStats } from "@food/utils/adminFallbackData";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"

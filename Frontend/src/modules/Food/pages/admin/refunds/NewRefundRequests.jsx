@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from "react"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
-import { Loader2 } from "lucide-react"
+import { Loader2 } from "@food/components/admin/theme/icons"
 import OrdersTopbar from "@food/components/admin/orders/OrdersTopbar"
 import OrdersTable from "@food/components/admin/orders/OrdersTable"
 import FilterPanel from "@food/components/admin/orders/FilterPanel"

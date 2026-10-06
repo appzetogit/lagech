@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react"
 
-import { Search, Download, ChevronDown, Plus, Edit, Trash2, Upload, Image as ImageIcon, Info, Loader2 } from "lucide-react"
+import { Search, Download, ChevronDown, Plus, Edit, Trash2, Upload, Image as ImageIcon, Info, Loader2 } from "@food/components/admin/theme/icons"
 
 import api from "@food/api"
 

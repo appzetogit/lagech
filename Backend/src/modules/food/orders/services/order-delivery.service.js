@@ -975,6 +975,11 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
     .then(({ awardOrderCashback }) => awardOrderCashback(row.id))
     .catch((e) => logger.warn(`cashback award hook failed: ${e?.message || e}`));
 
+  // Customer loyalty points on the delivered order. Idempotent per order, never throws.
+  import('../../user/services/loyaltyPoint.service.js')
+    .then(({ awardOrderLoyaltyPoints }) => awardOrderLoyaltyPoints(row.id))
+    .catch((e) => logger.warn(`loyalty points hook failed: ${e?.message || e}`));
+
   const ledgerKind =
     payMethod === 'cash' && prevPayStatus === 'cod_pending'
       ? 'cod_marked_paid_on_delivery'

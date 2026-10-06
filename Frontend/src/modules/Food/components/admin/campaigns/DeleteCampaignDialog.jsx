@@ -1,4 +1,4 @@
-import { AlertTriangle, X } from "lucide-react"
+import { AlertTriangle, X } from "@food/components/admin/theme/icons"
 import {
   Dialog,
   DialogContent,

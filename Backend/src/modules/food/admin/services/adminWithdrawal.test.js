@@ -81,6 +81,18 @@ test('approving a payout debits the wallet once', async () => {
     assert.equal(Number(wallet.lockedAmount), 0, 'the reservation is released');
 });
 
+test('approving a payout of the whole balance works', async () => {
+    const partner = await makePartner(300, 300);
+    const w = await makeWithdrawal(partner, 300);
+
+    const updated = await updateDeliveryWithdrawalStatus(w.id, { status: 'approved' });
+    assert.equal(updated.status, 'approved');
+
+    const wallet = await walletOf(partner.id);
+    assert.equal(Number(wallet.balance), 0);
+    assert.equal(Number(wallet.lockedAmount), 0);
+});
+
 test('two admins approving at once pay only once', async () => {
     const partner = await makePartner(500);
     const w = await makeWithdrawal(partner, 500);

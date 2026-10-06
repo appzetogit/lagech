@@ -1,6 +1,7 @@
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
+import { recordRiderPaymentInTx } from './adminRiderBalance.service.js';
 
 /**
  * What the platform owes each restaurant and rider, and paying it.
@@ -296,7 +297,7 @@ export async function payoutEntity(entityType, entityId, body = {}) {
     // move, so the same money stayed payable there and could be paid twice.
     if (entityType === 'restaurant') {
         throw new ValidationError(
-            'Restaurants are paid from Restaurant Disbursement or their withdrawal requests, so their balance stays right. Nothing was recorded here.',
+            'Restaurants are paid from Restaurant Disbursement, their withdrawal requests or Restaurant Payments, so their balance stays right. Nothing was recorded here.',
         );
     }
 
@@ -368,6 +369,23 @@ export async function payoutEntity(entityType, entityId, body = {}) {
 
         if (!count) throw new ValidationError('Nothing outstanding for this period');
 
+        // The rider withdraws from a balance worked out from orders, bonuses and
+        // withdrawals, which these settlement flags do not touch. Without this
+        // the money paid here stayed withdrawable and could be paid a second
+        // time. It is taken off that balance in this same transaction, and the
+        // payout fails if the rider no longer has that much to be paid.
+        if (!isRestaurant) {
+            await recordRiderPaymentInTx(tx, {
+                deliveryPartnerId: String(entityId),
+                amount,
+                method: 'bank_transfer',
+                reference: String(body.reference || '').slice(0, 120),
+                note: String(body.notes || '').slice(0, 500),
+                adminId: body.adminId,
+                source: 'balance_sheet',
+            });
+        }
+
         const settlement = await tx.settlement.create({
             data: {
                 entityType: isRestaurant ? 'restaurant' : 'deliveryBoy',
@@ -405,7 +423,7 @@ export async function payoutEntity(entityType, entityId, body = {}) {
             transactionsSettled: count,
             period: { from: start, to: end },
         };
-    });
+    }, { timeout: 20000 });
 }
 
 /** Past payout runs, newest first. */

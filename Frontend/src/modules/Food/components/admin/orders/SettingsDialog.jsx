@@ -1,4 +1,4 @@
-import { Settings, Columns, Check } from "lucide-react"
+import { Settings, Columns, Check } from "@food/components/admin/theme/icons"
 import {
   Dialog,
   DialogContent,

@@ -1,4 +1,4 @@
-import { Search, Filter, Download, ChevronDown, Settings } from "lucide-react"
+import { Search, Filter, Download, ChevronDown, Settings } from "@food/components/admin/theme/icons"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -7,7 +7,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@food/components/ui/dropdown-menu"
-import { FileSpreadsheet, FileText } from "lucide-react"
+import { FileSpreadsheet, FileText } from "@food/components/admin/theme/icons"
 
 export default function OrdersTopbar({
   title,

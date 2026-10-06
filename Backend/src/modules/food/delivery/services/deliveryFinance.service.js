@@ -12,6 +12,7 @@ import {
 import { logger } from '../../../../utils/logger.js';
 import { recordTransaction } from '../../../../core/payments/transaction.service.js';
 import { getRiderCashStatus } from './riderCash.service.js';
+import { getPayoutSnapshot } from '../../admin/services/withdrawalMethods.service.js';
 
 const num = (v) => Number(v) || 0;
 
@@ -202,6 +203,8 @@ export const requestDeliveryWithdrawal = async (deliveryPartnerId, payload) => {
     ]);
 
     if (!partner) throw new ValidationError('Delivery partner not found');
+    // The payout method the rider chose, kept with the bank fields on the request.
+    const payoutMethod = bankDetails ? null : await getPayoutSnapshot('rider', partnerId);
 
     const pendingBefore = num(pendingAgg?._sum?.amount);
     const currentBalance = num(walletDoc?.balance);
@@ -239,6 +242,7 @@ export const requestDeliveryWithdrawal = async (deliveryPartnerId, payload) => {
                     ifscCode: partner.bankIfscCode,
                     bankName: partner.bankName,
                     accountHolderName: partner.bankAccountHolderName,
+                    ...(payoutMethod ? { payoutMethod } : {}),
                 },
                 upiId: partner.upiId,
                 upiQrCode: partner.upiQrCode,

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
-import { MapPin, Plus, Search, Edit, Trash2, Eye, Map, Bike } from "lucide-react"
+import { MapPin, Plus, Search, Edit, Trash2, Eye, Map, Bike } from "@food/components/admin/theme/icons"
 import { adminAPI } from "@food/api"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}

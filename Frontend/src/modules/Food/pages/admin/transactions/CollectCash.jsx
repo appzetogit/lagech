@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react"
-import { Search, Download, ChevronDown, Eye, Settings, Wallet, ArrowUpDown, FileText, FileSpreadsheet, Code, Check, Columns } from "lucide-react"
+import { Search, Download, ChevronDown, Eye, Settings, Wallet, ArrowUpDown, FileText, FileSpreadsheet, Code, Check, Columns } from "@food/components/admin/theme/icons"
 import { emptyCollectCashTransactions } from "@food/utils/adminFallbackData"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter as DialogFooterComponent } from "@food/components/ui/dialog"

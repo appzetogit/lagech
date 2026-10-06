@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect } from "react"
-import { Package, Truck, CheckCircle, Clock, XCircle, Loader2 } from "lucide-react"
+import { Package, Truck, CheckCircle, Clock, XCircle, Loader2 } from "@food/components/admin/theme/icons"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
 import OrdersTopbar from "@food/components/admin/orders/OrdersTopbar"

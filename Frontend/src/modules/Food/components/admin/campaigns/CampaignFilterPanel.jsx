@@ -1,4 +1,4 @@
-import { X } from "lucide-react"
+import { X } from "@food/components/admin/theme/icons"
 
 export default function CampaignFilterPanel({ isOpen, onClose, filters, setFilters, onApply, onReset }) {
   if (!isOpen) return null

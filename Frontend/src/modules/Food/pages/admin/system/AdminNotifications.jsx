@@ -1,4 +1,4 @@
-import { Bell, Clock, Loader2, Trash2, X } from "lucide-react";
+import { Bell, Clock, Loader2, Trash2, X } from "@food/components/admin/theme/icons";
 import { useNavigate } from "react-router-dom";
 import useAdminNotifications from "@food/hooks/useAdminNotifications";
 

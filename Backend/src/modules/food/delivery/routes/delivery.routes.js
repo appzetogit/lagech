@@ -6,6 +6,7 @@ import { uploadRateLimiter } from '../../../uploads/middleware/upload.middleware
 import * as orderController from '../../orders/controllers/order.controller.js';
 import { registerDeliveryPartnerController, updateDeliveryPartnerProfileController, updateDeliveryPartnerBankDetailsController, listSupportTicketsController, createSupportTicketController, getSupportTicketByIdController, listOrderEmergencyRequestsController, createOrderEmergencyRequestController, getOrderEmergencyRequestController, updateDeliveryPartnerDetailsController, updateDeliveryPartnerProfilePhotoBase64Controller, updateAvailabilityController, getWalletController, createWithdrawalRequestController, createCashDepositOrderController, verifyCashDepositPaymentController, getEarningsController, getTripHistoryController, getPocketDetailsController, getEmergencyHelpController, getCashLimitController, getDeliveryReferralStatsController, getActiveEarningAddonsController, deleteDeliveryPartnerAccountController } from '../controllers/delivery.controller.js';
 import { getPublicFormSchemaController } from '../controllers/driverRegistrationField.controller.js';
+import { riderPayout } from '../../admin/controllers/adminSystemExtras.controller.js';
 
 const router = express.Router();
 
@@ -56,6 +57,10 @@ router.patch('/profile/details', authMiddleware, requireRoles('DELIVERY_PARTNER'
 router.post('/profile/photo-base64', authMiddleware, requireRoles('DELIVERY_PARTNER'), updateDeliveryPartnerProfilePhotoBase64Controller);
 
 router.patch('/profile/bank-details', authMiddleware, requireRoles('DELIVERY_PARTNER'), uploadFields, updateDeliveryPartnerBankDetailsController);
+// Payout methods the admin accepts, and the one this rider chose.
+router.get('/payout-methods', authMiddleware, requireRoles('DELIVERY_PARTNER'), riderPayout.listMethods);
+router.get('/payout-details', authMiddleware, requireRoles('DELIVERY_PARTNER'), riderPayout.getDetails);
+router.put('/payout-details', authMiddleware, requireRoles('DELIVERY_PARTNER'), riderPayout.saveDetails);
 router.delete('/profile/account', authMiddleware, requireRoles('DELIVERY_PARTNER'), deleteDeliveryPartnerAccountController);
 
 router.patch('/availability', authMiddleware, requireRoles('DELIVERY_PARTNER'), updateAvailabilityController);

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Loader2, X } from "lucide-react"
+import { Loader2, X } from "@food/components/admin/theme/icons"
 import { adminAPI } from "@food/api"
 
 const OTHER = "__other__"

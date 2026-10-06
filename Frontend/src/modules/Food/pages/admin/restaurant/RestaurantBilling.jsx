@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from "react"
-import { Search, Loader2, Percent, IndianRupee, X, RotateCcw, Info } from "lucide-react"
+import { Search, Loader2, Percent, IndianRupee, X, RotateCcw, Info } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminAPI } from "@food/api"
 

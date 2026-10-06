@@ -36,6 +36,7 @@ import {
     createWithdrawalRequestController,
     listMyWithdrawalsController
 } from '../controllers/withdrawal.controller.js';
+import { restaurantPayout } from '../../admin/controllers/adminSystemExtras.controller.js';
 import {
     getSubscriptionOverviewController,
     listSubscriptionInvoicesController,
@@ -160,6 +161,10 @@ router.put('/outlet-timings', authMiddleware, requireRestaurant, upsertCurrentRe
 router.get('/finance', authMiddleware, requireRestaurant, getRestaurantFinanceController);
 router.post('/withdraw', authMiddleware, requireRestaurant, createWithdrawalRequestController);
 router.get('/withdrawals', authMiddleware, requireRestaurant, listMyWithdrawalsController);
+// Payout methods the admin accepts, and the one this restaurant chose.
+router.get('/payout-methods', authMiddleware, requireRestaurant, restaurantPayout.listMethods);
+router.get('/payout-details', authMiddleware, requireRestaurant, restaurantPayout.getDetails);
+router.put('/payout-details', authMiddleware, requireRestaurant, restaurantPayout.saveDetails);
 // Advertisement requests: the restaurant asks, the admin decides.
 router.get('/advertisements', authMiddleware, requireRestaurant, promotionsController.listMyAds);
 router.post('/advertisements', authMiddleware, requireRestaurant, promotionsController.requestAd);

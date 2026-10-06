@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Search, TrendingUp, ShoppingCart, XCircle, Star, Calendar, BarChart3, Users, Package, Clock, CreditCard, ChevronDown, Check, Store } from 'lucide-react'
+import { Search, TrendingUp, ShoppingCart, XCircle, Star, Calendar, BarChart3, Users, Package, Clock, CreditCard, ChevronDown, Check, Store } from "@food/components/admin/theme/icons"
 import { adminAPI } from '@food/api'
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
