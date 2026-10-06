@@ -92,6 +92,7 @@ const PATH_PREFIX_TO_SECTION = [
   { prefix: "/admin/food/referral-settings", section: "referral_rewards" },
   { prefix: "/admin/food/customers", section: "customer_management" },
   { prefix: "/admin/food/support-tickets", section: "customer_management" },
+  { prefix: "/admin/food/order-issue-reports", section: "customer_management" },
   { prefix: "/admin/food/user-overview", section: "customer_management" },
   { prefix: "/admin/food/wallet", section: "customer_management" },
   { prefix: "/admin/food/loyalty-point", section: "customer_management" },

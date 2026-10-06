@@ -2851,7 +2851,11 @@ export async function markOrderDeliveredAdmin(orderId, adminId, note = "") {
   return normalizeOrderForClient(updated);
 }
 
-export async function processRefundAdmin(orderId, amount, adminId) {
+/**
+ * `options.notify === false` leaves telling the customer to the caller (the
+ * refund-request approval sends its own message about the request).
+ */
+export async function processRefundAdmin(orderId, amount, adminId, options = {}) {
   const identity = buildOrderIdentityFilter(orderId);
   const row = await prisma.foodOrder.findFirst({ where: identity, include: orderInclude });
   if (!row) throw new NotFoundError("Order not found");
@@ -2891,11 +2895,16 @@ export async function processRefundAdmin(orderId, amount, adminId) {
     logger.warn(`Admin refund transaction sync failed: ${err?.message || err}`);
   }
 
+  // Points the order earned go back with the money. Idempotent, never throws.
+  await import('../../user/services/loyaltyPoint.service.js')
+    .then(({ reverseOrderLoyaltyPoints }) => reverseOrderLoyaltyPoints(order.id))
+    .catch((err) => logger.warn(`Refund loyalty reversal failed: ${err?.message || err}`));
+
   const updated = toOrder(
     await prisma.foodOrder.findUnique({ where: { id: order.id }, include: orderInclude }),
   );
 
-  if (updated.userId) {
+  if (updated.userId && options.notify !== false) {
     await notifyOwnersSafely([{ ownerType: "USER", ownerId: updated.userId }], {
       title: "Refund Processed! 💸",
       body: `Your refund of ₹${refundAmount} for Order #${updated.order_id || updated.id} has been processed successfully.`,

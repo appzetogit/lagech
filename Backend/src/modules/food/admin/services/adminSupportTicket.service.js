@@ -29,6 +29,7 @@ const USER_TICKET_INCLUDE = {
     order: {
         select: {
             id: true,
+            order_id: true,
             restaurantId: true,
             restaurant: { select: { id: true, restaurantName: true, city: true, area: true } },
         },
@@ -61,6 +62,11 @@ const mapUserTicket = (t) => {
         userId: t.userId,
         type: t.type,
         orderId: t.orderId || null,
+        // The order number the admin searches by; order issue reports carry
+        // the reason picked and the customer's photos.
+        orderDisplayId: t.order?.order_id || null,
+        reasonId: t.reasonId || '',
+        images: t.images || [],
         restaurantId: restaurant?._id || t.restaurantId || t.order?.restaurantId || null,
         issueType: t.issueType,
         description: t.description,
@@ -321,7 +327,14 @@ export async function updateSupportTicket(id, body = {}) {
                 payload: {
                     title: 'Support Ticket Response',
                     body: message,
-                    data: { type: 'SUPPORT_RESPONSE', ticketId: String(updated.id), source },
+                    // The inbox row was written just above, with its own category.
+                    skipInbox: true,
+                    data: {
+                        type: 'SUPPORT_RESPONSE',
+                        ticketId: String(updated.id),
+                        source,
+                        ...(updated.orderId ? { orderId: String(updated.orderId) } : {}),
+                    },
                 },
             }).catch((err) => logger.error('Error sending support push notification:', err));
         }

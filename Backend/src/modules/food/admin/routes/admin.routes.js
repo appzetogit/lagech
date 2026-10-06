@@ -30,6 +30,7 @@ import adminSystemExtrasRoutes from './adminSystemExtras.routes.js';
 import adminCatalogExtrasRoutes from './adminCatalogExtras.routes.js';
 import adminOrderReportsRoutes from './adminOrderReports.routes.js';
 import adminListToolsRoutes from './adminListTools.routes.js';
+import adminRefundRequestsRoutes from './adminRefundRequests.routes.js';
 
 const router = express.Router();
 
@@ -158,6 +159,7 @@ router.use(adminSystemExtrasRoutes);
 router.use(adminCatalogExtrasRoutes); // reviews, gallery, addon categories, recommended, bulk import/export, campaigns
 router.use(adminOrderReportsRoutes); // transaction / order report and restaurant-wise report, with exports
 router.use(adminListToolsRoutes); // order export, restaurant featured / verify all
+router.use(adminRefundRequestsRoutes); // customer refund requests: list, detail, approve, reject
 
 router.post('/sub-admins', requireAdminPermission('sub_admin_management', 'create'), adminController.createSubAdmin);
 router.get('/sub-admins', adminController.listSubAdmins);

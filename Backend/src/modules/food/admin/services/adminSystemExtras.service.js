@@ -281,7 +281,7 @@ export async function getPublicBusinessSettings() {
             dishApprovalRequired: vendor.dishApprovalRequired,
             selfRegistration: vendor.restaurantSelfRegistration,
         },
-        refund: { requestEnabled: refund.refundRequestEnabled },
+        refund: { requestEnabled: refund.refundRequestEnabled, requestWindowHours: refund.requestWindowHours },
     };
 }
 

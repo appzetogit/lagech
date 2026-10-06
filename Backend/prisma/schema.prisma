@@ -623,6 +623,7 @@ model FoodUser {
   refunds       Refund[]
   offerUsages   FoodOfferUsage[]
   safetyReports FoodSafetyEmergencyReport[]
+  refundRequests FoodRefundRequest[]
 
   @@index([referredById])
   @@index([isActive])
@@ -1452,6 +1453,7 @@ model FoodOrder {
   chatConversations FoodChatConversation[]
   supportTickets    FoodSupportTicket[]
   emergencyRequests DeliveryOrderEmergencyRequest[]
+  refundRequests    FoodRefundRequest[]
 
   @@index([createdAt(sort: Desc)])
   @@index([orderStatus, createdAt(sort: Desc)])
@@ -3280,6 +3282,11 @@ model FoodSupportTicket {
   description   String       @default("")
   status        TicketStatus @default(open)
   adminResponse String       @default("")
+  /// Order issue reports (POST /user/orders/:id/issues): the Business Settings
+  /// order-issue reason picked, and the customer's photos. Blank / empty on
+  /// tickets raised from the support screen.
+  reasonId      String       @default("") @db.VarChar(24)
+  images        String[]     @default([])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -3291,6 +3298,57 @@ model FoodSupportTicket {
   @@index([userId, createdAt(sort: Desc)])
   @@index([status])
   @@map("food_support_tickets")
+}
+
+enum FoodRefundRequestStatus {
+  pending
+  /// Claimed by an admin's approval while the money moves; becomes `refunded`,
+  /// or back to `pending` (with failureReason) if the refund could not be made.
+  approved
+  refunded
+  rejected
+}
+
+/// A customer's request for a refund on a delivered order (the old panel's
+/// Refund Requests). At most one open (pending / approved) per order -- a
+/// partial unique index in constraints.sql.
+model FoodRefundRequest {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  orderId      String @db.VarChar(24)
+  userId       String @db.VarChar(24)
+  restaurantId String @db.VarChar(24)
+
+  /// Business Settings refund reason id, or blank when the customer typed one.
+  reasonId String   @default("") @db.VarChar(24)
+  reason   String
+  note     String   @default("")
+  images   String[] @default([])
+
+  /// What could still be refunded when the request was made.
+  requestedAmount Decimal                 @db.Decimal(14, 2)
+  status          FoodRefundRequestStatus @default(pending)
+  /// What the admin approved; set once refunded.
+  refundedAmount  Decimal?                @db.Decimal(14, 2)
+  /// 'razorpay' (original method) or 'wallet'.
+  refundMethod    String                  @default("") @db.VarChar(16)
+  adminNote       String                  @default("")
+  /// Why the last approval attempt failed (the request went back to pending).
+  failureReason   String                  @default("")
+  decidedById     String?                 @db.VarChar(24)
+  decidedAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  order FoodOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  user  FoodUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([orderId])
+  @@index([restaurantId, createdAt(sort: Desc)])
+  @@map("food_refund_requests")
 }
 
 model FoodRestaurantSupportTicket {
