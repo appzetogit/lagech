@@ -44,7 +44,12 @@ const toCard = (o) => ({
 export async function getDispatchBoard() {
     const [waiting, onTheWay, riders, limit] = await Promise.all([
         prisma.foodOrder.findMany({
-            where: { orderStatus: { in: WAITING_STATUSES }, dispatchStatus: { not: 'accepted' } },
+            // Never a takeaway (no rider), nor a scheduled order before its release time.
+            where: {
+                orderStatus: { in: WAITING_STATUSES }, dispatchStatus: { not: 'accepted' },
+                orderType: { not: 'takeaway' },
+                OR: [{ releaseAt: null }, { releaseAt: { lte: new Date() } }],
+            },
             orderBy: { createdAt: 'asc' },
             select: ORDER_SELECT,
             take: 200,
