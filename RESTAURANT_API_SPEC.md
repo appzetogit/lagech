@@ -359,6 +359,40 @@ Allowed values: `confirmed`, `preparing`, `ready_for_pickup`, `picked_up`, `deli
 ### `POST /food/restaurant/orders/:orderId/resend-notification`
 Re-pings delivery partners for an order that hasn't been picked up.
 
+### Scheduled orders
+With Business Settings → Order → scheduled orders on, a customer may order for a slot today or
+tomorrow. Such an order has `isScheduled: true`, `scheduledAt` (the slot) and `releaseAt` (about
+40 minutes before it). It is paid at placement and listed straight away with status `created`, but:
+- it does **not** ring: no `new_order` socket event or push until `releaseAt`; then it rings like a
+  new order (push `data.scheduledAt` set, `data.orderType`);
+- `acceptanceDeadlineAt` = `releaseAt` + the acceptance window, so it is never auto-cancelled early;
+- it may be accepted early (`confirmed` / `preparing`); no rider is dispatched before `releaseAt`.
+
+Show it as "Scheduled for <scheduledAt>" and do not play the new-order alarm for an order whose
+`releaseAt` is still in the future.
+
+### Takeaway orders
+`orderType: "takeaway"` (otherwise `"delivery"`): the customer collects it, so there is no rider and
+no delivery fee; commission applies as usual. Flow: accept (`confirmed`/`preparing`) →
+`ready_for_pickup` (the customer is pushed) → hand over:
+
+### `POST /food/restaurant/orders/:orderId/handover`
+```json
+{ "code": "4821" }
+```
+`code` is the 4-digit pickup code the customer's app shows (never sent to the restaurant). Allowed
+from `confirmed`, `preparing` or `ready_for_pickup`. Right code → the order is `delivered`
+(`deliveredAt` set) → `{ order }`. Wrong code → 400 "That pickup code does not match…", nothing
+changes. Setting `picked_up` / `delivered` through `/status` on a takeaway → 400 "Verify the
+customer's pickup code to hand over a takeaway order." `resend-notification` does nothing for it.
+
+### `PATCH /food/restaurant/takeaway-settings`
+```json
+{ "takeawayEnabled": false }
+```
+The restaurant's own takeaway switch (default on; only matters while Business Settings have takeaway
+on). → `{ restaurant }` with `takeawayEnabled`. Also on `GET /food/restaurant/current`.
+
 ### Order object
 
 Same canonical shape as the user app, with `userId` populated. Key fields for the restaurant screen:
@@ -419,7 +453,9 @@ Same canonical shape as the user app, with `userId` populated. Key fields for th
 }
 ```
 
-**Acceptance deadline is real.** `acceptanceDeadlineAt` (default 240s from placement) auto-expires unaccepted orders on the next list read. Run a countdown on the incoming-order card.
+**Acceptance deadline is real.** `acceptanceDeadlineAt` (default 240s from placement; from `releaseAt` for a scheduled order) auto-expires unaccepted orders on the next list read. Run a countdown on the incoming-order card.
+
+New fields on the order: `orderType` (`delivery` | `takeaway`), `isScheduled`, `releaseAt`, `scheduledAt`, `pricing.riderTip` (the customer's tip; it is in `pricing.total` but all of it goes to the rider — never part of `finance.netPayout`).
 
 Full status enum on the order document: `pending_payment`, `created`, `confirmed`, `preparing`, `ready_for_pickup`, `reached_pickup`, `picked_up`, `reached_drop`, `delivered`, `cancelled_by_user`, `cancelled_by_restaurant`, `cancelled_by_admin`.
 

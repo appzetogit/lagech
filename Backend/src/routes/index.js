@@ -70,6 +70,15 @@ router.get('/v1/food/public/restaurants/:restaurantId/reviews', async (req, res,
         next(error);
     }
 });
+// Delivery / takeaway, schedule slots and tip choices for one restaurant's checkout.
+router.get('/v1/food/public/restaurants/:restaurantId/order-options', async (req, res, next) => {
+    try {
+        const { getRestaurantOrderOptions } = await import('../modules/food/orders/services/order-scheduling.service.js');
+        res.status(200).json({ success: true, data: await getRestaurantOrderOptions(req.params.restaurantId) });
+    } catch (error) {
+        next(error);
+    }
+});
 // Social media links, app versions and sign-in options, landing page, page meta.
 router.use('/v1/food/public', systemExtrasPublicRoutes);
 router.get('/v1/food/public/advertisements', promotionsController.listRunningAds);

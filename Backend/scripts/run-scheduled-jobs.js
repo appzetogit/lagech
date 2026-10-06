@@ -6,6 +6,7 @@ import { expireExpiredOffers } from '../src/modules/food/admin/services/admin.se
 import { syncExpiredFssaiNotifications } from '../src/modules/food/restaurant/services/fssaiExpiry.service.js';
 import { runBillingCatchUp } from '../src/modules/food/restaurant/services/subscriptionBilling.service.js';
 import { expireStalledOrders } from '../src/modules/food/orders/services/order-expiry.service.js';
+import { releaseScheduledOrders } from '../src/modules/food/orders/services/order-scheduling.service.js';
 import { generateRestaurantPayouts } from '../src/modules/food/restaurant/services/restaurantPayout.service.js';
 import { runScheduledRiderDisbursement } from '../src/modules/food/admin/services/riderDisbursementSchedule.service.js';
 import { logger } from '../src/utils/logger.js';
@@ -16,6 +17,7 @@ let subscriptionBillingInterval = null;
 let orderWatchdogInterval = null;
 let restaurantPayoutInterval = null;
 let riderPayoutInterval = null;
+let scheduledReleaseInterval = null;
 
 const shutdown = async (signal) => {
     logger.info(`${signal} received, stopping scheduled jobs`);
@@ -25,6 +27,7 @@ const shutdown = async (signal) => {
     if (orderWatchdogInterval) clearInterval(orderWatchdogInterval);
     if (restaurantPayoutInterval) clearInterval(restaurantPayoutInterval);
     if (riderPayoutInterval) clearInterval(riderPayoutInterval);
+    if (scheduledReleaseInterval) clearInterval(scheduledReleaseInterval);
 
     try {
         await disconnectDB();
@@ -114,6 +117,16 @@ const start = async () => {
             }
         };
 
+        const runScheduledRelease = async () => {
+            try {
+                // Scheduled orders whose time has come: ring the restaurant,
+                // or start the rider hunt for one it accepted early.
+                await releaseScheduledOrders();
+            } catch (err) {
+                logger.error(`Scheduled order release error: ${err.message}`);
+            }
+        };
+
         await runExpire();
         await runFssaiExpirySync();
         await runSubscriptionBilling();
@@ -127,6 +140,8 @@ const start = async () => {
         orderWatchdogInterval = setInterval(runOrderWatchdog, 5 * 60 * 1000);
         restaurantPayoutInterval = setInterval(runRestaurantPayouts, 10 * 60 * 1000);
         riderPayoutInterval = setInterval(runRiderPayouts, 10 * 60 * 1000);
+        await runScheduledRelease();
+        scheduledReleaseInterval = setInterval(runScheduledRelease, 60 * 1000);
 
         logger.info('Scheduled jobs runner started');
     } catch (err) {

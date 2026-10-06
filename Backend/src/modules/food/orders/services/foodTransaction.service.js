@@ -222,7 +222,9 @@ export async function createInitialTransaction(order) {
   }));
 
   const totalCustomerPaid = Number(order.total) || 0;
+  // riderEarning includes the customer's tip, which is the rider's alone.
   const riderShare = Number(order.riderEarning) || 0;
+  const riderTip = Math.min(riderShare, Number(order.riderTip) || 0);
 
   // Prefer the commission already computed and stored on the order (source of truth
   // for this order); fall back to the rule snapshot for older orders.
@@ -241,8 +243,10 @@ export async function createInitialTransaction(order) {
   const tax = Number(order.tax) || 0;
 
   let restaurantNet = subtotal + packagingFee - restaurantCommission;
+  // The tip comes in with the order and goes straight out in riderShare, so
+  // it nets to nothing for the platform.
   let platformNetProfit =
-    platformFee + deliveryFee + deliveryFeeGst + restaurantCommission - riderShare;
+    platformFee + deliveryFee + deliveryFeeGst + restaurantCommission + riderTip - riderShare;
   let adminDiscountShare = 0;
   let restaurantDiscountShare = 0;
   let discountAdminBearPercentage = 0;
@@ -308,6 +312,7 @@ export async function createInitialTransaction(order) {
       restaurantShare: Math.max(0, restaurantNet),
       commissionAmount: restaurantCommission,
       riderShare,
+      riderTip,
       platformNetProfit,
       taxAmount: tax,
       adminDiscountShare,

@@ -16,6 +16,7 @@ import {
 } from './systemSettings.defaults.js';
 import { BUSINESS_AREA_CATALOG } from './businessSettings.defaults.js';
 import { invalidateBusinessSettings, getBusinessSettings, getMaintenanceState } from '../../shared/businessSettings.js';
+import { TIP_PRESETS, MAX_RIDER_TIP } from '../../orders/services/orderModes.js';
 
 /**
  * System settings stored one JSON document per area (page meta data, app
@@ -274,7 +275,12 @@ export async function getPublicBusinessSettings() {
             showEarning: deliveryman.showEarningToRider,
             pictureUpload: deliveryman.riderPictureUpload,
             selfRegistration: deliveryman.riderSelfRegistration,
+            tipsEnabled: deliveryman.tipsEnabled,
         },
+        /** Rider tips at checkout: one-tap amounts and the cap, when on. */
+        tips: deliveryman.tipsEnabled
+            ? { enabled: true, presets: TIP_PRESETS, max: MAX_RIDER_TIP }
+            : { enabled: false, presets: [], max: 0 },
         restaurant: {
             canCancelOrder: vendor.restaurantCanCancelOrder,
             canReplyToReviews: vendor.canReplyToReviews,

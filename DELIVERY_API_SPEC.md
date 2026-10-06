@@ -152,6 +152,12 @@ Behaviour depends on state. A rider may hold up to **`maxAssignedOrders`** accep
 exactly the old single-order behaviour.
 - **Partner holds as many deliveries as the limit** → returns only their own accepted deliveries.
 - **Partner holds fewer** → returns their own accepted deliveries **and** new offers: unassigned orders in `confirmed` / `preparing` / `ready_for_pickup`, filtered to within 20 km of the partner's last known GPS, excluding any order they were previously deassigned from.
+- Never listed or dispatched: **takeaway** orders (`orderType: "takeaway"`, the customer collects them) and **scheduled** orders before their `releaseAt` (about 40 minutes before the slot). Accepting either → 400 ("This is a takeaway order…" / "This scheduled order is not open for delivery yet.").
+
+**Tips.** With Business Settings → Deliveryman → tips on, a customer may tip up to ₹500. The tip is
+**included** in `riderEarning` / `earnings` (and `riderShare`, wallet, payouts) and shown on its own as
+`riderTip` on orders, offers (`new_order_available` payload, push `data.riderTip`, body "(incl. Rs.X tip)"),
+the current trip and history. 100% of it is the rider's.
 
 → `data` is the paginated envelope:
 ```json
@@ -416,7 +422,7 @@ Query: `period` = `today` | `week` (default) | `month` | `all`, `date` (anchor, 
   "summary": {
     "totalEarnings": 5100, "totalOrders": 122,
     "totalHours": 0, "totalMinutes": 0,
-    "orderEarning": 5100, "incentive": 0, "otherEarnings": 0
+    "orderEarning": 5100, "tips": 150, "incentive": 0, "otherEarnings": 0
   },
   "period": "week",
   "date": "2026-07-24T…",
@@ -424,6 +430,9 @@ Query: `period` = `today` | `week` (default) | `month` | `all`, `date` (anchor, 
 }
 ```
 `totalHours` / `totalMinutes` / `incentive` are not computed yet — always 0. Don't surface them.
+`tips` is the part of `totalEarnings` that came from customer tips. Elsewhere: `GET /wallet` →
+`totalTips` (part of `totalEarned`) and each `payment` transaction's `tip`; `trip-history` trips carry
+`tipAmount`; `pocket-details` payment rows carry `tip` and `summary.totalTips`.
 
 ### `GET /food/delivery/trip-history`
 Query: `period` = `daily` (default) | `weekly` | `monthly`, `date`, `status` = `Completed` | `Cancelled` | `Pending` | `ALL TRIPS`, `limit` (default 50, max 1000).

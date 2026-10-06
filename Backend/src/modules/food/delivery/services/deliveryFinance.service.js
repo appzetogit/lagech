@@ -81,7 +81,7 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
             where: { dispatchDeliveryPartnerId: partnerId, orderStatus: 'delivered' },
             orderBy: { createdAt: 'desc' },
             select: {
-                id: true, orderId: true, riderEarning: true, paymentMethod: true,
+                id: true, orderId: true, riderEarning: true, riderTip: true, paymentMethod: true,
                 orderStatus: true, createdAt: true,
             },
             take: 20,
@@ -129,6 +129,8 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
             id: o.id,
             type: 'payment',
             amount: num(o.riderEarning),
+            /** Part of amount: the customer's tip. */
+            tip: num(o.riderTip),
             status: 'Completed',
             date: o.createdAt,
             description: o.paymentMethod === 'cash' ? 'COD delivery earning' : 'Online delivery earning',

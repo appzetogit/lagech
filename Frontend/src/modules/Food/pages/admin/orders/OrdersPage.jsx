@@ -787,7 +787,9 @@ export default function OrdersPage({ statusKey = "all" }) {
         orderStatus: displayStatus,
         deliveryPartnerName,
         deliveryPartnerPhone,
-        deliveryType: order.deliveryType || "Home Delivery",
+        deliveryType: order.orderType === "takeaway" ? "Takeaway" : (order.deliveryType || "Home Delivery"),
+        riderTip: Number(pricing.riderTip || order.riderTip || 0),
+        scheduledFor: order.isScheduled && order.scheduledAt ? order.scheduledAt : null,
         orderOtp: order.deliveryOtp,
         address: order.address || order.customerAddress || order.deliveryAddress,
         refundStatus: order.payment?.refund?.status || (order.payment?.status === 'refunded' ? 'processed' : null)

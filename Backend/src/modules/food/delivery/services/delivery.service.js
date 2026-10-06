@@ -509,7 +509,8 @@ export const getDeliveryPartnerWallet = async (deliveryPartnerId) => {
     const [earningsAgg, cashPosition, bonusAgg, paymentTxList, bonusTxList] = await Promise.all([
         prisma.foodOrder.aggregate({
             where: { dispatchDeliveryPartnerId: partnerId, orderStatus: 'delivered' },
-            _sum: { riderEarning: true },
+            // riderEarning includes tips; riderTip says how much of it they were.
+            _sum: { riderEarning: true, riderTip: true },
         }),
         // Was the rider's EARNINGS on paid cash orders, reported as the cash they
         // hold; now the same figure every other screen and check uses.
@@ -522,7 +523,7 @@ export const getDeliveryPartnerWallet = async (deliveryPartnerId) => {
             where: { dispatchDeliveryPartnerId: partnerId, orderStatus: 'delivered' },
             orderBy: [{ deliveredAt: 'desc' }, { createdAt: 'desc' }],
             select: {
-                id: true, orderId: true, riderEarning: true, paymentMethod: true,
+                id: true, orderId: true, riderEarning: true, riderTip: true, paymentMethod: true,
                 orderStatus: true, deliveredAt: true, createdAt: true,
             },
             take: 2000,
@@ -544,6 +545,8 @@ export const getDeliveryPartnerWallet = async (deliveryPartnerId) => {
             _id: o.id,
             type: 'payment',
             amount: num(o.riderEarning),
+            /** Part of amount: the customer's tip. */
+            tip: num(o.riderTip),
             status: 'Completed',
             date,
             createdAt: date,
@@ -574,6 +577,8 @@ export const getDeliveryPartnerWallet = async (deliveryPartnerId) => {
         cashInHand,
         totalWithdrawn: 0,
         totalEarned,
+        /** Part of totalEarned: tips from customers. */
+        totalTips: num(earningsAgg?._sum?.riderTip),
         totalCashLimit,
         availableCashLimit: Math.max(0, totalCashLimit - cashInHand),
         cashWarningAt: cashPosition.cashWarningAt,
@@ -677,7 +682,7 @@ export const getDeliveryPartnerEarnings = async (deliveryPartnerId, query = {}) 
 
     const [totalOrders, agg, sessions] = await Promise.all([
         prisma.foodOrder.count({ where }),
-        prisma.foodOrder.aggregate({ where, _sum: { riderEarning: true } }),
+        prisma.foodOrder.aggregate({ where, _sum: { riderEarning: true, riderTip: true } }),
         prisma.foodDeliveryPartnerSession.findMany({
             where: sessionWhere,
             select: { wentOnlineAt: true, wentOfflineAt: true },
@@ -713,6 +718,8 @@ export const getDeliveryPartnerEarnings = async (deliveryPartnerId, query = {}) 
             /// recombine hours and minutes.
             totalOnlineMinutes: onlineMinutesTotal,
             orderEarning: totalEarnings,
+            /** Part of totalEarnings: tips from customers. */
+            tips: num(agg?._sum?.riderTip),
             incentive: 0,
             otherEarnings: 0,
         },
@@ -782,6 +789,9 @@ const toTripDto = (order) => {
         codCollectedAmount,
         deliveryEarning: earningAmount,
         earningAmount,
+        /** Part of the earning: the customer's tip. */
+        tipAmount: num(order?.riderTip),
+        orderType: order?.orderType || 'delivery',
         amount: earningAmount, // legacy fallback
         createdAt: order?.createdAt,
         deliveredAt,
@@ -867,6 +877,7 @@ export const getDeliveryPocketDetails = async (deliveryPartnerId, query = {}) =>
         _id: o.id,
         type: 'payment',
         amount: num(o.riderEarning),
+        tip: num(o.riderTip),
         status: 'Completed',
         date: o.deliveredAt || o.createdAt,
         createdAt: o.deliveredAt || o.createdAt,
@@ -890,10 +901,12 @@ export const getDeliveryPocketDetails = async (deliveryPartnerId, query = {}) =>
 
     const totalEarning = paymentTransactions.reduce((sum, t) => sum + num(t.amount), 0);
     const totalBonus = bonusTransactions.reduce((sum, t) => sum + num(t.amount), 0);
+    const totalTips = paymentTransactions.reduce((sum, t) => sum + num(t.tip), 0);
 
     return {
         week: { start: start.toISOString(), end: end.toISOString() },
-        summary: { totalEarning, totalBonus, grandTotal: totalEarning + totalBonus },
+        // totalEarning includes totalTips.
+        summary: { totalEarning, totalBonus, totalTips, grandTotal: totalEarning + totalBonus },
         trips,
         transactions: { payment: paymentTransactions, bonus: bonusTransactions },
     };

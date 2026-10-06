@@ -151,6 +151,18 @@ router.patch('/availability', authMiddleware, requireRestaurant, async (req, res
     await invalidateCache('restaurant_detail:*');
     next();
 }, updateRestaurantAcceptingOrdersController);
+// Takeaway on/off for this restaurant (only offered while Business Settings have takeaway on).
+router.patch('/takeaway-settings', authMiddleware, requireRestaurant, async (req, res, next) => {
+    try {
+        await invalidateCache('restaurants:*');
+        await invalidateCache('restaurant_detail:*');
+        const { updateRestaurantTakeaway } = await import('../services/restaurant.service.js');
+        const restaurant = await updateRestaurantTakeaway(req.user?.userId, req.body?.takeawayEnabled ?? req.body?.enabled);
+        res.status(200).json({ success: true, message: 'Takeaway setting updated', data: { restaurant } });
+    } catch (error) {
+        next(error);
+    }
+});
 router.patch('/dining-settings', authMiddleware, requireRestaurant, async (req, res, next) => {
     await invalidateCache('restaurants:*');
     next();
@@ -289,6 +301,8 @@ router.delete('/addons/:id', authMiddleware, requireRestaurant, deleteAddonContr
 router.get('/orders', authMiddleware, requireRestaurant, orderController.listOrdersRestaurantController);
 router.get('/orders/:orderId', authMiddleware, requireRestaurant, orderController.getOrderByIdRestaurantController);
 router.patch('/orders/:orderId/status', authMiddleware, requireRestaurant, orderController.updateOrderStatusRestaurantController);
+// A takeaway handed to the customer against their pickup code.
+router.post('/orders/:orderId/handover', authMiddleware, requireRestaurant, orderController.handoverTakeawayRestaurantController);
 router.post('/orders/:orderId/resend-notification', authMiddleware, requireRestaurant, orderController.resendDeliveryNotificationRestaurantController);
 
 // Complaints (restaurant dashboard)

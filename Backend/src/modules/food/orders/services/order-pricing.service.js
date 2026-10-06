@@ -13,6 +13,7 @@ import { resolveOrderCartItems } from '../helpers/order-cart-items.helper.js';
 import { applyFeeSwitches } from './feeSwitches.js';
 import { evaluateCoupon, requiresFirstOrder, USED_ORDER_WHERE } from './couponRules.js';
 import { freeDeliveryOverWaiver, newCustomerDiscount } from './businessRules.js';
+import { resolveOrderType, cleanRiderTip } from './orderModes.js';
 import { getBusinessSettings } from '../../shared/businessSettings.js';
 import { resolveOrderZoneId, getZonePaymentOptions } from '../../shared/zonePayment.js';
 
@@ -80,6 +81,12 @@ export async function loadRestaurantForOrdering(restaurantId) {
       openingTime: true,
       closingTime: true,
       openDays: true,
+      takeawayEnabled: true,
+      addressLine1: true,
+      area: true,
+      city: true,
+      state: true,
+      pincode: true,
     },
   });
 
@@ -481,8 +488,20 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
   const packagingFee = 0;
   const platformFee = Number(feeSettings.platformFee || 0);
 
-  let distanceKm = await getDeliveryDistanceKm(restaurant, deliveryAddress);
-  const straightLineKm = calculateDistanceKm(restaurant, deliveryAddress);
+  // Business Settings: delivery or takeaway, and a tip for the rider. Neither
+  // sent = a home delivery with no tip, exactly as before they existed.
+  const [orderRules, customerRules, riderRules] = await Promise.all([
+    getBusinessSettings('business_order'),
+    getBusinessSettings('business_customer'),
+    getBusinessSettings('business_deliveryman'),
+  ]);
+  const orderType = resolveOrderType(dto.orderType, { orderRules, restaurant });
+  const isTakeaway = orderType === 'takeaway';
+  const riderTip = cleanRiderTip(dto.riderTip ?? dto.tip, { tipsEnabled: riderRules.tipsEnabled, orderType });
+
+  // A takeaway is collected at the restaurant: no trip, so no distance and no fee.
+  let distanceKm = isTakeaway ? null : await getDeliveryDistanceKm(restaurant, deliveryAddress);
+  const straightLineKm = isTakeaway ? null : calculateDistanceKm(restaurant, deliveryAddress);
 
   // Nothing stopped a customer ordering from a restaurant on the other side of
   // the country — one live order ran 999 km from a Punjab kitchen to an Indore
@@ -501,7 +520,9 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
     );
   }
 
-  const deliveryFeeResult = resolveUserDeliveryFee(feeSettings, { subtotal, distanceKm });
+  const deliveryFeeResult = isTakeaway
+    ? { deliveryFee: 0, distanceKm: null, source: 'takeaway', breakdown: null }
+    : resolveUserDeliveryFee(feeSettings, { subtotal, distanceKm });
   const originalDeliveryFee = round2(deliveryFeeResult.deliveryFee);
   distanceKm = deliveryFeeResult.distanceKm ?? distanceKm;
 
@@ -533,10 +554,6 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
   // Business Settings: free delivery over an item total, and a discount on a
   // new customer's first order. Both are the platform's cost, like the coupon
   // waiver above; neither stacks with a coupon doing the same thing.
-  const [orderRules, customerRules] = await Promise.all([
-    getBusinessSettings('business_order'),
-    getBusinessSettings('business_customer'),
-  ]);
   const freeDeliveryWaived = freeDeliveryOverWaiver(orderRules.freeDelivery, {
     subtotal,
     deliveryFee: originalDeliveryFee,
@@ -586,11 +603,12 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
       ? Math.round(Math.max(0, subtotal - discount) * (gstRate / 100))
       : 0;
 
+  // The tip is added after the discount: no coupon or waiver ever reduces it.
   const total = round2(
     Math.max(
       0,
       subtotal + packagingFee + deliveryFee + deliveryFeeGst + platformFee + tax - discount,
-    ),
+    ) + riderTip,
   );
 
   const basePricing = {
@@ -601,6 +619,9 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
     deliveryFeeGst,
     platformFee,
     discount,
+    /** Tip for the rider, part of `total`; all of it is the rider's. */
+    riderTip,
+    orderType,
     total,
     // The rates behind `tax` and `deliveryFeeGst`, so the apps can label the
     // bill rows ("GST (5%)") instead of showing a bare rupee figure.
@@ -631,7 +652,8 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
 
   const pricing = applyDeliveryModePricing(
     basePricing,
-    dto.deliveryMode,
+    // Quick Mode is a faster rider; a takeaway has none.
+    isTakeaway ? 'basic' : dto.deliveryMode,
     Number(feeSettings.quickDeliveryFee) || 0,
   );
 
