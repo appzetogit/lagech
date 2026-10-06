@@ -204,7 +204,7 @@ const columnsFrom = (body) => {
         customerIds: body.customerIds ?? [],
         minOrderValue: body.minOrderValue ?? 0,
         maxDiscount: body.maxDiscount ?? null,
-        usageLimit: body.usageLimit ?? null,
+        usageLimit: body.usageLimit,
         perUserLimit: body.perUserLimit ?? null,
         startDate: body.startDate ? new Date(body.startDate) : null,
         endDate: body.endDate ? new Date(body.endDate) : null,
@@ -285,7 +285,12 @@ export async function updateAdminOffer(id, body = {}) {
 /** The list's status switch. Switching on an expired coupon is allowed; it still reads expired. */
 export async function setAdminOfferStatus(id, status) {
     if (!isId(id)) return null;
-    const { count } = await prisma.foodOffer.updateMany({ where: { id: String(id) }, data: { status } });
+    // Switching on also clears the older "hidden from cart" flag: this switch
+    // is now the only one on the page, and a coupon it shows as on must work.
+    const { count } = await prisma.foodOffer.updateMany({
+        where: { id: String(id) },
+        data: status === 'active' ? { status, showInCart: true } : { status },
+    });
     if (!count) return null;
     return prisma.foodOffer.findUnique({ where: { id: String(id) } });
 }

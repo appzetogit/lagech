@@ -1026,6 +1026,18 @@ export const adminAPI = {
     apiClient.post("/food/admin/offers", body ?? {}, {
       contextModule: "admin",
     }),
+  getAdminOffer: (offerId) =>
+    apiClient.get(`/food/admin/offers/${String(offerId)}`, { contextModule: "admin" }),
+  updateAdminOffer: (offerId, body) =>
+    apiClient.put(`/food/admin/offers/${String(offerId)}`, body ?? {}, {
+      contextModule: "admin",
+    }),
+  setAdminOfferStatus: (offerId, status) =>
+    apiClient.patch(
+      `/food/admin/offers/${String(offerId)}/status`,
+      { status },
+      { contextModule: "admin" },
+    ),
   updateAdminOfferCartVisibility: (offerId, itemId, showInCart) =>
     apiClient.patch(
       `/food/admin/offers/${String(offerId)}/cart-visibility`,

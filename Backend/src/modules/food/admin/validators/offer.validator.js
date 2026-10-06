@@ -184,7 +184,9 @@ export const validateCouponDto = (body = {}, { mode = 'create' } = {}) => {
         isFirstOrderOnly: couponType === 'first_order' || data.customerScope === 'first_time',
         startDate,
         endDate,
-        usageLimit: data.usageLimit && data.usageLimit > 0 ? data.usageLimit : null,
+        // The overall limit is not on the old panel's form; an edit that does
+        // not send it keeps whatever the coupon had.
+        usageLimit: data.usageLimit === undefined ? (mode === 'update' ? undefined : null) : data.usageLimit > 0 ? data.usageLimit : null,
         perUserLimit: data.perUserLimit && data.perUserLimit > 0 ? data.perUserLimit : null,
         adminBearPercentage,
         restaurantBearPercentage,

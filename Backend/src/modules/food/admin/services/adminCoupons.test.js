@@ -166,6 +166,17 @@ test('edit, switch off and search', async () => {
     assert.equal(row.isActive, false);
     assert.equal(row.isExpired, true);
 
+    // Switching on also clears the older hidden-from-cart flag, which this
+    // page no longer shows, so an "on" coupon always works.
+    await prisma.foodOffer.update({ where: { id: offer.id }, data: { showInCart: false, usageLimit: 50 } });
+    const on = await setAdminOfferStatus(offer.id, 'active');
+    assert.equal(on.status, 'active');
+    assert.equal(on.showInCart, true);
+
+    // The overall usage limit is not on the form; an edit keeps it.
+    const kept = await updateAdminOffer(offer.id, validateUpdateOfferDto(form({ title: 'Again', couponCode: offer.couponCode })));
+    assert.equal(kept.usageLimit, 50);
+
     // A code already taken is refused on edit too.
     const other = await create();
     await assert.rejects(
