@@ -3918,6 +3918,23 @@ model FoodSystemSetting {
   @@map("food_system_settings")
 }
 
+/// Who changed which settings area, and which fields -- never the values.
+/// Written by the 3rd Party settings page (third_party.* areas).
+model FoodSettingsAuditLog {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  area       String   @db.VarChar(64)
+  action     String   @db.VarChar(32)
+  fields     String[]
+  adminId    String?  @db.VarChar(24)
+  adminEmail String   @default("")
+
+  createdAt DateTime @default(now())
+
+  @@index([area, createdAt])
+  @@map("food_settings_audit_logs")
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Misc
 // ─────────────────────────────────────────────────────────────────────────────

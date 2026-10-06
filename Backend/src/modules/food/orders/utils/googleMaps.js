@@ -1,5 +1,6 @@
 import { config } from '../../../../config/env.js';
 import { logger } from '../../../../utils/logger.js';
+import { getThirdPartySettings } from '../../../../core/thirdParty/thirdParty.runtime.js';
 
 /**
  * Fetches driving route metrics from Google Directions API.
@@ -100,7 +101,13 @@ export async function fetchDrivingRoute(origin, destination) {
     distanceKm: null,
   };
 
-  const apiKey = config.googleMapsApiKey;
+  // The server key an admin saved under 3rd Party > Map APIs, else GOOGLE_MAPS_API_KEY.
+  let apiKey = config.googleMapsApiKey;
+  try {
+    apiKey = (await getThirdPartySettings('maps')).serverKey || apiKey;
+  } catch {
+    /* settings unreadable: the server key stands */
+  }
   if (!apiKey) {
     logger.warn('Google Maps API key missing. Driving route fetch skipped.');
     return empty;

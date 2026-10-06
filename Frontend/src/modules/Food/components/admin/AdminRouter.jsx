@@ -432,6 +432,7 @@ export default function AdminRouter() {
             <Route path="pages-social-media/cancellation" element={<CancellationPolicy />} />
             <Route path="pages-social-media/react-registration" element={<ReactRegistration />} />
 
+            <Route path="3rd-party-configurations/third-party" element={<ThirdParty />} />
             <Route path="3rd-party-configurations/firebase" element={<FirebaseNotification />} />
             <Route path="3rd-party-configurations/offline-payment" element={<OfflinePaymentSetup />} />
             <Route path="3rd-party-configurations/join-us" element={<JoinUsPageSetup />} />
