@@ -2,12 +2,39 @@ import { useState, useMemo, useEffect } from "react"
 import { Search, Download, ChevronDown, Eye, Settings, Building, ArrowUpDown, FileText, FileSpreadsheet, Code, Check, Columns, CheckCircle, XCircle, Loader2 } from "@food/components/admin/theme/icons"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
-import { exportTransactionsToExcel, exportTransactionsToPDF } from "@food/components/admin/transactions/transactionsExportUtils"
+import { exportTransactionsToPDF } from "@food/components/admin/transactions/transactionsExportUtils"
 import { adminAPI } from "@food/api"
+import ExportMenu from "@food/components/admin/ExportMenu"
+import { exportDate, exportMoney, fetchAllPages } from "@food/utils/listExport"
 import { toast } from "sonner"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
+
+// The search box filters on the page (the API takes no search), so the export
+// applies the same match to every row it fetches.
+const matchesSearch = (w, searchQuery) => {
+  const query = String(searchQuery || "").toLowerCase().trim()
+  if (!query) return true
+  return (
+    w.restaurantName?.toLowerCase().includes(query) ||
+    w.restaurantIdString?.toLowerCase().includes(query) ||
+    w.amount?.toString().includes(query)
+  )
+}
+
+const EXPORT_COLUMNS = [
+  { label: "Sl", value: (w, i) => i + 1 },
+  { label: "Amount", value: (w) => exportMoney(w.amount) },
+  { label: "Restaurant Name", value: (w) => w.restaurantName || "" },
+  { label: "Restaurant ID", value: (w) => w.restaurantIdString || "" },
+  { label: "Source", value: (w) => (w.source === "disbursement" ? "Daily payout" : "Request") },
+  { label: "Request Time", value: (w) => exportDate(w.requestedAt || w.createdAt) },
+  { label: "Approved/Rejected Time", value: (w) => exportDate(w.processedAt) },
+  { label: "Processed By", value: (w) => (w.processedBy?.name ? `${w.processedBy.name}${w.processedBy.email ? ` (${w.processedBy.email})` : ""}` : "") },
+  { label: "Status", value: (w) => w.status },
+  { label: "Rejection Reason", value: (w) => w.rejectionReason || "" },
+]
 
 
 export default function RestaurantWithdraws() {
@@ -67,18 +94,7 @@ export default function RestaurantWithdraws() {
   }, [searchQuery])
 
   const filteredWithdraws = useMemo(() => {
-    let result = [...withdraws]
-
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase().trim()
-      result = result.filter(w =>
-        w.restaurantName?.toLowerCase().includes(query) ||
-        w.restaurantIdString?.toLowerCase().includes(query) ||
-        w.amount?.toString().includes(query)
-      )
-    }
-
-    return result
+    return withdraws.filter((w) => matchesSearch(w, searchQuery))
   }, [withdraws, searchQuery])
 
   const getStatusBadge = (status) => {
@@ -206,14 +222,24 @@ export default function RestaurantWithdraws() {
       rejectionReason: w.rejectionReason || ''
     }))
     switch (format) {
-      case "excel":
-        exportTransactionsToExcel(exportData, headers, "restaurant_withdraws_full_details")
-        break
       case "pdf":
         await exportTransactionsToPDF(exportData, headers, "restaurant_withdraws_full_details", "Restaurant Withdraws Report")
         break
       default: break
     }
+  }
+
+  // Every request on the current tab (all pages), with the search applied.
+  const exportAllWithdraws = async () => {
+    const status = activeTab === "All" ? undefined : activeTab
+    const all = await fetchAllPages(
+      ({ page, limit }) => adminAPI.getWithdrawalRequests({ status, page, limit }),
+      (res) => {
+        const d = res?.data?.data || {}
+        return { rows: d.requests || [], total: d.total }
+      },
+    )
+    return all.filter((w) => matchesSearch(w, searchQuery))
   }
 
   const toggleColumn = (key) => {
@@ -283,25 +309,21 @@ export default function RestaurantWithdraws() {
                 />
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               </div>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button className="px-4 py-2.5 text-sm font-medium rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-2 transition-all">
-                    <Download className="w-4 h-4" />
-                    <span>Export</span>
-                    <ChevronDown className="w-3 h-3" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56 bg-white border border-slate-200 rounded-lg shadow-lg z-50">
-                  <DropdownMenuLabel>Export Format</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => handleExport("excel")} className="cursor-pointer flex items-center gap-2">
-                    <FileSpreadsheet className="w-4 h-4" /> Excel
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleExport("pdf")} className="cursor-pointer flex items-center gap-2">
-                    <Code className="w-4 h-4" /> PDF
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <ExportMenu
+                filename={`restaurant-withdraws-${activeTab.toLowerCase()}`}
+                sheetName="Restaurant Withdraws"
+                columns={EXPORT_COLUMNS}
+                getRows={exportAllWithdraws}
+              />
+              <button
+                type="button"
+                onClick={() => handleExport("pdf")}
+                className="px-4 py-2.5 text-sm font-medium rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-2 transition-all"
+                title="PDF of the rows shown"
+              >
+                <FileText className="w-4 h-4" />
+                <span>PDF</span>
+              </button>
               <button
                 onClick={() => setIsSettingsOpen(true)}
                 className="p-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 transition-all flex items-center justify-center"

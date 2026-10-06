@@ -9,6 +9,20 @@ import ViewOrderDialog from "@food/components/admin/orders/ViewOrderDialog"
 import SettingsDialog from "@food/components/admin/orders/SettingsDialog"
 import { useGenericTableManagement } from "@food/components/admin/orders/useGenericTableManagement"
 import { restaurantLabel } from "@food/utils/entityLabels"
+import { exportMoney, exportRows } from "@food/utils/listExport"
+
+const EXPORT_COLUMNS = [
+  { label: "Sl", value: (_row, index) => index + 1 },
+  { label: "Order ID", value: (order) => order.orderId },
+  { label: "Order Date", value: (order) => [order.date, order.time].filter(Boolean).join(", ") },
+  { label: "Customer", value: (order) => order.customerName },
+  { label: "Phone", value: (order) => order.customerPhone },
+  { label: "Restaurant", value: (order) => restaurantLabel(order.restaurant) },
+  { label: "Total Amount", value: (order) => exportMoney(order.totalAmount) },
+  { label: "Payment Status", value: (order) => order.paymentStatus },
+  { label: "Cancellation Reason", value: (order) => order.cancellationReason || "Rejected by restaurant" },
+  { label: "Refund Status", value: (order) => (order.refundStatus === "processed" ? "Processed" : "Pending") },
+]
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -129,6 +143,27 @@ export default function NewRefundRequests() {
     }
   }
 
+  // The page loads every request (limit 1000) and filters in memory, so
+  // filteredData is the whole filtered list. Excel / CSV use the shared
+  // exporter (real .xlsx); PDF stays on the generic orders exporter.
+  const handleListExport = async (format) => {
+    if (format === "pdf") return handleExport(format)
+    if (!filteredData.length) {
+      toast.info("Nothing to export")
+      return
+    }
+    try {
+      exportRows(format === "csv" ? "csv" : "excel", {
+        filename: "refund_requests",
+        sheetName: "Refund Requests",
+        columns: EXPORT_COLUMNS,
+        rows: filteredData,
+      })
+    } catch (error) {
+      toast.error(error?.message || "Export failed")
+    }
+  }
+
   const resetColumns = () => {
     setVisibleColumns({
       si: true,
@@ -151,7 +186,7 @@ export default function NewRefundRequests() {
         setSearchQuery={setSearchQuery}
         onFilterClick={() => setIsFilterOpen(true)}
         activeFiltersCount={activeFiltersCount}
-        onExport={handleExport}
+        onExport={handleListExport}
         onSettingsClick={() => setIsSettingsOpen(true)}
       />
       <FilterPanel

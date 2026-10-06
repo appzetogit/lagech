@@ -4,7 +4,7 @@ import { adminAPI } from "@food/api"
 import { toast } from "sonner"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
-import { exportReportsToCSV, exportReportsToExcel, exportReportsToPDF, exportReportsToJSON } from "@food/components/admin/reports/reportsExportUtils"
+import { exportReportsToPDF, exportReportsToJSON } from "@food/components/admin/reports/reportsExportUtils"
 import searchIcon from "@food/assets/Dashboard-icons/image8.png"
 import exportIcon from "@food/assets/Dashboard-icons/image9.png"
 import scheduledIcon from "@food/assets/Dashboard-icons/image24.png"
@@ -17,7 +17,8 @@ import deliveredIcon from "@food/assets/Dashboard-icons/image25.png"
 import canceledIcon from "@food/assets/Dashboard-icons/image26.png"
 import paymentFailedIcon from "@food/assets/Dashboard-icons/image27.png"
 import refundedIcon from "@food/assets/Dashboard-icons/image25.png"
-import { restaurantLabel } from "@food/utils/entityLabels"
+import { restaurantLabel } from "@food/utils/entityLabels"
+import { exportMoney, exportRows, fetchAllPages } from "@food/utils/listExport"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -36,6 +37,111 @@ const statusMeta = {
 }
 
 const PAGE_SIZE = 25
+
+/** A backend order as one report row (the table and the export share it). */
+const toReportRow = (order) => {
+  const pricing = order.pricing || {}
+  const items = Array.isArray(order.items) ? order.items : []
+
+  const itemsSubtotal = items.reduce((sum, item) => {
+    const qty = Number(item.quantity || 1)
+    const price = Number(item.price || 0)
+    return sum + qty * price
+  }, 0)
+
+  const subtotal =
+    itemsSubtotal > 0
+      ? itemsSubtotal
+      : Number(pricing.subtotal || 0)
+
+  const deliveryCharge = Number(pricing.deliveryFee || 0)
+  const platformFee = Number(pricing.platformFee || 0)
+  const vatTax = Number(pricing.tax || 0)
+  const couponDiscount = Number(pricing.discount || 0)
+  const computedTotal =
+    subtotal + deliveryCharge + platformFee + vatTax - couponDiscount
+
+  const totalAmount =
+    pricing.total != null
+      ? Number(pricing.total)
+      : computedTotal
+
+  const restaurantName =
+    order.restaurantId?.restaurantName ||
+    order.restaurantName ||
+    ""
+  const restaurantId =
+    order.restaurantId?._id?.toString?.() ||
+    order.restaurantId?.toString?.() ||
+    ""
+  const orderZoneId =
+    order.restaurantId?.zoneId?._id?.toString?.() ||
+    order.restaurantId?.zoneId?.toString?.() ||
+    ""
+
+  const customerName =
+    order.userId?.name ||
+    order.customerName ||
+    "N/A"
+  const customerId =
+    order.userId?._id?.toString?.() ||
+    order.userId?.toString?.() ||
+    ""
+
+  const backendStatus = String(order.orderStatus || "").toLowerCase()
+  let displayStatus = order.orderStatus
+  if (!backendStatus || backendStatus === "created" || backendStatus === "confirmed") {
+    displayStatus = "Pending"
+  } else if (backendStatus === "preparing" || backendStatus === "ready_for_pickup") {
+    displayStatus = "Processing"
+  } else if (backendStatus === "picked_up") {
+    displayStatus = "Food On The Way"
+  } else if (backendStatus === "delivered") {
+    displayStatus = "Delivered"
+  } else if (backendStatus === "cancelled_by_restaurant") {
+    displayStatus = "Canceled"
+  } else if (backendStatus === "cancelled_by_user" || backendStatus === "cancelled_by_admin") {
+    displayStatus = "Canceled"
+  }
+
+  return {
+    orderId: order.orderId,
+    restaurantId,
+    zoneId: orderZoneId,
+    restaurant: restaurantName,
+    customerId,
+    customerName,
+    totalItemAmount: subtotal,
+    couponDiscount,
+    vatTax,
+    deliveryCharge,
+    platformFee,
+    totalAmount,
+    orderStatus: displayStatus,
+  }
+}
+
+/** The zone, customer and Order ID filters the page applies on its side. */
+const matchesClientFilters = (o, filters, searchQuery) => {
+  if (filters.zone !== "All Zones" && String(o.zoneId || "") !== String(filters.zone)) return false
+  if (filters.customer !== "All customers" && String(o.customerId || "") !== String(filters.customer)) return false
+  const q = String(searchQuery || "").toLowerCase().trim()
+  return !q || String(o.orderId || "").toLowerCase().includes(q)
+}
+
+const EXPORT_COLUMNS = [
+  { label: "Sl", value: (o, i) => i + 1 },
+  { label: "Order ID", value: (o) => o.orderId },
+  { label: "Restaurant", value: (o) => o.restaurant },
+  { label: "Customer Name", value: (o) => o.customerName },
+  { label: "Total Item Amount", value: (o) => exportMoney(o.totalItemAmount) },
+  { label: "Coupon Discount", value: (o) => exportMoney(o.couponDiscount) },
+  { label: "VAT/Tax", value: (o) => exportMoney(o.vatTax) },
+  { label: "Delivery Charge", value: (o) => exportMoney(o.deliveryCharge) },
+  { label: "Platform Fee", value: (o) => exportMoney(o.platformFee) },
+  { label: "Order Amount", value: (o) => exportMoney(o.totalAmount) },
+  { label: "Status", value: (o) => o.orderStatus },
+]
 
 export default function RegularOrderReport() {
   const [orders, setOrders] = useState([])
@@ -126,19 +232,26 @@ export default function RegularOrderReport() {
     return { fromDate, toDate }
   }
 
+  // The filters the orders API applies itself.
+  const serverParams = () => {
+    const { fromDate, toDate } = getDateRange()
+    return {
+      ...(filters.zone !== "All Zones" && { zoneId: filters.zone }),
+      ...(filters.restaurant !== "All restaurants" && { restaurantId: filters.restaurant }),
+      ...(fromDate && { startDate: fromDate.toISOString().split('T')[0] }),
+      ...(toDate && { endDate: toDate.toISOString().split('T')[0] }),
+    }
+  }
+
   // Fetch orders from backend
   const fetchOrders = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const { fromDate, toDate } = getDateRange()
       const params = {
         page: 1,
         limit: 10000,
-        ...(filters.zone !== "All Zones" && { zoneId: filters.zone }),
-        ...(filters.restaurant !== "All restaurants" && { restaurantId: filters.restaurant }),
-        ...(fromDate && { startDate: fromDate.toISOString().split('T')[0] }),
-        ...(toDate && { endDate: toDate.toISOString().split('T')[0] }),
+        ...serverParams(),
       }
 
       const response = await adminAPI.getOrders(params)
@@ -146,87 +259,7 @@ export default function RegularOrderReport() {
       if (response.data?.success) {
         // Transform backend orders (FoodOrder docs) to report format
         const rawOrders = response.data.data.orders || []
-        const transformedOrders = rawOrders.map((order) => {
-          const pricing = order.pricing || {}
-          const items = Array.isArray(order.items) ? order.items : []
-
-          const itemsSubtotal = items.reduce((sum, item) => {
-            const qty = Number(item.quantity || 1)
-            const price = Number(item.price || 0)
-            return sum + qty * price
-          }, 0)
-
-          const subtotal =
-            itemsSubtotal > 0
-              ? itemsSubtotal
-              : Number(pricing.subtotal || 0)
-
-          const deliveryCharge = Number(pricing.deliveryFee || 0)
-          const platformFee = Number(pricing.platformFee || 0)
-          const vatTax = Number(pricing.tax || 0)
-          const couponDiscount = Number(pricing.discount || 0)
-          const computedTotal =
-            subtotal + deliveryCharge + platformFee + vatTax - couponDiscount
-
-          const totalAmount =
-            pricing.total != null
-              ? Number(pricing.total)
-              : computedTotal
-
-          const restaurantName =
-            order.restaurantId?.restaurantName ||
-            order.restaurantName ||
-            ""
-          const restaurantId =
-            order.restaurantId?._id?.toString?.() ||
-            order.restaurantId?.toString?.() ||
-            ""
-          const orderZoneId =
-            order.restaurantId?.zoneId?._id?.toString?.() ||
-            order.restaurantId?.zoneId?.toString?.() ||
-            ""
-
-          const customerName =
-            order.userId?.name ||
-            order.customerName ||
-            "N/A"
-          const customerId =
-            order.userId?._id?.toString?.() ||
-            order.userId?.toString?.() ||
-            ""
-
-          const backendStatus = String(order.orderStatus || "").toLowerCase()
-          let displayStatus = order.orderStatus
-          if (!backendStatus || backendStatus === "created" || backendStatus === "confirmed") {
-            displayStatus = "Pending"
-          } else if (backendStatus === "preparing" || backendStatus === "ready_for_pickup") {
-            displayStatus = "Processing"
-          } else if (backendStatus === "picked_up") {
-            displayStatus = "Food On The Way"
-          } else if (backendStatus === "delivered") {
-            displayStatus = "Delivered"
-          } else if (backendStatus === "cancelled_by_restaurant") {
-            displayStatus = "Canceled"
-          } else if (backendStatus === "cancelled_by_user" || backendStatus === "cancelled_by_admin") {
-            displayStatus = "Canceled"
-          }
-
-          return {
-            orderId: order.orderId,
-            restaurantId,
-            zoneId: orderZoneId,
-            restaurant: restaurantName,
-            customerId,
-            customerName,
-            totalItemAmount: subtotal,
-            couponDiscount,
-            vatTax,
-            deliveryCharge,
-            platformFee,
-            totalAmount,
-            orderStatus: displayStatus,
-          }
-        })
+        const transformedOrders = rawOrders.map(toReportRow)
         setOrders(transformedOrders)
       } else {
         setError(response.data?.message || "Failed to fetch orders")
@@ -253,25 +286,45 @@ export default function RegularOrderReport() {
     return () => clearTimeout(timer)
   }, [searchQuery])
 
-  const filteredOrders = useMemo(() => {
-    let scoped = orders
-    if (filters.zone !== "All Zones") {
-      scoped = scoped.filter((o) => String(o.zoneId || "") === String(filters.zone))
-    }
-    if (filters.customer !== "All customers") {
-      scoped = scoped.filter((o) => String(o.customerId || "") === String(filters.customer))
-    }
+  const filteredOrders = useMemo(
+    () => orders.filter((o) => matchesClientFilters(o, filters, searchQuery)),
+    [orders, searchQuery, filters.zone, filters.customer],
+  )
 
-    if (!searchQuery.trim()) return scoped
-    const q = searchQuery.toLowerCase().trim()
-    return scoped.filter((o) =>
-      String(o.orderId || "")
-        .toLowerCase()
-        .includes(q),
-    )
-  }, [orders, searchQuery, filters.zone, filters.customer])
+  // Excel / CSV: every matching order, fetched page by page with the same
+  // filters (the on-screen list is capped by the API's page size).
+  const [exporting, setExporting] = useState(false)
+  const exportAllOrders = async (format) => {
+    if (exporting) return
+    setExporting(true)
+    try {
+      const params = serverParams()
+      const raw = await fetchAllPages(
+        ({ page, limit }) => adminAPI.getOrders({ ...params, page, limit }, { force: true }),
+        (res) => {
+          const d = res?.data?.data || {}
+          return { rows: d.orders || [], total: d.meta?.total, pages: d.meta?.totalPages }
+        },
+        { pageSize: 500 },
+      )
+      const rows = raw.map(toReportRow).filter((o) => matchesClientFilters(o, filters, searchQuery))
+      if (!rows.length) {
+        toast.info("Nothing to export")
+        return
+      }
+      exportRows(format, { filename: "regular_order_report", columns: EXPORT_COLUMNS, rows, sheetName: "Regular Order Report" })
+    } catch (err) {
+      toast.error(err?.response?.data?.message || err?.message || "Export failed")
+    } finally {
+      setExporting(false)
+    }
+  }
 
   const handleExport = (format) => {
+    if (format === "csv" || format === "excel") {
+      exportAllOrders(format)
+      return
+    }
     if (filteredOrders.length === 0) {
       alert("No data to export")
       return
@@ -289,8 +342,6 @@ export default function RegularOrderReport() {
       { key: "orderStatus", label: "Status" },
     ]
     switch (format) {
-      case "csv": exportReportsToCSV(filteredOrders, headers, "regular_order_report"); break
-      case "excel": exportReportsToExcel(filteredOrders, headers, "regular_order_report"); break
       case "pdf": exportReportsToPDF(filteredOrders, headers, "regular_order_report", "Regular Order Report"); break
       case "json": exportReportsToJSON(filteredOrders, "regular_order_report"); break
     }
@@ -574,7 +625,7 @@ export default function RegularOrderReport() {
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button className="px-2.5 py-1.5 text-[11px] font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 flex items-center gap-1 transition-all">
-                    <img src={exportIcon} alt="Export" className="w-3 h-3" />
+                    {exporting ? <Loader2 className="w-3 h-3 animate-spin" /> : <img src={exportIcon} alt="Export" className="w-3 h-3" />}
                     <span>Export</span>
                     <ChevronDown className="w-2.5 h-2.5" />
                   </button>

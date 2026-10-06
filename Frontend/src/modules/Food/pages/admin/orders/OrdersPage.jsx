@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom"
 import io from "socket.io-client"
 import { FileText, Package } from "@food/components/admin/theme/icons"
 import { adminAPI } from "@food/api"
+import { adminCatalogExtrasAPI, blobErrorMessage, saveBlobResponse } from "@food/api/adminCatalogExtras"
 import { API_BASE_URL } from "@food/api/config"
 import { toast } from "sonner"
 
@@ -71,6 +72,14 @@ const EMPTY_ORDER_FILTERS = {
   restaurantId: "",
 }
 
+// Offline Payments' sub-tabs, as the old panel had them.
+const OFFLINE_TABS = [
+  ["all", "All"],
+  ["pending", "Pending"],
+  ["verified", "Verified"],
+  ["denied", "Denied"],
+]
+
 export default function OrdersPage({ statusKey = "all" }) {
   const config = statusConfig[statusKey] || statusConfig["all"]
   const [orders, setOrders] = useState([])
@@ -116,6 +125,13 @@ export default function OrdersPage({ statusKey = "all" }) {
   const statusKeyRef = useRef(statusKey)
   const searchQueryRef = useRef("")
   const appliedFiltersRef = useRef(EMPTY_ORDER_FILTERS)
+  // Offline Payments' sub-tabs: all / pending / verified / denied.
+  const [offlineTab, setOfflineTab] = useState("all")
+  const offlineTabRef = useRef("all")
+  const selectOfflineTab = (tab) => {
+    offlineTabRef.current = tab
+    setOfflineTab(tab)
+  }
   const [searchQuery, setSearchQuery] = useState("")
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("")
   const [draftFilters, setDraftFilters] = useState(EMPTY_ORDER_FILTERS)
@@ -435,6 +451,26 @@ export default function OrdersPage({ statusKey = "all" }) {
     }
   }, [])
 
+  // The list's whole query: the tab, the offline sub-tab and the filters. The
+  // export sends the same, so its file matches the list.
+  const buildListParams = useCallback(() => {
+    const currentStatusKey = statusKeyRef.current
+    return {
+      status:
+        currentStatusKey === "all"
+          ? undefined
+          : currentStatusKey === "restaurant-cancelled"
+            ? "cancelled"
+            : currentStatusKey,
+      cancelledBy: currentStatusKey === "restaurant-cancelled" ? "restaurant" : undefined,
+      offlineStatus:
+        currentStatusKey === "offline-payments" && offlineTabRef.current !== "all"
+          ? offlineTabRef.current
+          : undefined,
+      ...buildServerQueryParams(),
+    }
+  }, [buildServerQueryParams])
+
   const fetchOrders = useCallback(async (options = {}) => {
     const {
       silent = false,
@@ -463,16 +499,7 @@ export default function OrdersPage({ statusKey = "all" }) {
         }
       }
       const currentStatusKey = statusKeyRef.current
-      const baseParams = {
-        status:
-          currentStatusKey === "all"
-            ? undefined
-            : currentStatusKey === "restaurant-cancelled"
-              ? "cancelled"
-              : currentStatusKey,
-        cancelledBy: currentStatusKey === "restaurant-cancelled" ? "restaurant" : undefined,
-        ...buildServerQueryParams(),
-      }
+      const baseParams = buildListParams()
 
       const requestPage = withRingCheck ? 1 : page
       const requestLimit = withRingCheck ? 15 : pageSizeRef.current
@@ -600,7 +627,7 @@ export default function OrdersPage({ statusKey = "all" }) {
     extractOrdersFromResponse,
     getTotalPagesFromResponse,
     getTotalCountFromResponse,
-    buildServerQueryParams,
+    buildListParams,
     playDefaultRing,
     showBrowserNotification,
     startAlertLoop,
@@ -865,6 +892,8 @@ export default function OrdersPage({ statusKey = "all" }) {
     hasLoadedOnceRef.current = false
     searchQueryRef.current = ""
     appliedFiltersRef.current = EMPTY_ORDER_FILTERS
+    offlineTabRef.current = "all"
+    setOfflineTab("all")
     setSearchQuery("")
     setDebouncedSearchQuery("")
     setDraftFilters(EMPTY_ORDER_FILTERS)
@@ -880,7 +909,7 @@ export default function OrdersPage({ statusKey = "all" }) {
       return
     }
     setApiPage(1)
-  }, [statusKey, debouncedSearchQuery, appliedFilters])
+  }, [statusKey, debouncedSearchQuery, appliedFilters, offlineTab])
 
   // One place decides what to fetch. Split in two it managed both failures:
   // two requests for one change, and none at all when a filter reset the page
@@ -888,7 +917,7 @@ export default function OrdersPage({ statusKey = "all" }) {
   useEffect(() => {
     apiPageRef.current = apiPage
     fetchOrdersRef.current({ silent: false, withRingCheck: false, page: apiPage, force: true })
-  }, [statusKey, debouncedSearchQuery, appliedFilters, apiPage, pageSize])
+  }, [statusKey, debouncedSearchQuery, appliedFilters, offlineTab, apiPage, pageSize])
 
   useEffect(() => {
     if (statusKey !== "all") return undefined
@@ -1332,6 +1361,23 @@ export default function OrdersPage({ statusKey = "all" }) {
     }
   }
 
+  // Excel and CSV come from the server with the list's own query, so they hold
+  // every matching order rather than the page on screen. PDF stays the page.
+  const handleOrdersExport = async (format) => {
+    if (format !== "excel" && format !== "csv") {
+      handleExport(format)
+      return
+    }
+    const toastId = toast.loading("Preparing export...")
+    try {
+      const res = await adminCatalogExtrasAPI.exportOrders(buildListParams(), format === "csv" ? "csv" : "xlsx")
+      saveBlobResponse(res, `orders_${statusKey}.${format === "csv" ? "csv" : "xlsx"}`)
+      toast.success("Export downloaded", { id: toastId })
+    } catch (err) {
+      toast.error(await blobErrorMessage(err, "Export failed"), { id: toastId })
+    }
+  }
+
   if (showLoadingSkeleton) {
     return (
       <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-50 p-4 lg:p-6">
@@ -1349,9 +1395,29 @@ export default function OrdersPage({ statusKey = "all" }) {
         setSearchQuery={setSearchQuery}
         onFilterClick={() => setIsFilterOpen(true)}
         activeFiltersCount={activeFiltersCount}
-        onExport={handleExport}
+        onExport={handleOrdersExport}
         onSettingsClick={() => setIsSettingsOpen(true)}
       />
+      {statusKey === "offline-payments" && (
+        <div className="mb-4 flex flex-wrap gap-2" role="tablist" aria-label="Offline payment status">
+          {OFFLINE_TABS.map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={offlineTab === key}
+              onClick={() => selectOfflineTab(key)}
+              className={`rounded-lg border px-4 py-2 text-sm font-semibold transition-colors ${
+                offlineTab === key
+                  ? "border-blue-600 bg-blue-600 text-white"
+                  : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
       <FilterPanel
         isOpen={isFilterOpen}
         onClose={() => setIsFilterOpen(false)}

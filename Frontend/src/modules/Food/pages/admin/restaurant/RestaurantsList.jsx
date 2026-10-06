@@ -14,6 +14,9 @@ import inactiveIcon from "@food/assets/Dashboard-icons/image3.png"
 import { zoneLabel } from "@food/utils/entityLabels"
 import { toast } from "sonner"
 import { adminCatalogExtrasAPI } from "@food/api/adminCatalogExtras"
+import ExportMenu from "@food/components/admin/ExportMenu"
+import { exportDate, fetchAllPages } from "@food/utils/listExport"
+import { ShieldCheck } from "@food/components/admin/theme/icons"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -64,6 +67,22 @@ const mapRawRestaurant = (restaurant, index, zones) => ({
   logo: getPrimaryRestaurantImage(restaurant, PLACEHOLDER_40),
   originalData: restaurant,
 })
+
+// The old panel's columns: store, owner, zone, featured, status.
+const RESTAURANT_EXPORT_COLUMNS = [
+  { label: "Sl", value: (_r, i) => i + 1 },
+  { label: "Restaurant Id", value: (r) => r.originalData?.id || r.originalData?._id || "" },
+  { label: "Restaurant Name", value: (r) => r.name },
+  { label: "Restaurant Phone", value: (r) => r.originalData?.primaryContactNumber || "" },
+  { label: "Owner Name", value: (r) => r.ownerName },
+  { label: "Owner Phone", value: (r) => r.ownerPhone },
+  { label: "Zone", value: (r) => r.zone },
+  { label: "Rating", value: (r) => Number(r.rating) || 0 },
+  { label: "Featured", value: (r) => (r.originalData?.isFeatured ? "Yes" : "No") },
+  { label: "Status", value: (r) => approvalStatusLabel(r.approvalStatus) },
+  { label: "Position in app", value: (r) => r.originalData?.displayPosition ?? "" },
+  { label: "Joined", value: (r) => exportDate(r.originalData?.createdAt, false) },
+]
 
 const getSortByParam = (sortConfig) => {
   if (!sortConfig.key || sortConfig.key === "zone") return "created-desc"
@@ -1221,6 +1240,57 @@ export default function RestaurantsList() {
     utils.exportRestaurantsToPDF(dataToExport, filename)
   }
 
+  // Excel / CSV: every restaurant matching the search, not just this page.
+  const loadAllRestaurantsForExport = async () => {
+    const rows = await fetchAllPages(
+      ({ page: p, limit }) =>
+        adminAPI.getApprovedRestaurants({
+          page: p,
+          limit,
+          ...(debouncedSearchQuery && { search: debouncedSearchQuery }),
+          sortBy: getSortByParam(sortConfig),
+        }),
+      (res) => {
+        const data = res?.data?.data
+        const list = Array.isArray(data?.restaurants) ? data.restaurants : Array.isArray(data) ? data : []
+        return { rows: list, total: data?.total }
+      },
+      { pageSize: 500 },
+    )
+    return rows.map((r, i) => mapRawRestaurant(r, i, zones))
+  }
+
+  // "Verify all": approve every restaurant still pending its first approval.
+  const [verifyingAll, setVerifyingAll] = useState(false)
+  const handleVerifyAll = async () => {
+    let pendingCount = 0
+    try {
+      const res = await adminAPI.getPendingRestaurants()
+      const d = res?.data?.data
+      const list = Array.isArray(d?.restaurants) ? d.restaurants : Array.isArray(d) ? d : []
+      pendingCount = list.filter((r) => String(r?.status || "").toLowerCase() === "pending").length
+    } catch {
+      toast.error("Couldn't load the pending restaurants")
+      return
+    }
+    if (!pendingCount) {
+      toast.info("No restaurants are waiting for approval")
+      return
+    }
+    if (!window.confirm(`Approve all ${pendingCount} pending restaurant${pendingCount === 1 ? "" : "s"}? Each owner is notified, as when approved one by one. Rejected restaurants and location changes are not touched.`)) return
+    try {
+      setVerifyingAll(true)
+      const res = await adminCatalogExtrasAPI.approveAllPendingRestaurants()
+      const { approved = 0, failed = [] } = res?.data?.data || {}
+      if (failed.length) toast.warning(`${approved} approved, ${failed.length} could not be approved`)
+      else toast.success(`${approved} restaurant${approved === 1 ? "" : "s"} approved`)
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Couldn't approve the pending restaurants")
+    } finally {
+      setVerifyingAll(false)
+    }
+  }
+
   return (
     <div className="h-full overflow-y-auto bg-slate-50 p-4 lg:p-6">
       <div className="max-w-7xl mx-auto">
@@ -1305,35 +1375,26 @@ export default function RestaurantsList() {
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               </div>
 
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button className="px-4 py-2.5 text-sm font-medium rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-2 transition-all">
-                    <Download className="w-4 h-4" />
-                    <span>Export</span>
-                    <ChevronDown className="w-3 h-3" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56 bg-white border border-slate-200 rounded-lg shadow-lg z-50 animate-in fade-in-0 zoom-in-95 duration-200 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95">
-                  <DropdownMenuLabel>Export Format</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={handleExport} className="cursor-pointer flex items-center gap-2">
-                    <FileText className="w-4 h-4" />
-                    PDF
-                  </DropdownMenuItem>
-                  <DropdownMenuItem 
-                    onClick={async () => {
-                      const dataToExport = filteredRestaurants.length > 0 ? filteredRestaurants : restaurants
-                      const filename = "restaurants_list"
-                      const utils = await loadRestaurantsExportUtils()
-                      utils.exportRestaurantsToExcel(dataToExport, filename)
-                    }} 
-                    className="cursor-pointer flex items-center gap-2"
-                  >
-                    <FileSpreadsheet className="w-4 h-4" />
-                    Excel
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <ExportMenu filename="restaurants_list" sheetName="Restaurants" columns={RESTAURANT_EXPORT_COLUMNS} getRows={loadAllRestaurantsForExport} />
+              <button
+                type="button"
+                onClick={handleExport}
+                className="px-4 py-2.5 text-sm font-medium rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-2 transition-all"
+                title="PDF of the restaurants on this page"
+              >
+                <FileText className="w-4 h-4" />
+                <span>PDF</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleVerifyAll}
+                disabled={verifyingAll}
+                className="px-4 py-2.5 text-sm font-medium rounded-lg border border-emerald-600 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 flex items-center gap-2 transition-all disabled:opacity-60"
+                title="Approve every restaurant still waiting for approval (New Restaurants -> Pending)"
+              >
+                {verifyingAll ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                <span>Verify all</span>
+              </button>
             </div>
           </div>
 
@@ -1412,6 +1473,12 @@ export default function RestaurantsList() {
                       </div>
                     </th>
                     <th
+                      className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider"
+                      title="Featured restaurants are flagged on their card in the customer app."
+                    >
+                      Featured
+                    </th>
+                    <th
                       className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider cursor-pointer hover:bg-slate-100 transition-colors"
                       onClick={() => handleSort('status')}
                     >
@@ -1432,7 +1499,7 @@ export default function RestaurantsList() {
                 <tbody className="bg-white divide-y divide-slate-100">
                   {filteredRestaurants.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="px-6 py-20 text-center">
+                      <td colSpan={9} className="px-6 py-20 text-center">
                         <div className="flex flex-col items-center justify-center">
                           <p className="text-lg font-semibold text-slate-700 mb-1">No Data Found</p>
                           <p className="text-sm text-slate-500">No restaurants match your search</p>
@@ -1491,6 +1558,12 @@ export default function RestaurantsList() {
                               {(Number(restaurant.rating) || 0).toFixed(1)}
                             </span>
                           </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <FeaturedToggle
+                            restaurantId={restaurant.originalData?._id || restaurant.originalData?.id || restaurant._id || restaurant.id}
+                            value={restaurant.originalData?.isFeatured === true}
+                          />
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex flex-col gap-1">
@@ -2868,5 +2941,44 @@ function DisplayPositionInput({ restaurantId, value }) {
       />
       {saving && <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-400" />}
     </div>
+  )
+}
+
+/** The old panel's Featured switch; saved at once. */
+function FeaturedToggle({ restaurantId, value }) {
+  const [on, setOn] = useState(Boolean(value))
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    setOn(Boolean(value))
+  }, [value])
+
+  const toggle = async () => {
+    const next = !on
+    setSaving(true)
+    setOn(next)
+    try {
+      await adminCatalogExtrasAPI.setRestaurantFeatured(restaurantId, next)
+      toast.success(next ? "Marked as featured" : "Removed from featured")
+    } catch (error) {
+      setOn(!next)
+      toast.error(error?.response?.data?.message || "Couldn't update featured")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label="Featured"
+      disabled={saving}
+      onClick={toggle}
+      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-60 ${on ? "bg-blue-600" : "bg-slate-300"}`}
+    >
+      <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${on ? "translate-x-5" : "translate-x-0.5"}`} />
+    </button>
   )
 }

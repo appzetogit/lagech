@@ -27,7 +27,14 @@ const emptyStats = () => ({
     totalWithdrawn: 0,
     pendingWithdrawal: 0,
     totalOrders: 0,
+    activeOrders: 0,
 });
+
+/** Orders a rider has accepted and not yet finished: "on a delivery". */
+const ACTIVE_DELIVERY = {
+    dispatchStatus: 'accepted',
+    orderStatus: { notIn: ['delivered', 'cancelled_by_user', 'cancelled_by_restaurant', 'cancelled_by_admin', 'pending_payment'] },
+};
 
 /**
  * Per-partner money summary for a page of riders.
@@ -44,7 +51,7 @@ export async function getBulkDeliveryPartnerStats(partnerIds) {
         orderStatus: 'delivered',
     };
 
-    const [earnings, cash, deposits, bonuses, withdrawals] = await Promise.all([
+    const [earnings, cash, deposits, bonuses, withdrawals, active] = await Promise.all([
         // Earnings and the delivered-order count come from one grouping.
         prisma.foodOrder.groupBy({
             by: ['dispatchDeliveryPartnerId'],
@@ -74,6 +81,11 @@ export async function getBulkDeliveryPartnerStats(partnerIds) {
             where: { deliveryPartnerId: { in: ids }, status: { in: ['approved', 'pending'] } },
             _sum: { amount: true },
         }),
+        prisma.foodOrder.groupBy({
+            by: ['dispatchDeliveryPartnerId'],
+            where: { dispatchDeliveryPartnerId: { in: ids }, ...ACTIVE_DELIVERY },
+            _count: { _all: true },
+        }),
     ]);
 
     const statsMap = new Map(ids.map((id) => [id, emptyStats()]));
@@ -102,6 +114,10 @@ export async function getBulkDeliveryPartnerStats(partnerIds) {
         if (!stats) continue;
         if (row.status === 'approved') stats.totalWithdrawn = num(row._sum.amount);
         if (row.status === 'pending') stats.pendingWithdrawal = num(row._sum.amount);
+    }
+    for (const row of active) {
+        const stats = at(row.dispatchDeliveryPartnerId);
+        if (stats) stats.activeOrders = row._count._all;
     }
 
     for (const stats of statsMap.values()) {
@@ -155,7 +171,13 @@ const serializePartner = (doc, stats = {}, sl = 0) => {
             (doc.fcmTokenMobile || []).length > 0 || (doc.fcmTokens || []).length > 0,
         profilePhoto: doc.profilePhoto || null,
         profileImage: doc.profilePhoto ? { url: doc.profilePhoto } : null,
+        // Delivered orders: the old panel's "Total completed orders".
         totalOrders: stats.totalOrders || 0,
+        activeOrders: stats.activeOrders || 0,
+        // The old panel's Availability column: on a delivery beats online/offline.
+        availability: (stats.activeOrders || 0) > 0
+            ? 'on_delivery'
+            : (doc.availabilityStatus === 'online' ? 'online' : 'offline'),
         pocketBalance: stats.pocketBalance || 0,
         cashInHand: stats.cashInHand || 0,
         totalEarning: stats.totalEarning || 0,

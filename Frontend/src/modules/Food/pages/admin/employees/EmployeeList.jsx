@@ -2,6 +2,17 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Plus, Search, Shield, Trash2, ToggleLeft, ToggleRight } from "@food/components/admin/theme/icons";
 import { adminAPI } from "@food/api";
+import ExportMenu from "@food/components/admin/ExportMenu";
+import { exportDate } from "@food/utils/listExport";
+
+const EXPORT_COLUMNS = [
+  { label: "Sl", value: (_, i) => i + 1 },
+  { label: "Name", value: (it) => it.name || "" },
+  { label: "Email", value: (it) => it.email || "" },
+  { label: "Phone", value: (it) => it.phone || "" },
+  { label: "Status", value: (it) => (it.isActive ? "Active" : "Disabled") },
+  { label: "Created at", value: (it) => exportDate(it.createdAt) },
+];
 
 /** Employees -> List: every sub admin, with access, enable/disable and delete. New ones are added on Employees -> Add new. */
 export default function EmployeeList() {
@@ -60,7 +71,11 @@ export default function EmployeeList() {
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input className="border rounded-lg pl-9 pr-3 py-2 w-full" placeholder="Search sub admins" value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
-          <button className="px-3 py-2 border rounded-lg text-sm" onClick={load}>Refresh</button>
+          <div className="flex items-center gap-2">
+            {/* The API returns every sub admin, so the searched list on screen is the whole export. */}
+            <ExportMenu filename="employees" columns={EXPORT_COLUMNS} getRows={() => filtered} />
+            <button className="px-3 py-2 border rounded-lg text-sm" onClick={load}>Refresh</button>
+          </div>
         </div>
 
         {loading ? <div className="text-sm text-slate-500">Loading...</div> : (

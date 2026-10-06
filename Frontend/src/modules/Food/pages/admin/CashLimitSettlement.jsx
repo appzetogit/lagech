@@ -2,6 +2,8 @@
 import { Search, Receipt, Loader2, Package } from "@food/components/admin/theme/icons"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
+import ExportMenu from "@food/components/admin/ExportMenu"
+import { exportDate, exportMoney, fetchAllPages } from "@food/utils/listExport"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -29,6 +31,18 @@ const formatDate = (d) => {
 }
 
 const METHOD_LABELS = { cash: "Cash", upi: "UPI", bank_transfer: "Bank transfer", razorpay: "Online" }
+
+const SETTLEMENT_EXPORT_COLUMNS = [
+  { label: "Sl", value: (_tx, i) => i + 1 },
+  { label: "Date", value: (tx) => exportDate(tx.createdAt) },
+  { label: "Delivery man", value: (tx) => tx.deliveryName || "" },
+  { label: "Delivery man ID", value: (tx) => tx.deliveryIdString || "" },
+  { label: "Amount", value: (tx) => exportMoney(tx.amount) },
+  { label: "Status", value: (tx) => tx.status || "" },
+  { label: "Method", value: (tx) => METHOD_LABELS[tx.paymentMethod] || tx.paymentMethod || "" },
+  { label: "Collected by", value: (tx) => (tx.collectedByAdmin ? "Admin" : "Rider (online)") },
+  { label: "Reference", value: (tx) => tx.adminNote || (tx.razorpayPaymentId && tx.razorpayPaymentId !== "-" ? tx.razorpayPaymentId : "") },
+]
 
 export default function CashLimitSettlement() {
   const [transactions, setTransactions] = useState([])
@@ -99,6 +113,24 @@ export default function CashLimitSettlement() {
                 {total}
               </span>
             </div>
+            <div className="flex items-center gap-3">
+            <ExportMenu
+              filename="cash_limit_settlements"
+              sheetName="Collect cash"
+              columns={SETTLEMENT_EXPORT_COLUMNS}
+              getRows={() =>
+                fetchAllPages(
+                  ({ page: p, limit: size }) =>
+                    adminAPI.getCashLimitSettlements({ search: searchQuery.trim() || undefined, page: p, limit: size }),
+                  (res) => ({
+                    rows: res?.data?.data?.transactions || [],
+                    total: res?.data?.data?.pagination?.total,
+                    pages: res?.data?.data?.pagination?.pages,
+                  }),
+                  { pageSize: 500 },
+                )
+              }
+            />
             <div className="relative flex-1 sm:flex-initial min-w-[200px] max-w-xs">
               <input
                 type="text"
@@ -108,6 +140,7 @@ export default function CashLimitSettlement() {
                 className="pl-10 pr-4 py-2.5 w-full text-sm rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400"
               />
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            </div>
             </div>
           </div>
 

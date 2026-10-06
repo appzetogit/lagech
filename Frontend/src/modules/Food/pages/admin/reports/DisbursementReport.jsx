@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
-import { Download, Loader2, PiggyBank } from "@food/components/admin/theme/icons"
+import { Loader2, PiggyBank } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminAPI } from "@food/api"
 import { adminSystemExtrasAPI } from "@food/api/adminSystemExtras"
-import { downloadCsv, rupees } from "./ReportShell"
+import { rupees } from "./ReportShell"
+import ExportMenu from "@food/components/admin/ExportMenu"
+import { exportMoney, fetchAllPages } from "@food/utils/listExport"
 
 const isoDay = (date) => {
   const d = new Date(date)
@@ -35,13 +37,14 @@ const BATCH_BADGE = {
   canceled: "bg-slate-200 text-slate-700",
 }
 
-const CSV_COLUMNS = [
-  { key: "restaurantName", label: "Restaurant" },
-  { key: "payouts", label: "Payouts" },
-  { key: "total", label: "Total" },
-  { key: "paid", label: "Paid" },
-  { key: "pending", label: "Pending" },
-  { key: "cancelled", label: "Cancelled" },
+const EXPORT_COLUMNS = [
+  { label: "Sl", value: (r, i) => i + 1 },
+  { label: "Restaurant", value: (r) => r.restaurantName },
+  { label: "Payouts", value: (r) => Number(r.payouts) || 0 },
+  { label: "Total", value: (r) => exportMoney(r.total) },
+  { label: "Paid", value: (r) => exportMoney(r.paid) },
+  { label: "Pending", value: (r) => exportMoney(r.pending) },
+  { label: "Cancelled", value: (r) => exportMoney(r.cancelled) },
 ]
 
 /**
@@ -57,7 +60,6 @@ export default function DisbursementReport({ entityType = "restaurant" }) {
   const [page, setPage] = useState(1)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [exporting, setExporting] = useState(false)
 
   useEffect(() => {
     if (entityType !== "restaurant") return
@@ -86,17 +88,14 @@ export default function DisbursementReport({ entityType = "restaurant" }) {
     }
   }, [range.from, range.to, status, restaurantId, page, entityType])
 
-  const exportCsv = async () => {
-    try {
-      setExporting(true)
-      const res = await adminSystemExtrasAPI.getDisbursementReport({ ...params, page: 1, limit: 500 })
-      downloadCsv(`disbursement-report-${range.from}-to-${range.to}.csv`, CSV_COLUMNS, res?.data?.data?.rows || [])
-    } catch {
-      toast.error("Export failed")
-    } finally {
-      setExporting(false)
-    }
-  }
+  const exportAll = () =>
+    fetchAllPages(
+      ({ page: p, limit }) => adminSystemExtrasAPI.getDisbursementReport({ ...params, page: p, limit }),
+      (res) => {
+        const d = res?.data?.data || {}
+        return { rows: d.rows || [], total: d.pagination?.total, pages: d.pagination?.pages }
+      },
+    )
 
   const input = "rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white"
   const rows = data?.rows || []
@@ -147,9 +146,14 @@ export default function DisbursementReport({ entityType = "restaurant" }) {
                 </select>
               </label>
             )}
-            <button type="button" onClick={exportCsv} disabled={exporting || !rows.length} className="ml-auto inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50">
-              {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} Export CSV
-            </button>
+            <ExportMenu
+              className="ml-auto"
+              filename={`disbursement-report-${range.from}-to-${range.to}`}
+              sheetName="Disbursement Report"
+              columns={EXPORT_COLUMNS}
+              getRows={exportAll}
+              disabled={!rows.length}
+            />
           </div>
         </div>
 

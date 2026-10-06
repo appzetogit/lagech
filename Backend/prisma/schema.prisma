@@ -766,6 +766,8 @@ model FoodRestaurant {
   /// Admin-chosen place in the customer app's restaurant list (1 = first).
   /// Null means no fixed place: listed after the positioned ones.
   displayPosition      Int?
+  /// The admin restaurant list's Featured toggle; the public card carries it.
+  isFeatured           Boolean @default(false)
 
   diningEnabled   Boolean @default(false)
   diningMaxGuests Int     @default(6)

@@ -4,9 +4,27 @@ import {
   FileText, Image as ImageIcon, ExternalLink, CreditCard, Calendar, Star, Building2, User, Phone, Mail, MapPin, Clock
 } from "@food/components/admin/theme/icons"
 import { adminAPI, restaurantAPI } from "@food/api"
+import ExportMenu from "@food/components/admin/ExportMenu"
+import { exportDate } from "@food/utils/listExport"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
+
+const EXPORT_COLUMNS = [
+  { label: "Sl", value: (_, i) => i + 1 },
+  { label: "Restaurant name", value: (r) => r.restaurantName || "" },
+  { label: "Owner name", value: (r) => r.ownerName || "" },
+  { label: "Owner phone", value: (r) => r.ownerPhone || "" },
+  { label: "Owner email", value: (r) => r.ownerEmail || "" },
+  { label: "Zone", value: (r) => r.zone || "" },
+  {
+    label: "Request",
+    value: (r) => (r.status !== "pending" && r.locationUpdateStatus === "pending" ? "Location update" : "New restaurant"),
+  },
+  { label: "Status", value: (r) => r.status || "" },
+  { label: "Rejection reason", value: (r) => r.rejectionReason || "" },
+  { label: "Requested at", value: (r) => exportDate(r.createdAt) },
+]
 
 const formatTime12Hour = (timeStr) => {
   if (!timeStr || typeof timeStr !== "string" || !timeStr.includes(":")) return "--:-- --"
@@ -336,6 +354,14 @@ export default function JoiningRequest() {
                   </span>
                 )}
               </button>
+              {/* The queue API returns every request at once, so the searched and
+                  filtered list on screen is the whole export. */}
+              <ExportMenu
+                filename={activeTab === "pending" ? "restaurant_join_requests_pending" : "restaurant_join_requests_rejected"}
+                columns={EXPORT_COLUMNS}
+                getRows={() => filteredRequests}
+                disabled={loading}
+              />
             </div>
           </div>
 
