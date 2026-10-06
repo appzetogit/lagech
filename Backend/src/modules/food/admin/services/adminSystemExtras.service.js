@@ -250,6 +250,7 @@ export async function getPublicBusinessSettings() {
             offline: Boolean(offline.enabled && offline.methods.some((method) => method.isActive)),
             wallet: customer.walletEnabled,
             partialPayment: payment.partialPayment && customer.walletEnabled,
+            partialPaymentMethod: payment.partialPaymentMethod,
         },
         order: {
             homeDelivery: order.homeDelivery,

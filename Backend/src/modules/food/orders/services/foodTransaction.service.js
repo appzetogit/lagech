@@ -284,6 +284,8 @@ export async function createInitialTransaction(order) {
 
       paymentStatusLabel: String(order.paymentStatus || 'cod_pending'),
       amountDue: Number(order.paymentAmountDue ?? totalCustomerPaid) || 0,
+      // Partial payment: the wallet part of totalCustomerPaid (0 otherwise).
+      walletAmount: order.paymentMethod === 'wallet' ? 0 : Number(order.walletAmount) || 0,
       gatewayProvider: order.paymentMethod === 'offline' ? 'offline' : 'razorpay',
       razorpayOrderId: order.razorpayOrderId || null,
       razorpayPaymentId: order.razorpayPaymentId || null,

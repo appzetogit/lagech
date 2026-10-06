@@ -284,9 +284,7 @@ with a switched-off method returns 400 with a message for the customer:
 - `wallet` — `business.payment.wallet`.
 - `offline` — `business.payment.offline` (and the methods from `/offline-payment-methods`).
 
-Partial payment (part wallet, rest online or cash) is **not** available yet:
-`business.payment.partialPayment` is published for later but a wallet order
-must still cover the whole total.
+Partial payment (part wallet, rest online or cash): see *Partial payment* below.
 
 **Per-zone switches (Zone setup).** Each zone can switch off Cash On Delivery (`cash`) and/or
 Digital Payment (`razorpay`, `card`, `razorpay_qr`). Placing an order with a switched-off method
@@ -305,6 +303,65 @@ For `razorpay` / `card`, call `verify-payment` after checkout:
 POST /v1/food/orders/verify-payment
 { "orderId": "...", "razorpayOrderId": "...", "razorpayPaymentId": "...", "razorpaySignature": "..." }
 ```
+
+### Partial payment (wallet + online or cash)
+
+When `business.payment.partialPayment` is true and the customer's wallet
+balance (`GET /v1/food/user/wallet` → `balance`) is above 0 but **below** the
+order total, offer "Use wallet balance (₹X)". (A balance that covers the whole
+total is the ordinary `paymentMethod: "wallet"`.) With the toggle on, the
+customer picks the method for the rest:
+
+- `business.payment.partialPaymentMethod`: `"both"` (cash or online), `"cod"`
+  (cash only) or `"digital"` (online only), and only methods that are also on
+  (`cod` / `digital`, and the zone's `paymentOptions`).
+- `paymentMethod` is the method for the rest: `"razorpay"` (or `"card"`) or
+  `"cash"`. Not `razorpay_qr`, `offline` or `wallet`.
+
+```jsonc
+POST /v1/food/orders
+{
+  ...,
+  "paymentMethod": "razorpay",      // or "cash"
+  "useWallet": true,
+  "walletAmount": 120               // optional: the wallet part you showed = min(balance, total)
+}
+```
+
+The server takes the wallet part from the wallet **in the same database
+transaction that creates the order** and stores it on the order:
+
+- the order's `walletAmount` and `payment.walletAmount` = the wallet part,
+  `payment.isPartial: true`, `payment.method` = the method for the rest,
+  `payment.amountDue` = total − wallet part (what is charged online or collected
+  in cash). `pricing.total` is the full order total as before.
+- `razorpay`: the response's `razorpay.amount` is the rest only (paise). Verify
+  as usual. If the payment is abandoned (`DELETE /orders/:id/pending-payment`),
+  fails or is never completed (unpaid orders are removed after 30 minutes), the
+  wallet part goes back to the wallet automatically.
+- `cash`: the order is placed at once; the rider collects only `amountDue`.
+- Cancelled or refunded: the wallet part goes back to the wallet; a paid online
+  part is refunded to the original payment method. A cancelled wallet + cash
+  order shows `payment.refund.status: "processed"` with the wallet part as the
+  amount, and `payment.status` stays `cod_pending` (no cash was taken).
+
+Refusals (400, nothing is written and the wallet is untouched):
+"Paying part of an order with the wallet is not available right now. ..." (switched off),
+"Your wallet balance is empty. ...",
+"Your wallet balance has changed (₹50 now). Please review the payment and try again."
+(the balance is now below the `walletAmount` you sent, or another order spent it at the same moment),
+"Your wallet covers the whole order. Choose Wallet as the payment method.",
+"The rest of a wallet payment can only be paid with cash on delivery." / "... only be paid online.",
+"The amount left to pay online is below ₹1. ...".
+
+Show the split on the bill (Wallet −₹X, To pay online / in cash ₹Y) and in order
+details from `payment.walletAmount` and `payment.amountDue`.
+
+### Guest checkout
+
+Not supported: every order needs a signed-in customer (phone OTP).
+`business.customer.guestCheckout` is stored for the admin panel only; keep the
+login step before checkout whatever it says.
 
 ### Offline payment (bank transfer, UPI, ...)
 
@@ -686,7 +743,7 @@ below whatever the app shows.
 {
   "maintenance": { "maintenanceMode": false, "maintenanceMessage": "" },
   "currency": { "code": "INR", "decimals": 0 },          // decimals to show prices with
-  "payment": { "cod": true, "digital": true, "offline": false, "wallet": true, "partialPayment": true },
+  "payment": { "cod": true, "digital": true, "offline": false, "wallet": true, "partialPayment": true, "partialPaymentMethod": "both" },
   "order": {
     "homeDelivery": true, "takeaway": false,               // takeaway: no takeaway flow yet; keep hidden
     "scheduledOrder": false, "scheduleSlotMinutes": 30,    // slot length for the time picker
@@ -694,7 +751,7 @@ below whatever the app shows.
   },
   "customer": {
     "wallet": true, "addFund": false,                      // addFund: show "Add money" in the wallet
-    "vegNonVegToggle": true, "guestCheckout": false,       // guest checkout is not supported by the API yet
+    "vegNonVegToggle": true, "guestCheckout": false,       // stored only: every order needs a phone-OTP login (see §5 Guest checkout)
     "newCustomerDiscount": null                            // or { type: "amount"|"percent", value, maxDiscount, minOrderAmount, validityDays }
   },
   "rider": { "maxAssignedOrders": 2, "canCancelOrder": false, "showEarning": true, "pictureUpload": true, "selfRegistration": true },

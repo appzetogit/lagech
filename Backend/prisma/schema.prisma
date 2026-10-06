@@ -1352,6 +1352,10 @@ model FoodOrder {
   paymentMethod     OrderPaymentMethod
   paymentStatus     OrderPaymentStatus @default(cod_pending)
   paymentAmountDue  Decimal?           @db.Decimal(14, 2)
+  /// Partial payment: the part of `total` taken from the customer's wallet when
+  /// the order was placed; `paymentMethod` then pays the rest (`paymentAmountDue`).
+  /// 0 for every other order (a full-wallet order is paymentMethod 'wallet', 0 here).
+  walletAmount      Decimal            @default(0) @db.Decimal(14, 2)
   razorpayOrderId   String?
   razorpayPaymentId String?
   razorpaySignature String?
@@ -1583,6 +1587,9 @@ model FoodTransaction {
   /// 'paid'…). Distinct from `status`, which is the transaction's own lifecycle.
   paymentStatusLabel String  @default("cod_pending")
   amountDue          Decimal @default(0) @db.Decimal(14, 2)
+  /// Partial payment: the order's wallet part (FoodOrder.walletAmount); the
+  /// rider or the gateway took totalCustomerPaid - walletAmount.
+  walletAmount       Decimal @default(0) @db.Decimal(14, 2)
 
   gatewayProvider   String  @default("razorpay")
   razorpayOrderId   String?

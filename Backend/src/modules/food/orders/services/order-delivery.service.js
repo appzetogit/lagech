@@ -119,7 +119,9 @@ function emitOrderUpdate(order, deliveryPartnerId) {
 
       if (order.payment?.method === 'cash' || order.paymentMethod === 'cash') {
         riderTitle = 'Payment collected!';
-        const amt = order.pricing?.total || order.amounts?.totalCustomerPaid || 0;
+        // A partial payment's wallet part was not collected at the door.
+        const amt =
+          (order.pricing?.total || order.amounts?.totalCustomerPaid || 0) - (Number(order.payment?.walletAmount) || 0);
         riderBody = `You have collected Rs ${amt} cash for Order #${orderId}.`;
       }
     }

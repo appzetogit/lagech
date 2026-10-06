@@ -612,7 +612,7 @@ export async function getDeliverymanEarningReport(query = {}) {
             SELECT o."dispatchDeliveryPartnerId" AS id,
                    COUNT(*)::int AS deliveries,
                    SUM(o."riderEarning") AS earning,
-                   SUM(CASE WHEN o."paymentMethod" = 'cash' THEN o.total ELSE 0 END) AS "codCollected"
+                   SUM(CASE WHEN o."paymentMethod" = 'cash' THEN o.total - o."walletAmount" ELSE 0 END) AS "codCollected"
               FROM food_orders o
              WHERE o."orderStatus" = 'delivered'
                AND o."dispatchDeliveryPartnerId" IS NOT NULL

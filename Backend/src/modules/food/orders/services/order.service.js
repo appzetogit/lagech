@@ -30,6 +30,15 @@ import { getOfflinePaymentSettings } from '../../admin/services/adminSystemExtra
 import { buildOfflinePaymentRecord, decideOfflinePayment, OFFLINE_STATUS } from './offlinePayment.util.js';
 import { paymentMethodRefusal, isScheduledFor, percentageRiderEarning } from './businessRules.js';
 import { getBusinessSettings, getMaintenanceState } from '../../shared/businessSettings.js';
+import { getBalance } from '../../../../core/payments/transaction.service.js';
+import {
+  planPartialPayment,
+  debitPartialWallet,
+  returnPartialWallet,
+  refundPartialPayment,
+  isPartialPayment,
+  remainderAmount,
+} from './partialPayment.service.js';
 import * as dispatchService from './order-dispatch.service.js';
 import * as deliveryService from './order-delivery.service.js';
 import * as paymentService from './order-payment.service.js';
@@ -125,20 +134,42 @@ function buildAcceptanceDeadline(date = new Date(), windowSeconds = ORDER_ACCEPT
  * than deleted — money records must survive the order they refer to, or a
  * deleted order silently erases its own wallet history.
  */
+const purgeSteps = (db, id) => [
+  db.foodSupportTicket.updateMany({ where: { orderId: id }, data: { orderId: null } }),
+  db.transaction.updateMany({ where: { orderId: id }, data: { orderId: null } }),
+  db.foodChatMessage.updateMany({ where: { orderId: id }, data: { orderId: null } }),
+  db.foodChatConversation.updateMany({ where: { orderId: id }, data: { orderId: null } }),
+  db.deliveryOrderEmergencyRequest.deleteMany({ where: { orderId: id } }),
+  db.refund.deleteMany({ where: { orderId: id } }),
+  db.payment.deleteMany({ where: { orderId: id } }),
+  db.foodTransaction.deleteMany({ where: { orderId: id } }),
+  // items, itemRatings, statusHistory and dispatchOffers cascade.
+  db.foodOrder.delete({ where: { id } }),
+];
+
 async function purgeOrder(orderId) {
+  await prisma.$transaction(purgeSteps(prisma, String(orderId)));
+}
+
+/**
+ * Delete an order whose online payment never completed, giving back the
+ * wallet part of a partial payment in the same transaction. The row is locked
+ * and re-checked first, so a payment confirmed at this moment wins and the
+ * wallet is never returned for an order that goes on to be paid.
+ */
+async function purgeUnpaidOrder(orderId) {
   const id = String(orderId);
-  await prisma.$transaction([
-    prisma.foodSupportTicket.updateMany({ where: { orderId: id }, data: { orderId: null } }),
-    prisma.transaction.updateMany({ where: { orderId: id }, data: { orderId: null } }),
-    prisma.foodChatMessage.updateMany({ where: { orderId: id }, data: { orderId: null } }),
-    prisma.foodChatConversation.updateMany({ where: { orderId: id }, data: { orderId: null } }),
-    prisma.deliveryOrderEmergencyRequest.deleteMany({ where: { orderId: id } }),
-    prisma.refund.deleteMany({ where: { orderId: id } }),
-    prisma.payment.deleteMany({ where: { orderId: id } }),
-    prisma.foodTransaction.deleteMany({ where: { orderId: id } }),
-    // items, itemRatings, statusHistory and dispatchOffers cascade.
-    prisma.foodOrder.delete({ where: { id } }),
-  ]);
+  return prisma.$transaction(async (tx) => {
+    const [row] = await tx.$queryRaw`
+      SELECT id, "userId", "orderStatus"::text AS "orderStatus", "paymentStatus"::text AS "paymentStatus",
+             "paymentMethod"::text AS "paymentMethod", "walletAmount", order_id
+        FROM food_orders WHERE id = ${id} FOR UPDATE`;
+    if (!row || row.orderStatus !== "pending_payment") return false;
+    if (row.paymentStatus === "paid" || row.paymentStatus === "refunded") return false;
+    await returnPartialWallet(row, { reason: "payment not completed", client: tx });
+    for (const step of purgeSteps(tx, id)) await step;
+    return true;
+  });
 }
 
 async function deletePendingPaymentOrder(orderLike) {
@@ -149,16 +180,16 @@ async function deletePendingPaymentOrder(orderLike) {
   const payStatus = String(orderLike.paymentStatus || "").toLowerCase();
   if (payStatus === "paid" || payStatus === "refunded") return false;
 
-  await purgeOrder(id);
-  return true;
+  return purgeUnpaidOrder(id);
 }
 
 let lastExpiredCleanupAt = 0;
 const EXPIRE_CLEANUP_INTERVAL_MS = 60_000;
 
-async function expireStalePendingPaymentOrders() {
+// Exported for tests (`force` skips the once-a-minute throttle).
+export async function expireStalePendingPaymentOrders({ force = false } = {}) {
   const now = Date.now();
-  if (now - lastExpiredCleanupAt < EXPIRE_CLEANUP_INTERVAL_MS) return;
+  if (!force && now - lastExpiredCleanupAt < EXPIRE_CLEANUP_INTERVAL_MS) return;
   lastExpiredCleanupAt = now;
 
   const cutoff = new Date(Date.now() - PENDING_PAYMENT_TTL_MS);
@@ -221,6 +252,15 @@ async function applyCancellationRefund(order, { cancelledBy = 'system', refundAm
   const none = (extra) => ({ attempted: false, processed: false, paymentPatch: {}, ...extra });
 
   if (!order?.payment) return none({ reason: 'missing_payment' });
+
+  // Wallet + online/cash: the wallet part back to the wallet, the online part
+  // through Razorpay (partialPayment.service.js).
+  if (isPartialPayment(order)) {
+    return refundPartialPayment(order, {
+      refundAmount,
+      reason: buildCancellationRefundDescription(order, cancelledBy),
+    });
+  }
 
   const paymentMethod = String(order.paymentMethod || 'cash').toLowerCase();
   const paymentStatus = String(order.paymentStatus || 'cod_pending').toLowerCase();
@@ -445,14 +485,22 @@ function buildOrderDisplayId(entropyDigits = 4) {
   return `FOD-${timestamp}${random}`;
 }
 
-async function createOrderRow(data) {
+/**
+ * @param {Function} [inTransaction] (tx, row) => Promise, run in the same
+ *        database transaction as the insert (the partial-payment wallet debit):
+ *        if it throws, no order exists.
+ */
+async function createOrderRow(data, inTransaction = null) {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     // Widen the random part on later attempts rather than retrying the same odds.
     const displayId = buildOrderDisplayId(attempt < 3 ? 4 : 8);
+    const args = { data: { ...data, order_id: displayId, orderId: displayId }, include: orderInclude };
     try {
-      return await prisma.foodOrder.create({
-        data: { ...data, order_id: displayId, orderId: displayId },
-        include: orderInclude,
+      if (!inTransaction) return await prisma.foodOrder.create(args);
+      return await prisma.$transaction(async (tx) => {
+        const row = await tx.foodOrder.create(args);
+        await inTransaction(tx, row);
+        return row;
       });
     } catch (err) {
       // P2002 here can only be the display id — nothing else in `data` is unique.
@@ -602,10 +650,26 @@ export async function createOrder(userId, dto) {
     }
     normalizedPricing.total = Math.round(normalizedPricing.total * 100) / 100;
 
+    // ── Partial payment: wallet + razorpay/cash (partialPayment.service.js) ──
+    // The wallet part is debited in the same transaction as the insert below;
+    // paymentMethod pays the rest, and amountDue is that rest.
+    const partialPlan =
+      dto.useWallet === true && !isWallet
+        ? planPartialPayment({
+            method: paymentMethod,
+            total: normalizedPricing.total,
+            balance: (await getBalance('user', requireId(userId, 'User ID'))).balance,
+            walletAmount: dto.walletAmount,
+            payment: paymentRules,
+            customer: customerRules,
+          })
+        : null;
+    const partialWalletAmount = partialPlan?.walletAmount || 0;
+
     const payment = {
       method: paymentMethod,
       status: isCash ? "cod_pending" : isWallet ? "paid" : "created",
-      amountDue: normalizedPricing.total || 0,
+      amountDue: partialPlan ? partialPlan.remainder : normalizedPricing.total || 0,
       razorpay: {},
       qr: {},
     };
@@ -676,6 +740,7 @@ export async function createOrder(userId, dto) {
       riderEarning: Number(riderEarning) || 0,
       platformProfit: Number(platformProfit) || 0,
       ...(offlinePayment ? { offlinePayment } : {}),
+      ...(partialPlan ? { walletAmount: partialWalletAmount } : {}),
       items: {
         create: resolvedItems.map((item) => ({
           itemId: String(item.itemId),
@@ -706,15 +771,23 @@ export async function createOrder(userId, dto) {
                 : "Order created, awaiting payment",
         }],
       },
-    });
+    }, partialPlan
+      ? (tx, row) => debitPartialWallet(tx, {
+          orderId: row.id,
+          displayId: row.order_id,
+          userId,
+          amount: partialWalletAmount,
+        })
+      : null);
 
     let order = toOrder(created);
     let razorpayPayload = null;
 
     if (paymentMethod === "razorpay" && isRazorpayConfigured()) {
-      const amountPaise = Math.round((normalizedPricing.total || 0) * 100);
+      // A partial payment charges only the rest online.
+      const amountPaise = Math.round((partialPlan ? partialPlan.remainder : normalizedPricing.total || 0) * 100);
       if (amountPaise < 100) {
-        await purgeOrder(order.id);
+        await purgeUnpaidOrder(order.id);
         throw new ValidationError("Amount too low for online payment");
       }
       try {
@@ -733,7 +806,9 @@ export async function createOrder(userId, dto) {
         }));
       } catch (err) {
         // Mongo threw before saving, so no order existed on gateway failure.
-        await purgeOrder(order.id).catch(() => {});
+        // purgeUnpaidOrder also returns a partial payment's wallet part; if it
+        // fails, the pending_payment cleanup does it later.
+        await purgeUnpaidOrder(order.id).catch(() => {});
         logger.error(`Razorpay order creation failed: ${err.message}`);
         throw new ValidationError(err?.message || "Payment gateway error");
       }
@@ -857,7 +932,8 @@ export async function verifyPayment(userId, dto) {
     throw new ValidationError("Payment verification failed. Please retry in a moment.");
   }
 
-  const expectedPaise = Math.round((Number(order.total) || 0) * 100);
+  // A partial payment's gateway part is the total less the wallet part.
+  const expectedPaise = Math.round(remainderAmount(order) * 100);
   const paidPaise = Number(rzPayment?.amount);
   const rzStatus = String(rzPayment?.status || "").toLowerCase();
   if (
@@ -2782,7 +2858,9 @@ export async function processRefundAdmin(orderId, amount, adminId) {
   const order = toOrder(row);
 
   const currentPaymentStatus = String(order.paymentStatus || "").toLowerCase();
-  if (currentPaymentStatus === "refunded") {
+  // A cancelled wallet + cash order is refunded (its wallet part) while its
+  // payment status stays cod_pending, so the refund status counts too.
+  if (currentPaymentStatus === "refunded" || (isPartialPayment(order) && order.refundStatus === "processed")) {
     throw new ValidationError("Order is already refunded");
   }
 

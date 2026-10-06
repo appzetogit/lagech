@@ -66,11 +66,22 @@ export function sanitizeOrderForDeliveryPartner(orderDoc) {
   const o = sanitizeOrderForExternal(orderDoc);
   const cookingNote = String(o.note || "").trim();
   const deliveryInstructions = String(o.deliveryInstructions || "").trim();
+  // What the rider takes at the door: a pay-at-delivery order's amount due,
+  // which for a partial payment (wallet + cash) is the total less the wallet part.
+  const method = String(o.payment?.method || o.paymentMethod || "").toLowerCase();
+  const payStatus = String(o.payment?.status || o.paymentStatus || "").toLowerCase();
+  const total = Number(o.pricing?.total ?? o.total) || 0;
+  const walletAmount = Number(o.payment?.walletAmount) || 0;
+  const amountToCollect =
+    (method === "cash" || method === "razorpay_qr") && payStatus !== "paid"
+      ? Math.round(Math.max(0, total - walletAmount) * 100) / 100
+      : 0;
   return {
     ...o,
     cookingNote,
     deliveryInstructions,
     note: deliveryInstructions,
+    amountToCollect,
   };
 }
 

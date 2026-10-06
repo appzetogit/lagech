@@ -57,6 +57,10 @@ const ADMIN_NET = Prisma.sql`COALESCE(
     o."deliveryFee" + o."deliveryFeeGst" + o."platformFee" + o."restaurantCommission" - o."riderEarning" - o."discount"
 )`;
 const STORE_NET = RESTAURANT_SHARE;
+/** The part of the order paid from the wallet: all of a wallet order, the wallet part of a partial payment. */
+const WALLET_PAID = Prisma.sql`CASE WHEN o."paymentMethod" = 'wallet' THEN o."total" ELSE o."walletAmount" END`;
+/** Wallet + another method (partial payment). */
+const PARTIAL = Prisma.sql`(o."walletAmount" > 0 AND o."paymentMethod" <> 'wallet')`;
 
 /**
  * Every money column, as [key, SQL, incomeOnly]. incomeOnly columns are
@@ -75,6 +79,9 @@ const MONEY = [
     ['extraPackagingAmount', Prisma.sql`o."packagingFee"`, false],
     ['orderAmount', Prisma.sql`o."total"`, false],
     ['refundAmount', Prisma.sql`CASE WHEN ${REFUNDED} THEN o."refundAmount" ELSE 0 END`, false],
+    // How orderAmount was paid: walletPaidAmount + otherPaidAmount = orderAmount.
+    ['walletPaidAmount', WALLET_PAID, false],
+    ['otherPaidAmount', Prisma.sql`(o."total" - ${WALLET_PAID})`, false],
     ['adminDiscount', ADMIN_DISCOUNT, true],
     ['storeDiscount', STORE_DISCOUNT, true],
     ['adminCommission', COMMISSION, true],
@@ -113,7 +120,8 @@ const STATUS_SQL = {
     all: Prisma.sql`TRUE`,
 };
 
-const PAYMENT_METHODS = ['cash', 'razorpay', 'razorpay_qr', 'wallet', 'offline'];
+/** 'partial' = wallet + another method; the others match the order's method (a partial payment's rest). */
+const PAYMENT_METHODS = ['cash', 'razorpay', 'razorpay_qr', 'wallet', 'offline', 'partial'];
 
 const PAYMENT_LABEL = {
     cash: 'Cash on delivery',
@@ -123,8 +131,26 @@ const PAYMENT_LABEL = {
     offline: 'Offline payment',
 };
 
-/** Who holds the customer's money: the rider collects cash, everything else reaches the platform. */
-const receivedBy = (method) => (method === 'cash' ? 'Deliveryman' : 'Admin');
+/** The method paying the rest of a partial payment, as in "Wallet + Razorpay". */
+const PARTIAL_REST_LABEL = {
+    cash: 'Cash on delivery',
+    razorpay: 'Razorpay',
+    razorpay_qr: 'Razorpay QR',
+    offline: 'Offline payment',
+};
+
+const paymentLabel = (method, partial) => (partial
+    ? `Wallet + ${PARTIAL_REST_LABEL[method] || method}`
+    : PAYMENT_LABEL[method] || method);
+
+/**
+ * Who holds the customer's money: the rider collects cash, everything else
+ * reaches the platform. A partial payment's wallet part is the platform's.
+ */
+const receivedBy = (method, partial = false) => {
+    if (method !== 'cash') return 'Admin';
+    return partial ? 'Admin + Deliveryman' : 'Deliveryman';
+};
 
 /** Shared filters: period, zone, restaurant, payment method, search. Status is applied by the caller. */
 function readFilters(query = {}) {
@@ -148,9 +174,11 @@ function readFilters(query = {}) {
     if (zoneId) parts.push(isId(zoneId) ? Prisma.sql`COALESCE(o."zoneId", r."zoneId") = ${zoneId}` : Prisma.sql`FALSE`);
     if (restaurantId) parts.push(isId(restaurantId) ? Prisma.sql`o."restaurantId" = ${restaurantId}` : Prisma.sql`FALSE`);
     if (paymentMethod) {
-        parts.push(PAYMENT_METHODS.includes(paymentMethod)
-            ? Prisma.sql`o."paymentMethod"::text = ${paymentMethod}`
-            : Prisma.sql`FALSE`);
+        parts.push(!PAYMENT_METHODS.includes(paymentMethod)
+            ? Prisma.sql`FALSE`
+            : paymentMethod === 'partial'
+                ? PARTIAL
+                : Prisma.sql`o."paymentMethod"::text = ${paymentMethod}`);
     }
     if (search) {
         const like = `%${search}%`;
@@ -167,6 +195,7 @@ const ROW_SELECT = Prisma.sql`
            o."orderStatus"::text AS "orderStatus",
            o."paymentMethod"::text AS "paymentMethod",
            o."paymentStatus"::text AS "paymentStatus",
+           ${PARTIAL} AS "partialPayment",
            o."refundStatus"::text AS "refundStatus",
            o."couponCode" AS "couponCode",
            o."restaurantId" AS "restaurantId",
@@ -186,9 +215,10 @@ function mapRow(row, index) {
         customerName: row.customerName || 'Guest',
         orderStatus: row.orderStatus,
         paymentMethod: row.paymentMethod,
-        paymentMethodLabel: PAYMENT_LABEL[row.paymentMethod] || row.paymentMethod,
+        paymentMethodLabel: paymentLabel(row.paymentMethod, Boolean(row.partialPayment)),
+        partialPayment: Boolean(row.partialPayment),
         paymentStatus: row.paymentStatus,
-        amountReceivedBy: receivedBy(row.paymentMethod),
+        amountReceivedBy: receivedBy(row.paymentMethod, Boolean(row.partialPayment)),
         refundStatus: row.refundStatus,
         couponCode: row.couponCode || '',
         earned: Boolean(row.earned),
@@ -314,6 +344,8 @@ export const ORDER_MONEY_COLUMNS = [
     { key: 'storeNetIncome', label: 'Restaurant net income' },
     { key: 'refundAmount', label: 'Refunded amount' },
     { key: 'paymentMethodLabel', label: 'Payment method' },
+    { key: 'walletPaidAmount', label: 'Paid by wallet' },
+    { key: 'otherPaidAmount', label: 'Paid by other method' },
     { key: 'amountReceivedBy', label: 'Amount received by' },
 ];
 

@@ -334,11 +334,21 @@ export function PaymentTab() {
             <SwitchRow label="Digital payment" hint="Razorpay: card, UPI, net banking, and pay-by-QR at the door." checked={v.digital} onChange={(x) => area.set("digital", x)} />
             <SwitchRow
               label="Partial payment"
-              hint="Pay part with the wallet and the rest online or in cash. Wallet orders still have to cover the whole total."
+              hint="The customer pays part with their wallet balance and the rest online or in cash. Needs the customer wallet on (Customer tab)."
               checked={v.partialPayment}
               onChange={(x) => area.set("partialPayment", x)}
-              notApplied
             />
+            {v.partialPayment && (
+              <div className="grid gap-4 sm:grid-cols-2 mt-3">
+                <Field label="Pay the rest with" hint="Only methods that are also switched on above (and in the order's zone) are offered.">
+                  <select className={inputClass} value={v.partialPaymentMethod || "both"} onChange={(e) => area.set("partialPaymentMethod", e.target.value)}>
+                    <option value="both">Cash on delivery or online</option>
+                    <option value="cod">Cash on delivery only</option>
+                    <option value="digital">Online only</option>
+                  </select>
+                </Field>
+              </div>
+            )}
             <div className="mt-4">
               <SaveBar saving={area.saving} onSave={() => area.save()} updatedAt={area.updatedAt} />
             </div>

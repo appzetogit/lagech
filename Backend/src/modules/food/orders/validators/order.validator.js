@@ -135,7 +135,12 @@ export function validateCreateOrderDto(body) {
             })
             .optional(),
         zoneId: z.string().nullable().optional(),
-        scheduledAt: z.string().datetime().optional()
+        scheduledAt: z.string().datetime().optional(),
+        // Partial payment: pay part from the wallet, the rest with paymentMethod
+        // ('razorpay'/'card' or 'cash'). walletAmount is the wallet part the
+        // customer was shown; omitted, the whole balance (up to the total) is used.
+        useWallet: z.boolean().optional(),
+        walletAmount: z.number().positive().optional()
     }).refine((value) => value.paymentMethod !== 'offline' || Boolean(value.offlinePayment), {
         message: 'Choose an offline payment method',
     });

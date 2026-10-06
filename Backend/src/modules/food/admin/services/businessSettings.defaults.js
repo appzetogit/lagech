@@ -184,6 +184,9 @@ const cleanCustomer = (value) => {
 
 // ─── Payment ─────────────────────────────────────────────────────────────────
 
+/** What may pay the rest of a partial (wallet + ...) payment: cash, online, or either. */
+export const PARTIAL_PAYMENT_METHODS = ['both', 'cod', 'digital'];
+
 const cleanPayment = (value) => {
     const input = obj(value);
     const cod = bool(input.cod, true);
@@ -193,6 +196,7 @@ const cleanPayment = (value) => {
         cod,
         digital,
         partialPayment: bool(input.partialPayment, true),
+        partialPaymentMethod: oneOf(input.partialPaymentMethod, PARTIAL_PAYMENT_METHODS, 'both'),
     };
 };
 

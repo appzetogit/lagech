@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { prisma } from '../../../config/prisma.js';
 import { finalizeOrderPayment } from '../../../modules/food/orders/services/order.service.js';
+import { remainderAmount } from '../../../modules/food/orders/services/partialPayment.service.js';
 import { config } from '../../../config/env.js';
 import { logger } from '../../../utils/logger.js';
 import { getThirdPartySettingsSync } from '../../thirdParty/thirdParty.runtime.js';
@@ -60,13 +61,14 @@ export const handleRazorpayWebhook = async (req, res) => {
 
             const existingOrder = await prisma.foodOrder.findFirst({
                 where: { razorpayOrderId: rzOrderId },
-                select: { id: true, orderId: true, total: true, paymentStatus: true },
+                select: { id: true, orderId: true, total: true, walletAmount: true, paymentMethod: true, paymentStatus: true },
             });
 
             // Cross-check the captured amount before marking anything paid: a
             // gateway callback is not proof of the right amount.
             if (existingOrder) {
-                const expectedPaise = Math.round(Number(existingOrder.total || 0) * 100);
+                // A partial payment (wallet + online) charged only the rest online.
+                const expectedPaise = Math.round(remainderAmount(existingOrder) * 100);
                 const paidPaise = Number(paymentObj.amount);
 
                 if (!Number.isFinite(paidPaise) || paidPaise !== expectedPaise) {

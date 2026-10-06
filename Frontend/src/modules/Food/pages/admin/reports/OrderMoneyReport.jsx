@@ -73,6 +73,7 @@ const PAYMENT_METHODS = [
   ["razorpay_qr", "Online (QR)"],
   ["wallet", "Wallet"],
   ["offline", "Offline payment"],
+  ["partial", "Wallet + another method"],
 ]
 
 const STATUS_LABEL = {

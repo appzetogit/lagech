@@ -25,7 +25,7 @@ test('every business area cleans {} to the old panel values', () => {
     assert.equal(clean('business_order').scheduledOrder, false);
     assert.equal(clean('business_order').homeDelivery, true);
     assert.equal(clean('business_order').orderConfirmedBy, 'restaurant');
-    assert.deepEqual(clean('business_payment'), { cod: true, digital: true, partialPayment: true });
+    assert.deepEqual(clean('business_payment'), { cod: true, digital: true, partialPayment: true, partialPaymentMethod: 'both' });
     assert.equal(clean('business_customer').walletEnabled, true);
     assert.equal(clean('business_customer').addFundEnabled, false);
     assert.equal(clean('business_vendor').restaurantCanCancelOrder, false);

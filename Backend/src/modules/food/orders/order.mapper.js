@@ -114,6 +114,9 @@ export function toOrder(row) {
             method: row.paymentMethod,
             status: row.paymentStatus,
             amountDue: num(row.paymentAmountDue),
+            /** Partial payment: the wallet part; `method` pays the rest (`amountDue`). 0 otherwise. */
+            walletAmount: row.paymentMethod === 'wallet' ? 0 : money(row.walletAmount),
+            isPartial: row.paymentMethod !== 'wallet' && money(row.walletAmount) > 0,
             razorpay: {
                 orderId: row.razorpayOrderId,
                 paymentId: row.razorpayPaymentId,
@@ -169,6 +172,7 @@ export function toOrder(row) {
 
         lastRiderLocation: geoPoint(row.riderLat, row.riderLng),
 
+        walletAmount: money(row.walletAmount),
         riderEarning: money(row.riderEarning),
         platformProfit: money(row.platformProfit),
         tripDistanceKm: num(row.tripDistanceKm)

@@ -314,6 +314,12 @@ Polls and syncs the Razorpay link status server-side. Poll this after showing th
 ### `POST /food/delivery/orders/:orderId/collect/cash`
 Falls back from QR to physical cash. → `data: { "success": true }`
 
+**Amount to collect.** Every order sent to the rider carries `amountToCollect`: what to take at
+the door for an unpaid `cash` / `razorpay_qr` order, 0 otherwise. Show this, not `pricing.total`:
+a customer who paid part with their wallet (`payment.isPartial: true`, `payment.walletAmount`)
+owes only the rest (`payment.amountDue` = total − wallet part). Cash in hand and the cash
+limit count only the cash part.
+
 Rejected unless the order's payment method is `cash` or `razorpay_qr` and it is not already paid — online-prepaid orders cannot be switched.
 
 ---
