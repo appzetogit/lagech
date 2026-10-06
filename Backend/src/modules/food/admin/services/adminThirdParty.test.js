@@ -100,7 +100,7 @@ test('a saved secret is encrypted in the database and never comes back', async (
     assert.deepEqual(result.changed.sort(), ['host', 'password']);
     noSecretIn(result, ['admin-mail-password-77']);
     assert.equal(field(result, 'password').source, 'admin');
-    assert.equal(field(result, 'password').masked, '••••••••');
+    assert.equal(field(result, 'password').masked, '••••d-77');
 
     const row = await prisma.foodSystemSetting.findUnique({ where: { key: storeKey('mail') } });
     assert.ok(!JSON.stringify(row.value).includes('admin-mail-password-77'), 'not stored in the clear');

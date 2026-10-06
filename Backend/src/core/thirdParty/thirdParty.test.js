@@ -163,7 +163,9 @@ test('the Razorpay key id and secret can only be changed together', () => {
     assert.deepEqual(ok.changed.sort(), ['keyId', 'keySecret', 'mode']);
     // Clearing one half of a saved pair is refused too.
     assert.throws(() => applySave('payment', ok.doc, { clear: ['keySecret'] }, cfg), /together/);
-    const both = applySave('payment', ok.doc, { clear: ['keyId', 'keySecret'] }, cfg);
+    // Back to the server's live pair: the saved test mode no longer matches it.
+    assert.throws(() => applySave('payment', ok.doc, { clear: ['keyId', 'keySecret'] }, cfg), /Test mode/);
+    const both = applySave('payment', ok.doc, { clear: ['keyId', 'keySecret', 'mode'] }, cfg);
     assert.equal(resolveEffective('payment', both.doc, cfg).values.keyId, 'rzp_live_serverkey');
 });
 
