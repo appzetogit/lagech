@@ -500,6 +500,8 @@ export function buildDeliverySocketPayload(orderDoc, restaurantDoc = null) {
     cookingNote: order?.note || "",
     deliveryInstructions: order?.deliveryInstructions || "",
     riderEarning: order?.riderEarning || 0,
+    // Part of riderEarning: the customer's tip, shown to the rider on the offer.
+    riderTip: Number(order?.riderTip) || 0,
     earnings: order?.riderEarning || order?.pricing?.deliveryFee || 0,
     deliveryFee: order?.pricing?.deliveryFee || 0,
     deliveryFleet: order?.deliveryFleet,
@@ -532,6 +534,9 @@ export async function notifyRestaurantNewOrder(orderDoc) {
         orderMongoId: orderDoc._id || undefined,
         orderId: orderDoc.order_id || orderDoc._id,
       };
+      // A takeaway's pickup code is the customer's to show, never the restaurant's to read.
+      delete payload.deliveryOtp;
+      delete payload.offlinePayment;
       logger.info(
         `[RestaurantOrders] Emitting new_order to ${rooms.restaurant(orderDoc.restaurantId)} for order ${orderDoc._id?.toString?.() || ''}`,
       );
@@ -611,6 +616,8 @@ export async function notifyRestaurantNewOrder(orderDoc) {
           total: str(total),
           paymentMethod: str(orderDoc.payment?.method),
           acceptanceDeadlineAt: str(orderDoc.acceptanceDeadlineAt?.toISOString?.() || ""),
+          orderType: str(orderDoc.orderType || "delivery"),
+          scheduledAt: str(orderDoc.releaseAt && orderDoc.scheduledAt ? new Date(orderDoc.scheduledAt).toISOString() : ""),
         },
       },
     );

@@ -529,3 +529,14 @@ export async function getOrderRouteUserController(req, res, next) {
         next(err);
     }
 }
+
+/** POST /food/restaurant/orders/:orderId/handover { code } -- a takeaway handed to the customer. */
+export async function handoverTakeawayRestaurantController(req, res, next) {
+    try {
+        const restaurantId = req.user?.userId;
+        const order = await orderService.handoverTakeawayRestaurant(req.params.orderId, restaurantId, req.body?.code ?? req.body?.otp);
+        return sendResponse(res, 200, 'Order handed over', { order });
+    } catch (err) {
+        next(err);
+    }
+}

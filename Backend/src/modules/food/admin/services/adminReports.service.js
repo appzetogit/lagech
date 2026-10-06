@@ -48,7 +48,7 @@ export async function getExpenseReport(query = {}) {
         WITH per_order AS (
             SELECT o.id, o."orderId", o."createdAt", r."restaurantName" AS restaurant,
                    COALESCE(t."adminDiscountShare", 0) AS discount,
-                   GREATEST(0, COALESCE(t."riderShare", o."riderEarning") - o."deliveryFee") AS "freeDelivery",
+                   GREATEST(0, COALESCE(t."riderShare", o."riderEarning") - o."riderTip" - o."deliveryFee") AS "freeDelivery",
                    COALESCE((SELECT SUM(x.amount) FROM transactions x
                               WHERE x."orderId" = o.id AND x.category = 'wallet_topup'
                                 AND x.description LIKE 'Cashback%'), 0) AS cashback
@@ -111,11 +111,11 @@ export async function getAdminEarningReport(query = {}) {
                COUNT(*)::int AS orders,
                SUM(o.total) AS sales,
                SUM(COALESCE(t."commissionAmount", o."restaurantCommission")) AS commission,
-               SUM(o."deliveryFee" - LEAST(o."deliveryFee", COALESCE(t."riderShare", o."riderEarning"))) AS "deliveryCut",
+               SUM(o."deliveryFee" - LEAST(o."deliveryFee", COALESCE(t."riderShare", o."riderEarning") - o."riderTip")) AS "deliveryCut",
                SUM(o."platformFee") AS "platformFee",
                SUM(o.tax + o."deliveryFeeGst") AS gst,
                SUM(COALESCE(t."adminDiscountShare", 0)
-                   + GREATEST(0, COALESCE(t."riderShare", o."riderEarning") - o."deliveryFee")) AS expenses
+                   + GREATEST(0, COALESCE(t."riderShare", o."riderEarning") - o."riderTip" - o."deliveryFee")) AS expenses
           FROM food_orders o
           LEFT JOIN food_transactions t ON t."orderId" = o.id
          WHERE o."orderStatus" = 'delivered'

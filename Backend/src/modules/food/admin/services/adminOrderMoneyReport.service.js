@@ -25,11 +25,13 @@ import { streamSheet } from './reportSheetStream.util.js';
  * platform's net is platformNetProfit, i.e.
  *
  *   deliveryFee + deliveryFeeGst + platformFee + restaurantCommission
- *     − riderEarning − adminDiscountShare
+ *     + riderTip − riderEarning − adminDiscountShare
  *
- * and per order the four parts add back up to what the customer paid:
+ * where riderEarning includes the customer's tip (riderTip), all of which is
+ * the rider's -- so the tip passes through and is never the platform's. Per
+ * order the four parts add back up to what the customer paid:
  *
- *   orderAmount = storeNet + adminNet + deliverymanEarning + tax
+ *   orderAmount = storeNet + adminNet + deliverymanEarning (incl. tip) + tax
  *
  * Only delivered orders earn anything (EARNED_ORDER). Cancelled and refunded
  * orders are listed and counted separately; their income columns are null —
@@ -51,10 +53,12 @@ const ADMIN_DISCOUNT = Prisma.sql`CASE WHEN t.id IS NULL THEN o."discount" ELSE 
 const STORE_DISCOUNT = Prisma.sql`COALESCE(t."restaurantDiscountShare", 0)`;
 const COMMISSION = Prisma.sql`COALESCE(t."commissionAmount", o."restaurantCommission")`;
 const RIDER = Prisma.sql`COALESCE(t."riderShare", o."riderEarning")`;
+/** The customer's tip: part of RIDER, all of it the rider's. */
+const TIP = Prisma.sql`o."riderTip"`;
 /** platformNetProfit; reconstructed by the same formula for an order without a transaction. */
 const ADMIN_NET = Prisma.sql`COALESCE(
     t."platformNetProfit",
-    o."deliveryFee" + o."deliveryFeeGst" + o."platformFee" + o."restaurantCommission" - o."riderEarning" - o."discount"
+    o."deliveryFee" + o."deliveryFeeGst" + o."platformFee" + o."restaurantCommission" + o."riderTip" - o."riderEarning" - o."discount"
 )`;
 const STORE_NET = RESTAURANT_SHARE;
 
@@ -78,7 +82,9 @@ const MONEY = [
     ['adminDiscount', ADMIN_DISCOUNT, true],
     ['storeDiscount', STORE_DISCOUNT, true],
     ['adminCommission', COMMISSION, true],
-    ['commissionOnDeliveryCharge', Prisma.sql`(o."deliveryFee" - ${RIDER})`, true],
+    // Trip pay only: the tip is not paid out of the delivery fee.
+    ['commissionOnDeliveryCharge', Prisma.sql`(o."deliveryFee" - (${RIDER} - ${TIP}))`, true],
+    ['riderTip', TIP, true],
     ['deliverymanEarning', RIDER, true],
     ['adminNetIncome', ADMIN_NET, true],
     ['storeNetIncome', STORE_NET, true],
@@ -229,6 +235,7 @@ export async function getOrderMoneyReport(query = {}) {
                    COALESCE(SUM(${ADMIN_NET}) FILTER (WHERE ${EARNED}), 0) AS "adminNetIncome",
                    COALESCE(SUM(${STORE_NET}) FILTER (WHERE ${EARNED}), 0) AS "storeNetIncome",
                    COALESCE(SUM(${RIDER}) FILTER (WHERE ${EARNED}), 0) AS "deliverymanEarning",
+                   COALESCE(SUM(${TIP}) FILTER (WHERE ${EARNED}), 0) AS "riderTip",
                    COALESCE(SUM(${COMMISSION}) FILTER (WHERE ${EARNED}), 0) AS "adminCommission",
                    COALESCE(SUM(o."tax" + o."deliveryFeeGst") FILTER (WHERE ${EARNED}), 0) AS "taxCollected",
                    COALESCE(SUM(o."discount" + o."couponDeliveryWaiver") FILTER (WHERE ${EARNED}), 0) AS "discountGiven"
@@ -253,6 +260,7 @@ export async function getOrderMoneyReport(query = {}) {
             adminNetIncome: num(bucketRow?.adminNetIncome),
             storeNetIncome: num(bucketRow?.storeNetIncome),
             deliverymanEarning: num(bucketRow?.deliverymanEarning),
+            riderTip: num(bucketRow?.riderTip),
             adminCommission: num(bucketRow?.adminCommission),
             taxCollected: num(bucketRow?.taxCollected),
             discountGiven: num(bucketRow?.discountGiven),
@@ -309,7 +317,8 @@ export const ORDER_MONEY_COLUMNS = [
     { key: 'storeDiscount', label: 'Restaurant discount' },
     { key: 'adminCommission', label: 'Admin commission' },
     { key: 'commissionOnDeliveryCharge', label: 'Commission on delivery charge' },
-    { key: 'deliverymanEarning', label: 'Deliveryman earning' },
+    { key: 'riderTip', label: 'Tip (to rider)' },
+    { key: 'deliverymanEarning', label: 'Deliveryman earning (incl. tip)' },
     { key: 'adminNetIncome', label: 'Admin net income' },
     { key: 'storeNetIncome', label: 'Restaurant net income' },
     { key: 'refundAmount', label: 'Refunded amount' },

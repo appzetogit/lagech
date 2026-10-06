@@ -57,6 +57,15 @@ const addressSchema = z.object({
         .optional()
 });
 
+/**
+ * Business Settings order options: delivery or takeaway, and a tip for the
+ * rider (rupees). Both optional; the service checks them against the settings.
+ */
+const orderModeFields = {
+    orderType: z.enum(['delivery', 'takeaway'], { errorMap: () => ({ message: 'Choose delivery or takeaway' }) }).optional(),
+    riderTip: z.number().min(0, 'Enter a valid tip amount').optional()
+};
+
 const pricingSchema = z.object({
     subtotal: z.number().min(0),
     tax: z.number().min(0).optional(),
@@ -90,7 +99,8 @@ export function validateCalculateOrderDto(body) {
             })
             .passthrough()
             .optional(),
-        scheduledAt: z.string().datetime().optional()
+        scheduledAt: z.string().datetime().optional(),
+        ...orderModeFields
     });
     const result = schema.safeParse(body);
     if (!result.success) {
@@ -105,7 +115,8 @@ export function validateCalculateOrderDto(body) {
 export function validateCreateOrderDto(body) {
     const schema = z.object({
         items: z.array(orderItemSchema).min(1, 'At least one item required'),
-        address: addressSchema,
+        // Optional for a takeaway only: the service records the restaurant's.
+        address: addressSchema.optional(),
         restaurantId: z.string().min(1, 'Restaurant id required'),
         restaurantName: z.string().optional(),
         customerName: z.string().optional(),
@@ -135,9 +146,12 @@ export function validateCreateOrderDto(body) {
             })
             .optional(),
         zoneId: z.string().nullable().optional(),
-        scheduledAt: z.string().datetime().optional()
+        scheduledAt: z.string().datetime().optional(),
+        ...orderModeFields
     }).refine((value) => value.paymentMethod !== 'offline' || Boolean(value.offlinePayment), {
         message: 'Choose an offline payment method',
+    }).refine((value) => value.orderType === 'takeaway' || Boolean(value.address), {
+        message: 'Delivery address required',
     });
     const result = schema.safeParse(body);
     if (!result.success) {

@@ -422,6 +422,7 @@ const toRestaurantProfile = (doc) => {
             diningType: String(doc.diningSettings?.diningType || 'family-dining').trim() || 'family-dining'
         },
         isAcceptingOrders: doc.isAcceptingOrders !== false,
+        takeawayEnabled: doc.takeawayEnabled !== false,
         outsideHoursOverride: doc.outsideHoursOverride === true,
         subscriptionPlan: doc.subscriptionPlan || '',
         subscriptionAmount: Number.isFinite(Number(doc.subscriptionAmount)) ? Number(doc.subscriptionAmount) : 0,
@@ -474,7 +475,7 @@ const PROFILE_SELECT = {
     accountHolderName: true, accountNumber: true, accountType: true,
     addressLine1: true, addressLine2: true, area: true, city: true,
     closingTime: true, coverImages: true, createdAt: true, cuisines: true,
-    diningEnabled: true, diningMaxGuests: true, diningType: true,
+    diningEnabled: true, diningMaxGuests: true, diningType: true, takeawayEnabled: true,
     estimatedDeliveryTime: true, estimatedDeliveryTimeMinutes: true,
     formattedAddress: true, fssaiExpiry: true, fssaiImage: true, fssaiNumber: true,
     gstAddress: true, gstImage: true, gstLegalName: true, gstNumber: true,
@@ -1090,6 +1091,21 @@ export const updateRestaurantAcceptingOrders = async (restaurantId, isAcceptingO
     const profile = toRestaurantProfile(toRestaurant(doc));
     if (!profile) return null;
     return enrichRestaurantProfileWithAvailability(profile, doc);
+};
+
+/** The restaurant's own takeaway switch (PATCH /food/restaurant/takeaway-settings). */
+export const updateRestaurantTakeaway = async (restaurantId, enabled) => {
+    if (!isId(restaurantId)) throw new ValidationError('Invalid restaurant id');
+    if (typeof enabled !== 'boolean' && !['true', 'false'].includes(String(enabled))) {
+        throw new ValidationError('takeawayEnabled must be true or false');
+    }
+    const { count } = await prisma.foodRestaurant.updateMany({
+        where: { id: String(restaurantId) },
+        data: { takeawayEnabled: enabled === true || String(enabled) === 'true' },
+    });
+    if (!count) return null;
+    const doc = await prisma.foodRestaurant.findUnique({ where: { id: String(restaurantId) }, select: PROFILE_SELECT });
+    return toRestaurantProfile(toRestaurant(doc));
 };
 
 export const updateCurrentRestaurantDiningSettings = async (restaurantId, body = {}) => {

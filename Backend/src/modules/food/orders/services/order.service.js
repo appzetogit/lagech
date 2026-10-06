@@ -29,6 +29,13 @@ import { resolveOrderZoneId, assertZoneAllowsPayment } from '../../shared/zonePa
 import { getOfflinePaymentSettings } from '../../admin/services/adminSystemExtras.service.js';
 import { buildOfflinePaymentRecord, decideOfflinePayment, OFFLINE_STATUS } from './offlinePayment.util.js';
 import { paymentMethodRefusal, isScheduledFor, percentageRiderEarning } from './businessRules.js';
+import {
+  resolveOrderType,
+  takeawayPaymentRefusal,
+  assertSchedulable,
+  releaseAtFor,
+  isHeldForSchedule,
+} from './orderModes.js';
 import { getBusinessSettings, getMaintenanceState } from '../../shared/businessSettings.js';
 import * as dispatchService from './order-dispatch.service.js';
 import * as deliveryService from './order-delivery.service.js';
@@ -47,6 +54,7 @@ import {
   canExposeOrderToRestaurant,
   isStatusAdvance,
   STATUS_PRIORITY,
+  generateFourDigitDeliveryOtp,
 } from './order.helpers.js';
 
 const ORDER_ACCEPTANCE_WINDOW_SECONDS = 240;
@@ -113,6 +121,13 @@ function isAwaitingOnlinePaymentMethod(paymentMethod) {
 function buildAcceptanceDeadline(date = new Date(), windowSeconds = ORDER_ACCEPTANCE_WINDOW_SECONDS) {
   const seconds = Number(windowSeconds);
   return new Date(date.getTime() + (Number.isFinite(seconds) && seconds > 0 ? seconds : ORDER_ACCEPTANCE_WINDOW_SECONDS) * 1000);
+}
+
+/** Until the acceptance check runs: the window, from the release time for a scheduled order. */
+function acceptanceDelayMs(order, windowSeconds) {
+  const deadline = order?.acceptanceDeadlineAt ? new Date(order.acceptanceDeadlineAt).getTime() : NaN;
+  if (Number.isFinite(deadline)) return Math.max(1000, deadline - Date.now() + 1000);
+  return windowSeconds * 1000;
 }
 
 // ----- Order deletion -----
@@ -490,12 +505,38 @@ export async function createOrder(userId, dto) {
     if (isScheduledFor(dto.scheduledAt) && !orderRules.scheduledOrder) {
       throw new ValidationError('Scheduled orders are not available. Please order for now.');
     }
+    // On: the time must be one the slot list could have offered (lead time,
+    // today or tomorrow, restaurant open then). The order is placed and paid
+    // now and released to the restaurant and riders shortly before it.
+    const releaseAt = releaseAtFor(dto.scheduledAt);
+    if (releaseAt) assertSchedulable(dto.scheduledAt, { restaurant });
     assertRestaurantOpenForOrdering(restaurant, orderAt);
+
+    // Delivery (default) or takeaway (Business Settings > Order and the
+    // restaurant's own switch).
+    const orderType = resolveOrderType(dto.orderType, { orderRules, restaurant });
+    const isTakeaway = orderType === "takeaway";
 
     const settings = await getDispatchSettings();
     const dispatchMode = settings.dispatchMode;
 
-    const deliveryAddress = normalizeDeliveryAddress({
+    // A takeaway needs no address; one not sent is recorded as the restaurant's.
+    const pickupAddress = isTakeaway && !dto.address?.street
+      ? {
+          label: "Other",
+          street: [restaurant.addressLine1, restaurant.area].filter(Boolean).join(", ") || "Takeaway",
+          additionalDetails: "Takeaway - collect at the restaurant",
+          city: restaurant.city || "-",
+          state: restaurant.state || "-",
+          zipCode: restaurant.pincode || "",
+        }
+      : null;
+    const deliveryAddress = normalizeDeliveryAddress(pickupAddress ? {
+      ...pickupAddress,
+      name: dto.customerName || "",
+      fullName: dto.customerName || "",
+      phone: dto.customerPhone || "",
+    } : {
       label: dto.address?.label || "Home",
       name: dto.address?.name || dto.address?.fullName || dto.customerName || "",
       fullName: dto.address?.fullName || dto.address?.name || dto.customerName || "",
@@ -520,6 +561,11 @@ export async function createOrder(userId, dto) {
       codEnvEnabled: String(process.env.COD_ENABLED || "true") === "true",
     });
     if (paymentRefusal) throw new ValidationError(paymentRefusal);
+    // A takeaway is paid before pickup: nobody collects cash at a door.
+    if (isTakeaway) {
+      const refusal = takeawayPaymentRefusal(paymentMethod);
+      if (refusal) throw new ValidationError(refusal);
+    }
     const isCash = paymentMethod === "cash";
     const isWallet = paymentMethod === "wallet";
     // Checked before anything is priced or written: the method must be one
@@ -547,6 +593,8 @@ export async function createOrder(userId, dto) {
         deliveryAddress,
         couponCode: dto.pricing?.couponCode || undefined,
         deliveryMode: dto.deliveryMode || "basic",
+        orderType,
+        riderTip: dto.riderTip,
       },
       { at: orderAt, restaurant, skipAvailabilityCheck: true },
     );
@@ -587,6 +635,7 @@ export async function createOrder(userId, dto) {
       couponDeliveryWaiver: Number(pricingResult.pricing?.deliveryFeeWaived) || 0,
       freeDeliveryWaiver: Number(pricingResult.pricing?.freeDeliveryWaived) || 0,
       newCustomerDiscount: Number(pricingResult.pricing?.newCustomerDiscount) || 0,
+      riderTip: Number(pricingResult.pricing?.riderTip) || 0,
       total: Number(pricingResult.pricing?.total) || 0,
       currency: String(pricingResult.pricing?.currency || "INR"),
       distanceKm: Number.isFinite(Number(pricingResult.pricing?.distanceKm))
@@ -613,7 +662,9 @@ export async function createOrder(userId, dto) {
     // Reuse the pricing distance (already road-preferred) — do not call Directions again.
     let distanceKm = Number.isFinite(Number(normalizedPricing.distanceKm))
       ? Number(normalizedPricing.distanceKm)
-      : await getDeliveryDistanceKm(restaurant, deliveryAddress);
+      : isTakeaway
+        ? null
+        : await getDeliveryDistanceKm(restaurant, deliveryAddress);
     distanceKm = Number.isFinite(distanceKm) ? Number(distanceKm.toFixed(2)) : null;
     if (Number.isFinite(distanceKm)) {
       normalizedPricing.distanceKm = distanceKm;
@@ -626,10 +677,16 @@ export async function createOrder(userId, dto) {
     // (default) or a share of the delivery fee. Computed only here and stored
     // on the order; every earning, payout and profit figure reads it back.
     const businessInfo = await getBusinessSettings('business_info');
-    const riderEarning =
-      businessInfo.riderPayMode === 'percentage'
+    // A takeaway has no rider. A tip is the rider's on top of the trip pay, so
+    // riderEarning (what every earning, payout and ledger figure reads)
+    // includes it; riderTip records which part it was.
+    const riderTip = isTakeaway ? 0 : normalizedPricing.riderTip;
+    const tripPay = isTakeaway
+      ? 0
+      : businessInfo.riderPayMode === 'percentage'
         ? percentageRiderEarning(pricingResult.pricing?.originalDeliveryFee, businessInfo.deliveryChargeCommissionPercent)
         : calculateRiderEarning(feeSettings, distanceKm) || 0;
+    const riderEarning = Math.round(((Number(tripPay) || 0) + riderTip) * 100) / 100;
 
     let restaurantCommission = 0;
     try {
@@ -649,7 +706,9 @@ export async function createOrder(userId, dto) {
       (Number.isFinite(normalizedPricing.deliveryFee) ? normalizedPricing.deliveryFee : 0) +
       (Number.isFinite(normalizedPricing.deliveryFeeGst) ? normalizedPricing.deliveryFeeGst : 0) +
       (Number.isFinite(normalizedPricing.platformFee) ? normalizedPricing.platformFee : 0) +
-      restaurantCommission -
+      restaurantCommission +
+      // The tip is collected for the rider and paid straight on: in and out.
+      riderTip -
       riderEarning;
 
     const isAwaitingOnlinePayment = isAwaitingOnlinePaymentMethod(paymentMethod);
@@ -665,8 +724,16 @@ export async function createOrder(userId, dto) {
       customerPhone: String(dto.customerPhone || deliveryAddress.phone || ""),
       orderStatus: initialStatus,
       acceptanceWindowSeconds,
+      // A scheduled order's acceptance window opens when it is released to the
+      // restaurant, so the timer cannot cancel it hours early.
       acceptanceDeadlineAt:
-        initialStatus === "created" ? buildAcceptanceDeadline(new Date(), acceptanceWindowSeconds) : null,
+        initialStatus === "created" ? buildAcceptanceDeadline(releaseAt || new Date(), acceptanceWindowSeconds) : null,
+      releaseAt,
+      orderType,
+      riderTip,
+      // The takeaway pickup code: shown to the customer, checked by the
+      // restaurant at handover (never sent to the restaurant).
+      ...(isTakeaway ? { deliveryOtp: generateFourDigitDeliveryOtp(), dropOtpRequired: true } : {}),
       dispatchStatus: "unassigned",
       note: String(dto.note || ""),
       deliveryInstructions: String(dto.deliveryInstructions || ""),
@@ -743,7 +810,7 @@ export async function createOrder(userId, dto) {
       void addOrderJob(
         { action: "ORDER_ACCEPTANCE_TIMEOUT_CHECK", orderMongoId: order.id, orderId: order.id },
         {
-          delay: acceptanceWindowSeconds * 1000,
+          delay: acceptanceDelayMs(order, acceptanceWindowSeconds),
           removeOnComplete: true,
           removeOnFail: true,
           jobId: `order-accept-timeout-${order.id}`,
@@ -789,7 +856,7 @@ export async function createOrder(userId, dto) {
       if (!isAwaitingOnlinePayment) {
         await notifyOwnersSafely([{ ownerType: "USER", ownerId: userId }], {
           title: "Order Confirmed! 🍔",
-          body: `Your order #${order.order_id || order.id} from ${restaurant.restaurantName || "the restaurant"} has been placed successfully.`,
+          body: `Your order #${order.order_id || order.id} from ${restaurant.restaurantName || "the restaurant"} has been placed successfully.${releaseAt ? " It is scheduled for later; we will start on it shortly before then." : ""}`,
           image: "https://i.ibb.co/5GzXz7r/Switcheats-Brand-Image.png",
           data: {
             type: "order_created",
@@ -799,7 +866,9 @@ export async function createOrder(userId, dto) {
           },
         });
 
-        await notifyRestaurantNewOrder(order);
+        // A scheduled order rings the restaurant at its release time
+        // (releaseScheduledOrders), not now.
+        if (!isHeldForSchedule(order)) await notifyRestaurantNewOrder(order);
       }
     } catch (err) {
       logger.warn(`Notifications failed for order ${order.id}: ${err.message}`);
@@ -809,7 +878,9 @@ export async function createOrder(userId, dto) {
       await incrementCouponUsageForOrder(order, userId);
     }
 
-    return { order: normalizeOrderForClient(order), razorpay: razorpayPayload };
+    const placed = normalizeOrderForClient(order);
+    if (isTakeaway) placed.pickupCode = String(order.deliveryOtp || "");
+    return { order: placed, razorpay: razorpayPayload };
   } catch (err) {
     logger.error(`Order placement error: ${err.message}`, { stack: err.stack, userId, dto });
     if (err instanceof ValidationError || err instanceof ForbiddenError || err instanceof NotFoundError) {
@@ -923,7 +994,10 @@ export async function verifyPayment(userId, dto) {
  */
 export async function finalizeOrderPayment(orderId, { source = "SYSTEM", userId = null } = {}) {
   const acceptanceWindowSeconds = await getOrderAcceptanceWindowSeconds();
-  const acceptanceDeadlineAt = buildAcceptanceDeadline(new Date(), acceptanceWindowSeconds);
+  const pending = await prisma.foodOrder.findUnique({ where: { id: orderId }, select: { releaseAt: true } });
+  // A scheduled order's window opens at its release time, not at payment.
+  const releaseAt = isHeldForSchedule(pending) ? new Date(pending.releaseAt) : new Date();
+  const acceptanceDeadlineAt = buildAcceptanceDeadline(releaseAt, acceptanceWindowSeconds);
 
   const { count } = await prisma.foodOrder.updateMany({
     where: { id: orderId, orderStatus: 'pending_payment' },
@@ -949,7 +1023,7 @@ export async function finalizeOrderPayment(orderId, { source = "SYSTEM", userId 
   void addOrderJob(
     { action: "ORDER_ACCEPTANCE_TIMEOUT_CHECK", orderMongoId: orderId, orderId },
     {
-      delay: acceptanceWindowSeconds * 1000,
+      delay: acceptanceDelayMs(updated, acceptanceWindowSeconds),
       removeOnComplete: true,
       removeOnFail: true,
       jobId: `order-accept-timeout-${orderId}`,
@@ -981,8 +1055,9 @@ export async function finalizeOrderPayment(orderId, { source = "SYSTEM", userId 
     recordedById: userId ? String(userId) : undefined,
   });
 
-  // Now that payment is confirmed, tell the restaurant about the new order.
-  await notifyRestaurantNewOrder(updated);
+  // Now that payment is confirmed, tell the restaurant about the new order --
+  // a scheduled one at its release time instead (releaseScheduledOrders).
+  if (!isHeldForSchedule(updated)) await notifyRestaurantNewOrder(updated);
 
   return updated;
 }
@@ -1139,7 +1214,12 @@ export async function listOrdersUser(userId, query) {
   ]);
 
   return buildPaginatedResult({
-    docs: toOrders(rows).map((order) => normalizeOrderForClient(order)),
+    docs: toOrders(rows).map((order) => {
+      const out = normalizeOrderForClient(order);
+      // The customer shows this at the counter to collect a takeaway.
+      if (order.orderType === "takeaway" && !order.dropOtpVerified && order.deliveryOtp) out.pickupCode = order.deliveryOtp;
+      return out;
+    }),
     total,
     page,
     limit,
@@ -1273,6 +1353,8 @@ export async function getOrderById(
       dropOtp: { required: Boolean(drop.required), verified: Boolean(drop.verified) },
     };
     if (!drop.verified && secret) out.handoverOtp = secret;
+    // A takeaway's code is shown from the start: the customer shows it at the counter.
+    if (order.orderType === "takeaway" && !drop.verified && secret) out.pickupCode = secret;
 
     // deliveryState.currentLocation comes from the order's own rider position,
     // which is only written once the rider emits an update FOR THIS ORDER — so
@@ -1852,6 +1934,8 @@ export async function listOrdersRestaurant(restaurantId, query) {
     const out = normalizeOrderForClient(order);
     // What the customer typed to prove an offline payment is for the admin only.
     delete out.offlinePayment;
+    // The handover code (a takeaway's pickup code) is the customer's to show.
+    delete out.deliveryOtp;
     const tx = txByOrderId.get(order.id);
     out.finance = buildRestaurantFinanceViewSync(
       order,
@@ -1930,6 +2014,11 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
       `Current order status '${from}' is further ahead than '${orderStatus}'. Order cannot be moved backwards.`,
     );
   }
+  // A takeaway is handed over only against the customer's pickup code
+  // (handoverTakeawayRestaurant); it never has a rider stage.
+  if (order.orderType === "takeaway" && ["picked_up", "delivered"].includes(targetStatus)) {
+    throw new ValidationError("Verify the customer's pickup code to hand over a takeaway order.");
+  }
   // Business Settings > Vendor, "restaurant can cancel order": when off, a
   // restaurant can still reject a new order it has not accepted, but not
   // cancel one it already accepted -- that goes through the admin.
@@ -1990,7 +2079,9 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
     body = "Your food is currently being prepared by the restaurant.";
   } else if (orderStatus === "ready_for_pickup") {
     title = "Food is ready! 🛍️";
-    body = "Your order is ready and waiting to be picked up.";
+    body = updated.orderType === "takeaway"
+      ? "Your takeaway order is ready. Show your pickup code at the restaurant to collect it."
+      : "Your order is ready and waiting to be picked up.";
   } else if (String(orderStatus).includes("cancel")) {
     const isOnlinePaid =
       updated.paymentMethod === "razorpay" &&
@@ -2030,6 +2121,8 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
     const isCancellation = status.includes("cancel");
     // ready_for_pickup and preparing are kitchen states the customer cannot act on.
     const CUSTOMER_RELEVANT = ["confirmed", "picked_up", "delivered"];
+    // ...except for a takeaway, where "ready" is the customer's cue to come.
+    if (updated.orderType === "takeaway") CUSTOMER_RELEVANT.push("ready_for_pickup");
     const notifyList = [];
 
     if (isCancellation || CUSTOMER_RELEVANT.includes(status)) {
@@ -2088,7 +2181,10 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
       // On accept (confirmed or preparing) -> request delivery partners.
       if (
         (String(orderStatus) === "preparing" || String(orderStatus) === "confirmed") &&
-        String(from) !== "preparing" && String(from) !== "confirmed"
+        String(from) !== "preparing" && String(from) !== "confirmed" &&
+        // No rider for a takeaway. A scheduled order accepted early is held by
+        // tryAutoAssign itself until its release time.
+        updated.orderType !== "takeaway"
       ) {
         // Dispatch runs in the background, not inside the request: tryAutoAssign does
         // a geo query, a Directions call and an FCM batch. Awaiting all of that made
@@ -2156,6 +2252,105 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
 
 export async function resendDeliveryNotificationRestaurant(orderId, restaurantId) {
   return dispatchService.resendDeliveryNotificationRestaurant(orderId, restaurantId);
+}
+
+/**
+ * The restaurant hands a takeaway order to the customer: POST
+ * /food/restaurant/orders/:orderId/handover { code }. The code is the one the
+ * customer's app shows (deliveryOtp, set when the order was placed); a wrong
+ * code changes nothing. The order is then delivered, exactly as a delivered
+ * delivery order -- earned by the restaurant, commission as usual, no rider.
+ */
+export async function handoverTakeawayRestaurant(orderId, restaurantId, code) {
+  const identity = buildOrderIdentityFilter(orderId);
+  if (!identity) throw new ValidationError("Order id required");
+  const row = await prisma.foodOrder.findFirst({
+    where: { ...identity, restaurantId: String(restaurantId) },
+    include: orderInclude,
+  });
+  if (!row) throw new NotFoundError("Order not found");
+  if (row.orderType !== "takeaway") throw new ValidationError("Only a takeaway order is handed over at the restaurant.");
+  const from = String(row.orderStatus || "");
+  if (from === "delivered") throw new ValidationError("This order has already been handed over.");
+  if (!["confirmed", "preparing", "ready_for_pickup"].includes(from)) {
+    throw new ValidationError(
+      from === "created" ? "Accept the order before handing it over." : `This order cannot be handed over (${from.replace(/_/g, " ")}).`,
+    );
+  }
+  const expected = String(row.deliveryOtp || "").trim();
+  if (!expected || String(code ?? "").trim() !== expected) {
+    throw new ValidationError("That pickup code does not match. Ask the customer for the code shown in their app.");
+  }
+
+  const now = new Date();
+  // Guarded on the status, so a cancellation in the same moment wins.
+  const { count } = await prisma.foodOrder.updateMany({
+    where: { id: row.id, orderStatus: from },
+    data: {
+      orderStatus: "delivered",
+      deliveryPhase: "delivered",
+      deliveryStatus: "delivered",
+      deliveredAt: now,
+      dropOtpVerified: true,
+      deliveryOtp: "",
+      acceptanceDeadlineAt: null,
+    },
+  });
+  if (!count) throw new ValidationError("The order changed meanwhile. Please refresh and try again.");
+
+  await pushStatusHistory(row.id, {
+    byRole: "RESTAURANT",
+    byId: restaurantId,
+    from,
+    to: "delivered",
+    note: "Takeaway handed over to the customer (pickup code verified)",
+  });
+
+  try {
+    await foodTransactionService.updateTransactionStatus(row.id, "payment_snapshot_sync", {
+      status: "captured",
+      recordedByRole: "RESTAURANT",
+      recordedById: restaurantId,
+      note: "Takeaway handed over to the customer",
+    });
+  } catch (err) {
+    logger.warn(`handoverTakeawayRestaurant transaction sync failed: ${err?.message || err}`);
+  }
+
+  const updated = toOrder(await prisma.foodOrder.findUnique({ where: { id: row.id }, include: orderInclude }));
+  const label = updated.order_id || updated.id;
+  try {
+    const io = getIO();
+    if (io) {
+      const payload = {
+        orderMongoId: updated.id,
+        orderId: updated.id,
+        orderStatus: "delivered",
+        title: "Order collected 🎉",
+        message: `Takeaway order #${label} has been handed over.`,
+      };
+      io.to(rooms.user(updated.userId)).emit("order_status_update", payload);
+      io.to(rooms.restaurant(updated.restaurantId)).emit("order_status_update", payload);
+    }
+  } catch (err) {
+    logger.warn(`handoverTakeawayRestaurant socket emit failed: ${err?.message || err}`);
+  }
+  void notifyOwnersSafely([{ ownerType: "USER", ownerId: updated.userId }], {
+    title: "Order collected 🎉",
+    body: `Enjoy your meal! Takeaway order #${label} has been handed over to you.`,
+    data: { type: "order_status_update", orderId: updated.id, orderMongoId: updated.id, orderStatus: "delivered" },
+  });
+  enqueueOrderEvent("delivery_completed", {
+    orderMongoId: updated.id,
+    orderId: updated.id,
+    payMethod: String(updated.paymentMethod || ""),
+    paymentStatus: updated.paymentStatus,
+    source: "takeaway_handover",
+  });
+
+  const out = sanitizeOrderForExternal(updated);
+  out.finance = await buildRestaurantFinanceView(updated);
+  return out;
 }
 
 export async function resendDeliveryNotificationAdmin(orderId) {
@@ -2446,6 +2641,15 @@ export async function listOrdersAdmin(query) {
 }
 
 export async function assignDeliveryPartnerAdmin(orderId, deliveryPartnerId, adminId) {
+  {
+    const identity = buildOrderIdentityFilter(orderId);
+    const kind = identity
+      ? await prisma.foodOrder.findFirst({ where: identity, select: { orderType: true } })
+      : null;
+    if (kind?.orderType === "takeaway") {
+      throw new ValidationError("A takeaway order is collected by the customer; it has no delivery partner.");
+    }
+  }
   const row = await prisma.foodOrder.findUnique({
     where: { id: String(orderId) },
     include: orderInclude,

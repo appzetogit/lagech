@@ -112,6 +112,9 @@ export async function updateRestaurantById(id, body = {}) {
         data.pureVegRestaurant = parseBooleanLike(body.pureVegRestaurant, 'pureVegRestaurant');
     }
 
+    if (body.takeawayEnabled !== undefined) {
+        data.takeawayEnabled = parseBooleanLike(body.takeawayEnabled, 'takeawayEnabled');
+    }
     if (body.isAcceptingOrders !== undefined) {
         data.isAcceptingOrders = parseBooleanLike(body.isAcceptingOrders, 'isAcceptingOrders');
         // Going back online clears a manual force-offline.

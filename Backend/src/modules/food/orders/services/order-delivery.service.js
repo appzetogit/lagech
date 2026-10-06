@@ -255,6 +255,9 @@ export async function listOrdersAvailableDelivery(deliveryPartnerId, query) {
             // record for this rider on this order.
             dispatchOffers: { none: { partnerId, action: 'deassigned' } },
             orderStatus: { in: ['confirmed', 'preparing', 'ready_for_pickup'] },
+            // Never a takeaway, nor a scheduled order before its release time.
+            orderType: { not: 'takeaway' },
+            AND: [{ OR: [{ releaseAt: null }, { releaseAt: { lte: new Date() } }] }],
           },
           {
             dispatchDeliveryPartnerId: partnerId,
@@ -369,10 +372,16 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
 
   const requested = await prisma.foodOrder.findFirst({
     where: identity,
-    select: { id: true, paymentMethod: true, paymentStatus: true, total: true },
+    select: { id: true, paymentMethod: true, paymentStatus: true, total: true, orderType: true, releaseAt: true },
   });
   if (!requested) throw new NotFoundError('Order not found');
   const id = requested.id;
+  if (requested.orderType === 'takeaway') {
+    throw new ValidationError('This is a takeaway order; the customer collects it from the restaurant.');
+  }
+  if (requested.releaseAt && new Date(requested.releaseAt) > now) {
+    throw new ValidationError('This scheduled order is not open for delivery yet.');
+  }
 
   // Already this rider's: accepting again is a no-op, whatever the limit.
   const existingMine = await prisma.foodOrder.findFirst({

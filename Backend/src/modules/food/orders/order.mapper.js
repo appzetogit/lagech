@@ -103,6 +103,8 @@ export function toOrder(row) {
             freeDeliveryWaived: money(row.freeDeliveryWaiver),
             /** Part of `discount`: the new-customer first-order discount. */
             newCustomerDiscount: money(row.newCustomerDiscount),
+            /** Tip for the rider; part of `total` and of riderEarning. */
+            riderTip: money(row.riderTip),
             total: money(row.total),
             currency: row.currency,
             distanceKm: num(row.distanceKm),
@@ -170,6 +172,9 @@ export function toOrder(row) {
         lastRiderLocation: geoPoint(row.riderLat, row.riderLng),
 
         riderEarning: money(row.riderEarning),
+        riderTip: money(row.riderTip),
+        orderType: row.orderType || 'delivery',
+        isScheduled: Boolean(row.releaseAt),
         platformProfit: money(row.platformProfit),
         tripDistanceKm: num(row.tripDistanceKm)
     };
@@ -218,6 +223,8 @@ export function toFoodTransaction(row) {
             // snapshot's own restaurantCommission; callers still read `amounts.restaurantCommission`.
             restaurantCommission: money(row.commissionAmount),
             riderShare: money(row.riderShare),
+            /** Part of riderShare: the customer's tip. */
+            riderTip: money(row.riderTip),
             platformNetProfit: money(row.platformNetProfit),
             taxAmount: money(row.taxAmount),
             adminDiscountShare: money(row.adminDiscountShare),
@@ -263,7 +270,7 @@ export function fromOrder(input = {}) {
         'items', 'statusHistory', 'itemRatings', 'dispatchOffers',
         'restaurant', 'user', 'deliveryPartner', 'zone', 'coupon', 'foodTransaction',
         'payments', 'refunds', 'transactions', 'chatMessages',
-        '_id', 'id', 'orderId',
+        '_id', 'id', 'orderId', 'isScheduled',
     ]);
 
     for (const [key, value] of Object.entries(input)) {

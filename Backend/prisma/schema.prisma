@@ -769,6 +769,8 @@ model FoodRestaurant {
   /// The admin restaurant list's Featured toggle; the public card carries it.
   isFeatured           Boolean @default(false)
 
+  /// The restaurant offers takeaway (when Business Settings > Order has it on).
+  takeawayEnabled Boolean @default(true)
   diningEnabled   Boolean @default(false)
   diningMaxGuests Int     @default(6)
   diningType      String  @default("family-dining")
@@ -1409,6 +1411,16 @@ model FoodOrder {
   sendCutlery   Boolean   @default(true)
   deliveryFleet String    @default("standard")
   scheduledAt   DateTime?
+  /// A scheduled order (Business Settings > Order, scheduled orders): when the
+  /// restaurant is alerted and riders may be dispatched. Null = at once, as
+  /// every order did before scheduling existed.
+  releaseAt     DateTime?
+  /// 'delivery' or 'takeaway'. A takeaway order has no delivery fee, no rider
+  /// and is handed over by the restaurant against the code in deliveryOtp.
+  orderType     String    @default("delivery") @db.VarChar(16)
+  /// Tip for the rider, paid by the customer with the order. Part of `total`
+  /// and of `riderEarning` (all of it goes to the rider); never the platform's.
+  riderTip      Decimal   @default(0) @db.Decimal(14, 2)
 
   riderEarning   Decimal @default(0) @db.Decimal(14, 2)
   /// Can be negative when discounts/rider pay exceed platform income.
@@ -1461,6 +1473,7 @@ model FoodOrder {
   @@index([paymentMethod, createdAt(sort: Desc)])
   @@index([zoneId])
   @@index([couponId, userId])
+  @@index([releaseAt])
   @@map("food_orders")
 }
 
@@ -1596,6 +1609,8 @@ model FoodTransaction {
   restaurantShare                  Decimal @db.Decimal(14, 2)
   commissionAmount                 Decimal @db.Decimal(14, 2)
   riderShare                       Decimal @db.Decimal(14, 2)
+  /// Part of riderShare: the customer's tip, all of it the rider's.
+  riderTip                         Decimal @default(0) @db.Decimal(14, 2)
   /// Can be negative when discounts/rider pay exceed platform income.
   platformNetProfit                Decimal @db.Decimal(14, 2)
   taxAmount                        Decimal @default(0) @db.Decimal(14, 2)
