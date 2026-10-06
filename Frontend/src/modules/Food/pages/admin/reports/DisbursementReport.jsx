@@ -7,21 +7,8 @@ import { adminSystemExtrasAPI } from "@food/api/adminSystemExtras"
 import { rupees } from "./ReportShell"
 import ExportMenu from "@food/components/admin/ExportMenu"
 import { exportMoney, fetchAllPages } from "@food/utils/listExport"
-
-const isoDay = (date) => {
-  const d = new Date(date)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
-}
-const daysAgo = (n) => {
-  const d = new Date()
-  d.setDate(d.getDate() - n)
-  return isoDay(d)
-}
-
-const TABS = [
-  { key: "restaurant", label: "Restaurants", path: "/admin/food/disbursement-report/restaurants" },
-  { key: "rider", label: "Delivery men", path: "/admin/food/disbursement-report/deliverymen" },
-]
+import { daysAgo, isoDay, DisbursementTabs } from "./disbursementShared"
+import RiderDisbursementReport from "./RiderDisbursementReport"
 
 const STATUS = [
   ["", "All"],
@@ -48,11 +35,17 @@ const EXPORT_COLUMNS = [
 ]
 
 /**
- * What the payout runs disbursed: totals by status, a row per payee and each
- * run. Restaurants only for now -- riders have no payout runs, and their tab
- * says so; it is ready for them when they do.
+ * What the payout runs disbursed: totals by status, a row per restaurant and
+ * each run. The Delivery men tab lists each rider payout line instead
+ * (RiderDisbursementReport).
  */
 export default function DisbursementReport({ entityType = "restaurant" }) {
+  if (entityType === "rider") return <RiderDisbursementReport />
+  return <RestaurantDisbursementReport />
+}
+
+function RestaurantDisbursementReport() {
+  const entityType = "restaurant"
   const [range, setRange] = useState({ from: daysAgo(29), to: isoDay(new Date()) })
   const [status, setStatus] = useState("")
   const [restaurantId, setRestaurantId] = useState("")
@@ -62,7 +55,6 @@ export default function DisbursementReport({ entityType = "restaurant" }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (entityType !== "restaurant") return
     adminAPI
       .getRestaurants({ limit: 1000 })
       .then((res) => {
@@ -111,17 +103,7 @@ export default function DisbursementReport({ entityType = "restaurant" }) {
             <h1 className="text-2xl font-bold text-slate-900">Disbursement Report</h1>
           </div>
           <p className="text-sm text-slate-600 mt-1 max-w-3xl">Money sent out by the automatic payout runs in the period: what was paid, what is still waiting and what was cancelled.</p>
-          <div className="mt-4 flex gap-1 border-b border-slate-200">
-            {TABS.map((tab) => (
-              <Link
-                key={tab.key}
-                to={tab.path}
-                className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${tab.key === entityType ? "border-blue-600 text-blue-700" : "border-transparent text-slate-500 hover:text-slate-800"}`}
-              >
-                {tab.label}
-              </Link>
-            ))}
-          </div>
+          <DisbursementTabs active={entityType} />
           <div className="mt-5 flex flex-wrap items-end gap-3">
             <label className="space-y-1">
               <span className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">From</span>
