@@ -32,6 +32,7 @@ import {
     createRestaurantSupportTicketController,
     listRestaurantSupportTicketsController
 } from '../controllers/supportTicket.controller.js';
+import { listOwnReviewsController, replyToReviewController } from '../controllers/restaurantReviews.controller.js';
 import {
     createWithdrawalRequestController,
     listMyWithdrawalsController
@@ -295,6 +296,10 @@ router.post('/orders/:orderId/resend-notification', authMiddleware, requireResta
 router.get('/complaints', authMiddleware, requireRestaurant, getRestaurantComplaintsController);
 router.post('/support/tickets', authMiddleware, requireRestaurant, createRestaurantSupportTicketController);
 router.get('/support/tickets', authMiddleware, requireRestaurant, listRestaurantSupportTicketsController);
+
+// Customer reviews of this restaurant, and its replies (Business Settings switch).
+router.get('/reviews', authMiddleware, requireRestaurant, listOwnReviewsController);
+router.put('/reviews/:orderId/reply', authMiddleware, requireRestaurant, replyToReviewController);
 
 // Offers (restaurant dashboard)
 router.get('/my-offers', authMiddleware, requireRestaurant, listRestaurantOffersController);

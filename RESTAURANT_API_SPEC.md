@@ -378,6 +378,7 @@ Same canonical shape as the user app, with `userId` populated. Key fields for th
     "deliveryFee": 35, "deliveryFeeGst": 6, "platformFee": 5, "quickDeliveryFee": 0,
     "deliveryMode": "basic", "restaurantCommission": 78,
     "discount": 50, "couponCode": "SAVE50",
+    "campaignDiscount": 0,
     "total": 546, "currency": "INR",
     "distanceKm": 3.1, "roadDistanceKm": 3.9, "roadDurationMins": 14
   },
@@ -586,6 +587,31 @@ Query passes through to the admin complaint service (pagination + filters). → 
 → 201, `{ ticket }`. Invalid `category` / `priority` → 400. Note: `priority` here has no `urgent` — that's the delivery app's enum.
 
 ### `GET /food/restaurant/support/tickets` → `{ tickets: [...] }` (+ pagination)
+
+**Food campaign dishes on an order.** A line with `itemCampaignId` set is a food campaign dish the admin
+created for this restaurant (`itemId` is then the campaign id, not a menu item). Its `price` is the
+campaign's full price; what the campaign took off is in `pricing.campaignDiscount` (part of `discount`).
+The platform funds that discount: the restaurant is paid, and charged commission, on the full price.
+
+### Reviews and replies
+`GET /food/restaurant/reviews?page=1&limit=20&withComments=true` → the restaurant's customer reviews,
+newest first, in the same shape as the public list (`summary`, `reviews`, `pagination`) plus `canReply`:
+```json
+{ "summary": { "rating": 4.3, "totalRatings": 42, "totalReviews": 16, "breakdown": { "5": 30, "4": 4, "3": 4, "2": 0, "1": 4 } },
+  "reviews": [ { "id": "<order id>", "userName": "Neha V.", "rating": 4, "comment": "Tasty but late",
+                 "ratedAt": "…", "dishName": "Dal makhani", "dishImage": "…",
+                 "reply": { "text": "Sorry about the wait!", "repliedAt": "…" } } ],
+  "pagination": { "page": 1, "limit": 20, "total": 16, "pages": 1 },
+  "canReply": true }
+```
+`reply` is `null` when the restaurant has not replied. `canReply` is the admin's Business Settings switch
+("restaurant can reply to reviews"); show a Reply / Edit reply button only when it is `true`.
+
+`PUT /food/restaurant/reviews/:id/reply` `{ "reply": "Sorry about the wait!" }` (`:id` is the review's
+`id`) → `{ id, reply: { text, repliedAt } }`. Sending it again edits the reply; `""` removes it
+(`reply: null`). Up to 1000 characters. Refused with 403 `"Replying to reviews is switched off by the
+admin"` while the switch is off, 404 `"Review not found"` for an order that is not this restaurant's or has
+no review. The reply is public: customers see it under the review.
 
 ### `POST /food/restaurant/feedback-experience`
 Dashboard NPS/feedback submission.

@@ -1340,6 +1340,9 @@ model FoodOrder {
   freeDeliveryWaiver   Decimal      @default(0) @db.Decimal(14, 2)
   /// Part of `discount`: the Business Settings new-customer discount, borne by the platform.
   newCustomerDiscount  Decimal      @default(0) @db.Decimal(14, 2)
+  /// Part of `discount`: what food campaign dishes took off their price, borne
+  /// by the platform (the restaurant is settled on the full campaign price).
+  campaignDiscount     Decimal      @default(0) @db.Decimal(14, 2)
   total                Decimal      @db.Decimal(14, 2)
   currency             String       @default("INR") @db.VarChar(3)
   /// Straight-line restaurant ↔ customer km, used for fee calculation.
@@ -1390,6 +1393,10 @@ model FoodOrder {
   restaurantRating        Int?
   restaurantRatingComment String    @default("")
   restaurantRatedAt       DateTime?
+  /// The restaurant's public reply to that review (Business Settings decides
+  /// whether restaurants may reply). Empty = no reply.
+  restaurantReply         String    @default("")
+  restaurantRepliedAt     DateTime?
   partnerRating           Int?
   partnerRatingComment    String    @default("")
   partnerRatedAt          DateTime?
@@ -1482,6 +1489,10 @@ model OrderItem {
   isVeg        Boolean @default(true)
   image        String  @default("")
   notes        String  @default("")
+
+  /// Set when the line is a food campaign dish (itemId is then the campaign id).
+  /// `price` is the campaign's full price; its discount is in the order's campaignDiscount.
+  itemCampaignId String? @db.VarChar(24)
 
   /// [{ addonId, name, price }] as chosen and priced at order time. Already folded
   /// into `price`. Json rather than a table — written once, never queried across orders.

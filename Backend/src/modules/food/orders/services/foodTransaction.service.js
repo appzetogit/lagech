@@ -249,10 +249,12 @@ export async function createInitialTransaction(order) {
   let discountRestaurantBearPercentage = 0;
 
   // Discount attribution goes through the shared split util (single source of truth).
-  // The new-customer discount (Business Settings) is part of `discount` and
-  // is the platform's alone; only the rest is the coupon's to split.
-  const newCustomerDiscount = Math.min(discount, Number(order.newCustomerDiscount) || 0);
-  const couponDiscount = Math.round((discount - newCustomerDiscount) * 100) / 100;
+  // The new-customer discount (Business Settings) and the food campaign
+  // discount are part of `discount` and are the platform's alone; only the
+  // rest is the coupon's to split.
+  const campaignDiscount = Math.min(discount, Number(order.campaignDiscount) || 0);
+  const newCustomerDiscount = Math.min(discount - campaignDiscount, Number(order.newCustomerDiscount) || 0);
+  const couponDiscount = Math.round((discount - newCustomerDiscount - campaignDiscount) * 100) / 100;
   const couponCode = order.couponCode;
   if (couponDiscount > 0 && couponCode) {
     const split = await resolveDiscountSplitByCoupon({ couponCode, discount: couponDiscount });
@@ -261,8 +263,9 @@ export async function createInitialTransaction(order) {
     discountAdminBearPercentage = split.adminBearPercentage;
     discountRestaurantBearPercentage = split.restaurantBearPercentage;
   }
-  if (newCustomerDiscount > 0) {
-    adminDiscountShare = Math.round((adminDiscountShare + newCustomerDiscount) * 100) / 100;
+  const platformOnlyDiscount = newCustomerDiscount + campaignDiscount;
+  if (platformOnlyDiscount > 0) {
+    adminDiscountShare = Math.round((adminDiscountShare + platformOnlyDiscount) * 100) / 100;
     if (!couponDiscount) discountAdminBearPercentage = 100;
   }
   restaurantNet -= restaurantDiscountShare;

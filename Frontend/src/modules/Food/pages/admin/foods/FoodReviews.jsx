@@ -17,6 +17,7 @@ const EXPORT_COLUMNS = [
   { label: "Customer", value: (r) => r.customerName },
   { label: "Order", value: (r) => r.orderNumber },
   { label: "Restaurant", value: (r) => r.restaurantName },
+  { label: "Store reply", value: (r) => r.storeReply || "" },
   { label: "Date", value: (r) => exportDate(r.ratedAt) },
   { label: "Status", value: (r) => (r.isHidden ? "Hidden" : "Shown") },
 ]
@@ -167,6 +168,7 @@ export default function FoodReviews() {
                   <th className="px-4 py-3 font-semibold">Review</th>
                   <th className="px-4 py-3 font-semibold">Customer</th>
                   <th className="px-4 py-3 font-semibold">Restaurant</th>
+                  <th className="px-4 py-3 font-semibold">Store reply</th>
                   <th className="px-4 py-3 font-semibold">Date</th>
                   <th className="px-4 py-3 font-semibold text-right">Shown to customers</th>
                 </tr>
@@ -193,6 +195,16 @@ export default function FoodReviews() {
                       {r.orderNumber && <p className="text-xs text-slate-400">{r.orderNumber}</p>}
                     </td>
                     <td className="px-4 py-3 text-slate-700">{r.restaurantName}</td>
+                    <td className="px-4 py-3 max-w-xs">
+                      {r.storeReply ? (
+                        <>
+                          <p className="text-slate-700 whitespace-pre-line break-words">{r.storeReply}</p>
+                          {r.storeRepliedAt && <p className="text-xs text-slate-400">{when(r.storeRepliedAt)}</p>}
+                        </>
+                      ) : (
+                        <p className="text-xs text-slate-400">No reply</p>
+                      )}
+                    </td>
                     <td className="px-4 py-3 whitespace-nowrap text-slate-600">{when(r.ratedAt)}</td>
                     <td className="px-4 py-3 text-right">
                       <button

@@ -14,9 +14,8 @@ import { validateBasicCampaign, validateFoodCampaign } from './campaign.validato
  *            discount, on offer for a while.
  *
  * Either is shown to customers while switched on and between its start and
- * end (campaignState). The customer app lists them; ordering a food campaign
- * dish through checkout is not wired yet -- the dish card links to its
- * restaurant.
+ * end (campaignState). The customer app lists them; a food campaign dish is
+ * ordered at its campaign price through the normal checkout (campaignCart.js).
  */
 
 const STATES = ['off', 'scheduled', 'running', 'expired'];

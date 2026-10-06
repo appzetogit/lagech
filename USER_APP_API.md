@@ -108,6 +108,12 @@ Every restaurant in `GET /v1/food/restaurant/restaurants` carries `isRecommended
 (`lat`/`lng`, `zoneId`, `search`, …), so the row shows only recommended restaurants that serve the
 customer. An empty list means none are picked for that area — hide the row.
 
+### Featured restaurants
+Restaurants the admin marked featured carry `isFeatured: true`. `GET /v1/food/restaurant/restaurants?featured=true`
+returns only those, and combines with every other filter (`lat`/`lng`, `zoneId`, …) like `recommended=true`.
+The customer app shows them as a "Featured restaurants" row on home, scoped to the customer's zone; an
+empty list hides the row.
+
 ### Nutrition and allergens on dishes
 Every dish in the menu (`/restaurants/:id/menu`) and the flat dish list (`/public/foods`) carries:
 ```json
@@ -219,6 +225,26 @@ POST /v1/food/orders
   "note": "", "deliveryInstructions": "", "sendCutlery": true
 }
 ```
+
+### Food campaign dishes
+A food campaign dish (`GET /v1/food/public/campaigns` → `food[]`) is not a menu item. Put it in the cart
+as a line whose `campaignId` (and `itemId`) is the campaign's `id`, from the campaign's restaurant:
+```json
+{ "itemId": "<campaign id>", "campaignId": "<campaign id>", "name": "Hyderabadi biryani", "price": 239.2, "quantity": 2 }
+```
+`/calculate` and `POST /orders` price it from the campaign row; the `price` sent is only compared, like any
+line (a different one comes back in `priceChanges` with the campaign price). The campaign must belong to the
+restaurant being ordered from and be running at the time the order is for (now, or `scheduledAt`), else
+`"<title> is no longer available from this restaurant"` / `"The <title> campaign is not running any more"`.
+No variants or add-ons.
+
+In the result, the line's `price` is the campaign's full price, `campaignPrice` what the customer pays per
+unit, and `itemCampaignId` the campaign. `pricing.campaignDiscount` is the total the campaigns take off; it
+is **part of** `pricing.discount` (show it as its own "Campaign discount" row and the rest as the coupon's).
+Coupons, "free delivery over" and the new-customer discount are worked out on the item total after it.
+Placed orders keep it in `pricing.campaignDiscount`.
+
+The platform funds the campaign discount: the restaurant is settled (and charged commission) on the full price.
 
 ### Coupons at checkout
 
@@ -602,7 +628,8 @@ Campaigns running now (switched on, and between their start and end). Two kinds:
 - **basic**: a promotion with a banner; `restaurants` are the approved restaurants taking part (may be
   empty). Tapping a restaurant opens it.
 - **food**: one special dish. `discountType` is `percent` or `amount`; `finalPrice` is what the
-  customer pays. These dishes are not orderable through checkout yet — tapping one opens its restaurant.
+  customer pays. The dish is orderable: add it to the cart as a line with `campaignId` (see
+  "Food campaign dishes" under Orders).
 
 Both lists are empty when nothing is running; hide the section rather than showing placeholders.
 
@@ -622,6 +649,10 @@ Real customer ratings of the restaurant, newest first. `withComments=true` retur
   "pagination": { "page": 1, "limit": 20, "total": 16, "pages": 1 } }
 ```
 `userName` is the first name and last initial only. A restaurant with no ratings returns `rating: 0` and empty lists — show "No reviews yet", never sample data.
+
+Each review carries `reply`: the restaurant's reply, `{ "text": "Sorry about the wait!", "repliedAt": "…" }`,
+or `null`. Show it under the review. The customer's own order (`GET /v1/food/orders/:orderId`) has it too,
+in `ratings.restaurantReply` (same shape, or `null`).
 
 An order whose dish review an admin has hidden (Food Setup → Review) is left out of both the list and the summary.
 

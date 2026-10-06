@@ -556,9 +556,10 @@ export async function createOrder(userId, dto) {
     // order anyway would charge more than they agreed to, so stop and say why.
     // A client that echoes a code which never applied (discount 0 in the
     // pricing it sends back) is unaffected, as before.
-    // The new-customer discount is part of `discount` but is not the coupon's.
+    // The new-customer and campaign discounts are part of `discount` but are not the coupon's.
     const promisedSaving =
-      Math.max(0, (Number(dto.pricing?.discount) || 0) - (Number(dto.pricing?.newCustomerDiscount) || 0)) +
+      Math.max(0, (Number(dto.pricing?.discount) || 0) - (Number(dto.pricing?.newCustomerDiscount) || 0) -
+        (Number(dto.pricing?.campaignDiscount) || 0)) +
       (Number(dto.pricing?.deliveryFeeWaived) || 0);
     if (dto.pricing?.couponCode && promisedSaving > 0 && !pricingResult.pricing?.appliedCoupon) {
       throw new ValidationError(
@@ -587,6 +588,7 @@ export async function createOrder(userId, dto) {
       couponDeliveryWaiver: Number(pricingResult.pricing?.deliveryFeeWaived) || 0,
       freeDeliveryWaiver: Number(pricingResult.pricing?.freeDeliveryWaived) || 0,
       newCustomerDiscount: Number(pricingResult.pricing?.newCustomerDiscount) || 0,
+      campaignDiscount: Number(pricingResult.pricing?.campaignDiscount) || 0,
       total: Number(pricingResult.pricing?.total) || 0,
       currency: String(pricingResult.pricing?.currency || "INR"),
       distanceKm: Number.isFinite(Number(pricingResult.pricing?.distanceKm))
@@ -690,6 +692,7 @@ export async function createOrder(userId, dto) {
           image: item.image || '',
           notes: item.notes || '',
           addons: item.addons || [],
+          itemCampaignId: item.itemCampaignId || null,
         })),
       },
       statusHistory: {
