@@ -64,11 +64,32 @@ export async function saveRecommendedRestaurants(restaurantIds) {
         ),
     ]);
 
+    await clearListCaches();
+    return listRecommendedRestaurants();
+}
+
+async function clearListCaches() {
     try {
         const { invalidateCache } = await import('../../../../middleware/cache.js');
         await Promise.all([invalidateCache('restaurants:*'), invalidateCache('restaurant_detail:*')]);
     } catch {
         // The cached lists expire on their own.
     }
-    return listRecommendedRestaurants();
+}
+
+/**
+ * The restaurant's place in the customer app's list: 1 is first. Null clears
+ * it, and the restaurant goes back to the default order after the positioned
+ * ones. Two restaurants may share a number; they then follow each other.
+ */
+export async function setRestaurantDisplayPosition(restaurantId, position) {
+    const found = await prisma.foodRestaurant.findUnique({ where: { id: restaurantId }, select: { id: true } });
+    if (!found) throw new ValidationError('Restaurant not found');
+    const updated = await prisma.foodRestaurant.update({
+        where: { id: restaurantId },
+        data: { displayPosition: position },
+        select: { id: true, restaurantName: true, displayPosition: true },
+    });
+    await clearListCaches();
+    return { id: updated.id, name: updated.restaurantName, displayPosition: updated.displayPosition };
 }

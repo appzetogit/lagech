@@ -12,6 +12,8 @@ import locationIcon from "@food/assets/Dashboard-icons/image1.png"
 import restaurantIcon from "@food/assets/Dashboard-icons/image2.png"
 import inactiveIcon from "@food/assets/Dashboard-icons/image3.png"
 import { zoneLabel } from "@food/utils/entityLabels"
+import { toast } from "sonner"
+import { adminCatalogExtrasAPI } from "@food/api/adminCatalogExtras"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -1418,13 +1420,19 @@ export default function RestaurantsList() {
                         <ArrowUpDown className={`w-3 h-3 ${sortConfig.key === 'status' ? 'text-blue-600' : 'text-slate-400'}`} />
                       </div>
                     </th>
+                    <th
+                      className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider"
+                      title="Place in the customer app's restaurant list. 1 is shown first; leave empty for the normal order."
+                    >
+                      Position in app
+                    </th>
                     <th className="px-6 py-4 text-center text-[10px] font-bold text-slate-700 uppercase tracking-wider">Action</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-slate-100">
                   {filteredRestaurants.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-6 py-20 text-center">
+                      <td colSpan={8} className="px-6 py-20 text-center">
                         <div className="flex flex-col items-center justify-center">
                           <p className="text-lg font-semibold text-slate-700 mb-1">No Data Found</p>
                           <p className="text-sm text-slate-500">No restaurants match your search</p>
@@ -1493,6 +1501,12 @@ export default function RestaurantsList() {
                               Outlet: {restaurant.isActive ? "Active" : "Inactive"}
                             </span>
                           </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <DisplayPositionInput
+                            restaurantId={restaurant.originalData?._id || restaurant.originalData?.id || restaurant._id || restaurant.id}
+                            value={restaurant.originalData?.displayPosition ?? null}
+                          />
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-center">
                           <div className="flex items-center justify-center gap-2">
@@ -2795,6 +2809,64 @@ export default function RestaurantsList() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * The restaurant's place in the customer app's list, saved when the field
+ * loses focus or Enter is pressed. Empty clears it.
+ */
+function DisplayPositionInput({ restaurantId, value }) {
+  const [saved, setSaved] = useState(value ?? null)
+  const [draft, setDraft] = useState(value == null ? "" : String(value))
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    setSaved(value ?? null)
+    setDraft(value == null ? "" : String(value))
+  }, [value])
+
+  const save = async () => {
+    const trimmed = draft.trim()
+    const next = trimmed === "" ? null : Number(trimmed)
+    if (next !== null && (!Number.isInteger(next) || next < 1)) {
+      toast.error("Position must be a whole number from 1")
+      setDraft(saved == null ? "" : String(saved))
+      return
+    }
+    if (next === saved) return
+    setSaving(true)
+    try {
+      await adminCatalogExtrasAPI.setRestaurantDisplayPosition(restaurantId, next)
+      setSaved(next)
+      toast.success(next == null ? "Position cleared" : `Shown at position ${next} in the app`)
+    } catch (error) {
+      toast.error(error?.response?.data?.message || "Couldn't save the position")
+      setDraft(saved == null ? "" : String(saved))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <input
+        type="number"
+        min={1}
+        inputMode="numeric"
+        value={draft}
+        placeholder="—"
+        disabled={saving}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur()
+        }}
+        className="w-16 rounded-[5px] border border-slate-200 px-2 py-1 text-sm text-slate-900 focus:border-blue-500 focus:outline-none"
+        aria-label="Position in the customer app"
+      />
+      {saving && <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-400" />}
     </div>
   )
 }

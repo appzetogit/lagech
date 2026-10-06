@@ -1647,7 +1647,7 @@ const PUBLIC_CARD_SELECT = {
     offer: true, featuredDish: true, featuredPrice: true,
     rating: true, totalRatings: true, isAcceptingOrders: true, status: true,
     pureVegRestaurant: true, createdAt: true,
-    isRecommended: true, recommendedSortOrder: true,
+    isRecommended: true, recommendedSortOrder: true, displayPosition: true,
     openingTime: true, closingTime: true, openDays: true,
     latitude: true, longitude: true, formattedAddress: true,
     addressLine1: true, addressLine2: true, state: true, pincode: true, landmark: true,
@@ -1848,11 +1848,15 @@ export const listApprovedRestaurants = async (query = {}) => {
                     (b.estimatedDeliveryTimeMinutes ?? Infinity) || byDistance(a, b),
         };
 
+        // Admin positions first (1, 2, 3...), then everyone else by distance.
+        const byPosition = (a, b) =>
+            (a.displayPosition ?? Infinity) - (b.displayPosition ?? Infinity) || byDistance(a, b);
+
         const sorted = rows
             .map((r) => ({ ...toPublicCard(r), distanceInKm: distanceById.get(r.id) ?? null }))
             .sort(sorters[sortBy] || (recommendedOnly
                 ? (a, b) => a.recommendedSortOrder - b.recommendedSortOrder || byDistance(a, b)
-                : byDistance));
+                : byPosition));
 
         return finish(sorted.slice(skip, skip + limit), sorted.length);
     }
@@ -1868,7 +1872,7 @@ export const listApprovedRestaurants = async (query = {}) => {
             deliveryTime: [{ estimatedDeliveryTimeMinutes: 'asc' }, { createdAt: 'desc' }],
         }[sortBy] || (recommendedOnly
             ? [{ recommendedSortOrder: 'asc' }, { createdAt: 'desc' }]
-            : [{ createdAt: 'desc' }]);
+            : [{ displayPosition: { sort: 'asc', nulls: 'last' } }, { createdAt: 'desc' }]);
 
     const [rows, total] = await Promise.all([
         prisma.foodRestaurant.findMany({

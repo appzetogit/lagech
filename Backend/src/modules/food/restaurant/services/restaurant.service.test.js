@@ -329,3 +329,26 @@ test('a restaurant that never traded deletes, taking its dishes with it', async 
 
     created.restaurants = created.restaurants.filter((id) => id !== r.id);
 });
+
+test('restaurants the admin positioned come first, in that order, then the rest', async () => {
+    const second = await makeRestaurant({ displayPosition: 2, latitude: HERE.lat, longitude: HERE.lng });
+    const first = await makeRestaurant({ displayPosition: 1, latitude: FAR.lat + 20.01, longitude: FAR.lng + 20.01 });
+    const unplaced = await makeRestaurant({ latitude: HERE.lat, longitude: HERE.lng }); // newest, nearest
+
+    const indexIn = (list) => (r) => list.findIndex((row) => row.id === r.id);
+
+    const { restaurants: plain } = await listApprovedRestaurants({ limit: 1000 });
+    const at = indexIn(plain);
+    assert.ok(at(first) >= 0 && at(first) < at(second), 'position 1 before position 2');
+    assert.ok(at(second) < at(unplaced), 'positioned before unpositioned, even a newer one');
+    assert.equal(plain.find((r) => r.id === first.id).displayPosition, 1, 'the app gets the position');
+
+    const { restaurants: nearby } = await listApprovedRestaurants({
+        lat: HERE.lat, lng: HERE.lng, radiusKm: 25, limit: 1000,
+    });
+    const near = indexIn(nearby);
+    assert.ok(near(first) < near(second) && near(second) < near(unplaced), 'the same holds in a radius search');
+
+    const { restaurants: byRating } = await listApprovedRestaurants({ sortBy: 'rating', limit: 1000 });
+    assert.ok(indexIn(byRating)(first) >= 0, 'a sort the customer picks still works');
+});

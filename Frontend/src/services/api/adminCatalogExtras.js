@@ -36,6 +36,9 @@ export const adminCatalogExtrasAPI = {
   getRecommendedRestaurants: () => apiClient.get("/food/admin/restaurants/recommended", admin),
   saveRecommendedRestaurants: (restaurantIds) =>
     apiClient.put("/food/admin/restaurants/recommended", { restaurantIds }, admin),
+  /** 1 = first in the customer app's restaurant list; null = no fixed place. */
+  setRestaurantDisplayPosition: (restaurantId, position) =>
+    apiClient.patch(`/food/admin/restaurants/${id(restaurantId)}/display-position`, { position }, admin),
 
   // Bulk import / export
   downloadBulkTemplate: (entity, format = "xlsx") =>

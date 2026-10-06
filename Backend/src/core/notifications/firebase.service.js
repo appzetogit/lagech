@@ -6,6 +6,7 @@ import { config } from '../../config/env.js';
 import { logger } from '../../utils/logger.js';
 import { isMobilePlatform, normalizePlatform } from '../../utils/platform.js';
 import { isPushAllowed } from './notificationChannels.js';
+import { recordPushInInbox } from './notification.service.js';
 
 const FIREBASE_MESSAGING_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging';
 const OAUTH_TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -581,6 +582,8 @@ export const sendNotificationToOwner = async ({ ownerType, ownerId, payload, pla
     }
     // Clone payload to avoid side-effects across batched sends.
     const enrichedPayload = { ...payload };
+    // Notification history in the apps, whether or not a phone is registered.
+    await recordPushInInbox({ ownerType, ownerId, payload: enrichedPayload });
 
     const tokens = await listOwnerTokens({ ownerType, ownerId, platform });
     if (!tokens.length) {
