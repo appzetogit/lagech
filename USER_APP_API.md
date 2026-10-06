@@ -220,6 +220,60 @@ POST /v1/food/orders
 }
 ```
 
+### Delivery or takeaway, scheduled time and rider tip
+
+Three Business Settings options. Each is offered only when the admin has it on; switched off, an
+order is exactly a home delivery for now with no tip, as before.
+
+**What to offer for one restaurant** (public, no login):
+
+```jsonc
+GET /v1/food/public/restaurants/:restaurantId/order-options
+{
+  "restaurantId": "…",
+  "orderTypes": { "delivery": true, "takeaway": true },     // takeaway: setting on AND the restaurant offers it
+  "schedule": {
+    "enabled": true, "slotMinutes": 30, "minLeadMinutes": 45, "releaseMinutesBefore": 40,
+    "days": [
+      { "date": "2026-10-06", "label": "Today", "dayName": "Tue, 6 Oct",
+        "slots": [ { "scheduledAt": "2026-10-06T07:30:00.000Z", "endsAt": "2026-10-06T08:00:00.000Z", "label": "1:00 pm - 1:30 pm" } ] },
+      { "date": "2026-10-07", "label": "Tomorrow", "dayName": "Wed, 7 Oct", "slots": [ … ] }
+    ]
+  },                                                          // { "enabled": false, "days": [] } when off
+  "tips": { "enabled": true, "presets": [10, 20, 30, 50], "max": 500 }   // { enabled: false, presets: [], max: 0 } when off
+}
+```
+
+Slots run today and tomorrow (restaurant timezone), on the admin's interval, from at least
+`minLeadMinutes` ahead, and only wholly inside the restaurant's opening hours. `GET
+/v1/food/public/business-settings` also carries `order.takeaway`, `order.scheduledOrder`,
+`order.scheduleSlotMinutes` and `tips` for the global switches.
+
+**Sending them** — the same three optional fields on `POST /orders/calculate` and `POST /orders`:
+
+| Field | Values | Notes |
+|---|---|---|
+| `orderType` | `"delivery"` (default) \| `"takeaway"` | Takeaway: refused unless on (400 "Takeaway is not available right now." / "… does not offer takeaway."). With home delivery off, `"delivery"` is refused. |
+| `scheduledAt` | ISO time of a slot | Refused when scheduling is off (more than 5 min ahead), sooner than the lead time, past tomorrow, or when the restaurant is closed then. |
+| `riderTip` | rupees, 0–500 | Refused when tips are off, on a takeaway, or above ₹500. |
+
+**Takeaway.** No delivery fee or its GST (`pricing.deliveryFee: 0`), no Quick Mode, no rider. Paid
+in the app only: `razorpay` / `card`, `wallet` or `offline` (cash and `razorpay_qr` → 400 "Takeaway
+orders are paid in the app…"). `address` may be left out (the restaurant's address is recorded).
+The order carries `orderType: "takeaway"` and a 4-digit **`pickupCode`**: returned by `POST /orders`,
+on `GET /orders` items and on `GET /orders/:id` until it is handed over. Show it on the order screen;
+the restaurant asks for it at the counter. Status goes `created → confirmed → preparing →
+ready_for_pickup` (push "Your takeaway order is ready…") `→ delivered` when the restaurant enters the
+code. Cancellation and refunds work as for any order.
+
+**Scheduled.** The order is placed and paid now (online payment as usual). It comes back with
+`isScheduled: true`, `scheduledAt` and `releaseAt` (when the restaurant is alerted and a rider is
+looked for — `releaseMinutesBefore` ahead of the slot). Until then it stays `created` (or
+`confirmed` if the restaurant accepts early); show "Scheduled for <time>".
+
+**Tip.** The quote returns `pricing.riderTip` and includes it in `pricing.total`; it is never
+discounted by a coupon. Orders carry `pricing.riderTip` (and `riderTip`). All of it goes to the rider.
+
 ### Coupons at checkout
 
 Unchanged contract: send the code as `couponCode` to `POST /orders/calculate`, then send the
@@ -688,8 +742,8 @@ below whatever the app shows.
   "currency": { "code": "INR", "decimals": 0 },          // decimals to show prices with
   "payment": { "cod": true, "digital": true, "offline": false, "wallet": true, "partialPayment": true },
   "order": {
-    "homeDelivery": true, "takeaway": false,               // takeaway: no takeaway flow yet; keep hidden
-    "scheduledOrder": false, "scheduleSlotMinutes": 30,    // slot length for the time picker
+    "homeDelivery": true, "takeaway": false,               // takeaway on: offer Delivery / Takeaway (see §5)
+    "scheduledOrder": false, "scheduleSlotMinutes": 30,    // slot length; slots come from /restaurants/:id/order-options
     "freeDeliveryOver": null                               // or 499: item total from which delivery is free
   },
   "customer": {
@@ -697,7 +751,8 @@ below whatever the app shows.
     "vegNonVegToggle": true, "guestCheckout": false,       // guest checkout is not supported by the API yet
     "newCustomerDiscount": null                            // or { type: "amount"|"percent", value, maxDiscount, minOrderAmount, validityDays }
   },
-  "rider": { "maxAssignedOrders": 2, "canCancelOrder": false, "showEarning": true, "pictureUpload": true, "selfRegistration": true },
+  "rider": { "maxAssignedOrders": 2, "canCancelOrder": false, "showEarning": true, "pictureUpload": true, "selfRegistration": true, "tipsEnabled": false },
+  "tips": { "enabled": false, "presets": [], "max": 0 },   // on: { enabled: true, presets: [10, 20, 30, 50], max: 500 }
   "restaurant": { "canCancelOrder": false, "canReplyToReviews": false, "dishApprovalRequired": true, "selfRegistration": true },
   "refund": { "requestEnabled": true }
 }
