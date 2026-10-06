@@ -28,6 +28,7 @@ import adminCustomerExtrasRoutes from './adminCustomerExtras.routes.js';
 import adminRiderExtrasRoutes from './adminRiderExtras.routes.js';
 import adminSystemExtrasRoutes from './adminSystemExtras.routes.js';
 import adminCatalogExtrasRoutes from './adminCatalogExtras.routes.js';
+import adminOrderReportsRoutes from './adminOrderReports.routes.js';
 
 const router = express.Router();
 
@@ -154,6 +155,7 @@ router.use(adminRiderExtrasRoutes); // Add Delivery Man, vehicle categories, rid
 // system settings, social media, gallery -- guarded by the mapping above.
 router.use(adminSystemExtrasRoutes);
 router.use(adminCatalogExtrasRoutes); // reviews, gallery, addon categories, recommended, bulk import/export, campaigns
+router.use(adminOrderReportsRoutes); // transaction / order report and restaurant-wise report, with exports
 
 router.post('/sub-admins', requireAdminPermission('sub_admin_management', 'create'), adminController.createSubAdmin);
 router.get('/sub-admins', adminController.listSubAdmins);
