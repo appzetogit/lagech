@@ -15,6 +15,7 @@ import * as foodTransactionService from './foodTransaction.service.js';
 import * as dispatchService from './order-dispatch.service.js';
 import * as paymentService from './order-payment.service.js';
 import { assertRiderCanTakeOrder } from '../../delivery/services/riderCash.service.js';
+import { getBusinessSettings } from '../../shared/businessSettings.js';
 
 import {
   buildOrderIdentityFilter,
@@ -634,9 +635,24 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
   return responseOrder;
 }
 
-export async function rejectOrderDelivery(orderId, deliveryPartnerId) {
+export async function rejectOrderDelivery(orderId, deliveryPartnerId, { reason = '' } = {}) {
   const { row, order } = await loadOrder(orderId);
   assertOwnedBy(row, deliveryPartnerId);
+
+  // Declining an offer is always allowed. Giving back an order the rider has
+  // already accepted is a cancellation, and that follows the admin's switch
+  // (Business Settings > Deliveryman > Deliveryman can cancel order; off by
+  // default, as in the previous panel).
+  const cancellingAccepted = String(row.dispatchStatus || '') === 'accepted';
+  if (cancellingAccepted) {
+    const rules = await getBusinessSettings('business_deliveryman');
+    if (!rules?.riderCanCancelOrder) {
+      throw new ValidationError(
+        'Cancelling an accepted order is turned off. Please contact support if you cannot deliver it.',
+      );
+    }
+  }
+  const cleanReason = String(reason || '').trim().slice(0, 300);
 
   // Only an order that hasn't been collected may be rejected. Without this a rider
   // could pick the food up and then reject: the order was re-dispatched while rider
@@ -676,9 +692,11 @@ export async function rejectOrderDelivery(orderId, deliveryPartnerId) {
   await pushStatusHistory(row.id, {
     byRole: 'DELIVERY_PARTNER',
     byId: deliveryPartnerId,
-    from: 'assigned',
+    from: cancellingAccepted ? 'accepted' : 'assigned',
     to: 'unassigned',
-    note: 'Rejected',
+    note: cancellingAccepted
+      ? `Cancelled by delivery partner${cleanReason ? `: ${cleanReason}` : ''}`
+      : 'Rejected',
   });
 
   enqueueOrderEvent('delivery_rejected', {

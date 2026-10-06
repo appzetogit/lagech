@@ -2187,8 +2187,8 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
   return deliveryService.acceptOrderDelivery(orderId, deliveryPartnerId);
 }
 
-export async function rejectOrderDelivery(orderId, deliveryPartnerId) {
-  return deliveryService.rejectOrderDelivery(orderId, deliveryPartnerId);
+export async function rejectOrderDelivery(orderId, deliveryPartnerId, options = {}) {
+  return deliveryService.rejectOrderDelivery(orderId, deliveryPartnerId, options);
 }
 
 export async function confirmReachedPickupDelivery(orderId, deliveryPartnerId) {

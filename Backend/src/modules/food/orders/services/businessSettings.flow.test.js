@@ -5,7 +5,7 @@ import { prisma } from '../../../../config/prisma.js';
 import { uniquePhone, uniqueTag } from '../../../../utils/testIds.js';
 import { testPatch } from '../../../../utils/testGeo.js';
 import { calculateOrder, createOrder, updateOrderStatusRestaurant } from './order.service.js';
-import { acceptOrderDelivery, listActiveDeliveries } from './order-delivery.service.js';
+import { acceptOrderDelivery, listActiveDeliveries, rejectOrderDelivery } from './order-delivery.service.js';
 import { getBusyDeliveryPartnerIds } from './order.helpers.js';
 import { saveSystemSettings, getPublicBusinessSettings, getPublicReasons } from '../../admin/services/adminSystemExtras.service.js';
 import { invalidateBusinessSettings } from '../../shared/businessSettings.js';
@@ -192,6 +192,39 @@ test('the rider app gets every delivery it holds and the live limit', async () =
     await set('business_deliveryman', { maxAssignedOrders: 3 });
     active = await listActiveDeliveries(rider.id);
     assert.deepEqual([active.orderLimit, active.canAcceptMore], [3, true]);
+    await resetSettings();
+});
+
+test('a rider may decline an offer, but cancels an accepted order only when the admin allows it', async () => {
+    await resetSettings();
+    const userId = await makeUser();
+    const rider = await makePartner();
+
+    // An offer (assigned, not accepted) can always be declined.
+    const offered = await makeDispatchableOrder(userId, { dispatchStatus: 'assigned', dispatchDeliveryPartnerId: rider.id });
+    await rejectOrderDelivery(offered.id, rider.id);
+    assert.equal((await prisma.foodOrder.findUnique({ where: { id: offered.id } })).dispatchStatus, 'unassigned');
+
+    // Accepted: refused while the switch is off (the default).
+    const held = await makeDispatchableOrder(userId);
+    await acceptOrderDelivery(held.id, rider.id);
+    await assert.rejects(() => rejectOrderDelivery(held.id, rider.id, { reason: 'Bike broke' }), /turned off/);
+    assert.equal((await prisma.foodOrder.findUnique({ where: { id: held.id } })).dispatchDeliveryPartnerId, rider.id);
+
+    // Switched on: the order goes back for re-assignment, with the reason recorded.
+    await set('business_deliveryman', { riderCanCancelOrder: true });
+    await rejectOrderDelivery(held.id, rider.id, { reason: 'Bike broke' });
+    const after = await prisma.foodOrder.findUnique({ where: { id: held.id } });
+    assert.equal(after.dispatchDeliveryPartnerId, null);
+    assert.equal(after.dispatchStatus, 'unassigned');
+    const history = await prisma.orderStatusHistory.findMany({ where: { orderId: held.id } });
+    assert.ok(history.some((h) => /Cancelled by delivery partner: Bike broke/.test(h.note)), 'the reason is recorded');
+
+    // Never after pickup, whatever the switch says.
+    const picked = await makeDispatchableOrder(userId);
+    await acceptOrderDelivery(picked.id, rider.id);
+    await prisma.foodOrder.update({ where: { id: picked.id }, data: { orderStatus: 'picked_up', pickedUpAt: new Date() } });
+    await assert.rejects(() => rejectOrderDelivery(picked.id, rider.id), /already been picked up/);
     await resetSettings();
 });
 
