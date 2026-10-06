@@ -2782,7 +2782,22 @@ export async function deleteOrderAdmin(orderId, adminId) {
   if (!row) throw new NotFoundError("Order not found");
   const order = toOrder(row);
 
-  await purgeOrder(order.id);
+  if (row.orderStatus === "pending_payment") {
+    // Never paid: the same path as an abandoned checkout, which gives back
+    // the wallet part of a partial payment (and refuses if it was just paid).
+    const purged = await purgeUnpaidOrder(order.id);
+    if (!purged) throw new ValidationError("This order was just paid. Refresh and refund it instead of deleting it.");
+  } else {
+    // Deleting would silently keep the customer's wallet money: money taken
+    // from the wallet must be refunded (or the order cancelled) first.
+    const walletUsed = Number(row.walletAmount || 0) > 0 || String(row.paymentMethod || "") === "wallet";
+    const refunded = String(row.refundStatus || "") === "processed" || String(row.paymentStatus || "") === "refunded";
+    // A wallet + cash order is still cod_pending, but its wallet part was taken.
+    if (walletUsed && !refunded) {
+      throw new ValidationError("The customer paid part of this order from their wallet. Cancel or refund it before deleting, so the money goes back.");
+    }
+    await purgeOrder(order.id);
+  }
 
   // Remove the realtime tracking node if present.
   try {

@@ -7,6 +7,7 @@ import { syncExpiredFssaiNotifications } from '../src/modules/food/restaurant/se
 import { runBillingCatchUp } from '../src/modules/food/restaurant/services/subscriptionBilling.service.js';
 import { expireStalledOrders } from '../src/modules/food/orders/services/order-expiry.service.js';
 import { releaseScheduledOrders } from '../src/modules/food/orders/services/order-scheduling.service.js';
+import { expireStalePendingPaymentOrders } from '../src/modules/food/orders/services/order.service.js';
 import { generateRestaurantPayouts } from '../src/modules/food/restaurant/services/restaurantPayout.service.js';
 import { runScheduledRiderDisbursement } from '../src/modules/food/admin/services/riderDisbursementSchedule.service.js';
 import { logger } from '../src/utils/logger.js';
@@ -18,6 +19,7 @@ let orderWatchdogInterval = null;
 let restaurantPayoutInterval = null;
 let riderPayoutInterval = null;
 let scheduledReleaseInterval = null;
+let abandonedCheckoutInterval = null;
 
 const shutdown = async (signal) => {
     logger.info(`${signal} received, stopping scheduled jobs`);
@@ -28,6 +30,7 @@ const shutdown = async (signal) => {
     if (restaurantPayoutInterval) clearInterval(restaurantPayoutInterval);
     if (riderPayoutInterval) clearInterval(riderPayoutInterval);
     if (scheduledReleaseInterval) clearInterval(scheduledReleaseInterval);
+    if (abandonedCheckoutInterval) clearInterval(abandonedCheckoutInterval);
 
     try {
         await disconnectDB();
@@ -142,6 +145,19 @@ const start = async () => {
         riderPayoutInterval = setInterval(runRiderPayouts, 10 * 60 * 1000);
         await runScheduledRelease();
         scheduledReleaseInterval = setInterval(runScheduledRelease, 60 * 1000);
+
+        // Unpaid online checkouts past their time are removed (and the wallet
+        // part of a partial payment given back) on a timer, not only when
+        // someone happens to open an order list.
+        const runAbandonedCheckouts = async () => {
+            try {
+                await expireStalePendingPaymentOrders({ force: true });
+            } catch (err) {
+                logger.error(`Abandoned checkout cleanup error: ${err.message}`);
+            }
+        };
+        await runAbandonedCheckouts();
+        abandonedCheckoutInterval = setInterval(runAbandonedCheckouts, 2 * 60 * 1000);
 
         logger.info('Scheduled jobs runner started');
     } catch (err) {

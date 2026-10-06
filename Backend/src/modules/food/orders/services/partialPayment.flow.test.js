@@ -11,6 +11,7 @@ import {
     abandonOnlinePaymentOrder,
     expireStalePendingPaymentOrders,
     processRefundAdmin,
+    deleteOrderAdmin,
 } from './order.service.js';
 import { returnPartialWallet, walletDebitKey, walletReturnKey } from './partialPayment.service.js';
 import { saveSystemSettings, getPublicBusinessSettings } from '../../admin/services/adminSystemExtras.service.js';
@@ -369,3 +370,28 @@ test('Transaction report: "Wallet + Cash on delivery", and the paid-by columns a
         all.totals.orderAmount,
     );
 });
+
+test('admin delete: an unpaid order gives the wallet part back; a wallet-paid order must be refunded first', async () => {
+    const pendingUser = await makeUser(80);
+    const { order: pending } = await createOrder(pendingUser, cart({ paymentMethod: 'razorpay', useWallet: true }));
+    assert.equal(await balanceOf(pendingUser), 0);
+    await deleteOrderAdmin(pending.id);
+    assert.equal(await rowOf(pending.id), null);
+    assert.equal(await balanceOf(pendingUser), 80, 'the wallet part came back');
+
+    const cashUser = await makeUser(120);
+    const { order: held } = await createOrder(cashUser, cart({ useWallet: true, walletAmount: 120 }));
+    await assert.rejects(() => deleteOrderAdmin(held.id), /Cancel or refund it before deleting/);
+    assert.ok(await rowOf(held.id), 'the order is kept');
+    assert.equal(await balanceOf(cashUser), 0);
+});
+
+test('the scheduled cleanup removes stale unpaid checkouts and returns their wallet part', async () => {
+    const userId = await makeUser(60);
+    const { order } = await createOrder(userId, cart({ paymentMethod: 'razorpay', useWallet: true }));
+    await prisma.foodOrder.update({ where: { id: order.id }, data: { createdAt: new Date(Date.now() - 3 * 60 * 60 * 1000) } });
+    await expireStalePendingPaymentOrders({ force: true });
+    assert.equal(await rowOf(order.id), null);
+    assert.equal(await balanceOf(userId), 60);
+});
+
