@@ -295,6 +295,17 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order, onOrderCh
                   <p className="text-sm font-medium text-slate-900">{order.deliveryType}</p>
                 </div>
               )}
+              {order.isScheduled && order.scheduledAt && (
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                    <Clock className="w-4 h-4" />
+                    Scheduled For
+                  </p>
+                  <p className="text-sm font-medium text-slate-900">
+                    {new Date(order.scheduledAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "numeric", minute: "2-digit", hour12: true })}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 
@@ -538,9 +549,15 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order, onOrderCh
                     {deliveryFeeBase > 0 ? (
                       formatDialogMoney(getDeliveryFeeTotal(deliveryFeeBase, deliveryFeeGst))
                     ) : (
-                      <span className="text-emerald-600">Free delivery</span>
+                      <span className="text-emerald-600">{order.orderType === "takeaway" ? "Takeaway" : "Free delivery"}</span>
                     )}
                   </span>
+                </div>
+              )}
+              {Number(order.riderTip ?? orderPricing.riderTip ?? 0) > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-600">Rider tip <span className="text-[11px] text-slate-400">(all to the rider)</span></span>
+                  <span className="font-medium text-slate-900">{formatDialogMoney(Number(order.riderTip ?? orderPricing.riderTip))}</span>
                 </div>
               )}
               {quickDeliveryFee > 0 && (

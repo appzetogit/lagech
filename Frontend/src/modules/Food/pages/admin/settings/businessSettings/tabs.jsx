@@ -158,7 +158,7 @@ export function DeliverymanTab() {
               onChange={(x) => area.set("riderCanCancelOrder", x)}
               notApplied="Rider app only"
             />
-            <SwitchRow label="Tips for deliveryman" hint="Let customers add a tip." checked={v.tipsEnabled} onChange={(x) => area.set("tipsEnabled", x)} notApplied />
+            <SwitchRow label="Tips for deliveryman" hint="Customers may add a tip at checkout (up to ₹500). It is added to the total and paid in full to the rider." checked={v.tipsEnabled} onChange={(x) => area.set("tipsEnabled", x)} />
             <SwitchRow label="Show earning to deliveryman" hint="The rider app shows the earning on each offer." checked={v.showEarningToRider} onChange={(x) => area.set("showEarningToRider", x)} notApplied="Rider app only" />
             <SwitchRow label="Deliveryman picture upload" hint="Riders upload a delivery photo." checked={v.riderPictureUpload} onChange={(x) => area.set("riderPictureUpload", x)} notApplied="Rider app only" />
             <SwitchRow label="Deliveryman self registration" hint="Riders can sign up from the app." checked={v.riderSelfRegistration} onChange={(x) => area.set("riderSelfRegistration", x)} notApplied />
@@ -188,11 +188,11 @@ export function OrderTab() {
       <AreaGate area={area}>
         {v && (
           <Card title="Order">
-            <SwitchRow label="Home delivery" checked={v.homeDelivery} onChange={(x) => area.set("homeDelivery", x)} hint="Every order is a home delivery today." notApplied />
-            <SwitchRow label="Takeaway" hint="There is no takeaway order flow yet; saved for when there is." checked={v.takeaway} onChange={(x) => area.set("takeaway", x)} notApplied />
+            <SwitchRow label="Home delivery" checked={v.homeDelivery} onChange={(x) => area.set("homeDelivery", x)} hint="When off, customers can only order takeaway." />
+            <SwitchRow label="Takeaway" hint="Customers may collect the order at the restaurant: no delivery fee, no rider, paid in the app; the restaurant hands it over against the customer's pickup code. Each restaurant can also switch it off for itself." checked={v.takeaway} onChange={(x) => area.set("takeaway", x)} />
             <SwitchRow
               label="Scheduled orders"
-              hint="Customers may order for a later time. When off, an order for a time more than a few minutes ahead is refused."
+              hint="Customers may pick a slot today or tomorrow (at least 45 minutes ahead, within the restaurant's hours). The order is paid now; the restaurant is alerted and a rider found about 40 minutes before the slot. When off, an order for a time more than a few minutes ahead is refused."
               checked={v.scheduledOrder}
               onChange={(x) => area.set("scheduledOrder", x)}
             />

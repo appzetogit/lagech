@@ -104,9 +104,10 @@ const MONEY_COLUMNS = [
   ["adminDiscount", "Admin discount", "Platform-funded share of the coupon"],
   ["storeDiscount", "Restaurant discount", "Restaurant-funded share of the coupon"],
   ["adminCommission", "Admin commission", "Commission on the food"],
-  ["commissionOnDeliveryCharge", "Commission on delivery charge", "Delivery fee − rider pay (negative when the platform tops the rider up)"],
-  ["deliverymanEarning", "Deliveryman earning", "Rider pay for the trip"],
-  ["adminNetIncome", "Admin net income", "Platform fee + delivery fee + delivery GST + commission − rider pay − admin discount"],
+  ["commissionOnDeliveryCharge", "Commission on delivery charge", "Delivery fee − rider trip pay (negative when the platform tops the rider up)"],
+  ["riderTip", "Tip", "Customer's tip, paid in full to the rider; never admin or restaurant income"],
+  ["deliverymanEarning", "Deliveryman earning", "Rider pay for the trip, including the tip"],
+  ["adminNetIncome", "Admin net income", "Platform fee + delivery fee + delivery GST + commission − rider trip pay − admin discount (tips pass through)"],
   ["storeNetIncome", "Restaurant net income", "Owed to the restaurant: food + packaging − commission − restaurant discount (same as payouts)"],
   ["refundAmount", "Refunded", "Refunded to the customer"],
 ]
@@ -301,7 +302,7 @@ export default function OrderMoneyReport({ variant = "transaction", title, icon:
               <Card label="Refunded transaction" value={money(s.refundedAmount)} sub={`${s.refundedOrders} refunded · ${s.cancelledOrders} cancelled (${money(s.cancelledAmount)})`} tone="red" />
               <Card label="Admin earning" value={money(s.adminNetIncome)} sub="Net of rider pay and admin-funded discounts" tone="teal" />
               <Card label="Restaurant earning" value={money(s.storeNetIncome)} sub="Owed to restaurants" tone="blue" />
-              <Card label="Deliveryman earning" value={money(s.deliverymanEarning)} tone="amber" />
+              <Card label="Deliveryman earning" value={money(s.deliverymanEarning)} sub={s.riderTip ? `incl. ${money(s.riderTip)} tips` : undefined} tone="amber" />
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <Card label="Admin commission" value={money(s.adminCommission)} />
