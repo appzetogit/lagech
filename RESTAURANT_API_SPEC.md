@@ -31,6 +31,10 @@ Verified against `Backend/src/modules/food/restaurant/` and `Backend/src/modules
 ## 2. Onboarding (no auth)
 
 ### `POST /food/restaurant/register` — `multipart/form-data`
+When Business Settings turn restaurant self registration off (`GET /food/public/business-settings` →
+`restaurant.selfRegistration: false`) this and `POST /food/restaurant/onboarding-fee/order` return
+**403** "Restaurant sign-up is closed right now. Please contact Lagech to list your restaurant." —
+hide the sign-up button. Restaurants an admin adds are unaffected.
 
 File fields: `profileImage` (1), `panImage` (1), `gstImage` (1), `fssaiImage` (1), `menuImages` (up to 10), **`coverImage` (1)**, **`galleryImages` (up to 10)**.
 
@@ -393,6 +397,30 @@ customer's pickup code to hand over a takeaway order." `resend-notification` doe
 The restaurant's own takeaway switch (default on; only matters while Business Settings have takeaway
 on). → `{ restaurant }` with `takeawayEnabled`. Also on `GET /food/restaurant/current`.
 
+### `PATCH /food/restaurant/packaging-settings`
+```json
+{ "enabled": true, "amount": 15, "required": false }
+```
+The restaurant's extra packaging charge, offered only while Business Settings > Order has "extra
+packaging charge" on (`GET /food/public/business-settings` → `order.extraPackagingCharge`); otherwise
+400 "Extra packaging charges are not allowed right now." `amount` 0–500 (rupees); switching it on
+needs an amount. `required: true` adds it to every order; `false` charges it only when the customer
+asks for it at checkout. Fields not sent keep their value. → `{ restaurant }` with
+`extraPackaging: { enabled, amount, required }` (also on `GET /food/restaurant/current`). The charge is
+the restaurant's: it is the order's `pricing.packagingFee`, added to the restaurant's share, with no
+commission on it. Show a "Packaging charge" setting only while `order.extraPackagingCharge` is true.
+
+### Who confirms orders (Business Settings > Order)
+`GET /food/public/business-settings` → `order.confirmedBy`:
+- `"restaurant"` (default): as above — a new order arrives `created`, the restaurant accepts
+  (`confirmed`/`preparing`) within the acceptance time or it is cancelled.
+- `"deliveryman"`: a **delivery** order arrives already `confirmed` (no acceptance timer, riders are
+  looked for at once; the `new_order` socket event and push still come). Show it with "Start
+  preparing" rather than Accept / Reject, then move it to `preparing` and `ready_for_pickup` as usual.
+  Rejecting it is cancelling an accepted order, so it needs "restaurant can cancel order" on
+  (`restaurant.canCancelOrder`), otherwise the admin cancels it. A **takeaway** order is still
+  `created` and accepted by the restaurant as usual.
+
 ### Order object
 
 Same canonical shape as the user app, with `userId` populated. Key fields for the restaurant screen:
@@ -528,6 +556,12 @@ The chosen method is copied onto each new withdrawal request (`bankDetails.payou
 ---
 
 ## 8. Subscription (calendar-month postpaid)
+
+Business Settings > Business info "subscription business model" is the same switch as the
+Restaurant Subscription feature flag: when off, `featureEnabled` / `features.restaurantSubscriptionEnabled`
+are false, no month is billed, and restaurants set to a subscription pay commission per order. The
+public `GET /food/public/business-settings` carries it as `business.subscriptionModel` — hide the
+subscription screens while it is false.
 
 ### `GET /food/restaurant/subscription/overview`
 ```json

@@ -12,7 +12,7 @@ import { getRestaurantAvailabilityStatus } from '../../restaurant/helpers/restau
 import { cartCampaignDiscount, resolveCartWithCampaigns } from '../../campaigns/campaignCart.js';
 import { applyFeeSwitches } from './feeSwitches.js';
 import { evaluateCoupon, requiresFirstOrder, USED_ORDER_WHERE } from './couponRules.js';
-import { freeDeliveryOverWaiver, newCustomerDiscount } from './businessRules.js';
+import { additionalChargeFor, extraPackagingFee, extraPackagingOffer, freeDeliveryOverWaiver, newCustomerDiscount } from './businessRules.js';
 import { resolveOrderType, cleanRiderTip } from './orderModes.js';
 import { getBusinessSettings } from '../../shared/businessSettings.js';
 import { resolveOrderZoneId, getZonePaymentOptions } from '../../shared/zonePayment.js';
@@ -82,6 +82,9 @@ export async function loadRestaurantForOrdering(restaurantId) {
       closingTime: true,
       openDays: true,
       takeawayEnabled: true,
+      extraPackagingEnabled: true,
+      extraPackagingAmount: true,
+      extraPackagingRequired: true,
       addressLine1: true,
       area: true,
       city: true,
@@ -490,16 +493,22 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
   const pricingZoneId = await resolveOrderZoneId(dto?.zoneId, restaurant);
   const feeSettings = await loadActiveFeeSettings(pricingZoneId);
 
-  const packagingFee = 0;
-  const platformFee = Number(feeSettings.platformFee || 0);
-
   // Business Settings: delivery or takeaway, and a tip for the rider. Neither
   // sent = a home delivery with no tip, exactly as before they existed.
-  const [orderRules, customerRules, riderRules] = await Promise.all([
+  const [orderRules, customerRules, riderRules, infoRules] = await Promise.all([
     getBusinessSettings('business_order'),
     getBusinessSettings('business_customer'),
     getBusinessSettings('business_deliveryman'),
+    getBusinessSettings('business_info'),
   ]);
+
+  // Extra packaging (the restaurant's, when the admin allows it) and the
+  // admin's flat additional charge. Both 0 while their switches are off.
+  // The additional charge is part of platformFee, as the Quick Mode
+  // surcharge is, so every split and report already counts it.
+  const packagingFee = extraPackagingFee(orderRules, restaurant, dto.extraPackaging);
+  const additional = additionalChargeFor(infoRules);
+  const platformFee = round2(Number(feeSettings.platformFee || 0) + additional.amount);
   const orderType = resolveOrderType(dto.orderType, { orderRules, restaurant });
   const isTakeaway = orderType === 'takeaway';
   const riderTip = cleanRiderTip(dto.riderTip ?? dto.tip, { tipsEnabled: riderRules.tipsEnabled, orderType });
@@ -620,9 +629,14 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
     subtotal,
     tax,
     packagingFee,
+    /** packagingFee is the restaurant's extra packaging charge; whether the customer may opt out. */
+    extraPackaging: extraPackagingOffer(orderRules, restaurant, packagingFee),
     deliveryFee,
     deliveryFeeGst,
     platformFee,
+    /** Part of platformFee: the admin's flat charge, shown as its own line named additionalChargeName. */
+    additionalCharge: additional.amount,
+    additionalChargeName: additional.name,
     discount,
     /** Tip for the rider, part of `total`; all of it is the rider's. */
     riderTip,

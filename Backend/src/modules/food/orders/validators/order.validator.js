@@ -65,7 +65,9 @@ const addressSchema = z.object({
  */
 const orderModeFields = {
     orderType: z.enum(['delivery', 'takeaway'], { errorMap: () => ({ message: 'Choose delivery or takeaway' }) }).optional(),
-    riderTip: z.number().min(0, 'Enter a valid tip amount').optional()
+    riderTip: z.number().min(0, 'Enter a valid tip amount').optional(),
+    /** The customer asked for the restaurant's extra packaging (when offered). */
+    extraPackaging: z.boolean().optional()
 };
 
 const pricingSchema = z.object({

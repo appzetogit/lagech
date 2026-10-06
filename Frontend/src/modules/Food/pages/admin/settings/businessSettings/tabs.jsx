@@ -38,10 +38,9 @@ export function BusinessInfoTab({ companyInfo }) {
             />
             <SwitchRow
               label="Subscription business model"
-              hint="Each restaurant's billing mode (commission or subscription) is set on the restaurant; plans are under Subscription settings."
+              hint="The same switch as Restaurant Subscription under Feature settings. On: monthly plans are billed and restaurants may be put on a subscription (Restaurant commission page). Off: no plans are billed or shown, and restaurants set to subscription pay commission. Keep at least one model on; with commission off, restaurants can only be put on a subscription."
               checked={v.subscriptionModel}
               onChange={(x) => area.set("subscriptionModel", x)}
-              notApplied
             />
             <div className="grid gap-4 sm:grid-cols-2 mt-4">
               <NumberField
@@ -82,10 +81,9 @@ export function BusinessInfoTab({ companyInfo }) {
             <div className="mt-4">
               <SwitchRow
                 label="Additional charge"
-                hint="An extra charge per order, such as a service charge."
+                hint="A flat charge added to every new order, such as a service charge, shown on the bill under its name. It is the platform's: counted in the platform fee and in the Transaction report's Additional charge column."
                 checked={v.additionalCharge?.enabled}
                 onChange={(x) => area.set(["additionalCharge", "enabled"], x)}
-                notApplied
               />
               {v.additionalCharge?.enabled && (
                 <div className="grid gap-4 sm:grid-cols-2 mt-2">
@@ -161,7 +159,7 @@ export function DeliverymanTab() {
             <SwitchRow label="Tips for deliveryman" hint="Customers may add a tip at checkout (up to ₹500). It is added to the total and paid in full to the rider." checked={v.tipsEnabled} onChange={(x) => area.set("tipsEnabled", x)} />
             <SwitchRow label="Show earning to deliveryman" hint="The rider app shows the earning on each offer." checked={v.showEarningToRider} onChange={(x) => area.set("showEarningToRider", x)} notApplied="Rider app only" />
             <SwitchRow label="Deliveryman picture upload" hint="Riders upload a delivery photo." checked={v.riderPictureUpload} onChange={(x) => area.set("riderPictureUpload", x)} notApplied="Rider app only" />
-            <SwitchRow label="Deliveryman self registration" hint="Riders can sign up from the app." checked={v.riderSelfRegistration} onChange={(x) => area.set("riderSelfRegistration", x)} notApplied />
+            <SwitchRow label="Deliveryman self registration" hint="Riders can sign up from the app. When off, the sign-up is refused with a message (riders an admin adds still work)." checked={v.riderSelfRegistration} onChange={(x) => area.set("riderSelfRegistration", x)} />
             <div className="mt-4">
               <SaveBar saving={area.saving} onSave={() => area.save()} updatedAt={area.updatedAt} />
             </div>
@@ -212,9 +210,9 @@ export function OrderTab() {
                 <NumberField label="Free delivery over (₹)" value={v.freeDelivery.minSubtotal} onChange={(x) => area.set(["freeDelivery", "minSubtotal"], x)} step="0.01" />
               </div>
             )}
-            <SwitchRow label="Extra packaging charge" hint="Restaurants may add a packaging charge." checked={v.extraPackagingCharge} onChange={(x) => area.set("extraPackagingCharge", x)} notApplied />
+            <SwitchRow label="Extra packaging charge" hint="Restaurants may set their own packaging charge in the restaurant app, charged on every order or when the customer asks for it. It is the restaurant's money, with no commission. When off, nothing is charged." checked={v.extraPackagingCharge} onChange={(x) => area.set("extraPackagingCharge", x)} />
             <div className="grid gap-4 sm:grid-cols-2 mt-3">
-              <Field label={<>Who confirms the order<NotApplied /></>} hint="Orders are confirmed by the restaurant today.">
+              <Field label="Who confirms the order" hint="Restaurant: the restaurant accepts each new order within the acceptance time, or it is cancelled. Deliveryman: a delivery order is confirmed as soon as it is placed and paid, riders are looked for at once and the restaurant is alerted to prepare it (no acceptance timer). Takeaway orders are always accepted by the restaurant.">
                 <select className={inputClass} value={v.orderConfirmedBy} onChange={(e) => area.set("orderConfirmedBy", e.target.value)}>
                   <option value="restaurant">Restaurant</option>
                   <option value="deliveryman">Deliveryman</option>
@@ -247,15 +245,15 @@ export function VendorTab() {
             checked={v.restaurantCanCancelOrder}
             onChange={(x) => area.set("restaurantCanCancelOrder", x)}
           />
-          <SwitchRow label="Restaurant self registration" hint="Restaurants can sign up themselves." checked={v.restaurantSelfRegistration} onChange={(x) => area.set("restaurantSelfRegistration", x)} notApplied />
+          <SwitchRow label="Restaurant self registration" hint="Restaurants can sign up themselves. When off, the sign-up (and its onboarding fee) is refused with a message; restaurants an admin adds still work." checked={v.restaurantSelfRegistration} onChange={(x) => area.set("restaurantSelfRegistration", x)} />
           <SwitchRow
             label="Dish approval"
             hint="New dishes, and edits to a dish's name, picture, price, type, category or sizes, wait for admin approval. When off they are live at once."
             checked={v.dishApprovalRequired}
             onChange={(x) => area.set("dishApprovalRequired", x)}
           />
-          <SwitchRow label="Restaurant can reply to reviews" hint="There are no review replies yet." checked={v.canReplyToReviews} onChange={(x) => area.set("canReplyToReviews", x)} notApplied />
-          <SwitchRow label="Restaurant cash in hand limit" checked={v.cashInHandLimit} onChange={(x) => area.set("cashInHandLimit", x)} notApplied />
+          <SwitchRow label="Restaurant can reply to reviews" hint="Restaurants may reply to their reviews from the app." checked={v.canReplyToReviews} onChange={(x) => area.set("canReplyToReviews", x)} />
+          <SwitchRow label="Restaurant cash in hand limit" hint="Restaurants never hold customer cash here: cash on delivery is collected by riders (rider cash limits apply), takeaway is paid in the app, and restaurants do not run their own delivery. Saved for if that changes." checked={v.cashInHandLimit} onChange={(x) => area.set("cashInHandLimit", x)} notApplied="Not applicable" />
           <div className="mt-4">
             <SaveBar saving={area.saving} onSave={() => area.save()} updatedAt={area.updatedAt} />
           </div>

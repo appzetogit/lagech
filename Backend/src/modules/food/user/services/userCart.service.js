@@ -87,6 +87,9 @@ const normalizePricingSnapshot = (pricing = null) => {
         deliveryFeeGst,
         platformFee,
         quickDeliveryFee,
+        /** Part of platformFee (Business Settings additional charge). */
+        additionalCharge: toNonNegativeNumber(pricing.additionalCharge, 0),
+        additionalChargeName: String(pricing.additionalChargeName || ''),
         deliveryMode,
         discount,
         total,

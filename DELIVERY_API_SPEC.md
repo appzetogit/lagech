@@ -41,6 +41,10 @@ Same as the user app.
 ## 2. Registration & profile
 
 ### `POST /food/delivery/register` — no auth, `multipart/form-data`
+When Business Settings turn deliveryman self registration off (`GET /food/public/business-settings`
+→ `rider.selfRegistration: false`) this returns **403** "Delivery partner sign-up is closed right now.
+Please contact Lagech to join as a delivery partner." — hide the sign-up button. Riders an admin adds
+are unaffected.
 
 File fields: `profilePhoto`, `aadharPhoto`, `panPhoto`, `drivingLicensePhoto`, `upiQrCode` (max 1 each).
 

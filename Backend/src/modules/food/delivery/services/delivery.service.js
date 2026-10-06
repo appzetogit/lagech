@@ -5,6 +5,7 @@ import { ValidationError } from '../../../../core/auth/errors.js';
 import { getDeliveryCashLimitSettings } from '../../admin/services/admin.service.js';
 import { upsertFirebaseDeviceToken } from '../../../../core/notifications/firebase.service.js';
 import { logger } from '../../../../utils/logger.js';
+import { assertSelfRegistrationOpen } from '../../shared/businessSettings.js';
 import { collectDynamicRegistration } from './driverRegistrationField.service.js';
 import { assertRiderMayGoOnline, getRiderCashStatus } from './riderCash.service.js';
 import { emailNewDeliveryPartnerRegistration } from '../../../../core/notifications/emailEvents.js';
@@ -72,6 +73,8 @@ export const registerDeliveryPartner = async (payload, files, rawBody = {}) => {
     } = payload;
     const refRaw = typeof payload?.ref === 'string' ? String(payload.ref).trim() : '';
 
+    // Business Settings > Deliveryman "self registration" off: only an admin adds riders.
+    await assertSelfRegistrationOpen('rider');
     await claimRegistrationIdentity({ phone, vehicleNumber });
 
     const uploadTasks = [];

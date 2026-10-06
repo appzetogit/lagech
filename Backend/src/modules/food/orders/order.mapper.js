@@ -92,6 +92,9 @@ export function toOrder(row) {
             deliveryFeeGst: money(row.deliveryFeeGst),
             platformFee: money(row.platformFee),
             quickDeliveryFee: money(row.quickDeliveryFee),
+            /** Part of platformFee: Business Settings' additional charge, named additionalChargeName. */
+            additionalCharge: money(row.additionalCharge),
+            additionalChargeName: row.additionalChargeName || '',
             deliveryMode: row.deliveryMode,
             restaurantCommission: money(row.restaurantCommission),
             discount: money(row.discount),
@@ -313,7 +316,8 @@ export function fromOrder(input = {}) {
 
     if (pricing) {
         for (const key of ['subtotal', 'tax', 'packagingFee', 'deliveryFee', 'deliveryFeeGst',
-                           'platformFee', 'quickDeliveryFee', 'deliveryMode', 'restaurantCommission',
+                           'platformFee', 'quickDeliveryFee', 'additionalCharge', 'additionalChargeName',
+                           'deliveryMode', 'restaurantCommission',
                            'discount', 'couponCode', 'couponId', 'couponDeliveryWaiver', 'freeDeliveryWaiver',
                            'newCustomerDiscount', 'campaignDiscount', 'total', 'currency', 'distanceKm',
                            'roadDistanceKm', 'roadDurationMins']) {

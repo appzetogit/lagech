@@ -1,7 +1,7 @@
 import { prisma } from '../../../../config/prisma.js';
 import { toFoodTransaction } from '../order.mapper.js';
 import { resolveDiscountSplitByCoupon } from '../../shared/discountSplit.util.js';
-import { getBusinessSettings } from '../../shared/businessSettings.js';
+import { getBusinessSettings, isSubscriptionModelOn } from '../../shared/businessSettings.js';
 
 const RESTAURANT_COMMISSION_CACHE_MS = 60 * 1000;
 let restaurantCommissionRulesCache = null;
@@ -176,7 +176,11 @@ export async function getRestaurantCommissionSnapshot(orderDoc) {
   if (!restaurantIdRaw) return empty;
   const restaurantId = String(restaurantIdRaw);
 
-  const billingMode = await getRestaurantBillingMode(restaurantId);
+  let billingMode = await getRestaurantBillingMode(restaurantId);
+  // Business Settings > Business info: with the subscription business model
+  // off there are no plans, so a restaurant set to subscription is on
+  // commission like everyone else.
+  if (billingMode === 'subscription' && !(await isSubscriptionModelOn())) billingMode = 'commission_overall';
 
   // The restaurant pays a monthly plan instead. Charging commission as well
   // would bill them twice for the same order.
