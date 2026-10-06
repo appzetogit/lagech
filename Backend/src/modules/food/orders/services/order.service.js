@@ -1719,6 +1719,9 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
   }
 
   const from = order.orderStatus;
+  // The app re-sends the current status on retries and double taps; that is a
+  // no-op, not an error.
+  if (from === targetStatus) return normalizeOrderForClient(order);
   if (!isStatusAdvance(from, orderStatus)) {
     throw new ValidationError(
       `Current order status '${from}' is further ahead than '${orderStatus}'. Order cannot be moved backwards.`,

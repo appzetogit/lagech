@@ -527,7 +527,7 @@ export const verifyDeliveryOtpAndLogin = async (phone, otp, fcmToken, platform) 
 };
 
 export const logout = async (refreshToken, fcmToken, platform) => {
-  if (!refreshToken) {
+  if (!refreshToken && !fcmToken) {
     throw new ValidationError("Refresh token is required");
   }
 
@@ -541,8 +541,9 @@ export const logout = async (refreshToken, fcmToken, platform) => {
   }
 
   // 2. Invalidate the refresh token (standard logout procedure)
+  if (!refreshToken) return { invalidated: false };
   const deleted = await prisma.foodRefreshToken.deleteMany({ where: { token: refreshToken } });
-  return { invalidated: deleted.deletedCount > 0 };
+  return { invalidated: deleted.count > 0 };
 };
 
 export const getProfile = async (userId, role) => {

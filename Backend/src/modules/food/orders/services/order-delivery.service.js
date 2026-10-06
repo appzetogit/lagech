@@ -1010,6 +1010,8 @@ export async function updateOrderStatusDelivery(orderId, deliveryPartnerId, orde
   assertOwnedBy(row, deliveryPartnerId);
 
   const from = row.orderStatus;
+  // A repeated status (retry, double tap) changes nothing.
+  if (from === String(orderStatus || '').toLowerCase()) return sanitizeOrderForDeliveryPartner(toOrder(row));
   if (!isStatusAdvance(from, orderStatus)) {
     throw new ValidationError(
       `Current order status '${from}' is further ahead than '${orderStatus}'. Order cannot be moved backwards.`,
