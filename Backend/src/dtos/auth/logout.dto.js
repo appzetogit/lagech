@@ -3,8 +3,10 @@ import { ValidationError } from '../../core/auth/errors.js';
 import { normalizePlatform } from '../../utils/platform.js';
 
 const schema = z.object({
-    refreshToken: z.string().min(1, 'Refresh token is required'),
-    fcmToken: z.string().optional(),
+    // The apps sometimes have no refresh token left (null) when logging out;
+    // the device's push token must still be detached, so neither is required.
+    refreshToken: z.string().nullish(),
+    fcmToken: z.string().nullish(),
     platform: z.preprocess(
         (value) => normalizePlatform(value, { allowUndefined: true }),
         z.enum(['web', 'mobile']).optional()
