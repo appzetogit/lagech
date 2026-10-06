@@ -49,7 +49,7 @@ test('food import creates approved dishes, files them under a sub-category and r
     const report = await importFoods(csv([
         HEAD,
         `,${momos},${r.id},${top.id},${sub.id},120,150,Non-Veg,https://cdn.example.com/m.webp,"Calories 250 kcal, High protein",`,
-        `,${paneer},${veg.id},${top.id},,200,,,,,No`,
+        `,${paneer},${veg.id},${vegOnly.id},,200,,,,,No`,
         `,${uniqueTag('Bad ')},${r.id},${sub.id},,100,,,,,`,
         `,${uniqueTag('Bad ')},${r.id},${top.id},${sub.id.replace(/./, (c) => (c === 'a' ? 'b' : 'a'))},100,,,,,`,
         `,${uniqueTag('Bad ')},${r.id},${other.id},${sub.id},100,,,,,`,
