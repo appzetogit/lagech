@@ -8,6 +8,7 @@ import {
     markNotificationAsRead,
     dismissNotification,
     dismissAllNotifications,
+    recordPushInInbox,
 } from './notification.service.js';
 import {
     upsertFirebaseDeviceToken,
@@ -15,6 +16,7 @@ import {
     removeFirebaseDeviceToken,
     replaceFirebaseDeviceToken,
     detachFirebaseDeviceTokenEverywhere,
+    sendNotificationToOwner,
 } from './firebase.service.js';
 import { uniquePhone } from '../../utils/testIds.js';
 
@@ -266,4 +268,32 @@ test('detaching takes the token off every owner and both platforms', async () =>
         assert.ok(!owner.fcmTokens.includes(token), 'still attached on web');
         assert.ok(!owner.fcmTokenMobile.includes(token), 'still attached on mobile');
     }
+});
+
+test('a push to someone with no phone registered still lands in their history', async () => {
+    await sendNotificationToOwner({
+        ownerType: 'USER',
+        ownerId: otherUserId,
+        payload: { title: 'Order delivered', body: 'Enjoy your meal', data: { type: 'order_status_update', orderId: 'FOD-1' } },
+    });
+    const inbox = await getInboxNotifications({ ownerType: 'USER', ownerId: otherUserId });
+    const row = inbox.items.find((n) => n.title === 'Order delivered');
+    assert.ok(row, 'the push is in the inbox');
+    assert.equal(row.message, 'Enjoy your meal');
+    assert.equal(row.category, 'order_status_update');
+    assert.equal(row.source, 'SYSTEM');
+    assert.equal(row.metadata.orderId, 'FOD-1');
+    assert.equal(row.isRead, false);
+});
+
+test('data-only pushes and admin broadcasts are not copied into history', async () => {
+    const before = (await getInboxNotifications({ ownerType: 'USER', ownerId: otherUserId })).pagination.total;
+    assert.equal(await recordPushInInbox({ ownerType: 'USER', ownerId: otherUserId, payload: { data: { type: 'sync' } } }), null);
+    assert.equal(
+        await recordPushInInbox({ ownerType: 'USER', ownerId: otherUserId, payload: { title: 'Hi', body: 'x', data: { type: 'admin_broadcast' } } }),
+        null,
+    );
+    assert.equal(await recordPushInInbox({ ownerType: 'ADMIN', ownerId: otherUserId, payload: { title: 'Hi', body: 'x' } }), null);
+    const after = (await getInboxNotifications({ ownerType: 'USER', ownerId: otherUserId })).pagination.total;
+    assert.equal(after, before);
 });

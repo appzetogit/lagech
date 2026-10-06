@@ -7,6 +7,7 @@ import {
     validateAddonCategoryCreate,
     validateAddonCategoryUpdate,
     validateRecommendedList,
+    validateDisplayPosition,
     validateReviewVisibility,
     validateSetAddonCategory,
 } from '../validators/catalogExtras.validator.js';
@@ -64,6 +65,11 @@ export const listRecommendedRestaurants = handle(() => recommended.listRecommend
 export const saveRecommendedRestaurants = handle(
     (req) => recommended.saveRecommendedRestaurants(validateRecommendedList(req.body)),
     { message: 'Recommended restaurants saved' },
+);
+
+export const setRestaurantDisplayPosition = handle(
+    (req) => recommended.setRestaurantDisplayPosition(String(req.params.id), validateDisplayPosition(req.body)),
+    { message: 'Position saved' },
 );
 
 // Bulk import / export: categories, addons, restaurants

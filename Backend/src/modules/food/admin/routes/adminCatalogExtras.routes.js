@@ -32,6 +32,7 @@ router.patch('/addons/:id/category', extras.setAddonCategory);
 // ----- Recommended restaurants -----
 router.get('/restaurants/recommended', extras.listRecommendedRestaurants);
 router.put('/restaurants/recommended', extras.saveRecommendedRestaurants);
+router.patch('/restaurants/:id/display-position', extras.setRestaurantDisplayPosition);
 
 // ----- Bulk import / export -----
 for (const [base, entity] of [['/categories', 'categories'], ['/addons', 'addons'], ['/restaurants', 'restaurants']]) {

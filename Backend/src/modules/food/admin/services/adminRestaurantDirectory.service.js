@@ -23,6 +23,8 @@ const RESTAURANT_ROW = {
     // commission rows -- a restaurant on a subscription plan has no commission
     // row at all and would otherwise show as being on the default mode.
     billingMode: true,
+    // The restaurant's place in the customer app's list, set from this page.
+    displayPosition: true,
 };
 
 const ZONE_SUMMARY = { select: { id: true, name: true, zoneName: true } };

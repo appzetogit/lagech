@@ -107,6 +107,47 @@ export const createInboxNotifications = async ({ notifications = [] } = {}) => {
     });
 };
 
+const INBOX_OWNER_TYPES = new Set(['USER', 'RESTAURANT', 'DELIVERY_PARTNER']);
+// Admin broadcasts write their own inbox rows before pushing.
+const NOT_KEPT_IN_INBOX = new Set(['admin_broadcast']);
+
+/**
+ * Keep a copy of a push in the recipient's notification history, so the
+ * apps' notification screens show what was sent (and what would have been
+ * sent to a phone with no push token). Data-only pushes have no title and
+ * are not kept. Never throws: history must not stop the push itself.
+ */
+export const recordPushInInbox = async ({ ownerType, ownerId, payload = {} } = {}) => {
+    try {
+        const type = String(ownerType || '').toUpperCase();
+        if (!INBOX_OWNER_TYPES.has(type) || !isId(ownerId)) return null;
+        if (payload.skipInbox) return null;
+        const title = String(payload.title || '').trim();
+        const message = String(payload.body || payload.message || '').trim();
+        if (!title || !message) return null;
+        const data = payload.data && typeof payload.data === 'object' ? payload.data : {};
+        const category = String(data.type || 'general').trim() || 'general';
+        if (NOT_KEPT_IN_INBOX.has(category)) return null;
+
+        return await prisma.foodNotification.create({
+            data: {
+                ownerType: type,
+                ownerId: String(ownerId),
+                title: title.slice(0, 500),
+                message: message.slice(0, 2000),
+                link: String(data.link || '').trim(),
+                category,
+                source: 'SYSTEM',
+                metadata: Object.fromEntries(
+                    Object.entries(data).filter(([, v]) => v === null || ['string', 'number', 'boolean'].includes(typeof v)),
+                ),
+            },
+        });
+    } catch {
+        return null;
+    }
+};
+
 export const getInboxNotifications = async ({ ownerType, ownerId, page = 1, limit = 20 } = {}) => {
     const where = {
         ownerType: normalizeOwnerType(ownerType),

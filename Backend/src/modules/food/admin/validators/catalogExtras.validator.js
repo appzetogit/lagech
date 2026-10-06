@@ -31,3 +31,15 @@ export const validateReviewVisibility = (body) =>
 export const validateRecommendedList = (body) =>
     parse(z.object({ restaurantIds: z.array(id).max(50, 'At most 50 recommended restaurants') }), body, 'Invalid restaurant list')
         .restaurantIds;
+
+export const validateDisplayPosition = (body) =>
+    parse(
+        z.object({
+            position: z.union([
+                z.null(),
+                z.coerce.number().int('Position must be a whole number').min(1, 'Position starts at 1').max(9999, 'Position is too large'),
+            ]),
+        }),
+        body,
+        'Invalid position',
+    ).position;
