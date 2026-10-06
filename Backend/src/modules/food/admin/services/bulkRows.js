@@ -1,6 +1,6 @@
 /**
  * Columns and per-row checks for the admin bulk import/export of categories,
- * add-ons and restaurants.
+ * add-ons, restaurants and foods.
  *
  * Pure: no database, so every rule here is unit-tested directly. A row either
  * comes back as `{ value }` ready for the service to write, or as `{ errors }`
@@ -315,3 +315,135 @@ export const restaurantExportRow = (r) => [
     Number(r.rating) || 0,
     r.createdAt ? new Date(r.createdAt).toISOString() : '',
 ];
+
+// ─── foods ───────────────────────────────────────────────────────────────────
+
+/**
+ * The old panel's food import columns that our dish has. Left out because a
+ * dish here has no such field: discount and discount type, available time
+ * start/end, and add-on ids (add-ons are linked to dishes from the add-on side,
+ * where an empty list means the whole menu).
+ */
+export const FOOD_COLUMNS = [
+    'Id', 'Name*', 'Description', 'Restaurant Id*', 'Restaurant Name', 'Category Id*', 'Category Name',
+    'Sub Category Id', 'Sub Category Name', 'Price*', 'Compare-at Price', 'Food Type (Veg/Non-Veg)',
+    'Preparation Time', 'Image URL', 'Tags', 'Nutrition', 'Allergens', 'Available (Yes/No)',
+];
+
+/** Export adds what an import does not take: approval, sizes and the date. */
+export const FOOD_EXPORT_COLUMNS = [...FOOD_COLUMNS, 'Approval Status', 'Sizes', 'Created At'];
+
+export const FOOD_NOTES = [
+    ['Id', 'Leave blank to add a new dish. Keep the id from an export to update that dish.'],
+    ['Name*', 'Dish name, up to 200 characters. A restaurant cannot have two dishes with the same name.'],
+    ['Restaurant Id*', 'The restaurant\'s id, as shown in a restaurant export. A dish cannot be moved to another restaurant.'],
+    ['Restaurant / Category / Sub Category Name', 'For reading only; ignored on import.'],
+    ['Category Id*', 'Id of a top-level category, as shown in a category export.'],
+    ['Sub Category Id', 'Optional id of a sub-category of that category; the dish is then filed under it.'],
+    ['Price*', 'Price in rupees, more than 0. Ignored for a dish that has sizes: their prices are kept.'],
+    ['Compare-at Price', 'Optional crossed-out price shown next to the price. Blank or 0 = none.'],
+    ['Food Type', 'Veg or Non-Veg. Blank = unchanged on update; for a new dish Non-Veg (Veg at a pure veg restaurant).'],
+    ['Preparation Time', 'Optional, e.g. 20-25 min.'],
+    ['Image URL', 'Optional https:// link or uploaded file path. On update, blank keeps the current images.'],
+    ['Tags / Nutrition / Allergens', 'Comma-separated, e.g. Calories 250 kcal, High protein.'],
+    ['Available', 'Yes or No. Blank = Yes.'],
+    ['', 'Every imported dish is approved, exactly as if added or edited from the admin food list.'],
+];
+
+const FOOD_TYPES = { veg: 'Veg', 'non-veg': 'Non-Veg', nonveg: 'Non-Veg' };
+
+const requiredId = (raw, label, errors) => {
+    if (!raw) {
+        errors.push(`${label} is required`);
+        return '';
+    }
+    if (!ID.test(raw)) {
+        errors.push(`${label} is not a valid id`);
+        return '';
+    }
+    return raw.toLowerCase();
+};
+
+export function validateFoodRow(data) {
+    const errors = [];
+    const id = optionalId(read(data, 'Id'), 'Id', errors);
+    const name = read(data, 'Name');
+    if (!name) errors.push('Name is required');
+    else if (name.length > 200) errors.push('Name must be 200 characters or fewer');
+    const description = read(data, 'Description');
+    if (description.length > 2000) errors.push('Description must be 2000 characters or fewer');
+
+    const restaurantId = requiredId(read(data, 'Restaurant Id'), 'Restaurant Id', errors);
+    const categoryId = requiredId(read(data, 'Category Id'), 'Category Id', errors);
+    const subRaw = read(data, 'Sub Category Id');
+    let subCategoryId = null;
+    if (subRaw) {
+        if (!ID.test(subRaw)) errors.push('Sub Category Id is not a valid id');
+        else subCategoryId = subRaw.toLowerCase();
+    }
+
+    const price = number(read(data, 'Price'), 'Price', errors, { required: true });
+    if (price === 0) errors.push('Price must be more than 0');
+    const otherPrice = number(read(data, 'Compare-at Price'), 'Compare-at Price', errors);
+
+    const typeRaw = read(data, 'Food Type (Veg/Non-Veg)').toLowerCase().replace(/\s+/g, '-');
+    let foodType = null;
+    if (typeRaw) {
+        foodType = FOOD_TYPES[typeRaw] || null;
+        if (!foodType) errors.push('Food Type must be Veg or Non-Veg');
+    }
+
+    const preparationTime = read(data, 'Preparation Time');
+    if (preparationTime.length > 50) errors.push('Preparation Time must be 50 characters or fewer');
+    const isAvailable = parseYesNo(read(data, 'Available (Yes/No)'), true, 'Available', errors);
+
+    return result({
+        id,
+        name,
+        description,
+        restaurantId,
+        categoryId,
+        subCategoryId,
+        price: price ?? 0,
+        otherPrice: otherPrice ?? 0,
+        foodType,
+        preparationTime,
+        image: mediaUrl(read(data, 'Image URL'), 'Image URL', errors),
+        tags: read(data, 'Tags'),
+        nutrition: read(data, 'Nutrition'),
+        allergens: read(data, 'Allergens'),
+        isAvailable,
+    }, errors);
+}
+
+const listCell = (list) => (Array.isArray(list) ? list.join(', ') : '');
+
+/** A dish with its restaurant, category (with parent) and sizes included. */
+export const foodExportRow = (f) => {
+    const category = f.category || null;
+    const isSub = Boolean(category?.parentId);
+    const variants = Array.isArray(f.variants) ? f.variants : [];
+    return [
+        f.id,
+        f.name || '',
+        f.description || '',
+        f.restaurantId,
+        f.restaurant?.restaurantName || '',
+        isSub ? category.parentId : f.categoryId || '',
+        isSub ? category.parent?.name || '' : category?.name || f.categoryName || '',
+        isSub ? f.categoryId : '',
+        isSub ? category.name || '' : '',
+        Number(f.price) || 0,
+        Number(f.otherPrice) || 0,
+        String(f.foodType || '') === 'Veg' ? 'Veg' : 'Non-Veg',
+        f.preparationTime || '',
+        f.image || '',
+        listCell(f.tags),
+        listCell(f.nutrition),
+        listCell(f.allergens),
+        f.isAvailable === false ? 'No' : 'Yes',
+        f.approvalStatus || '',
+        variants.map((v) => `${v.name}: ${Number(v.price) || 0}`).join(' | '),
+        f.createdAt ? new Date(f.createdAt).toISOString() : '',
+    ];
+};

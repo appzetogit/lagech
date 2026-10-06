@@ -8,11 +8,12 @@ import apiClient from "./axios.js"
 const admin = { contextModule: "admin" }
 const id = (value) => encodeURIComponent(String(value))
 
-/** categories | addons | restaurants -> the admin path they live under. */
+/** categories | addons | restaurants | foods -> the admin path they live under. */
 const BULK_BASE = {
   categories: "/food/admin/categories/bulk",
   addons: "/food/admin/addons/bulk",
   restaurants: "/food/admin/restaurants/bulk",
+  foods: "/food/admin/foods/bulk",
 }
 
 export const adminCatalogExtrasAPI = {

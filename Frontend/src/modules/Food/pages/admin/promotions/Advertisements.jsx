@@ -163,13 +163,18 @@ function AdForm({ ad, restaurants, onClose, onSaved }) {
   )
 }
 
-/** Restaurant advertisements: requests to decide, and what is running. */
-export default function Advertisements() {
+/**
+ * Restaurant advertisements: requests to decide, and what is running.
+ *
+ * The sidebar's three entries (New Advertisement, Ad Requests, Ads list) all
+ * open this page: `initialState` picks the tab, `openNew` opens the form.
+ */
+export default function Advertisements({ initialState = "all", openNew = false } = {}) {
   const [data, setData] = useState({ ads: [], counts: {} })
-  const [state, setState] = useState("all")
+  const [state, setState] = useState(STATES.some(([key]) => key === initialState) ? initialState : "all")
   const [loading, setLoading] = useState(true)
   const [restaurants, setRestaurants] = useState([])
-  const [editing, setEditing] = useState(null) // null | {} (new) | ad
+  const [editing, setEditing] = useState(openNew ? {} : null) // null | {} (new) | ad
 
   const load = async () => {
     try {

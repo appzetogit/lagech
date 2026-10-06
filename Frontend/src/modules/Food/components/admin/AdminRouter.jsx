@@ -314,7 +314,10 @@ export default function AdminRouter() {
             <Route path="categories/sub" element={<Category key="sub-categories" variant="sub" />} />
             <Route path="fee-settings" element={<FeeSettings />} />
             <Route path="referral-settings" element={<ReferralSettings />} />
-            <Route path="foods" element={<FoodsList />} />
+            <Route path="foods" element={<FoodsList key="foods" />} />
+            <Route path="foods/add-new" element={<FoodsList key="foods-add" openAdd />} />
+            <Route path="foods/bulk-import" element={<BulkImport key="foods-import" entity="foods" />} />
+            <Route path="foods/bulk-export" element={<BulkExport key="foods-export" entity="foods" />} />
             <Route path="food/list" element={<FoodsList />} />
             <Route path="addons" element={<AddonsList />} />
             <Route path="addons/categories" element={<AddonCategories />} />
@@ -390,8 +393,13 @@ export default function AdminRouter() {
             <Route path="restaurant-withdraws" element={<RestaurantWithdraws />} />
             <Route path="order-cancel-reasons" element={<OrderCancelReasons />} />
             <Route path="dispatch" element={<DispatchBoard />} />
-            <Route path="advertisements" element={<AdminAdvertisements />} />
-            <Route path="reels" element={<AdminReels />} />
+            {/* Keys remount the page between its sidebar entries, so the tab
+                and the open form follow the entry that was clicked. */}
+            <Route path="advertisements" element={<AdminAdvertisements key="ads" />} />
+            <Route path="advertisements/new" element={<AdminAdvertisements key="ads-new" openNew />} />
+            <Route path="advertisements/requests" element={<AdminAdvertisements key="ads-requests" initialState="pending" />} />
+            <Route path="reels" element={<AdminReels key="reels" />} />
+            <Route path="reels/new" element={<AdminReels key="reels-new" openNew />} />
             <Route path="restaurant-disbursements" element={<RestaurantPayouts />} />
             <Route path="restaurant-disbursements/:batchId" element={<RestaurantPayoutBatch />} />
             <Route path="balance-sheet" element={<BalanceSheet />} />
