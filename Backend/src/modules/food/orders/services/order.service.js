@@ -25,6 +25,8 @@ import {
   assertRestaurantOpenForOrdering,
 } from './order-pricing.service.js';
 import { normalizeDeliveryAddress } from '../../shared/geo.utils.js';
+import { getOfflinePaymentSettings } from '../../admin/services/adminSystemExtras.service.js';
+import { buildOfflinePaymentRecord, decideOfflinePayment, OFFLINE_STATUS } from './offlinePayment.util.js';
 import * as dispatchService from './order-dispatch.service.js';
 import * as deliveryService from './order-delivery.service.js';
 import * as paymentService from './order-payment.service.js';
@@ -99,9 +101,10 @@ async function getOrderAcceptanceWindowSeconds() {
   }
 }
 
+// Offline payment waits too: in pending_payment until the admin verifies it.
 function isAwaitingOnlinePaymentMethod(paymentMethod) {
   const method = String(paymentMethod || "").toLowerCase();
-  return method === "razorpay" || method === "card";
+  return method === "razorpay" || method === "card" || method === "offline";
 }
 
 function buildAcceptanceDeadline(date = new Date(), windowSeconds = ORDER_ACCEPTANCE_WINDOW_SECONDS) {
@@ -164,6 +167,9 @@ async function expireStalePendingPaymentOrders() {
       // and is not an OrderPaymentStatus — Mongo matched nothing, Postgres
       // rejects the query, and this runs on every customer's order list.
       paymentStatus: { in: ["created", "pending_qr", "failed"] },
+      // An offline payment waits for the admin, however long that takes; the
+      // customer may already have sent the money.
+      paymentMethod: { not: "offline" },
       createdAt: { lte: cutoff },
     },
     select: { id: true, orderStatus: true, paymentStatus: true },
@@ -484,6 +490,12 @@ export async function createOrder(userId, dto) {
     }
     const isCash = paymentMethod === "cash";
     const isWallet = paymentMethod === "wallet";
+    // Checked before anything is priced or written: the method must be one
+    // the admin offers, with its required fields filled in.
+    const offlinePayment =
+      paymentMethod === "offline"
+        ? buildOfflinePaymentRecord(await getOfflinePaymentSettings(), dto.offlinePayment)
+        : null;
 
     const pricingResult = await calculateOrderPricing(
       userId,
@@ -596,6 +608,7 @@ export async function createOrder(userId, dto) {
       scheduledAt: dto.scheduledAt ? new Date(dto.scheduledAt) : null,
       riderEarning: Number(riderEarning) || 0,
       platformProfit: Number(platformProfit) || 0,
+      ...(offlinePayment ? { offlinePayment } : {}),
       items: {
         create: resolvedItems.map((item) => ({
           itemId: String(item.itemId),
@@ -618,7 +631,12 @@ export async function createOrder(userId, dto) {
           byRole: "SYSTEM",
           from: "",
           to: initialStatus,
-          note: initialStatus === "pending_payment" ? "Order created, awaiting payment" : "Order placed",
+          note:
+            initialStatus !== "pending_payment"
+              ? "Order placed"
+              : offlinePayment
+                ? `Order created, awaiting verification of the ${offlinePayment.methodName} payment`
+                : "Order created, awaiting payment",
         }],
       },
     });
@@ -791,6 +809,11 @@ export async function verifyPayment(userId, dto) {
     logger.error(
       `Payment amount mismatch for order ${order.id}: paid ${paidPaise} paise, expected ${expectedPaise} paise, rz order ${rzPayment?.order_id}, status ${rzStatus}`,
     );
+    await notifyOwnersSafely([{ ownerType: "USER", ownerId: String(userId) }], {
+      title: "Payment failed",
+      body: `We could not confirm the payment for order #${order.order_id || order.id}. If money was taken, it will be returned to you.`,
+      data: { type: "payment_failed", orderId: order.id, orderMongoId: order.id },
+    });
     throw new ValidationError("Payment verification failed");
   }
 
@@ -848,7 +871,12 @@ export async function finalizeOrderPayment(orderId, { source = "SYSTEM", userId 
     byId: userId,
     from: "pending_payment",
     to: "created",
-    note: source === "USER" ? "Payment verified, order confirmed" : "Payment confirmed via webhook",
+    note:
+      source === "USER"
+        ? "Payment verified, order confirmed"
+        : source === "ADMIN"
+          ? "Offline payment verified by admin"
+          : "Payment confirmed via webhook",
   });
 
   void addOrderJob(
@@ -906,11 +934,108 @@ export async function abandonOnlinePaymentOrder(userId, orderId) {
   if (String(order.orderStatus || "").toLowerCase() !== "pending_payment") {
     throw new ValidationError("Order is not awaiting payment");
   }
+  // The customer may already have sent the money; only the admin can settle it.
+  if (String(order.paymentMethod || "").toLowerCase() === "offline") {
+    throw new ValidationError("An offline payment is being verified. Please contact support to cancel this order.");
+  }
 
   const deleted = await deletePendingPaymentOrder(order);
   if (!deleted) throw new ValidationError("Could not abandon payment");
 
   return { deleted: true, orderId: order.id };
+}
+
+// ----- Offline payment (admin) -----
+
+async function loadOfflineOrderAwaitingCheck(orderId) {
+  const identity = buildOrderIdentityFilter(orderId);
+  if (!identity) throw new ValidationError("Order id required");
+  const row = await prisma.foodOrder.findFirst({
+    where: identity,
+    include: { ...orderInclude, restaurant: { select: { restaurantName: true } } },
+  });
+  if (!row) throw new NotFoundError("Order not found");
+  if (row.paymentMethod !== "offline") throw new ValidationError("This order was not paid offline");
+  if (row.orderStatus !== "pending_payment" || row.paymentStatus === "paid") {
+    throw new ValidationError("This payment has already been verified or rejected");
+  }
+  return row;
+}
+
+/**
+ * The admin found the customer's offline payment: the order is paid and goes
+ * to the restaurant exactly like a confirmed online payment
+ * (finalizeOrderPayment: acceptance timer, ledger, coupon use, new-order push).
+ */
+export async function verifyOfflinePaymentAdmin(orderId, adminId, note = "") {
+  const row = await loadOfflineOrderAwaitingCheck(orderId);
+  const record = decideOfflinePayment(row.offlinePayment, OFFLINE_STATUS.VERIFIED, { adminId, note });
+
+  // Conditional, like the online claim: two admins clicking at once verify once.
+  const { count } = await prisma.foodOrder.updateMany({
+    where: { id: row.id, orderStatus: "pending_payment", paymentMethod: "offline", paymentStatus: { not: "paid" } },
+    data: { paymentStatus: "paid", offlinePayment: record },
+  });
+  if (!count) throw new ValidationError("This payment has already been verified or rejected");
+
+  const finalized = await finalizeOrderPayment(row.id, { source: "ADMIN", userId: adminId ? String(adminId) : null });
+  const updated =
+    finalized ?? toOrder(await prisma.foodOrder.findFirst({ where: { id: row.id }, include: orderInclude }));
+
+  await notifyOwnersSafely([{ ownerType: "USER", ownerId: row.userId }], {
+    title: "Payment verified",
+    body: `Your payment for order #${row.order_id || row.id} was received. ${row.restaurant?.restaurantName || "The restaurant"} has your order now.`,
+    data: { type: "order_created", orderId: row.id, orderMongoId: row.id, link: `/food/user/orders/${row.id}` },
+  });
+
+  return normalizeOrderForClient(updated);
+}
+
+/**
+ * The admin could not find the payment: payment failed, order cancelled, the
+ * customer told why. Nothing was charged through the app, so nothing is
+ * refunded; the restaurant never saw the order, so it is not told.
+ */
+export async function rejectOfflinePaymentAdmin(orderId, adminId, reason = "") {
+  const row = await loadOfflineOrderAwaitingCheck(orderId);
+  const record = decideOfflinePayment(row.offlinePayment, OFFLINE_STATUS.REJECTED, { adminId, note: reason });
+
+  const { count } = await prisma.foodOrder.updateMany({
+    where: { id: row.id, orderStatus: "pending_payment", paymentMethod: "offline", paymentStatus: { not: "paid" } },
+    data: { paymentStatus: "failed", orderStatus: "cancelled_by_admin", offlinePayment: record },
+  });
+  if (!count) throw new ValidationError("This payment has already been verified or rejected");
+
+  await pushStatusHistory(row.id, {
+    byRole: "ADMIN",
+    byId: adminId ? String(adminId) : null,
+    from: "pending_payment",
+    to: "cancelled_by_admin",
+    note: `Offline payment rejected: ${record.adminNote}`,
+  });
+
+  await notifyOwnersSafely([{ ownerType: "USER", ownerId: row.userId }], {
+    title: "Payment not verified",
+    body: `We could not verify your payment for order #${row.order_id || row.id}: ${record.adminNote}`,
+    data: { type: "payment_failed", orderId: row.id, orderMongoId: row.id, link: `/food/user/orders/${row.id}` },
+  });
+
+  try {
+    const io = getIO();
+    if (io) {
+      io.to(rooms.user(row.userId)).emit("order_status_update", {
+        orderMongoId: row.id,
+        orderId: row.id,
+        orderStatus: "cancelled_by_admin",
+        message: `Payment not verified: ${record.adminNote}`,
+      });
+    }
+  } catch (err) {
+    logger.warn(`Offline payment rejection socket emit failed: ${err?.message || err}`);
+  }
+
+  const updated = toOrder(await prisma.foodOrder.findFirst({ where: { id: row.id }, include: orderInclude }));
+  return normalizeOrderForClient(updated);
 }
 
 // ----- Auto-assign -----
@@ -928,7 +1053,12 @@ export async function listOrdersUser(userId, query) {
   await expireUnacceptedOrders();
 
   const { page, limit, skip } = buildPaginationOptions(query);
-  const where = { userId: String(userId), orderStatus: { not: 'pending_payment' } };
+  // Orders still waiting on an online payment are hidden; an offline payment
+  // waiting for the admin's check is shown, so the customer can follow it.
+  const where = {
+    userId: String(userId),
+    OR: [{ orderStatus: { not: 'pending_payment' } }, { paymentMethod: 'offline' }],
+  };
 
   const [rows, total] = await Promise.all([
     prisma.foodOrder.findMany({
@@ -1653,6 +1783,8 @@ export async function listOrdersRestaurant(restaurantId, query) {
 
   const normalizedOrders = toOrders(rows).map((order) => {
     const out = normalizeOrderForClient(order);
+    // What the customer typed to prove an offline payment is for the admin only.
+    delete out.offlinePayment;
     const tx = txByOrderId.get(order.id);
     out.finance = buildRestaurantFinanceViewSync(
       order,
@@ -2104,7 +2236,9 @@ export async function listOrdersAdmin(query) {
     typeof query.paymentStatus === "string" ? query.paymentStatus.trim() : "";
 
   if (!rawStatus || rawStatus === "all") {
-    where.orderStatus = { not: "pending_payment" };
+    // Unpaid online checkouts are noise; offline payments awaiting the
+    // admin's check are work, so they stay in the list.
+    AND.push({ OR: [{ orderStatus: { not: "pending_payment" } }, { paymentMethod: "offline" }] });
   }
 
   if (rawStatus && rawStatus !== "all") {
@@ -2145,8 +2279,8 @@ export async function listOrdersAdmin(query) {
         where.paymentStatus = "refunded";
         break;
       case "offline-payments":
-        where.paymentMethod = "cash";
-        where.orderStatus = { in: ["created", "confirmed", "delivered"] };
+        // Every offline-payment order: awaiting verification, verified, rejected.
+        where.paymentMethod = "offline";
         break;
       case "scheduled":
         // Placed for later: the delivery time is still ahead, and the order
@@ -2318,6 +2452,11 @@ export async function updateOrderStatusAdmin(orderId, orderStatus, note = "", ad
     throw new ValidationError(
       `Cannot change order status from '${order.orderStatus}' to '${orderStatus}'`,
     );
+  }
+  // An unpaid order only moves on through its payment (or an offline payment's
+  // Verify); accepting it here would hand the restaurant an order nobody paid for.
+  if (order.orderStatus === "pending_payment" && !String(orderStatus).includes("cancel")) {
+    throw new ValidationError("This order is still waiting for its payment");
   }
 
   const from = order.orderStatus;

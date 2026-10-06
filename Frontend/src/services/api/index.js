@@ -931,6 +931,15 @@ export const adminAPI = {
     apiClient.post(`/food/admin/orders/${String(orderId)}/refund`, data ?? {}, {
       contextModule: "admin",
     }),
+  // Offline payments: confirm the money arrived, or reject with a reason.
+  verifyOfflinePayment: (orderId, note = "") =>
+    apiClient.patch(`/food/admin/orders/${String(orderId)}/offline-payment/verify`, { note }, {
+      contextModule: "admin",
+    }),
+  rejectOfflinePayment: (orderId, reason) =>
+    apiClient.patch(`/food/admin/orders/${String(orderId)}/offline-payment/reject`, { reason }, {
+      contextModule: "admin",
+    }),
   deleteOrder: (orderId) =>
     apiClient.delete(`/food/admin/orders/${String(orderId)}`, {
       contextModule: "admin",

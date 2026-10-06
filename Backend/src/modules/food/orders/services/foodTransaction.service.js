@@ -265,7 +265,7 @@ export async function createInitialTransaction(order) {
 
       paymentStatusLabel: String(order.paymentStatus || 'cod_pending'),
       amountDue: Number(order.paymentAmountDue ?? totalCustomerPaid) || 0,
-      gatewayProvider: 'razorpay',
+      gatewayProvider: order.paymentMethod === 'offline' ? 'offline' : 'razorpay',
       razorpayOrderId: order.razorpayOrderId || null,
       razorpayPaymentId: order.razorpayPaymentId || null,
       razorpaySignature: order.razorpaySignature || null,

@@ -1,5 +1,8 @@
 import { ValidationError } from '../../../../core/auth/errors.js';
+import crypto from 'crypto';
 import { normalizeChannelSettings } from '../../../../core/notifications/notificationChannels.js';
+import { normalizePushMessages } from '../../../../core/notifications/pushMessages.js';
+import { normalizeMethodFields } from './payoutMethods.util.js';
 
 /**
  * The settings areas stored in food_system_settings, one JSON document each:
@@ -211,6 +214,77 @@ const cleanWebsite = (value) => {
     };
 };
 
+// ─── Offline payment ─────────────────────────────────────────────────────────
+
+const MAX_OFFLINE_METHODS = 20;
+const MAX_PAYMENT_INFO = 10;
+const METHOD_ID = /^[a-f0-9]{16}$/;
+
+/**
+ * Offline payment methods (bank transfer, UPI, ...): what the customer is
+ * shown to pay to (`paymentInfo`), and what they must fill in afterwards so
+ * the admin can find the payment (`fields`, e.g. a transaction id). A method
+ * keeps its id across edits, because orders record which method they used.
+ */
+const cleanOfflinePayment = (value) => {
+    const input = obj(value);
+    const raw = Array.isArray(input.methods) ? input.methods : [];
+    if (raw.length > MAX_OFFLINE_METHODS) throw new ValidationError(`At most ${MAX_OFFLINE_METHODS} offline payment methods`);
+    const ids = new Set();
+    const methods = raw.map((item, index) => {
+        const method = obj(item);
+        const name = str(method.name, 80);
+        if (!name) throw new ValidationError(`Offline payment method ${index + 1} needs a name`);
+        let id = METHOD_ID.test(String(method.id || '')) ? String(method.id) : '';
+        if (!id || ids.has(id)) id = crypto.randomBytes(8).toString('hex');
+        ids.add(id);
+
+        const info = Array.isArray(method.paymentInfo) ? method.paymentInfo : [];
+        if (info.length > MAX_PAYMENT_INFO) throw new ValidationError(`"${name}" can show at most ${MAX_PAYMENT_INFO} payment details`);
+        const paymentInfo = info
+            .map((entry) => ({ label: str(obj(entry).label, 80), value: str(obj(entry).value, 300) }))
+            .filter((entry) => entry.label || entry.value);
+        for (const entry of paymentInfo) {
+            if (!entry.label || !entry.value) throw new ValidationError(`"${name}": every payment detail needs a title and a value`);
+        }
+        if (!paymentInfo.length) throw new ValidationError(`"${name}": add the details the customer pays to, such as the account number or UPI id`);
+
+        let fields;
+        try {
+            fields = normalizeMethodFields(method.fields);
+        } catch (error) {
+            throw new ValidationError(`"${name}": ${error.message}`);
+        }
+        return { id, name, isActive: bool(method.isActive, true), paymentInfo, fields };
+    });
+    return { enabled: bool(input.enabled, false), methods };
+};
+
+// ─── Analytics scripts ───────────────────────────────────────────────────────
+
+/**
+ * Tracking ids for the customer website. Only ids are stored, never script
+ * text, and each is checked against its format, so nothing an admin types can
+ * end up as code on the site: the website builds the standard snippet itself.
+ */
+export const ANALYTICS_TOOLS = [
+    { key: 'googleAnalytics', label: 'Google Analytics', idLabel: 'Measurement ID', example: 'G-XXXXXXXXXX', pattern: /^G-[A-Z0-9]{4,20}$/ },
+    { key: 'googleTagManager', label: 'Google Tag Manager', idLabel: 'Container ID', example: 'GTM-XXXXXXX', pattern: /^GTM-[A-Z0-9]{4,12}$/ },
+    { key: 'metaPixel', label: 'Meta Pixel', idLabel: 'Pixel ID', example: '123456789012345', pattern: /^\d{6,20}$/ },
+];
+
+const cleanAnalytics = (value) => {
+    const input = obj(value);
+    return Object.fromEntries(ANALYTICS_TOOLS.map((tool) => {
+        const entry = obj(input[tool.key]);
+        const id = str(entry.id, 40).toUpperCase();
+        const enabled = bool(entry.enabled, false);
+        if (id && !tool.pattern.test(id)) throw new ValidationError(`${tool.label} ${tool.idLabel} should look like ${tool.example}`);
+        if (enabled && !id) throw new ValidationError(`Enter the ${tool.label} ${tool.idLabel} before switching it on`);
+        return [tool.key, { enabled, id }];
+    }));
+};
+
 /** key -> clean(value). Cleaning `{}` gives the area's defaults. */
 export const SETTINGS_AREAS = {
     page_meta: cleanPageMeta,
@@ -219,6 +293,9 @@ export const SETTINGS_AREAS = {
     notification_channels: (value) => normalizeChannelSettings(value),
     landing_page: cleanLanding,
     website: cleanWebsite,
+    push_messages: (value) => normalizePushMessages(value),
+    offline_payment: cleanOfflinePayment,
+    analytics_scripts: cleanAnalytics,
 };
 
 export function cleanSettings(area, value) {

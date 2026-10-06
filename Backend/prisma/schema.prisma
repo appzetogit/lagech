@@ -172,6 +172,8 @@ enum OrderPaymentMethod {
   razorpay
   razorpay_qr
   wallet
+  /// Bank transfer, UPI and the like, verified by the admin. See FoodOrder.offlinePayment.
+  offline
 }
 
 enum OrderPaymentStatus {
@@ -1341,6 +1343,9 @@ model FoodOrder {
   razorpaySignature String?
   /// QR checkout details — written once, never filtered on.
   qr                Json?
+  /// Offline payment: the method (snapshotted), what the customer filled in,
+  /// and the admin's verification. Null for every other method.
+  offlinePayment    Json?
   refundStatus      OrderRefundStatus  @default(none)
   refundAmount      Decimal            @default(0) @db.Decimal(14, 2)
   refundId          String             @default("")

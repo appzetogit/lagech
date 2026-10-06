@@ -2,12 +2,14 @@ import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError, NotFoundError } from '../../../../core/auth/errors.js';
 import { invalidateChannelSettings, NOTIFICATION_EVENTS } from '../../../../core/notifications/notificationChannels.js';
+import { invalidatePushMessages, PUSH_MESSAGE_CATALOG } from '../../../../core/notifications/pushMessages.js';
 import {
     SETTINGS_AREAS,
     META_PAGES,
     APPS,
     PLATFORMS,
     LOGIN_OPTIONS,
+    ANALYTICS_TOOLS,
     cleanSettings,
     readStoredSettings,
     cleanUrl,
@@ -33,6 +35,12 @@ const AREA_CATALOG = {
     },
     landing_page: {},
     website: {},
+    push_messages: {
+        messages: PUSH_MESSAGE_CATALOG,
+        events: NOTIFICATION_EVENTS.map(({ key, label }) => ({ key, label })),
+    },
+    offline_payment: { fieldTypes: ['text', 'number', 'email'] },
+    analytics_scripts: { tools: ANALYTICS_TOOLS.map(({ key, label, idLabel, example }) => ({ key, label, idLabel, example })) },
 };
 
 const assertArea = (area) => {
@@ -59,6 +67,7 @@ export async function saveSystemSettings(area, body = {}, adminId = null) {
         update: { value, updatedBy: adminId ? String(adminId) : null },
     });
     if (area === 'notification_channels') invalidateChannelSettings();
+    if (area === 'push_messages') invalidatePushMessages();
     return { area, value, updatedAt: row.updatedAt, catalog: AREA_CATALOG[area] };
 }
 
@@ -135,8 +144,44 @@ export async function getPublicSocialMedia() {
  * An app older than minVersion must update; older than latestVersion may.
  */
 export async function getPublicAppSettings() {
-    const [apps, login] = await Promise.all([readArea('app_settings'), readArea('login_setup')]);
-    return { apps: apps.value, login: login.value, updatedAt: apps.updatedAt };
+    const [apps, login, analytics] = await Promise.all([
+        readArea('app_settings'),
+        readArea('login_setup'),
+        getPublicAnalytics(),
+    ]);
+    return { apps: apps.value, login: login.value, analytics, updatedAt: apps.updatedAt };
+}
+
+/**
+ * The tracking ids switched on, for the customer website to load the standard
+ * Google Analytics / Tag Manager / Meta Pixel snippets. Off or blank tools are
+ * left out.
+ */
+export async function getPublicAnalytics() {
+    const { value } = await readArea('analytics_scripts');
+    return Object.fromEntries(
+        ANALYTICS_TOOLS.filter((tool) => value[tool.key]?.enabled && value[tool.key]?.id).map((tool) => [tool.key, value[tool.key].id]),
+    );
+}
+
+/** Offline payment as the admin set it up (orders read it at checkout). */
+export async function getOfflinePaymentSettings() {
+    return (await readArea('offline_payment')).value;
+}
+
+/**
+ * What checkout offers: nothing when offline payment is switched off,
+ * otherwise each active method with what to pay to and what to fill in.
+ */
+export async function getPublicOfflinePaymentMethods() {
+    const settings = await getOfflinePaymentSettings();
+    if (!settings.enabled) return { enabled: false, methods: [] };
+    return {
+        enabled: true,
+        methods: settings.methods
+            .filter((method) => method.isActive)
+            .map(({ id, name, paymentInfo, fields }) => ({ id, name, paymentInfo, fields })),
+    };
 }
 
 /** SEO title, description and image per public page. */

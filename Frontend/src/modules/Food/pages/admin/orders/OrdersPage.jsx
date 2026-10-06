@@ -653,6 +653,7 @@ export default function OrdersPage({ statusKey = "all" }) {
       if (!paymentType) {
         if (paymentMethod === "cash" || paymentMethod === "cod") paymentType = "Cash on Delivery"
         else if (paymentMethod === "wallet") paymentType = "Wallet"
+        else if (paymentMethod === "offline") paymentType = `Offline${order.offlinePayment?.methodName ? ` (${order.offlinePayment.methodName})` : ""}`
         else if (paymentMethod) paymentType = "Online"
         else paymentType = "N/A"
       }
@@ -1388,6 +1389,7 @@ export default function OrdersPage({ statusKey = "all" }) {
         isOpen={isViewOrderOpen}
         onOpenChange={setIsViewOrderOpen}
         order={selectedOrder}
+        onOrderChanged={() => fetchOrdersRef.current?.({ silent: true, withRingCheck: false, force: true })}
       />
       <RefundModal
         isOpen={refundModalOpen}

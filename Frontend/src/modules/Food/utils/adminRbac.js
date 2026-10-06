@@ -127,6 +127,8 @@ const PATH_PREFIX_TO_SECTION = [
   { prefix: "/admin/food/react-site", section: "system_settings" },
   { prefix: "/admin/food/page-meta-data", section: "system_settings" },
   { prefix: "/admin/food/gallery", section: "system_settings" },
+  // Firebase notification, offline payment, analytics script.
+  { prefix: "/admin/food/3rd-party-configurations", section: "system_settings" },
   { prefix: "/admin/food/hero-banner-management", section: "banner_management" },
   { prefix: "/admin/food/promotional-banner", section: "banner_management" },
   { prefix: "/admin/food/feature-settings", section: "system_settings" },

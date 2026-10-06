@@ -461,6 +461,24 @@ export async function markOrderDeliveredAdminController(req, res, next) {
     }
 }
 
+export async function verifyOfflinePaymentAdminController(req, res, next) {
+    try {
+        const order = await orderService.verifyOfflinePaymentAdmin(req.params.orderId, req.user?.userId, req.body?.note);
+        return sendResponse(res, 200, 'Offline payment verified', { order });
+    } catch (err) {
+        next(err);
+    }
+}
+
+export async function rejectOfflinePaymentAdminController(req, res, next) {
+    try {
+        const order = await orderService.rejectOfflinePaymentAdmin(req.params.orderId, req.user?.userId, req.body?.reason ?? req.body?.note);
+        return sendResponse(res, 200, 'Offline payment rejected', { order });
+    } catch (err) {
+        next(err);
+    }
+}
+
 export async function processRefundAdminController(req, res, next) {
     try {
         const adminId = req.user?.userId;

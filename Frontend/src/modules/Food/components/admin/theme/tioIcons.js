@@ -93,6 +93,7 @@ export const TIO_BY_LABEL = {
   Website: "website",
   "Page Meta Data": "document-text-outlined",
   Gallery: "photo-gallery-outlined",
+  "3rd Party & Configurations": "plugin-outlined",
 }
 
 /** Fallbacks by the menu's lucide icon key, for anything not named above. */

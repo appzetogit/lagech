@@ -119,11 +119,23 @@ export function validateCreateOrderDto(body) {
         // 'cash' is accepted here regardless so the service can return the friendly
         // "not available" message when COD_ENABLED is off, rather than a generic
         // enum error that names every method.
-        paymentMethod: z.enum(['razorpay', 'razorpay_qr', 'card', 'wallet', 'cash'], {
+        // 'offline' is a bank transfer / UPI the customer makes outside the app,
+        // verified by the admin; offlinePayment says which method and carries
+        // what the customer filled in (checked against the method in the service).
+        paymentMethod: z.enum(['razorpay', 'razorpay_qr', 'card', 'wallet', 'cash', 'offline'], {
             errorMap: () => ({ message: 'Unsupported payment method' }),
         }),
+        offlinePayment: z
+            .object({
+                methodId: z.string().min(1, 'Choose an offline payment method'),
+                fields: z.record(z.union([z.string(), z.number()])).optional(),
+                note: z.string().max(300).optional(),
+            })
+            .optional(),
         zoneId: z.string().nullable().optional(),
         scheduledAt: z.string().datetime().optional()
+    }).refine((value) => value.paymentMethod !== 'offline' || Boolean(value.offlinePayment), {
+        message: 'Choose an offline payment method',
     });
     const result = schema.safeParse(body);
     if (!result.success) {

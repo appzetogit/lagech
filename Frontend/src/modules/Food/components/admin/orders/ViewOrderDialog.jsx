@@ -13,6 +13,7 @@ import { formatDeliveryFeeBreakdownSubtext, getDeliveryFeeTotal, resolveDelivery
 import { getCartCompareItemTotal, getLineCompareUnitPrice } from "@food/utils/foodVariants"
 import { DualMoney } from "@food/components/user/FoodPriceDisplay"
 import { restaurantLabel } from "@food/utils/entityLabels"
+import OfflinePaymentPanel from "./OfflinePaymentPanel"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -50,10 +51,11 @@ const formatDialogMoney = (value) => {
   return `${num < 0 ? "-" : ""}₹${Math.abs(num).toFixed(2)}`
 }
 
-export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
+export default function ViewOrderDialog({ isOpen, onOpenChange, order, onOrderChanged }) {
   // Full order detail (statusHistory + transaction split) fetched on open;
   // the `order` prop only carries the mapped list-row fields.
   const [detail, setDetail] = useState(null)
+  const [reloadKey, setReloadKey] = useState(0)
   const detailOrderId = order?._id || order?.orderMongoId || order?.id || null
 
   useEffect(() => {
@@ -75,7 +77,7 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
     return () => {
       active = false
     }
-  }, [isOpen, detailOrderId])
+  }, [isOpen, detailOrderId, reloadKey])
 
   if (!order) return null
 
@@ -295,6 +297,18 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
               )}
             </div>
           </div>
+
+          {(detail?.offlinePayment || order.offlinePayment) && (
+            <OfflinePaymentPanel
+              orderId={detailOrderId}
+              offlinePayment={detail?.offlinePayment || order.offlinePayment}
+              awaiting={String(detail?.orderStatus || "").toLowerCase() === "pending_payment"}
+              onChanged={() => {
+                setReloadKey((k) => k + 1)
+                onOrderChanged?.()
+              }}
+            />
+          )}
 
           {/* Customer Information */}
           <div className="border-t border-slate-200 pt-4">

@@ -37,7 +37,7 @@ router.delete('/email-templates/:key', c.resetEmailTemplate);
 router.post('/email-templates/:key/preview', c.previewEmailTemplate);
 
 // Settings areas: page_meta, app_settings, login_setup, notification_channels,
-// landing_page, website.
+// landing_page, website, push_messages, offline_payment, analytics_scripts.
 router.get('/system-settings/:area', c.getSystemSettings);
 router.put('/system-settings/:area', c.saveSystemSettings);
 

@@ -11,5 +11,7 @@ router.get('/social-media', c.publicSocialMedia);
 router.get('/app-settings', c.publicAppSettings);
 router.get('/landing', c.publicLanding);
 router.get('/page-meta', c.publicPageMeta);
+router.get('/analytics', c.publicAnalytics);
+router.get('/offline-payment-methods', c.publicOfflinePaymentMethods);
 
 export default router;
