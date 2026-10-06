@@ -22,6 +22,7 @@ import { importZones } from './steps/zones.mjs';
 import { importCategories } from './steps/categories.mjs';
 import { importRestaurants } from './steps/restaurants.mjs';
 import { importFoods } from './steps/foods.mjs';
+import { importNutrition } from './steps/nutrition.mjs';
 import { importCustomers } from './steps/customers.mjs';
 import { importDeliveryPartners } from './steps/deliveryPartners.mjs';
 import { importOrders } from './steps/orders.mjs';
@@ -42,6 +43,7 @@ const STEPS = [
     ['categories', importCategories],
     ['restaurants', importRestaurants],
     ['foods', importFoods],
+    ['nutrition', importNutrition],
     ['customers', importCustomers],
     ['riders', importDeliveryPartners],
     ['payment-details', importPaymentDetails],

@@ -7,6 +7,7 @@ import {
     serializeFoodVariants,
 } from '../../admin/services/foodVariant.service.js';
 import { restoreExpiredFoodAvailability } from './foodAvailability.service.js';
+import { serializeNutrition } from '../../shared/nutrition.util.js';
 
 const buildCategoryKeywords = (categorySlug) => {
     const raw = String(categorySlug || '').trim().toLowerCase();
@@ -129,6 +130,7 @@ export async function listPublicFoods(query = {}) {
                 foodType: food.foodType || 'Non-Veg',
                 isAvailable: food.isAvailable !== false,
                 preparationTime: food.preparationTime || '',
+                ...serializeNutrition(food),
                 approvalStatus: food.approvalStatus || 'approved',
             };
         })

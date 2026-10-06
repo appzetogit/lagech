@@ -27,6 +27,7 @@ import * as restaurantAppBanner from '../controllers/restaurantAppBanner.control
 import adminCustomerExtrasRoutes from './adminCustomerExtras.routes.js';
 import adminRiderExtrasRoutes from './adminRiderExtras.routes.js';
 import adminSystemExtrasRoutes from './adminSystemExtras.routes.js';
+import adminCatalogExtrasRoutes from './adminCatalogExtras.routes.js';
 
 const router = express.Router();
 
@@ -85,7 +86,8 @@ const resolveSectionFromRequest = (path = '', method = '') => {
     if (path.startsWith('/categories') || path.startsWith('/addons') || path.startsWith('/foods')) return 'food_management';
     // Cashback settings were unguarded: any sub-admin could change what every order pays out.
     if (path.startsWith('/offers') || path.startsWith('/cashback-settings')
-        || path.startsWith('/advertisements') || path.startsWith('/reels')) return 'promotions_management';
+        || path.startsWith('/advertisements') || path.startsWith('/reels')
+        || path.startsWith('/campaigns')) return 'promotions_management';
     if (path.startsWith('/orders') || path.startsWith('/order-detect-delivery') || path.startsWith('/order-cancel-reasons')) return 'order_management';
     if (path.startsWith('/delivery')) return 'delivery_management';
     if (path.startsWith('/withdrawals')) return 'transaction_management';
@@ -151,6 +153,7 @@ router.use(adminRiderExtrasRoutes); // Add Delivery Man, vehicle categories, rid
 // Withdrawal methods, restaurant payments, money reports, email templates,
 // system settings, social media, gallery -- guarded by the mapping above.
 router.use(adminSystemExtrasRoutes);
+router.use(adminCatalogExtrasRoutes); // reviews, gallery, addon categories, recommended, bulk import/export, campaigns
 
 router.post('/sub-admins', requireAdminPermission('sub_admin_management', 'create'), adminController.createSubAdmin);
 router.get('/sub-admins', adminController.listSubAdmins);
