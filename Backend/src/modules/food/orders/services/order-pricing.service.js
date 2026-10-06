@@ -12,6 +12,8 @@ import { getRestaurantAvailabilityStatus } from '../../restaurant/helpers/restau
 import { resolveOrderCartItems } from '../helpers/order-cart-items.helper.js';
 import { applyFeeSwitches } from './feeSwitches.js';
 import { evaluateCoupon, requiresFirstOrder, USED_ORDER_WHERE } from './couponRules.js';
+import { freeDeliveryOverWaiver, newCustomerDiscount } from './businessRules.js';
+import { getBusinessSettings } from '../../shared/businessSettings.js';
 
 const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
 
@@ -520,25 +522,58 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
       })
     : null;
 
-  const discount = coupon?.ok ? coupon.discount : 0;
+  const couponDiscount = coupon?.ok ? coupon.discount : 0;
   // A free-delivery coupon waives the delivery fee and the GST charged on it.
   // The rider's pay is worked out from the distance bands, not from this fee,
   // so it is unchanged; the platform absorbs the waived amount.
   const deliveryFeeWaived = coupon?.ok ? coupon.deliveryFeeWaived : 0;
-  const deliveryFee = deliveryFeeWaived > 0 ? 0 : originalDeliveryFee;
-  const deliveryFeeGst = deliveryFeeWaived > 0 ? 0 : originalDeliveryFeeGst;
+
+  // Business Settings: free delivery over an item total, and a discount on a
+  // new customer's first order. Both are the platform's cost, like the coupon
+  // waiver above; neither stacks with a coupon doing the same thing.
+  const [orderRules, customerRules] = await Promise.all([
+    getBusinessSettings('business_order'),
+    getBusinessSettings('business_customer'),
+  ]);
+  const freeDeliveryWaived = freeDeliveryOverWaiver(orderRules.freeDelivery, {
+    subtotal,
+    deliveryFee: originalDeliveryFee,
+    deliveryFeeGst: originalDeliveryFeeGst,
+    couponWaived: deliveryFeeWaived,
+  });
+  let firstOrderDiscount = 0;
+  const ncRule = customerRules.newCustomerDiscount;
+  if (ncRule.enabled && isId(userId) && !(couponDiscount > 0)) {
+    const [priorOrders, user] = await Promise.all([
+      prisma.foodOrder.count({ where: { userId: String(userId), ...USED_ORDER_WHERE } }),
+      prisma.foodUser.findUnique({ where: { id: String(userId) }, select: { createdAt: true } }),
+    ]);
+    firstOrderDiscount = newCustomerDiscount(ncRule, {
+      subtotal,
+      priorOrders,
+      accountCreatedAt: user?.createdAt,
+      couponDiscount,
+    });
+  }
+  // `discount` is everything taken off the items: the coupon's and the
+  // new-customer discount's (they never both apply).
+  const discount = round2(Math.min(subtotal, couponDiscount + firstOrderDiscount));
+
+  const feeWaived = deliveryFeeWaived > 0 || freeDeliveryWaived > 0;
+  const deliveryFee = feeWaived ? 0 : originalDeliveryFee;
+  const deliveryFeeGst = feeWaived ? 0 : originalDeliveryFeeGst;
 
   const appliedCoupon = coupon?.ok
     ? {
         code: codeRaw,
-        discount,
+        discount: couponDiscount,
         couponId: coupon.offer.id,
         title: coupon.offer.title || "",
         couponType: coupon.couponType,
         freeDelivery: coupon.couponType === "free_delivery",
         deliveryFeeWaived,
         // What the customer saves in total, whichever way the coupon works.
-        savings: round2(discount + deliveryFeeWaived),
+        savings: round2(couponDiscount + deliveryFeeWaived),
       }
     : null;
 
@@ -578,6 +613,11 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
     couponErrorReason: coupon && !coupon.ok ? coupon.reason : null,
     couponId: appliedCoupon?.couponId || null,
     deliveryFeeWaived,
+    /** Delivery fee + GST waived because the item total reached "free delivery over". */
+    freeDeliveryWaived,
+    freeDeliveryOver: orderRules.freeDelivery.enabled ? orderRules.freeDelivery.minSubtotal : null,
+    /** Part of `discount`: the first-order discount for new customers. */
+    newCustomerDiscount: firstOrderDiscount,
     originalDeliveryFee,
     distanceKm: Number.isFinite(distanceKm) ? Number(distanceKm.toFixed(2)) : null,
     roadDistanceKm: Number.isFinite(distanceKm) ? Number(distanceKm.toFixed(2)) : null,
@@ -623,6 +663,7 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
         deliveryFee,
         originalDeliveryFee,
         deliveryFeeWaived,
+        freeDeliveryWaived,
         message: Number.isFinite(distanceKm)
           ? `Distance: ${Number(distanceKm).toFixed(1)} km`
           : null,

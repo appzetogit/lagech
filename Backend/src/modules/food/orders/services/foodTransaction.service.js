@@ -1,6 +1,7 @@
 import { prisma } from '../../../../config/prisma.js';
 import { toFoodTransaction } from '../order.mapper.js';
 import { resolveDiscountSplitByCoupon } from '../../shared/discountSplit.util.js';
+import { getBusinessSettings } from '../../shared/businessSettings.js';
 
 const RESTAURANT_COMMISSION_CACHE_MS = 60 * 1000;
 let restaurantCommissionRulesCache = null;
@@ -19,6 +20,14 @@ async function getActiveRestaurantCommissionRules() {
   restaurantCommissionRulesCache = list || [];
   restaurantCommissionRulesLoadedAt = now;
   return restaurantCommissionRulesCache;
+}
+
+/** The default commission as a rule, or null when there is none to charge. */
+async function getDefaultCommissionRule() {
+  const info = await getBusinessSettings('business_info');
+  const value = Number(info.defaultCommissionPercent) || 0;
+  if (!info.commissionModel || value <= 0) return null;
+  return { commissionType: 'percentage', commissionValue: value, isDefault: true };
 }
 
 /**
@@ -176,7 +185,9 @@ export async function getRestaurantCommissionSnapshot(orderDoc) {
   }
 
   const rules = await getActiveRestaurantCommissionRules();
-  const rule = rules.find((r) => String(r.restaurantId) === restaurantId) || null;
+  // A restaurant with no commission row of its own pays the platform default
+  // (Business Settings > Business info), unless the commission model is off.
+  const rule = rules.find((r) => String(r.restaurantId) === restaurantId) || (await getDefaultCommissionRule());
 
   if (billingMode === 'commission_dish') {
     const lines = orderLines(orderDoc);
@@ -238,13 +249,21 @@ export async function createInitialTransaction(order) {
   let discountRestaurantBearPercentage = 0;
 
   // Discount attribution goes through the shared split util (single source of truth).
+  // The new-customer discount (Business Settings) is part of `discount` and
+  // is the platform's alone; only the rest is the coupon's to split.
+  const newCustomerDiscount = Math.min(discount, Number(order.newCustomerDiscount) || 0);
+  const couponDiscount = Math.round((discount - newCustomerDiscount) * 100) / 100;
   const couponCode = order.couponCode;
-  if (discount > 0 && couponCode) {
-    const split = await resolveDiscountSplitByCoupon({ couponCode, discount });
+  if (couponDiscount > 0 && couponCode) {
+    const split = await resolveDiscountSplitByCoupon({ couponCode, discount: couponDiscount });
     adminDiscountShare = split.adminDiscountShare;
     restaurantDiscountShare = split.restaurantDiscountShare;
     discountAdminBearPercentage = split.adminBearPercentage;
     discountRestaurantBearPercentage = split.restaurantBearPercentage;
+  }
+  if (newCustomerDiscount > 0) {
+    adminDiscountShare = Math.round((adminDiscountShare + newCustomerDiscount) * 100) / 100;
+    if (!couponDiscount) discountAdminBearPercentage = 100;
   }
   restaurantNet -= restaurantDiscountShare;
   platformNetProfit -= adminDiscountShare;

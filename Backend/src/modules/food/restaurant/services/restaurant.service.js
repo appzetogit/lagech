@@ -1,3 +1,4 @@
+import { getPrioritySort } from '../../shared/businessSettings.js';
 import { logger } from '../../../../utils/logger.js';
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
@@ -1812,7 +1813,10 @@ export const listApprovedRestaurants = async (query = {}) => {
     const lng = toFiniteNumber(query.lng);
     // radiusKm is preferred; maxDistance is the legacy frontend param.
     const radiusKm = toFiniteNumber(query.radiusKm) ?? toFiniteNumber(query.maxDistance);
-    const sortBy = parseSortBy(query.sortBy);
+    // No sort asked for: the admin's choice for this section (Business
+    // Settings > Priority setup), else the default order below.
+    const sortBy = parseSortBy(query.sortBy)
+        || parseSortBy(await getPrioritySort(recommendedOnly ? 'recommended' : 'allRestaurants'));
 
     // Geo is used only when actually asked for, so a restaurant with no
     // coordinates yet is not silently dropped from the default listing.
@@ -1887,6 +1891,7 @@ export const listApprovedRestaurants = async (query = {}) => {
             'price-low': [{ featuredPrice: 'asc' }, { createdAt: 'desc' }],
             'price-high': [{ featuredPrice: 'desc' }, { createdAt: 'desc' }],
             deliveryTime: [{ estimatedDeliveryTimeMinutes: 'asc' }, { createdAt: 'desc' }],
+            newest: [{ createdAt: 'desc' }],
         }[sortBy] || (recommendedOnly
             ? [{ recommendedSortOrder: 'asc' }, { createdAt: 'desc' }]
             : [{ displayPosition: { sort: 'asc', nulls: 'last' } }, { createdAt: 'desc' }]);

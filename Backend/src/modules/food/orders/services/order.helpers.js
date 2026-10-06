@@ -1,6 +1,7 @@
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { logger } from '../../../../utils/logger.js';
+import { getBusinessSettings } from '../../shared/businessSettings.js';
 import { haversineKm as geoHaversineKm, parseGeoPoint } from '../../shared/geo.utils.js';
 import {
   notifyOwnersActionableAlert,
@@ -130,18 +131,52 @@ export async function partnerHasActiveDelivery(deliveryPartnerId) {
   return Boolean(active);
 }
 
-export async function getBusyDeliveryPartnerIds() {
-  const rows = await prisma.foodOrder.findMany({
+/** Deliveries a rider holds now: accepted by them and not yet delivered or cancelled. */
+export async function countPartnerActiveDeliveries(deliveryPartnerId, { excludeOrderId = null, client = prisma } = {}) {
+  if (!deliveryPartnerId) return 0;
+  return client.foodOrder.count({
     where: {
+      dispatchDeliveryPartnerId: String(deliveryPartnerId),
       dispatchStatus: 'accepted',
-      dispatchDeliveryPartnerId: { not: null },
       orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
+      ...(excludeOrderId ? { id: { not: String(excludeOrderId) } } : {}),
     },
-    select: { dispatchDeliveryPartnerId: true },
-    distinct: ['dispatchDeliveryPartnerId'],
   });
+}
 
-  return new Set(rows.map((row) => row.dispatchDeliveryPartnerId));
+/**
+ * How many deliveries a rider may hold at once (Business Settings >
+ * Deliveryman, "Maximum assigned order limit"; 1 behaves as before the
+ * setting existed). Never below 1.
+ */
+export async function getRiderOrderLimit() {
+  const { maxAssignedOrders } = await getBusinessSettings('business_deliveryman');
+  return Math.max(1, Number(maxAssignedOrders) || 1);
+}
+
+/** Whether a rider is at their limit and must finish a delivery before taking another. */
+export async function partnerAtDeliveryLimit(deliveryPartnerId) {
+  if (!deliveryPartnerId) return false;
+  const [count, limit] = await Promise.all([countPartnerActiveDeliveries(deliveryPartnerId), getRiderOrderLimit()]);
+  return count >= limit;
+}
+
+/** Riders holding as many deliveries as the limit allows; dispatch skips them. */
+export async function getBusyDeliveryPartnerIds() {
+  const [rows, limit] = await Promise.all([
+    prisma.foodOrder.groupBy({
+      by: ['dispatchDeliveryPartnerId'],
+      where: {
+        dispatchStatus: 'accepted',
+        dispatchDeliveryPartnerId: { not: null },
+        orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
+      },
+      _count: { _all: true },
+    }),
+    getRiderOrderLimit(),
+  ]);
+
+  return new Set(rows.filter((row) => row._count._all >= limit).map((row) => row.dispatchDeliveryPartnerId));
 }
 
 /** Accepts either a raw order id or the display id ("FOD-…"). */

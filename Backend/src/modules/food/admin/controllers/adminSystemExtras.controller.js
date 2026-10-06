@@ -114,3 +114,6 @@ export const publicLanding = handle(200, 'Landing page', () => extras.getPublicL
 export const publicPageMeta = handle(200, 'Page meta data', () => extras.getPublicPageMeta());
 export const publicAnalytics = handle(200, 'Analytics', () => extras.getPublicAnalytics());
 export const publicOfflinePaymentMethods = handle(200, 'Offline payment methods', () => extras.getPublicOfflinePaymentMethods());
+export const publicBusinessSettings = handle(200, 'Business settings', () => extras.getPublicBusinessSettings());
+export const publicRefundReasons = handle(200, 'Refund reasons', () => extras.getPublicReasons('business_refund'));
+export const publicOrderIssueReasons = handle(200, 'Order issue reasons', () => extras.getPublicReasons('business_order_issue_reasons'));

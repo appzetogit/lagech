@@ -146,9 +146,12 @@ Location freshness drives the offer radius (20 km cap), so keep pinging this whi
 ### `GET /food/delivery/orders/available`
 Query: `page`, `limit` (default 20, max 100).
 
-Behaviour depends on state:
-- **Partner has an active accepted delivery** → returns only that order.
-- **Partner is idle** → returns unassigned orders in `confirmed` / `preparing` / `ready_for_pickup`, filtered to within 20 km of the partner's last known GPS, excluding any order they were previously deassigned from.
+Behaviour depends on state. A rider may hold up to **`maxAssignedOrders`** accepted deliveries at once
+(admin: Business Settings → Deliveryman, default **2**; published at
+`GET /v1/food/public/business-settings` → `rider.maxAssignedOrders`). With the limit at 1 this is
+exactly the old single-order behaviour.
+- **Partner holds as many deliveries as the limit** → returns only their own accepted deliveries.
+- **Partner holds fewer** → returns their own accepted deliveries **and** new offers: unassigned orders in `confirmed` / `preparing` / `ready_for_pickup`, filtered to within 20 km of the partner's last known GPS, excluding any order they were previously deassigned from.
 
 → `data` is the paginated envelope:
 ```json
@@ -200,6 +203,26 @@ Watch out: `note` on a delivery-facing order is the **delivery instruction**, no
 
 ### `GET /food/delivery/orders/current`
 → `data: { "activeOrder": <order|null> }`
+
+Still one order (the most recently updated of the rider's active deliveries), so an app built for one
+order keeps working. **For more than one delivery at a time the app needs:** the full list of its
+active deliveries — use `GET /orders/available` (the rider's own accepted orders come first, marked by
+`dispatch.status: "accepted"` and their own partner id), or the per-order `GET /orders/:orderId`;
+to keep offering new orders while on a trip (the accept screen must not assume the rider is idle);
+and to run the trip lifecycle per order id (it already is). The socket resync (`activeOrder`) and the
+emergency reassignment request (which picks "the current" accepted pre-pickup order itself) are still
+single-order; with two deliveries held, send emergency requests only for the order on screen once the
+endpoint takes an `orderId`.
+
+Accepting when already at the limit returns 400: with a limit of 1 the old text
+"You already have an active delivery. Complete it before accepting another order.", otherwise
+"You already have N active deliveries, the most you can hold at once. …". Dispatch stops offering
+orders to a rider at the limit.
+
+`rider.canCancelOrder` (Business Settings, default off) is published for the app. Releasing an accepted
+order before pickup with `PATCH /orders/:orderId/reject` works as before whatever it says; show a
+"Cancel" button on accepted orders only when it is on. `rider.showEarning` says whether to show
+`riderEarning` on offers.
 
 ### `GET /food/delivery/orders/:orderId`
 → `data: { order }`. 403 if not assigned to this partner.

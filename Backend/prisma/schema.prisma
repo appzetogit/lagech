@@ -1334,6 +1334,10 @@ model FoodOrder {
   /// The fee columns are already 0 on such an order; this keeps what the
   /// platform absorbed. Rider pay (riderEarning) is not reduced by it.
   couponDeliveryWaiver Decimal      @default(0) @db.Decimal(14, 2)
+  /// Delivery fee + its GST waived by Business Settings "free delivery over".
+  freeDeliveryWaiver   Decimal      @default(0) @db.Decimal(14, 2)
+  /// Part of `discount`: the Business Settings new-customer discount, borne by the platform.
+  newCustomerDiscount  Decimal      @default(0) @db.Decimal(14, 2)
   total                Decimal      @db.Decimal(14, 2)
   currency             String       @default("INR") @db.VarChar(3)
   /// Straight-line restaurant ↔ customer km, used for fee calculation.

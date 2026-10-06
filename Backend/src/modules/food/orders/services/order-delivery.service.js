@@ -24,7 +24,8 @@ import {
   haversineKm,
   notifyOwnerSafely,
   notifyOwnersSafely,
-  partnerHasActiveDelivery,
+  countPartnerActiveDeliveries,
+  getRiderOrderLimit,
   pushStatusHistory,
   sanitizeOrderForDeliveryPartner,
   TERMINAL_ORDER_STATUSES,
@@ -203,7 +204,14 @@ export async function getCurrentTripDelivery(deliveryPartnerId) {
 export async function listOrdersAvailableDelivery(deliveryPartnerId, query) {
   const { page, limit, skip } = buildPaginationOptions(query);
   const partnerId = String(deliveryPartnerId);
-  const hasActiveDelivery = await partnerHasActiveDelivery(partnerId);
+  // At the limit (Business Settings > Deliveryman, maximum assigned orders)
+  // the rider sees only their own deliveries, as a rider on one trip always
+  // did. Below it they also see new offers next to the deliveries they hold.
+  const [activeCount, orderLimit] = await Promise.all([
+    countPartnerActiveDeliveries(partnerId),
+    getRiderOrderLimit(),
+  ]);
+  const hasActiveDelivery = activeCount >= orderLimit;
 
   const where = hasActiveDelivery
     ? {
@@ -338,26 +346,34 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
   if (!requested) throw new NotFoundError('Order not found');
   const id = requested.id;
 
-  const alreadyOnTrip = await partnerHasActiveDelivery(partnerId);
-  if (alreadyOnTrip) {
-    const existingActive = await prisma.foodOrder.findFirst({
-      where: {
-        dispatchDeliveryPartnerId: partnerId,
-        dispatchStatus: 'accepted',
-        orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
-      },
-      select: { id: true },
-    });
-
-    if (existingActive?.id && existingActive.id === id) {
-      const { order } = await loadOrder(id, deliveryInclude);
-      return sanitizeOrderForDeliveryPartner(order);
-    }
-
-    throw new ValidationError(
-      'You already have an active delivery. Complete it before accepting another order.',
-    );
+  // Already this rider's: accepting again is a no-op, whatever the limit.
+  const existingMine = await prisma.foodOrder.findFirst({
+    where: {
+      id,
+      dispatchDeliveryPartnerId: partnerId,
+      dispatchStatus: 'accepted',
+      orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
+    },
+    select: { id: true },
+  });
+  if (existingMine) {
+    const { order } = await loadOrder(id, deliveryInclude);
+    return sanitizeOrderForDeliveryPartner(order);
   }
+
+  const orderLimit = await getRiderOrderLimit();
+  const assertBelowLimit = async (client) => {
+    const held = await countPartnerActiveDeliveries(partnerId, { excludeOrderId: id, client });
+    if (held >= orderLimit) {
+      throw new ValidationError(
+        orderLimit === 1
+          ? 'You already have an active delivery. Complete it before accepting another order.'
+          : `You already have ${held} active deliveries, the most you can hold at once. Complete one before accepting another order.`,
+      );
+    }
+  };
+  // Cheap early refusal; the authoritative count is repeated under the lock below.
+  await assertBelowLimit(prisma);
 
   // Refuse before claiming the order, not after. This is the authoritative
   // check: dispatch skips blocked riders, but an offer sent a moment before a
@@ -366,24 +382,31 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
 
   // Atomic claim. The guard replaces findOneAndUpdate's filter — only one rider
   // can flip the order to accepted.
-  const { count } = await prisma.foodOrder.updateMany({
-    where: {
-      id,
-      orderStatus: { in: acceptedStatuses },
-      OR: [
-        {
-          dispatchStatus: 'unassigned',
-          dispatchOffers: { none: { partnerId, action: 'deassigned' } },
-        },
-        { dispatchStatus: 'assigned', dispatchDeliveryPartnerId: partnerId },
-      ],
-    },
-    data: {
-      dispatchDeliveryPartnerId: partnerId,
-      dispatchStatus: 'accepted',
-      dispatchAssignedAt: now,
-      dispatchAcceptedAt: now,
-    },
+  // Under a per-rider advisory lock, so two accepts racing from the same
+  // rider cannot both see room below the limit and both claim.
+  const count = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`rider-accept:${partnerId}`}))`;
+    await assertBelowLimit(tx);
+    const claimed = await tx.foodOrder.updateMany({
+      where: {
+        id,
+        orderStatus: { in: acceptedStatuses },
+        OR: [
+          {
+            dispatchStatus: 'unassigned',
+            dispatchOffers: { none: { partnerId, action: 'deassigned' } },
+          },
+          { dispatchStatus: 'assigned', dispatchDeliveryPartnerId: partnerId },
+        ],
+      },
+      data: {
+        dispatchDeliveryPartnerId: partnerId,
+        dispatchStatus: 'accepted',
+        dispatchAssignedAt: now,
+        dispatchAcceptedAt: now,
+      },
+    });
+    return claimed.count;
   });
 
   if (count === 0) {

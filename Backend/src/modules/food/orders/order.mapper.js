@@ -99,6 +99,10 @@ export function toOrder(row) {
             couponId: row.couponId ?? null,
             /** Delivery fee + its GST taken off by a free-delivery coupon. */
             deliveryFeeWaived: money(row.couponDeliveryWaiver),
+            /** Delivery fee + its GST waived by "free delivery over" (Business Settings). */
+            freeDeliveryWaived: money(row.freeDeliveryWaiver),
+            /** Part of `discount`: the new-customer first-order discount. */
+            newCustomerDiscount: money(row.newCustomerDiscount),
             total: money(row.total),
             currency: row.currency,
             distanceKm: num(row.distanceKm),
@@ -293,7 +297,8 @@ export function fromOrder(input = {}) {
     if (pricing) {
         for (const key of ['subtotal', 'tax', 'packagingFee', 'deliveryFee', 'deliveryFeeGst',
                            'platformFee', 'quickDeliveryFee', 'deliveryMode', 'restaurantCommission',
-                           'discount', 'couponCode', 'couponId', 'couponDeliveryWaiver', 'total', 'currency', 'distanceKm',
+                           'discount', 'couponCode', 'couponId', 'couponDeliveryWaiver', 'freeDeliveryWaiver',
+                           'newCustomerDiscount', 'total', 'currency', 'distanceKm',
                            'roadDistanceKm', 'roadDurationMins']) {
             set(key, pricing[key]);
         }
