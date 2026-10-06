@@ -235,11 +235,21 @@ when the zone is known (from `restaurantId`, or a `zoneId` query param) and matc
 
 ### Payment methods
 
-`"razorpay" | "razorpay_qr" | "card" | "wallet"`
+`"cash" | "razorpay" | "razorpay_qr" | "card" | "wallet" | "offline"`
 
-**Cash on delivery is disabled.** Sending `"cash"` returns 400 with
-`"Cash on Delivery is no longer available. Please pay online."` Legacy COD orders
-still work everywhere else — only creation is blocked.
+Which of these the customer may use is set by the admin (Business Settings →
+Payment / Customer) and published in `GET /v1/food/public/app-settings` →
+`business.payment` (see §17). Show only the switched-on ones; placing an order
+with a switched-off method returns 400 with a message for the customer:
+
+- `cash` — `business.payment.cod`. "Cash on Delivery is not available right now. Please pay online."
+- `razorpay`, `razorpay_qr`, `card` — `business.payment.digital`.
+- `wallet` — `business.payment.wallet`.
+- `offline` — `business.payment.offline` (and the methods from `/offline-payment-methods`).
+
+Partial payment (part wallet, rest online or cash) is **not** available yet:
+`business.payment.partialPayment` is published for later but a wallet order
+must still cover the whole total.
 
 **`razorpay_qr` is the pay-at-the-door replacement.** Same UX as COD: nothing is
 charged upfront, the order dispatches immediately, `payment.status` stays
@@ -612,3 +622,81 @@ the balance, or not a whole number.
 Body: `{ "email": "asha@example.com" }` → `{ "subscribed": true }`. The email is stored
 lower-cased; subscribing an address that is already on the list answers the same way and
 adds nothing. `400` "Enter a valid email address" for anything that is not an email.
+
+## 17. Business settings — public, no login
+
+What the admin set under Business Settings that changes what the app shows.
+Read it at start-up (it is also inside `GET /v1/food/public/app-settings` as
+`business`); it may change at any time, and the server enforces every switch
+below whatever the app shows.
+
+### `GET /v1/food/public/business-settings`
+
+```jsonc
+{
+  "maintenance": { "maintenanceMode": false, "maintenanceMessage": "" },
+  "currency": { "code": "INR", "decimals": 0 },          // decimals to show prices with
+  "payment": { "cod": true, "digital": true, "offline": false, "wallet": true, "partialPayment": true },
+  "order": {
+    "homeDelivery": true, "takeaway": false,               // takeaway: no takeaway flow yet; keep hidden
+    "scheduledOrder": false, "scheduleSlotMinutes": 30,    // slot length for the time picker
+    "freeDeliveryOver": null                               // or 499: item total from which delivery is free
+  },
+  "customer": {
+    "wallet": true, "addFund": false,                      // addFund: show "Add money" in the wallet
+    "vegNonVegToggle": true, "guestCheckout": false,       // guest checkout is not supported by the API yet
+    "newCustomerDiscount": null                            // or { type: "amount"|"percent", value, maxDiscount, minOrderAmount, validityDays }
+  },
+  "rider": { "maxAssignedOrders": 2, "canCancelOrder": false, "showEarning": true, "pictureUpload": true, "selfRegistration": true },
+  "restaurant": { "canCancelOrder": false, "canReplyToReviews": false, "dishApprovalRequired": true, "selfRegistration": true },
+  "refund": { "requestEnabled": true }
+}
+```
+
+- **Maintenance.** While `maintenanceMode` is on, `POST /v1/food/orders` returns 400 with
+  `maintenanceMessage` (or a default text). Show the message and disable checkout.
+- **Scheduled orders.** With `scheduledOrder` off, a `scheduledAt` more than 5 minutes ahead is
+  refused ("Scheduled orders are not available. Please order for now.").
+- **Free delivery over.** When the item total reaches `freeDeliveryOver`, the quote
+  (`POST /orders/calculate`) comes back with `deliveryFee: 0`, `deliveryFeeGst: 0` and
+  `pricing.freeDeliveryWaived` = the fee + GST waived (`originalDeliveryFee` keeps the fee).
+  It never stacks with a free-delivery coupon (that one is `deliveryFeeWaived`). Orders carry
+  `pricing.freeDeliveryWaived` too.
+- **New customer discount.** On a customer's first order (no earlier placed order; account younger
+  than `validityDays`, 0 = any age; item total at least `minOrderAmount`) the quote includes it in
+  `pricing.discount` and shows it alone as `pricing.newCustomerDiscount`. It does not stack with
+  a coupon discount: when a coupon gives a discount, the new-customer discount is 0. Send the quote's
+  `pricing` back with the order as usual.
+- **Add fund.** With `addFund` false, `POST /v1/food/user/wallet/topup/order` returns 400
+  ("Adding money to the wallet is not available right now."). Verifying a payment already made
+  still credits it.
+
+### `GET /v1/food/public/refund-reasons`
+
+`{ "reasons": [{ "id": "a1b2c3d4e5f6", "text": "Food was cold" }] }` — the active reasons a customer
+can pick when asking for a refund. The ids are stable across admin edits. (A customer
+refund-request endpoint does not exist yet; `refund.requestEnabled` says whether to show the option
+once it does.)
+
+### `GET /v1/food/public/order-issue-reasons`
+
+`{ "reasons": [{ "id": "...", "text": "Item missing" }] }` — the predefined messages a customer can
+pick when reporting a problem with an order (Business Settings → Automated message). Replaces the
+hard-coded list in the app.
+
+### List order (Priority setup)
+
+When the app sends no `sortBy`, these lists use the order the admin chose (Business Settings →
+Priority setup), else their usual default:
+
+| Section | Endpoint | Applied |
+|---|---|---|
+| All restaurants | `GET /v1/food/restaurant/restaurants` | yes (`rating`, `nearest`, `newest`, `deliveryTime`) |
+| Recommended | `GET /v1/food/restaurant/restaurants?recommended=true` | yes (same sorts) |
+| Category item lists | `GET /v1/food/restaurant/public/foods?categoryId=…` | yes (`newest`, `price_low`, `price_high`) |
+| Search | `GET /v1/food/search/unified` | yes (`rating`, `newest`, `nearest` with coordinates) |
+| Best nearby, special offers, popular items, best reviewed, new on Lagech | — | saved only: these rails are filters on the lists above |
+
+An explicit `sortBy` from the app always wins. The lists are cached for a few minutes, so a change
+can take that long to show.
+

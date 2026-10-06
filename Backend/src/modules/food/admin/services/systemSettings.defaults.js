@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { normalizeChannelSettings } from '../../../../core/notifications/notificationChannels.js';
 import { normalizePushMessages } from '../../../../core/notifications/pushMessages.js';
 import { normalizeMethodFields } from './payoutMethods.util.js';
+import { BUSINESS_SETTINGS_AREAS } from './businessSettings.defaults.js';
 
 /**
  * The settings areas stored in food_system_settings, one JSON document each:
@@ -296,6 +297,8 @@ export const SETTINGS_AREAS = {
     push_messages: (value) => normalizePushMessages(value),
     offline_payment: cleanOfflinePayment,
     analytics_scripts: cleanAnalytics,
+    // Business Settings tabs (business_info, business_order, ...).
+    ...BUSINESS_SETTINGS_AREAS,
 };
 
 export function cleanSettings(area, value) {

@@ -281,6 +281,8 @@ Bulk menu update. → `{ menu }`
 `nutrition` and `allergens` are free text, shown to customers on the dish. Each entry is trimmed and kept as typed (case included); repeats are dropped (ignoring case); at most 30 entries of 60 characters. Send `[]` to clear. Changing them does not send the dish back for approval.
 → 201, `{ food }` with **`approvalStatus: "pending"`**. New items are invisible to customers until an admin approves; admins get a push at creation. Surface the pending badge or partners will think the item is live.
 
+This is while dish approval is on (admin: Business Settings → Vendor, on by default; published as `restaurant.dishApprovalRequired` in `GET /v1/food/public/business-settings`). With it off, new dishes come back `approved` and are live at once, and edits no longer send a dish back for approval.
+
 ### `PATCH /food/restaurant/foods/:id`
 Partial update of the same fields. → `{ food }`, 404 if not yours.
 
@@ -350,6 +352,8 @@ Only orders that are actually payable are returned: payment method `cash`/`walle
 { "orderStatus": "preparing", "note": "optional" }
 ```
 Allowed values: `confirmed`, `preparing`, `ready_for_pickup`, `picked_up`, `delivered`, `cancelled_by_restaurant`. In practice the restaurant drives `confirmed` → `preparing` → `ready_for_pickup`; the rider owns the rest.
+
+`cancelled_by_restaurant` on an order still `created` (rejecting a new order) always works. Cancelling an order the restaurant already accepted needs Business Settings → Vendor → "restaurant can cancel order" (off by default; published as `restaurant.canCancelOrder`); otherwise it returns 400 "You cannot cancel an order you have already accepted. Please contact Lagech support to cancel it." Hide the cancel button on accepted orders when it is off.
 → `{ order }`
 
 ### `POST /food/restaurant/orders/:orderId/resend-notification`

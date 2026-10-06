@@ -27,6 +27,8 @@ import {
 import { normalizeDeliveryAddress } from '../../shared/geo.utils.js';
 import { getOfflinePaymentSettings } from '../../admin/services/adminSystemExtras.service.js';
 import { buildOfflinePaymentRecord, decideOfflinePayment, OFFLINE_STATUS } from './offlinePayment.util.js';
+import { paymentMethodRefusal, isScheduledFor, percentageRiderEarning } from './businessRules.js';
+import { getBusinessSettings, getMaintenanceState } from '../../shared/businessSettings.js';
 import * as dispatchService from './order-dispatch.service.js';
 import * as deliveryService from './order-delivery.service.js';
 import * as paymentService from './order-payment.service.js';
@@ -462,12 +464,30 @@ async function createOrderRow(data) {
 
 export async function createOrder(userId, dto) {
   try {
+    // The website's maintenance switch pauses customer ordering everywhere.
+    const maintenance = await getMaintenanceState();
+    if (maintenance.maintenanceMode) {
+      throw new ValidationError(
+        maintenance.maintenanceMessage || 'Lagech is under maintenance and is not taking orders right now. Please try again later.',
+      );
+    }
+    const [orderRules, paymentRules, customerRules] = await Promise.all([
+      getBusinessSettings('business_order'),
+      getBusinessSettings('business_payment'),
+      getBusinessSettings('business_customer'),
+    ]);
+
     const restaurantId = requireId(dto.restaurantId, 'Restaurant ID');
     const restaurant = await loadRestaurantForOrdering(restaurantId);
 
     const orderAt = dto.scheduledAt ? new Date(dto.scheduledAt) : new Date();
     if (dto.scheduledAt && Number.isNaN(orderAt.getTime())) {
       throw new ValidationError('Invalid scheduled time');
+    }
+    // Business Settings > Order: scheduled orders off refuses a time ahead of
+    // now (a few minutes of clock skew still counts as "now").
+    if (isScheduledFor(dto.scheduledAt) && !orderRules.scheduledOrder) {
+      throw new ValidationError('Scheduled orders are not available. Please order for now.');
     }
     assertRestaurantOpenForOrdering(restaurant, orderAt);
 
@@ -491,9 +511,14 @@ export async function createOrder(userId, dto) {
     // COD was hard-disabled here. It is back on by default and kept behind a switch
     // so it can be turned off again without a deploy — everything downstream already
     // supports it.
-    if (paymentMethod === "cash" && String(process.env.COD_ENABLED || "true") !== "true") {
-      throw new ValidationError("Cash on Delivery is no longer available. Please pay online.");
-    }
+    // Business Settings > Payment (COD, digital) and Customer (wallet); the
+    // COD_ENABLED deploy switch still wins for cash.
+    const paymentRefusal = paymentMethodRefusal(paymentMethod, {
+      payment: paymentRules,
+      customer: customerRules,
+      codEnvEnabled: String(process.env.COD_ENABLED || "true") === "true",
+    });
+    if (paymentRefusal) throw new ValidationError(paymentRefusal);
     const isCash = paymentMethod === "cash";
     const isWallet = paymentMethod === "wallet";
     // Checked before anything is priced or written: the method must be one
@@ -520,8 +545,10 @@ export async function createOrder(userId, dto) {
     // order anyway would charge more than they agreed to, so stop and say why.
     // A client that echoes a code which never applied (discount 0 in the
     // pricing it sends back) is unaffected, as before.
+    // The new-customer discount is part of `discount` but is not the coupon's.
     const promisedSaving =
-      (Number(dto.pricing?.discount) || 0) + (Number(dto.pricing?.deliveryFeeWaived) || 0);
+      Math.max(0, (Number(dto.pricing?.discount) || 0) - (Number(dto.pricing?.newCustomerDiscount) || 0)) +
+      (Number(dto.pricing?.deliveryFeeWaived) || 0);
     if (dto.pricing?.couponCode && promisedSaving > 0 && !pricingResult.pricing?.appliedCoupon) {
       throw new ValidationError(
         `${pricingResult.pricing?.couponError || "This coupon can no longer be applied"}. Please review your cart and try again.`,
@@ -547,6 +574,8 @@ export async function createOrder(userId, dto) {
         : null,
       couponId: pricingResult.pricing?.couponId || null,
       couponDeliveryWaiver: Number(pricingResult.pricing?.deliveryFeeWaived) || 0,
+      freeDeliveryWaiver: Number(pricingResult.pricing?.freeDeliveryWaived) || 0,
+      newCustomerDiscount: Number(pricingResult.pricing?.newCustomerDiscount) || 0,
       total: Number(pricingResult.pricing?.total) || 0,
       currency: String(pricingResult.pricing?.currency || "INR"),
       distanceKm: Number.isFinite(Number(pricingResult.pricing?.distanceKm))
@@ -583,7 +612,14 @@ export async function createOrder(userId, dto) {
     // Same zone the order is about to be stamped with, a few lines below.
     const orderZoneId = dto.zoneId || restaurant.zoneId || null;
     const feeSettings = await loadActiveFeeSettings(orderZoneId);
-    const riderEarning = calculateRiderEarning(feeSettings, distanceKm) || 0;
+    // Business Settings > Business info: riders are paid by the distance bands
+    // (default) or a share of the delivery fee. Computed only here and stored
+    // on the order; every earning, payout and profit figure reads it back.
+    const businessInfo = await getBusinessSettings('business_info');
+    const riderEarning =
+      businessInfo.riderPayMode === 'percentage'
+        ? percentageRiderEarning(pricingResult.pricing?.originalDeliveryFee, businessInfo.deliveryChargeCommissionPercent)
+        : calculateRiderEarning(feeSettings, distanceKm) || 0;
 
     let restaurantCommission = 0;
     try {
@@ -1842,6 +1878,10 @@ export async function listOrdersRestaurant(restaurantId, query) {
   };
 }
 
+async function restaurantMayCancelAccepted() {
+  return (await getBusinessSettings('business_vendor')).restaurantCanCancelOrder;
+}
+
 export async function updateOrderStatusRestaurant(orderId, restaurantId, orderStatus, note = "") {
   await expireUnacceptedOrders({ restaurantId: String(restaurantId) });
 
@@ -1879,6 +1919,12 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
     throw new ValidationError(
       `Current order status '${from}' is further ahead than '${orderStatus}'. Order cannot be moved backwards.`,
     );
+  }
+  // Business Settings > Vendor, "restaurant can cancel order": when off, a
+  // restaurant can still reject a new order it has not accepted, but not
+  // cancel one it already accepted -- that goes through the admin.
+  if (targetStatus === "cancelled_by_restaurant" && from !== "created" && !(await restaurantMayCancelAccepted())) {
+    throw new ValidationError("You cannot cancel an order you have already accepted. Please contact Lagech support to cancel it.");
   }
 
   const normalizedPaymentMethod = String(order.paymentMethod || "cash").toLowerCase();

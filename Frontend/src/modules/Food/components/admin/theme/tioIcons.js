@@ -81,6 +81,7 @@ export const TIO_BY_LABEL = {
   "Balance Sheet": "account-square-outlined",
   "Customer Feedback Report": "chart-donut-2",
   "Business Setup": "settings-outlined",
+  "Business Settings": "settings-outlined",
   "Feature Settings": "settings",
   "Power Scanning": "lock-outlined",
   "Business Pages": "pages-outlined",

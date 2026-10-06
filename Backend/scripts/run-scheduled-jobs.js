@@ -7,6 +7,7 @@ import { syncExpiredFssaiNotifications } from '../src/modules/food/restaurant/se
 import { runBillingCatchUp } from '../src/modules/food/restaurant/services/subscriptionBilling.service.js';
 import { expireStalledOrders } from '../src/modules/food/orders/services/order-expiry.service.js';
 import { generateRestaurantPayouts } from '../src/modules/food/restaurant/services/restaurantPayout.service.js';
+import { runScheduledRiderDisbursement } from '../src/modules/food/admin/services/riderDisbursementSchedule.service.js';
 import { logger } from '../src/utils/logger.js';
 
 let expireOffersInterval = null;
@@ -14,6 +15,7 @@ let fssaiExpiryInterval = null;
 let subscriptionBillingInterval = null;
 let orderWatchdogInterval = null;
 let restaurantPayoutInterval = null;
+let riderPayoutInterval = null;
 
 const shutdown = async (signal) => {
     logger.info(`${signal} received, stopping scheduled jobs`);
@@ -22,6 +24,7 @@ const shutdown = async (signal) => {
     if (subscriptionBillingInterval) clearInterval(subscriptionBillingInterval);
     if (orderWatchdogInterval) clearInterval(orderWatchdogInterval);
     if (restaurantPayoutInterval) clearInterval(restaurantPayoutInterval);
+    if (riderPayoutInterval) clearInterval(riderPayoutInterval);
 
     try {
         await disconnectDB();
@@ -100,17 +103,30 @@ const start = async () => {
             }
         };
 
+        const runRiderPayouts = async () => {
+            try {
+                // Business Settings > Disbursement: once a day after the
+                // configured time (01:01 India by default); the day is claimed
+                // in the database, so a restart cannot run it twice.
+                await runScheduledRiderDisbursement();
+            } catch (err) {
+                logger.error(`Rider disbursement run error: ${err.message}`);
+            }
+        };
+
         await runExpire();
         await runFssaiExpirySync();
         await runSubscriptionBilling();
         await runOrderWatchdog();
         await runRestaurantPayouts();
+        await runRiderPayouts();
 
         expireOffersInterval = setInterval(runExpire, 5 * 60 * 1000);
         fssaiExpiryInterval = setInterval(runFssaiExpirySync, 60 * 60 * 1000);
         subscriptionBillingInterval = setInterval(runSubscriptionBilling, 6 * 60 * 60 * 1000);
         orderWatchdogInterval = setInterval(runOrderWatchdog, 5 * 60 * 1000);
         restaurantPayoutInterval = setInterval(runRestaurantPayouts, 10 * 60 * 1000);
+        riderPayoutInterval = setInterval(runRiderPayouts, 10 * 60 * 1000);
 
         logger.info('Scheduled jobs runner started');
     } catch (err) {

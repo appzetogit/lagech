@@ -6,6 +6,7 @@ import {
 } from '../../shared/foodType.util.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
+import { getBusinessSettings } from '../../shared/businessSettings.js';
 import { normalizeFoodImages } from '../../admin/services/foodImages.util.js';
 import { nutritionFields } from '../../shared/nutrition.util.js';
 import {
@@ -250,6 +251,8 @@ export async function createRestaurantFood(restaurantId, body = {}) {
         foodType,
     });
 
+    // Business Settings > Vendor, "dish approval": off publishes the dish at once.
+    const approvalRequired = (await getBusinessSettings('business_vendor')).dishApprovalRequired;
     const doc = await prisma.foodItem.create({
         data: {
             restaurantId: context.restaurantId,
@@ -277,17 +280,20 @@ export async function createRestaurantFood(restaurantId, body = {}) {
             isRecommended: body.isRecommended === true,
             preparationTime: toStr(body.preparationTime),
             ...nutritionFields(body),
-            approvalStatus: 'pending',
-            requestedAt: new Date(),
+            ...(approvalRequired
+                ? { approvalStatus: 'pending', requestedAt: new Date() }
+                : { approvalStatus: 'approved', requestedAt: new Date(), approvedAt: new Date() }),
         },
         include: WITH_VARIANTS,
     });
 
-    await notifyAdmins(
-        'New Product Approval Request',
-        `Restaurant has submitted a new item "${doc.name}" for approval.`,
-        doc.id
-    );
+    if (approvalRequired) {
+        await notifyAdmins(
+            'New Product Approval Request',
+            `Restaurant has submitted a new item "${doc.name}" for approval.`,
+            doc.id
+        );
+    }
 
     return doc;
 }
@@ -361,11 +367,21 @@ export async function updateRestaurantFood(restaurantId, foodId, body = {}) {
         Object.keys(update).some((key) => CRITICAL_APPROVAL_FIELDS.includes(key)) ||
         nextVariants !== undefined;
 
-    if (shouldResubmitForApproval) {
+    // With dish approval off (Business Settings > Vendor) the change is live
+    // at once, and a dish waiting for or refused approval is published by it.
+    const approvalRequired = shouldResubmitForApproval
+        ? (await getBusinessSettings('business_vendor')).dishApprovalRequired
+        : true;
+    if (shouldResubmitForApproval && approvalRequired) {
         update.approvalStatus = 'pending';
         update.requestedAt = new Date();
         update.rejectionReason = '';
         update.approvedAt = null;
+        update.rejectedAt = null;
+    } else if (shouldResubmitForApproval && existing.approvalStatus !== 'approved') {
+        update.approvalStatus = 'approved';
+        update.rejectionReason = '';
+        update.approvedAt = new Date();
         update.rejectedAt = null;
     }
 
@@ -382,7 +398,7 @@ export async function updateRestaurantFood(restaurantId, foodId, body = {}) {
         });
     });
 
-    if (shouldResubmitForApproval) {
+    if (shouldResubmitForApproval && approvalRequired) {
         await notifyAdmins(
             'Updated Product Approval Request',
             `Restaurant has updated and resubmitted "${updated.name}" for approval.`,

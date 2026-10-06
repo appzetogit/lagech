@@ -14,6 +14,8 @@ import {
     readStoredSettings,
     cleanUrl,
 } from './systemSettings.defaults.js';
+import { BUSINESS_AREA_CATALOG } from './businessSettings.defaults.js';
+import { invalidateBusinessSettings, getBusinessSettings, getMaintenanceState } from '../../shared/businessSettings.js';
 
 /**
  * System settings stored one JSON document per area (page meta data, app
@@ -41,6 +43,7 @@ const AREA_CATALOG = {
     },
     offline_payment: { fieldTypes: ['text', 'number', 'email'] },
     analytics_scripts: { tools: ANALYTICS_TOOLS.map(({ key, label, idLabel, example }) => ({ key, label, idLabel, example })) },
+    ...BUSINESS_AREA_CATALOG,
 };
 
 const assertArea = (area) => {
@@ -68,6 +71,7 @@ export async function saveSystemSettings(area, body = {}, adminId = null) {
     });
     if (area === 'notification_channels') invalidateChannelSettings();
     if (area === 'push_messages') invalidatePushMessages();
+    if (area.startsWith('business_') || area === 'website') invalidateBusinessSettings(area);
     return { area, value, updatedAt: row.updatedAt, catalog: AREA_CATALOG[area] };
 }
 
@@ -144,12 +148,13 @@ export async function getPublicSocialMedia() {
  * An app older than minVersion must update; older than latestVersion may.
  */
 export async function getPublicAppSettings() {
-    const [apps, login, analytics] = await Promise.all([
+    const [apps, login, analytics, business] = await Promise.all([
         readArea('app_settings'),
         readArea('login_setup'),
         getPublicAnalytics(),
+        getPublicBusinessSettings(),
     ]);
-    return { apps: apps.value, login: login.value, analytics, updatedAt: apps.updatedAt };
+    return { apps: apps.value, login: login.value, analytics, business, updatedAt: apps.updatedAt };
 }
 
 /**
@@ -215,4 +220,72 @@ export async function getPublicLanding() {
         website: website.value,
         updatedAt: landing.updatedAt,
     };
+}
+
+/**
+ * The Business Settings the apps act on (payment options, order types,
+ * maintenance, rider limits, ...), for GET /food/public/app-settings
+ * (`business`) and GET /food/public/business-settings. Admin-only values
+ * such as commission rates are left out.
+ */
+export async function getPublicBusinessSettings() {
+    const [info, order, payment, customer, deliveryman, vendor, refund, offline, maintenance] = await Promise.all([
+        getBusinessSettings('business_info'),
+        getBusinessSettings('business_order'),
+        getBusinessSettings('business_payment'),
+        getBusinessSettings('business_customer'),
+        getBusinessSettings('business_deliveryman'),
+        getBusinessSettings('business_vendor'),
+        getBusinessSettings('business_refund'),
+        getOfflinePaymentSettings(),
+        getMaintenanceState(),
+    ]);
+    const nc = customer.newCustomerDiscount;
+    return {
+        maintenance,
+        currency: { code: info.currency, decimals: info.currencyDecimals },
+        payment: {
+            cod: payment.cod,
+            digital: payment.digital,
+            offline: Boolean(offline.enabled && offline.methods.some((method) => method.isActive)),
+            wallet: customer.walletEnabled,
+            partialPayment: payment.partialPayment && customer.walletEnabled,
+        },
+        order: {
+            homeDelivery: order.homeDelivery,
+            takeaway: order.takeaway,
+            scheduledOrder: order.scheduledOrder,
+            scheduleSlotMinutes: order.scheduleSlotMinutes,
+            freeDeliveryOver: order.freeDelivery.enabled ? order.freeDelivery.minSubtotal : null,
+        },
+        customer: {
+            wallet: customer.walletEnabled,
+            addFund: customer.walletEnabled && customer.addFundEnabled,
+            vegNonVegToggle: customer.vegNonVegToggle,
+            guestCheckout: customer.guestCheckout,
+            newCustomerDiscount: nc.enabled
+                ? { type: nc.type, value: nc.value, maxDiscount: nc.maxDiscount || null, minOrderAmount: nc.minOrderAmount, validityDays: nc.validityDays }
+                : null,
+        },
+        rider: {
+            maxAssignedOrders: deliveryman.maxAssignedOrders,
+            canCancelOrder: deliveryman.riderCanCancelOrder,
+            showEarning: deliveryman.showEarningToRider,
+            pictureUpload: deliveryman.riderPictureUpload,
+            selfRegistration: deliveryman.riderSelfRegistration,
+        },
+        restaurant: {
+            canCancelOrder: vendor.restaurantCanCancelOrder,
+            canReplyToReviews: vendor.canReplyToReviews,
+            dishApprovalRequired: vendor.dishApprovalRequired,
+            selfRegistration: vendor.restaurantSelfRegistration,
+        },
+        refund: { requestEnabled: refund.refundRequestEnabled },
+    };
+}
+
+/** Active reasons of a reason-list area, for the customer app. */
+export async function getPublicReasons(area) {
+    const value = await getBusinessSettings(area);
+    return { reasons: value.reasons.filter((reason) => reason.isActive).map(({ id, text }) => ({ id, text })) };
 }
