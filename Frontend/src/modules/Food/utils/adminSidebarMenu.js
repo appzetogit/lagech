@@ -390,7 +390,7 @@ export const adminSidebarMenu = [
     type: "section",
     label: "BUSINESS SETTINGS",
     items: [
-      { type: "link", label: "Business Setup", path: "/admin/food/business-setup", icon: "Settings" },
+      { type: "link", label: "Business Settings", path: "/admin/food/business-setup", icon: "Settings" },
       {
         type: "link",
         label: "Feature Settings",
