@@ -17,6 +17,8 @@ import {
     listRefundRequestsAdmin,
     refundEligibility,
     rejectRefundRequest,
+    sniffImageType,
+    storeImages,
 } from './refundRequest.service.js';
 
 /**
@@ -119,6 +121,18 @@ test('eligibility: mode, delivery, payment, window, open and finished requests',
     const late = new Date('2026-10-07T00:00:01Z');
     assert.match(refundEligibility(order, on, [], late).message, /within 24 hours of delivery/);
     assert.equal(refundEligibility(order, { ...on, requestWindowHours: 0 }, [], late).eligible, true, '0 = no limit');
+});
+
+test('photos are recognised by their bytes, not the declared type; at most three', async () => {
+    const pad = Buffer.alloc(16);
+    assert.equal(sniffImageType(Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), pad])), 'image/jpeg');
+    assert.equal(sniffImageType(Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), pad])), 'image/png');
+    assert.equal(sniffImageType(Buffer.concat([Buffer.from('RIFF0000WEBP'), pad])), 'image/webp');
+    assert.equal(sniffImageType(Buffer.from('<html><script>alert(1)</script>')), null);
+    const fake = { buffer: Buffer.from('not an image at all, honestly'), mimetype: 'image/jpeg' };
+    await assert.rejects(() => storeImages([fake], 'food/test'), /must be JPEG/);
+    await assert.rejects(() => storeImages([fake, fake, fake, fake], 'food/test'), /At most 3/);
+    assert.deepEqual(await storeImages([], 'food/test'), []);
 });
 
 test('a wallet order: request, one open at a time, partial approval to the wallet, points taken back', async () => {

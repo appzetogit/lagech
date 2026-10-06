@@ -3,7 +3,7 @@ import { logger } from '../../../../utils/logger.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError, NotFoundError } from '../../../../core/auth/errors.js';
 import { recordTransaction } from '../../../../core/payments/transaction.service.js';
-import { uploadImageBuffer } from '../../../../services/cloudinary.service.js';
+import { saveImageFile } from '../../../../services/storage.service.js';
 import { getBusinessSettings } from '../../shared/businessSettings.js';
 import { buildOrderIdentityFilter, notifyOwnerSafely } from './order.helpers.js';
 import * as foodTransactionService from './foodTransaction.service.js';
@@ -159,17 +159,30 @@ async function resolveReason(body) {
     return { settings, reasonId: '', reason };
 }
 
+/**
+ * The image type from the file's first bytes. Phones often send photos as
+ * application/octet-stream, so the declared type is not trusted either way.
+ */
+export function sniffImageType(buffer) {
+    if (!buffer || buffer.length < 12) return null;
+    if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg';
+    if (buffer.readUInt32BE(0) === 0x89504e47) return 'image/png';
+    if (buffer.toString('ascii', 0, 4) === 'GIF8') return 'image/gif';
+    if (buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
+    return null;
+}
+
 /** Image files from a multipart request (field `images`), stored like every upload. */
 export async function storeImages(files, folder) {
     const list = Array.isArray(files) ? files : [];
     if (list.length > MAX_IMAGES) throw new ValidationError(`At most ${MAX_IMAGES} photos`);
-    for (const file of list) {
-        if (!String(file?.mimetype || '').startsWith('image/') || !file.buffer) {
-            throw new ValidationError('Photos must be images');
-        }
-    }
+    const typed = list.map((file) => ({ file, mimetype: sniffImageType(file?.buffer) }));
+    if (typed.some((t) => !t.mimetype)) throw new ValidationError('Photos must be JPEG, PNG, WebP or GIF images');
     const urls = [];
-    for (const file of list) urls.push(await uploadImageBuffer(file.buffer, folder));
+    for (const { file, mimetype } of typed) {
+        const saved = await saveImageFile({ buffer: file.buffer, mimetype, originalname: file.originalname || 'photo' }, folder);
+        urls.push(saved.url);
+    }
     return urls.filter(Boolean);
 }
 
