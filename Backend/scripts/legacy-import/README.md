@@ -23,13 +23,17 @@ Steps run in this order whatever order they are named in.
 | `categories` | Categories and sub-categories, with images |
 | `restaurants` | Restaurants, approval state, per-day hours, commission, logo and cover |
 | `foods` | Dishes, variations as variants, other option groups as add-ons |
+| `nutrition` | Each dish's nutrition tags (`nutritions` / `item_nutrition`) and allergens (`allergies` / `item_allergy`, when present) |
 | `customers` | Customers (10-digit phones, as login matches) and addresses |
 | `riders` | Riders; riders the old admin deleted become deactivated placeholders |
 | `payment-details` | Restaurant and rider bank/UPI details (fills blanks only) |
+| `withdrawal-methods` | Payout method types and their fields; each restaurant's and rider's chosen method (keeps a choice made here) |
 | `orders` | Orders as `FOD-<old id>`, items, history, reviews, the old ledger's split |
 | `balances` | Rider cash collections, withdrawals and payouts; restaurant withdrawals and payouts; opening-balance adjustments so every wallet equals the old one |
 | `ratings` | Restaurant and rider star ratings recomputed from rated orders |
+| `newsletter` | Newsletter subscribers (Subscribed Mail List), emails lower-cased |
 | `settings` | Restaurant subscriptions off (old system was commission-only); rider cash limit |
+| `social-media` | Social media links (name, link, on/off) |
 
 ## Running it
 
@@ -40,7 +44,7 @@ LEGACY_MYSQL_URL='mysql://legacy_ro:<pass>@127.0.0.1:3306/legacy_lagech' \
 DATABASE_URL='postgresql://<user>:<pass>@127.0.0.1:5432/<database>?schema=public' \
 UPLOAD_STORAGE_ROOT=/srv/lagech/uploads UPLOAD_BASE_URL=/uploads \
 REDIS_URL= NODE_ENV=development \
-node scripts/legacy-import/index.mjs zones categories restaurants foods customers riders \
+node scripts/legacy-import/index.mjs zones categories restaurants foods nutrition customers riders \
   payment-details orders balances ratings settings
 ```
 

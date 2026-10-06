@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react"
-import { Edit, Upload, Info, Trash2, Plus, Calendar, Link as LinkIcon, Save, X, Loader2, Image as ImageIcon } from "lucide-react"
+import { Edit, Upload, Info, Trash2, Plus, Calendar, Link as LinkIcon, Save, X, Loader2, Image as ImageIcon } from "@food/components/admin/theme/icons"
 import api from "@food/api"
 import { resolveMediaUrl } from "../../../../shared/utils/mediaUrl.js"
 

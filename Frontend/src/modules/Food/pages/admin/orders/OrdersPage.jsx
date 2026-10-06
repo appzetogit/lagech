@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { useSearchParams } from "react-router-dom"
 import io from "socket.io-client"
-import { FileText, Package } from "lucide-react"
+import { FileText, Package } from "@food/components/admin/theme/icons"
 import { adminAPI } from "@food/api"
 import { API_BASE_URL } from "@food/api/config"
 import { toast } from "sonner"
@@ -15,7 +15,7 @@ import SettingsDialog from "@food/components/admin/orders/SettingsDialog"
 import RefundModal from "@food/components/admin/orders/RefundModal"
 import CancelOrderDialog from "@food/components/admin/orders/CancelOrderDialog"
 import { useOrdersManagement } from "@food/components/admin/orders/useOrdersManagement"
-import { Loader2 } from "lucide-react"
+import { Loader2 } from "@food/components/admin/theme/icons"
 import { OrdersDashboardSkeleton } from "@food/components/ui/loading-skeletons"
 import { useDelayedLoading } from "@food/hooks/useDelayedLoading"
 import alertSound from "@food/assets/audio/alert.mp3"
@@ -28,6 +28,12 @@ const debugError = (...args) => {}
 // Status configuration with titles, colors, and icons
 const statusConfig = {
   "all": { title: "All Orders", color: "emerald", icon: FileText },
+  "scheduled": {
+    title: "Scheduled Orders",
+    subtitle: "Placed for a later time that is still ahead, soonest first",
+    color: "sky",
+    icon: Package,
+  },
   "pending": {
     title: "Pending Orders",
     subtitle: "Cash orders awaiting restaurant acceptance",

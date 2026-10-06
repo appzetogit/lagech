@@ -46,6 +46,12 @@ const AddonsList = lazy(() => import("@food/pages/admin/addons/AddonsList"));
 // Promotions Management
 const BasicCampaign = lazy(() => import("@food/pages/admin/campaigns/BasicCampaign"));
 const FoodCampaign = lazy(() => import("@food/pages/admin/campaigns/FoodCampaign"));
+const FoodReviews = lazy(() => import("@food/pages/admin/foods/FoodReviews"));
+const FoodGallery = lazy(() => import("@food/pages/admin/foods/FoodGallery"));
+const AddonCategories = lazy(() => import("@food/pages/admin/addons/AddonCategories"));
+const RecommendedRestaurants = lazy(() => import("@food/pages/admin/restaurant/RecommendedRestaurants"));
+const BulkImport = lazy(() => import("@food/pages/admin/bulk/BulkImport"));
+const BulkExport = lazy(() => import("@food/pages/admin/bulk/BulkExport"));
 const Coupons = lazy(() => import("@food/pages/admin/Coupons"));
 const Cashback = lazy(() => import("@food/pages/admin/Cashback"));
 const Banners = lazy(() => import("@food/pages/admin/Banners"));
@@ -63,6 +69,8 @@ const Customers = lazy(() => import("@food/pages/admin/Customers"));
 const SupportTickets = lazy(() => import("@food/pages/admin/SupportTickets"));
 const AddFund = lazy(() => import("@food/pages/admin/wallet/AddFund"));
 const Bonus = lazy(() => import("@food/pages/admin/wallet/Bonus"));
+const WalletReport = lazy(() => import("@food/pages/admin/wallet/Report"));
+const UserOverview = lazy(() => import("@food/pages/admin/UserOverview"));
 const LoyaltyPointReport = lazy(() => import("@food/pages/admin/loyalty-point/Report"));
 const SubscribedMailList = lazy(() => import("@food/pages/admin/SubscribedMailList"));
 // Deliveryman Management
@@ -107,6 +115,15 @@ const OrderCancelReasons = lazy(() => import("@food/pages/admin/orders/OrderCanc
 const RestaurantPayouts = lazy(() => import("@food/pages/admin/transactions/RestaurantPayouts"));
 const RestaurantPayoutBatch = lazy(() => import("@food/pages/admin/transactions/RestaurantPayoutBatch"));
 const WithdrawMethod = lazy(() => import("@food/pages/admin/transactions/WithdrawMethod"));
+// Delivery man: vehicle categories, disbursements, payments, earning report
+const VehicleCategories = lazy(() => import("@food/pages/admin/delivery-partners/VehicleCategories"));
+const DeliveryDisbursements = lazy(() => import("@food/pages/admin/transactions/DeliveryDisbursements"));
+const DeliveryDisbursementBatch = lazy(() => import("@food/pages/admin/transactions/DeliveryDisbursementBatch"));
+const DeliveryPayments = lazy(() => import("@food/pages/admin/transactions/DeliveryPayments"));
+const DeliverymanEarningReport = lazy(() => import("@food/pages/admin/reports/DeliverymanEarningReport"));
+const RestaurantPayments = lazy(() => import("@food/pages/admin/transactions/RestaurantPayments"));
+const RestaurantEarningReport = lazy(() => import("@food/pages/admin/reports/RestaurantEarningReport"));
+const SocialMedia = lazy(() => import("@food/pages/admin/system/SocialMedia"));
 // Employee Management
 const EmployeeRole = lazy(() => import("@food/pages/admin/employees/EmployeeRole"));
 const AddEmployee = lazy(() => import("@food/pages/admin/employees/AddEmployee"));
@@ -250,7 +267,7 @@ export default function AdminRouter() {
             
             {/* ORDER MANAGEMENT */}
             <Route path="orders/all" element={<OrdersPage statusKey="all" />} />
-            <Route path="orders/scheduled" element={<Navigate to="/admin/food/orders/pending" replace />} />
+            <Route path="orders/scheduled" element={<OrdersPage statusKey="scheduled" />} />
             <Route path="orders/pending" element={<OrdersPage statusKey="pending" />} />
             <Route path="orders/accepted" element={<Navigate to="/admin/food/orders/processing" replace />} />
             <Route path="orders/processing" element={<OrdersPage statusKey="processing" />} />
@@ -284,6 +301,7 @@ export default function AdminRouter() {
             <Route path="restaurants/reviews" element={<RestaurantReviews />} />
             <Route path="restaurants/bulk-import" element={<RestaurantsBulkImport />} />
             <Route path="restaurants/bulk-export" element={<RestaurantsBulkExport />} />
+            <Route path="restaurants/recommended" element={<RecommendedRestaurants />} />
             <Route path="restaurants/settings" element={<RestaurantSettings />} />
             <Route path="restaurants/subscription-settings" element={<SubscriptionSettings />} />
             <Route path="restaurants/subscription-history" element={<SubscriptionHistory />} />
@@ -299,6 +317,13 @@ export default function AdminRouter() {
             <Route path="foods" element={<FoodsList />} />
             <Route path="food/list" element={<FoodsList />} />
             <Route path="addons" element={<AddonsList />} />
+            <Route path="addons/categories" element={<AddonCategories />} />
+            <Route path="addons/bulk-import" element={<BulkImport key="addons-import" entity="addons" />} />
+            <Route path="addons/bulk-export" element={<BulkExport key="addons-export" entity="addons" />} />
+            <Route path="categories/bulk-import" element={<BulkImport key="categories-import" entity="categories" />} />
+            <Route path="categories/bulk-export" element={<BulkExport key="categories-export" entity="categories" />} />
+            <Route path="foods/reviews" element={<FoodReviews />} />
+            <Route path="foods/gallery" element={<FoodGallery />} />
 
             {/* PROMOTIONS, CUSTOMERS, DELIVERYMEN, etc. */}
             <Route path="campaigns/basic" element={<BasicCampaign />} />
@@ -319,6 +344,8 @@ export default function AdminRouter() {
             <Route path="support-tickets" element={<SupportTickets />} />
             <Route path="wallet/add-fund" element={<AddFund />} />
             <Route path="wallet/bonus" element={<Bonus />} />
+            <Route path="wallet/report" element={<WalletReport />} />
+            <Route path="user-overview" element={<UserOverview />} />
             <Route path="loyalty-point/report" element={<LoyaltyPointReport />} />
             <Route path="subscribed-mail-list" element={<SubscribedMailList />} />
 
@@ -340,6 +367,11 @@ export default function AdminRouter() {
             <Route path="delivery-partners/earning-addon-history" element={<EarningAddonHistory />} />
             <Route path="delivery-partners/earnings" element={<DeliveryEarnings />} />
             <Route path="delivery-partners/duty-log" element={<DutyLog />} />
+            <Route path="delivery-partners/vehicle-categories" element={<VehicleCategories />} />
+            <Route path="deliveryman-disbursements" element={<DeliveryDisbursements />} />
+            <Route path="deliveryman-disbursements/:batchId" element={<DeliveryDisbursementBatch />} />
+            <Route path="deliveryman-payments" element={<DeliveryPayments />} />
+            <Route path="deliveryman-earning-report" element={<DeliverymanEarningReport />} />
 
             {/* REPORTS & SETTINGS */}
             <Route path="transaction-report" element={<TransactionReport />} />
@@ -364,6 +396,9 @@ export default function AdminRouter() {
             <Route path="restaurant-disbursements/:batchId" element={<RestaurantPayoutBatch />} />
             <Route path="balance-sheet" element={<BalanceSheet />} />
             <Route path="withdraw-method" element={<WithdrawMethod />} />
+            <Route path="restaurant-payments" element={<RestaurantPayments />} />
+            <Route path="restaurant-earning-report" element={<RestaurantEarningReport />} />
+            <Route path="pages-social-media/social-media" element={<SocialMedia />} />
             
             <Route path="employee-role" element={<EmployeeRole />} />
             <Route path="employees" element={<EmployeeList />} />

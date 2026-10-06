@@ -756,6 +756,11 @@ model FoodRestaurant {
   rating       Decimal @default(0) @db.Decimal(2, 1)
   totalRatings Int     @default(0)
 
+  /// Picked by the admin for the customer app's "Recommended" row, shown in
+  /// recommendedSortOrder (lowest first).
+  isRecommended        Boolean @default(false)
+  recommendedSortOrder Int     @default(0)
+
   diningEnabled   Boolean @default(false)
   diningMaxGuests Int     @default(6)
   diningType      String  @default("family-dining")
@@ -819,6 +824,8 @@ model FoodRestaurant {
   emergencyRequests    DeliveryOrderEmergencyRequest[]
   feedback             FeedbackExperience[]
   offers               FoodOffer[]
+  campaignEntries      FoodCampaignRestaurant[]
+  itemCampaigns        FoodItemCampaign[]
 
   @@unique([restaurantNameNormalized, ownerPhoneLast10])
   @@index([ownerPhone])
@@ -830,6 +837,7 @@ model FoodRestaurant {
   @@index([zoneId])
   @@index([estimatedDeliveryTimeMinutes])
   @@index([rating])
+  @@index([isRecommended, recommendedSortOrder])
   @@map("food_restaurants")
 }
 
@@ -844,6 +852,9 @@ model FoodDeliveryPartner {
   address String?
   city    String?
   state   String?
+  /// The zone the rider works in, chosen when an admin adds them. Riders who
+  /// registered from the app have none.
+  zoneId  String? @db.VarChar(24)
 
   vehicleType   String?
   vehicleName   String?
@@ -915,6 +926,7 @@ model FoodDeliveryPartner {
   @@index([referralCode])
   @@index([referredById])
   @@index([availabilityStatus, status])
+  @@index([zoneId])
   @@map("food_delivery_partners")
 }
 
@@ -1467,10 +1479,16 @@ model OrderItemRating {
   comment String   @default("")
   ratedAt DateTime @default(now())
 
+  /// Hidden by an admin (abusive or irrelevant). The customer's own order still
+  /// shows it; public review listings leave it out.
+  isHidden Boolean   @default(false)
+  hiddenAt DateTime?
+
   order FoodOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([orderId])
   @@index([itemId])
+  @@index([ratedAt(sort: Desc)])
   @@map("food_order_item_ratings")
 }
 
@@ -1656,6 +1674,11 @@ model FoodItem {
   preparationTime String  @default("")
   /// Search tags ("healthy food", "momos"), normalised by shared/tags.util.js.
   tags            String[] @default([])
+  /// Free-text nutrition facts ("Calories 250 kcal", "High protein"),
+  /// tidied by shared/nutrition.util.js. Shown on the dish, not searched.
+  nutrition       String[] @default([])
+  /// Allergens the dish contains ("Peanuts", "Gluten"), tidied the same way.
+  allergens       String[] @default([])
 
   approvalStatus  ApprovalStatus @default(approved)
   rejectionReason String         @default("")
@@ -1776,7 +1799,10 @@ model FoodCategory {
 model FoodAddon {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 
-  restaurantId String @db.VarChar(24)
+  restaurantId String  @db.VarChar(24)
+  /// Admin grouping for the add-on list ("Drinks", "Extra toppings"). Optional;
+  /// the customer app still groups add-ons by groupName.
+  categoryId   String? @db.VarChar(24)
 
   /// Menu items this add-on attaches to. EMPTY MEANS RESTAURANT-WIDE.
   /// ponytail: array of ids rather than a join table, matching the Mongo access
@@ -1812,13 +1838,34 @@ model FoodAddon {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  restaurant FoodRestaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  restaurant FoodRestaurant     @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  /// SetNull: deleting a category leaves its add-ons uncategorised, never deleted.
+  category   FoodAddonCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
 
   @@index([restaurantId, isDeleted, createdAt(sort: Desc)])
   @@index([approvalStatus, isDeleted, requestedAt(sort: Desc)])
   @@index([restaurantId, approvalStatus, isDeleted, requestedAt(sort: Desc)])
   @@index([restaurantId, approvalStatus, isAvailable])
+  @@index([categoryId])
   @@map("food_addons")
+}
+
+/// Admin-managed grouping for add-ons, as on the previous panel's
+/// "Addon Category" page.
+model FoodAddonCategory {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  name      String
+  isActive  Boolean @default(true)
+  sortOrder Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  addons FoodAddon[]
+
+  @@index([isActive, sortOrder])
+  @@map("food_addon_categories")
 }
 
 model FoodRestaurantMenu {
@@ -2054,6 +2101,107 @@ model FoodCashbackSettings {
 
   @@index([isActive, createdAt(sort: Desc)])
   @@map("food_cashback_settings")
+}
+
+/// Bonus rules for wallet top-ups (the old panel's Customer Wallet → Bonus).
+/// When a customer's top-up succeeds, the matching running rule that pays the
+/// most is credited as its own ledger entry (metadata.source 'wallet_bonus').
+model FoodWalletBonus {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  title       String
+  description String @default("")
+  /// 'percentage' (of the amount added) or 'amount' (fixed rupees).
+  bonusType   String  @default("percentage") @db.VarChar(16)
+  bonusAmount Decimal @db.Decimal(14, 2)
+  /// The top-up must be at least this much to earn the bonus.
+  minimumAddAmount Decimal @default(0) @db.Decimal(14, 2)
+  /// Cap on a percentage bonus. 0 = uncapped.
+  maximumBonus     Decimal @default(0) @db.Decimal(14, 2)
+
+  startDate DateTime
+  endDate   DateTime
+  isActive  Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, startDate, endDate])
+  @@map("food_wallet_bonuses")
+}
+
+/// Loyalty programme settings, one row (like the cashback and referral settings).
+model FoodLoyaltySettings {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  isEnabled            Boolean @default(false)
+  /// Points earned for every ₹100 of a delivered order's total.
+  pointsPerHundred     Decimal @default(0) @db.Decimal(10, 2)
+  /// Points that convert into ₹1 of wallet balance.
+  pointsPerRupee       Int     @default(0)
+  /// Fewest points a customer may convert at once.
+  minimumConvertPoints Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("food_loyalty_settings")
+}
+
+/// A customer's current points. Kept as a row so a conversion can guard the
+/// balance in its WHERE clause, the way the wallet does.
+model FoodLoyaltyPointAccount {
+  userId String @id @db.VarChar(24)
+
+  points         Int @default(0)
+  totalEarned    Int @default(0)
+  totalConverted Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("food_loyalty_point_accounts")
+}
+
+/// Points ledger: every earn and every conversion.
+model FoodLoyaltyPointTransaction {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  userId       String  @db.VarChar(24)
+  /// 'credit' (earned) or 'debit' (converted).
+  type         String  @db.VarChar(8)
+  points       Int
+  balanceAfter Int
+  /// 'order' or 'conversion'.
+  source       String  @db.VarChar(16)
+  orderId      String? @db.VarChar(24)
+  /// Wallet rupees a conversion paid out; 0 for an earn.
+  walletAmount Decimal @default(0) @db.Decimal(14, 2)
+  note         String  @default("")
+
+  /// `loyalty_earn:<orderId>` or `loyalty_convert:<request>` — unique, so a
+  /// replayed delivery or a double-tapped conversion is applied once.
+  idempotencyKey String? @unique
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+  @@map("food_loyalty_point_transactions")
+}
+
+/// Newsletter subscribers (the old panel's Subscribed Mail List).
+model FoodNewsletterSubscriber {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  /// Stored lower-cased; unique so subscribing twice is a no-op.
+  email String @unique @db.VarChar(255)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([createdAt(sort: Desc)])
+  @@map("food_newsletter_subscribers")
 }
 
 model FoodReferralSettings {
@@ -2725,6 +2873,70 @@ model FoodReel {
   @@map("food_reels")
 }
 
+/// A basic campaign: a promotion restaurants take part in ("Weekend Feast").
+/// Running while switched on and between startsAt and endsAt.
+model FoodCampaign {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  title       String
+  description String   @default("")
+  image       String   @default("")
+  startsAt    DateTime
+  endsAt      DateTime
+  isActive    Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurants FoodCampaignRestaurant[]
+
+  @@index([isActive, startsAt, endsAt])
+  @@map("food_campaigns")
+}
+
+/// A restaurant taking part in a basic campaign. Added by the admin for now.
+model FoodCampaignRestaurant {
+  id           String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  campaignId   String @db.VarChar(24)
+  restaurantId String @db.VarChar(24)
+
+  joinedAt DateTime @default(now())
+
+  campaign   FoodCampaign   @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  restaurant FoodRestaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, restaurantId])
+  @@index([restaurantId])
+  @@map("food_campaign_restaurants")
+}
+
+/// A food campaign: one special dish from one restaurant, on offer for a while.
+model FoodItemCampaign {
+  id           String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  restaurantId String @db.VarChar(24)
+
+  title        String
+  description  String   @default("")
+  image        String   @default("")
+  price        Decimal  @db.Decimal(14, 2)
+  /// 'percent' or 'amount'; a discount of 0 means none.
+  discountType String   @default("percent") @db.VarChar(16)
+  discount     Decimal  @default(0) @db.Decimal(14, 2)
+  foodType     FoodType @default(Veg)
+  startsAt     DateTime
+  endsAt       DateTime
+  isActive     Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant FoodRestaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@index([isActive, startsAt, endsAt])
+  @@index([restaurantId])
+  @@map("food_item_campaigns")
+}
+
 model FoodCancelReason {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 
@@ -2793,15 +3005,70 @@ model FoodDeliveryWithdrawal {
   transactionId   String?
   processedAt     DateTime?
 
+  /// 'manual' when the rider asked for it; 'disbursement' when an admin's
+  /// payout batch created it (batchId says which); 'admin_payment' when an
+  /// admin recorded a payment made to the rider; 'balance_sheet' when it was
+  /// paid from the balance sheet. Every kind counts against the same balance.
+  source      String  @default("manual") @db.VarChar(16)
+  batchId     String? @db.VarChar(24)
+  /// The admin who created or recorded it, for admin-made rows.
+  processedBy String? @db.VarChar(24)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  deliveryPartner FoodDeliveryPartner @relation(fields: [deliveryPartnerId], references: [id])
+  deliveryPartner FoodDeliveryPartner      @relation(fields: [deliveryPartnerId], references: [id])
+  batch           FoodDeliveryPayoutBatch? @relation(fields: [batchId], references: [id])
 
   @@index([deliveryPartnerId])
   @@index([status])
   @@index([createdAt(sort: Desc)])
+  @@index([batchId])
+  @@index([source, createdAt(sort: Desc)])
   @@map("food_delivery_withdrawals")
+}
+
+/// One delivery man disbursement: a payout line (a withdrawal with source
+/// 'disbursement') for every rider whose withdrawable balance was at least the
+/// minimum when an admin generated it. The admin pays each line and marks it
+/// paid or failed; the batch status is worked out from its lines.
+model FoodDeliveryPayoutBatch {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  /// Human number, "Disbursement #1001".
+  number      Int     @unique @default(autoincrement())
+  totalAmount Decimal @default(0) @db.Decimal(14, 2)
+  riderCount  Int     @default(0)
+  /// Riders below this balance were left for a later batch.
+  minAmount   Decimal @default(1) @db.Decimal(14, 2)
+  /// Riders owed money but left out, with why: [{ deliveryPartnerId, name, amount, reason }].
+  skipped     Json    @default("[]")
+  createdById String? @db.VarChar(24)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payouts FoodDeliveryWithdrawal[]
+
+  @@index([createdAt(sort: Desc)])
+  @@map("food_delivery_payout_batches")
+}
+
+/// A kind of vehicle riders may use, and how far it may deliver: up to
+/// startingCoverageKm at the normal rate, up to maxCoverageKm with extraCharges.
+model FoodDeliveryVehicleCategory {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  type               String  @unique @db.VarChar(64)
+  startingCoverageKm Decimal @default(0) @db.Decimal(8, 2)
+  maxCoverageKm      Decimal @db.Decimal(8, 2)
+  extraCharges       Decimal @default(0) @db.Decimal(14, 2)
+  isActive           Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("food_delivery_vehicle_categories")
 }
 
 model FoodDeliveryCashDeposit {
@@ -3508,6 +3775,106 @@ model FoodLandingSettings {
   updatedAt DateTime @updatedAt
 
   @@map("food_landing_settings")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Payout methods, email templates, social links, system settings
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A kind of payout the admin accepts ("Bank transfer", "UPI"), and the fields
+/// a restaurant or rider fills in to be paid that way. Additive to the fixed
+/// bank and UPI columns on restaurants and riders, which stay as they are.
+model FoodWithdrawalMethod {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  name      String  @db.VarChar(80)
+  /// [{ key, label, type: 'text'|'number'|'email', required, placeholder }]
+  fields    Json    @default("[]")
+  isActive  Boolean @default(true)
+  /// At most one method is the default; the service keeps it that way.
+  isDefault Boolean @default(false)
+  sortOrder Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  details FoodPayoutMethodDetail[]
+
+  @@index([isActive, sortOrder])
+  @@map("food_withdrawal_methods")
+}
+
+/// The method a restaurant or rider chose to be paid by, and what they filled
+/// in for its fields. One row per payee.
+model FoodPayoutMethodDetail {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  /// 'restaurant' or 'rider'.
+  ownerType String @db.VarChar(16)
+  ownerId   String @db.VarChar(24)
+  methodId  String @db.VarChar(24)
+  /// { [field key]: value }
+  values    Json   @default("{}")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  method FoodWithdrawalMethod @relation(fields: [methodId], references: [id], onDelete: Restrict)
+
+  @@unique([ownerType, ownerId])
+  @@index([methodId])
+  @@map("food_payout_method_details")
+}
+
+/// The admin's wording for an email the backend sends. `key` names the email
+/// (see emailTemplates.registry.js); a missing or switched-off row falls back
+/// to the built-in text.
+model FoodEmailTemplate {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  key       String  @unique @db.VarChar(64)
+  subject   String
+  /// HTML with {{placeholders}}.
+  body      String
+  isActive  Boolean @default(true)
+  updatedBy String? @db.VarChar(24)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("food_email_templates")
+}
+
+/// Social media profiles shown on the website and in the apps.
+model FoodSocialMediaLink {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  platform  String  @db.VarChar(40)
+  url       String
+  isActive  Boolean @default(true)
+  sortOrder Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, sortOrder])
+  @@map("food_social_media_links")
+}
+
+/// One JSON document per settings area: 'page_meta', 'app_settings',
+/// 'login_setup', 'notification_channels', 'landing_page', 'website'.
+/// Shapes and defaults live in systemSettings.defaults.js.
+model FoodSystemSetting {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  key       String  @unique @db.VarChar(64)
+  value     Json    @default("{}")
+  updatedBy String? @db.VarChar(24)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("food_system_settings")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

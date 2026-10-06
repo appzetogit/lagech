@@ -13,7 +13,7 @@ import { Button } from "@food/components/ui/button"
 import { Input } from "@food/components/ui/input"
 import { Label } from "@food/components/ui/label"
 import AdminAuthHero from "@food/components/admin/auth/AdminAuthHero"
-import { Eye, EyeOff, Shield, Loader2 } from "lucide-react"
+import { Eye, EyeOff, Shield, Loader2 } from "@food/components/admin/theme/icons"
 import lagechLogo from "@food/assets/lagech-logo.png"
 
 const debugLog = (...args) => {}

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Plus, Search, Shield, Trash2, ToggleLeft, ToggleRight } from "lucide-react";
+import { Plus, Search, Shield, Trash2, ToggleLeft, ToggleRight } from "@food/components/admin/theme/icons";
 import { adminAPI } from "@food/api";
 import SidebarAccessPicker, { permissionsForPages } from "./SidebarAccessPicker";
 import RoleSelect from "./RoleSelect";

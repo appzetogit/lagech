@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react"
-import { Eye, Loader2, Search, Trash2, Pencil } from "lucide-react"
+import { Eye, Loader2, Search, Trash2, Pencil } from "@food/components/admin/theme/icons"
 import { Switch } from "@food/components/ui/switch"
 import { adminAPI, uploadAPI } from "@food/api"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@food/components/ui/dialog"
+import { adminCatalogExtrasAPI, errorMessage } from "@food/api/adminCatalogExtras"
 
 const debugError = (...args) => {}
 
@@ -44,6 +45,42 @@ export default function AddonsList() {
   const [editForm, setEditForm] = useState({ name: "", price: "", description: "", isAvailable: true })
   const [editImagePreview, setEditImagePreview] = useState("")
   const [editImageFile, setEditImageFile] = useState(null)
+  // Addon categories: filter the list by one ('none' = uncategorised) and file
+  // each add-on under one from its row.
+  const [addonCategories, setAddonCategories] = useState([])
+  const [categoryFilter, setCategoryFilter] = useState("")
+  const [savingCategoryFor, setSavingCategoryFor] = useState("")
+
+  useEffect(() => {
+    adminCatalogExtrasAPI
+      .getAddonCategories()
+      .then((res) => setAddonCategories(res?.data?.data?.categories || []))
+      .catch(() => {})
+  }, [])
+
+  const changeCategory = async (addon, categoryId) => {
+    const id = String(addon.id || addon._id)
+    try {
+      setSavingCategoryFor(id)
+      await adminCatalogExtrasAPI.setAddonCategory(id, categoryId || null)
+      const category = addonCategories.find((c) => c.id === categoryId)
+      setAddons((prev) =>
+        (prev || [])
+          .map((a) =>
+            String(a.id || a._id) === id
+              ? { ...a, categoryId: categoryId || null, category: category ? { id: category.id, name: category.name } : null }
+              : a,
+          )
+          // Leave the row out once it no longer matches the category filter.
+          .filter((a) => !categoryFilter || (categoryFilter === "none" ? !a.categoryId : a.categoryId === categoryFilter)),
+      )
+      toast.success("Category saved")
+    } catch (error) {
+      toast.error(errorMessage(error, "Failed to save the category"))
+    } finally {
+      setSavingCategoryFor("")
+    }
+  }
 
   useEffect(() => {
     const fetchAddons = async () => {
@@ -53,6 +90,7 @@ export default function AddonsList() {
           // only approved items should be visible in this list
           approvalStatus: "approved",
           search: searchQuery?.trim() ? searchQuery.trim() : undefined,
+          categoryId: categoryFilter || undefined,
           limit: 200,
           page: 1,
         })
@@ -72,7 +110,7 @@ export default function AddonsList() {
 
     const t = setTimeout(fetchAddons, 250)
     return () => clearTimeout(t)
-  }, [searchQuery])
+  }, [searchQuery, categoryFilter])
 
   const filteredAddons = useMemo(() => {
     const result = Array.isArray(addons) ? [...addons] : []
@@ -208,6 +246,18 @@ export default function AddonsList() {
               className="pl-10 pr-4 py-2.5 w-full text-sm rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400"
             />
           </div>
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            aria-label="Addon category"
+            className="w-full sm:w-56 px-3 py-2.5 text-sm rounded-lg border border-slate-300 bg-white"
+          >
+            <option value="">All categories</option>
+            <option value="none">No category</option>
+            {addonCategories.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}{c.isActive ? "" : " (off)"}</option>
+            ))}
+          </select>
           <div className="text-sm text-slate-600">
             Showing <span className="font-semibold">{countLabel}</span>
           </div>
@@ -234,6 +284,9 @@ export default function AddonsList() {
                 <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
                   Price
                 </th>
+                <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
+                  Category
+                </th>
                 <th className="px-6 py-4 text-center text-[10px] font-bold text-slate-700 uppercase tracking-wider">
                   Action
                 </th>
@@ -242,7 +295,7 @@ export default function AddonsList() {
             <tbody className="bg-white divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-20 text-center">
+                  <td colSpan={7} className="px-6 py-20 text-center">
                     <div className="flex flex-col items-center justify-center">
                       <Loader2 className="w-8 h-8 animate-spin text-blue-600 mb-2" />
                       <p className="text-sm text-slate-500">Loading add-ons...</p>
@@ -251,7 +304,7 @@ export default function AddonsList() {
                 </tr>
               ) : filteredAddons.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-20 text-center">
+                  <td colSpan={7} className="px-6 py-20 text-center">
                     <div className="flex flex-col items-center justify-center">
                       <p className="text-lg font-semibold text-slate-700 mb-1">No Data Found</p>
                       <p className="text-sm text-slate-500">No add-ons match your search</p>
@@ -294,6 +347,20 @@ export default function AddonsList() {
                       <span className="text-sm font-medium text-slate-900">
                         ₹{Number(addon?.draft?.price ?? addon?.price ?? 0).toFixed(2)}
                       </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <select
+                        value={addon.categoryId || ""}
+                        disabled={savingCategoryFor === String(addon.id || addon._id)}
+                        onChange={(e) => changeCategory(addon, e.target.value)}
+                        aria-label="Category"
+                        className="px-2 py-1.5 text-xs rounded-lg border border-slate-300 bg-white disabled:opacity-60"
+                      >
+                        <option value="">No category</option>
+                        {addonCategories.map((c) => (
+                          <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                      </select>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-center">
                       <div className="flex items-center justify-center gap-2 flex-wrap">

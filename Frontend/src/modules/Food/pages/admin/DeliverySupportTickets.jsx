@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { MessageSquare, Search, Clock, CheckCircle, XCircle, Loader2, Eye, Edit } from "lucide-react"
+import { MessageSquare, Search, Clock, CheckCircle, XCircle, Loader2, Eye, Edit } from "@food/components/admin/theme/icons"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"

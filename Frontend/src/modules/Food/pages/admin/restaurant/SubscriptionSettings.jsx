@@ -13,7 +13,7 @@ import {
   Receipt,
   Sparkles,
   Info,
-} from "lucide-react"
+} from "@food/components/admin/theme/icons"
 
 const THEME = "#008078"
 const GST_RATE = 0.18

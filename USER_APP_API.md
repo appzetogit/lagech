@@ -61,6 +61,24 @@ token gets 403 on those, not 404.
 
 > The non-`/public` variants of the banner routes are **admin-only** and will 403.
 
+### Recommended restaurants
+Every restaurant in `GET /v1/food/restaurant/restaurants` carries `isRecommended` (boolean) and
+`recommendedSortOrder` (number). The admin picks and orders the recommended ones
+(Restaurant Management → Recommended Restaurants).
+
+`GET /v1/food/restaurant/restaurants?recommended=true` returns only those, in the admin's order
+(lowest `recommendedSortOrder` first) unless a `sortBy` is given. It combines with every other filter
+(`lat`/`lng`, `zoneId`, `search`, …), so the row shows only recommended restaurants that serve the
+customer. An empty list means none are picked for that area — hide the row.
+
+### Nutrition and allergens on dishes
+Every dish in the menu (`/restaurants/:id/menu`) and the flat dish list (`/public/foods`) carries:
+```json
+{ "nutrition": ["Calories 250 kcal", "High protein"], "allergens": ["Peanuts"] }
+```
+Both are always arrays (empty when not set), free text as entered by the restaurant or admin. Show
+them on the dish detail; they are not searchable.
+
 ---
 
 ## 3. Add-ons (per-item, Zomato-style)
@@ -370,6 +388,26 @@ Reels showing now: `{ reels: [ { id, description, videoUrl, thumbnail, views, li
 ### `POST /v1/food/public/reels/:id/view` · `/like` · `/visit`
 Count a view (once per play), a like, or a tap through to the restaurant. `{ counted: true }`.
 
+### `GET /v1/food/public/campaigns`
+Campaigns running now (switched on, and between their start and end). Two kinds:
+```json
+{ "basic": [ { "id": "…", "title": "Weekend Feast", "description": "…", "image": "/uploads/…",
+               "startsAt": "2026-10-10T04:30:00.000Z", "endsAt": "2026-10-12T18:29:00.000Z",
+               "restaurants": [ { "id": "…", "name": "…", "logo": "/uploads/…", "coverImage": "/uploads/…",
+                                  "area": "…", "rating": 4.3, "totalRatings": 42, "isAcceptingOrders": true } ] } ],
+  "food":  [ { "id": "…", "title": "Hyderabadi biryani", "description": "…", "image": "/uploads/…",
+               "price": 299, "discountType": "percent", "discount": 20, "finalPrice": 239.2,
+               "foodType": "Non-Veg", "startsAt": "…", "endsAt": "…",
+               "restaurant": { "id": "…", "name": "…", "logo": "…", "coverImage": "…", "area": "…",
+                               "rating": 4.1, "totalRatings": 12, "isAcceptingOrders": true } } ] }
+```
+- **basic**: a promotion with a banner; `restaurants` are the approved restaurants taking part (may be
+  empty). Tapping a restaurant opens it.
+- **food**: one special dish. `discountType` is `percent` or `amount`; `finalPrice` is what the
+  customer pays. These dishes are not orderable through checkout yet — tapping one opens its restaurant.
+
+Both lists are empty when nothing is running; hide the section rather than showing placeholders.
+
 ### `GET /v1/food/public/cancel-reasons?userType=customer`
 The reasons to offer when a customer cancels: `{ reasons: [ { id, reason } ] }`. Send the chosen text as `reason` to `PATCH /v1/food/orders/:orderId/cancel`.
 
@@ -386,3 +424,53 @@ Real customer ratings of the restaurant, newest first. `withComments=true` retur
   "pagination": { "page": 1, "limit": 20, "total": 16, "pages": 1 } }
 ```
 `userName` is the first name and last initial only. A restaurant with no ratings returns `rating: 0` and empty lists — show "No reviews yet", never sample data.
+
+An order whose dish review an admin has hidden (Food Setup → Review) is left out of both the list and the summary.
+
+## 15. Wallet bonus and loyalty points — `/v1/food/user`
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/v1/food/user/wallet/bonuses` | Top-up bonus offers running now |
+| GET | `/v1/food/user/loyalty-points?page=1&limit=20` | Points balance, rules and history |
+| POST | `/v1/food/user/loyalty-points/convert` | Convert points into wallet balance |
+
+### `GET /v1/food/user/wallet/bonuses`
+Show on the "Add money" screen, e.g. "Add ₹500 or more, get 10% extra (up to ₹50)".
+```json
+{ "bonuses": [ { "id": "…", "title": "Diwali top-up", "description": "",
+  "bonusType": "percentage | amount", "bonusAmount": 10, "minimumAddAmount": 500,
+  "maximumBonus": 50, "startDate": "…", "endDate": "…", "state": "running" } ] }
+```
+`maximumBonus` is 0 when uncapped (always 0 for `amount`). Nothing to send at top-up: when
+`POST /wallet/topup/verify` succeeds, the running offer that pays the most is credited as
+its own wallet entry ("Top-up bonus: <title>"), and the verify response carries
+`bonus: { title, amount }` (or `bonus: null`). A replayed verify credits nothing more.
+
+### `GET /v1/food/user/loyalty-points`
+```json
+{ "enabled": true, "points": 120, "worth": 12, "totalEarned": 220, "totalConverted": 100,
+  "settings": { "pointsPerHundred": 5, "pointsPerRupee": 10, "minimumConvertPoints": 50 },
+  "transactions": [ { "id": "…", "type": "credit | debit", "points": 25, "balanceAfter": 120,
+                      "source": "order | conversion", "orderId": "…", "walletAmount": 0,
+                      "note": "Order FOD-…", "createdAt": "…" } ],
+  "pagination": { "page": 1, "limit": 20, "total": 3, "pages": 1 } }
+```
+Points are earned when an order is **delivered**: `pointsPerHundred` points per ₹100 of the
+order total, rounded down. `worth` is what the current points convert into, in rupees.
+Hide the section when `enabled` is false.
+
+### `POST /v1/food/user/loyalty-points/convert`
+Body: `{ "points": 100, "requestId": "<uuid made once per tap>" }`. Converts at
+`pointsPerRupee` points per ₹1 (rounded down to paise) and credits the wallet in the same
+step. Returns the `GET /loyalty-points` shape plus `wallet` (as `GET /wallet`). Sending the
+same `requestId` again does nothing, so a retry after a timeout is safe. `400` with a
+message to show when: points are switched off, fewer than `minimumConvertPoints`, more than
+the balance, or not a whole number.
+
+## 16. Newsletter — public, no login
+
+### `POST /v1/food/public/newsletter/subscribe`
+Body: `{ "email": "asha@example.com" }` → `{ "subscribed": true }`. The email is stored
+lower-cased; subscribing an address that is already on the list answers the same way and
+adds nothing. `400` "Enter a valid email address" for anything that is not an email.

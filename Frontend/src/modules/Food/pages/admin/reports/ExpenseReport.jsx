@@ -1,4 +1,4 @@
-import { Receipt } from "lucide-react"
+import { Receipt } from "@food/components/admin/theme/icons"
 import { adminAPI } from "@food/api"
 import ReportShell, { rupees } from "./ReportShell"
 

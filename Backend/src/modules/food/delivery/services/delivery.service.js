@@ -30,14 +30,13 @@ const requirePartner = async (userId) => {
     return partner;
 };
 
-export const registerDeliveryPartner = async (payload, files, rawBody = {}) => {
-    const {
-        name, phone, email, countryCode, address, city, state,
-        vehicleType, vehicleName, vehicleNumber, drivingLicenseNumber, panNumber, aadharNumber,
-        fcmToken, platform,
-    } = payload;
-    const refRaw = typeof payload?.ref === 'string' ? String(payload.ref).trim() : '';
-
+/**
+ * A phone, and a vehicle number when given, may belong to one rider who is not
+ * rejected. A rejected rider's record is cleared so they can start again on
+ * the same phone or vehicle. Shared by the app sign-up and the admin's "Add
+ * Delivery Man", so the two can never disagree about who is a duplicate.
+ */
+export async function claimRegistrationIdentity({ phone, vehicleNumber }) {
     const existing = await prisma.foodDeliveryPartner.findUnique({ where: { phone } });
     if (existing) {
         if (existing.status !== 'rejected') {
@@ -62,6 +61,17 @@ export const registerDeliveryPartner = async (payload, files, rawBody = {}) => {
             where: { vehicleNumber: vNum, status: 'rejected' },
         });
     }
+}
+
+export const registerDeliveryPartner = async (payload, files, rawBody = {}) => {
+    const {
+        name, phone, email, countryCode, address, city, state,
+        vehicleType, vehicleName, vehicleNumber, drivingLicenseNumber, panNumber, aadharNumber,
+        fcmToken, platform,
+    } = payload;
+    const refRaw = typeof payload?.ref === 'string' ? String(payload.ref).trim() : '';
+
+    await claimRegistrationIdentity({ phone, vehicleNumber });
 
     const uploadTasks = [];
     const photoField = (field, folder) => {

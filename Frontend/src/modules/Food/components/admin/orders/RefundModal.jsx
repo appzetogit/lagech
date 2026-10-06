@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { Wallet, X } from "lucide-react"
+import { Wallet, X } from "@food/components/admin/theme/icons"
 import {
   Dialog,
   DialogContent,

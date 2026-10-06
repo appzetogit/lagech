@@ -4,6 +4,7 @@ import { ValidationError } from '../../../../core/auth/errors.js';
 const listSchema = z.object({
     search: z.string().max(80).optional(),
     restaurantId: z.string().optional(),
+    categoryId: z.string().max(24).optional(),
     approvalStatus: z.enum(['pending', 'approved', 'rejected']).optional(),
     page: z.coerce.number().int().min(1).optional(),
     limit: z.coerce.number().int().min(1).max(200).optional()

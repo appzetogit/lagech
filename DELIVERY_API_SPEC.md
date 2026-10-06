@@ -343,7 +343,20 @@ Query: `type` (transaction-type filter), `limit`.
 { "amount": 500, "paymentMethod": "bank_transfer", "bankDetails": { … } }
 ```
 Rejected if `amount < deliveryWithdrawalLimit` or `amount > pocketBalance`.
-→ 201, `data: { withdrawal }`
+→ 201, `data: { withdrawal }`. Without `bankDetails` in the body, the rider's bank fields are used and their chosen payout method (below) is added as `bankDetails.payoutMethod`.
+
+### Payout methods
+The admin defines how riders can be paid (e.g. "Bank transfer", "UPI") and which fields each needs. This is **in addition to** `PATCH /profile/bank-details`, which keeps working.
+
+`GET /food/delivery/payout-methods` → `{ methods: [ { id, name, isDefault, fields: [ { key, label, type: "text"|"number"|"email", required, placeholder } ] } ] }`, active only, default first.
+
+`GET /food/delivery/payout-details` → `{ selected: null | { methodId, methodName, methodIsActive, values: { [field key]: "…" }, updatedAt }, methods: [ … ] }`. `methodIsActive: false` means the admin switched it off; ask the rider to choose another.
+
+`PUT /food/delivery/payout-details`
+```json
+{ "methodId": "…", "values": { "upi_id": "name@bank" } }
+```
+Values are keyed by field `key`, sent as strings. Every problem (missing required field, not a number, not an email) comes back in one 400 message. → 200, same shape as GET.
 
 ### `POST /food/delivery/wallet/deposit/order`
 Rider hands collected cash back to the company. `{ "amount": 1200 }` — must be ≥ ₹1, ≤ ₹5,00,000, and ≤ `cashInHand`.
@@ -527,6 +540,14 @@ Errors to handle: `Emergency reassignment is available only for an accepted orde
 Same as the user app: `POST /fcm-tokens/mobile/save`, `DELETE /fcm-tokens/remove`, or pass `fcmToken` + `platform: "mobile"` at OTP verify.
 
 Inbox: `GET /food/notifications/inbox`, `PATCH /food/notifications/:id/read`, `DELETE /food/notifications/:id`, `DELETE /food/notifications/inbox/all`.
+
+The admin can switch some push events off (Notification Channels): order status, cancellations, refunds, rider progress, chat and wallet messages. New-order offers to riders are never switched off.
+
+### App settings — force update (no auth)
+`GET /food/public/app-settings` → `{ apps: { customer, restaurant, rider: { android: { minVersion, latestVersion, storeUrl }, ios: { … } } }, login: { …, rider: { otpLogin: true } }, updatedAt }`.
+On start, compare the app's version with `apps.rider.<platform>`: older than `minVersion` → block and open `storeUrl`; older than `latestVersion` → offer the update. Empty string = not set. Compare dotted versions part by part as numbers.
+
+`GET /food/public/social-media` → `{ links: [ { platform, url } ] }`.
 
 ---
 

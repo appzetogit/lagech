@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
-import { ArrowLeft, Loader2, Pencil, Plus, Shield, Trash2 } from "lucide-react"
+import { ArrowLeft, Loader2, Pencil, Plus, Shield, Trash2 } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminAPI } from "@food/api"
 import SidebarAccessPicker, { permissionsForPages } from "./SidebarAccessPicker"

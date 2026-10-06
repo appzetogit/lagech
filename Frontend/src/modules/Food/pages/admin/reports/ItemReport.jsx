@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { UtensilsCrossed } from "lucide-react"
+import { UtensilsCrossed } from "@food/components/admin/theme/icons"
 import { adminAPI } from "@food/api"
 import ReportShell, { rupees } from "./ReportShell"
 

@@ -1,5 +1,6 @@
 import express from 'express';
 import * as promotionsController from '../modules/food/promotions/promotions.controller.js';
+import * as campaignsController from '../modules/food/campaigns/campaigns.controller.js';
 import authRoutes from '../core/auth/auth.routes.js';
 import deliveryRoutes from '../modules/food/delivery/routes/delivery.routes.js';
 import restaurantRoutes from '../modules/food/restaurant/routes/restaurant.routes.js';
@@ -22,9 +23,11 @@ import searchRoutes from '../modules/food/search/routes/search.routes.js';
 import chatRoutes from '../modules/food/chat/routes/chat.routes.js';
 import { requireAdminPermission } from '../core/roles/adminPermission.middleware.js';
 import { getCashbackSettingsPublicController } from '../modules/food/user/controllers/cashback.controller.js';
+import { subscribeNewsletterController } from '../modules/food/user/controllers/customerRewards.controller.js';
 import { config } from '../config/env.js';
 import { getRateLimitSummary } from '../middleware/rateLimit.js';
 import { getRestaurantReviews } from '../modules/food/restaurant/services/restaurantReviews.service.js';
+import systemExtrasPublicRoutes from '../modules/food/admin/routes/systemExtrasPublic.routes.js';
 
 const router = express.Router();
 
@@ -67,9 +70,13 @@ router.get('/v1/food/public/restaurants/:restaurantId/reviews', async (req, res,
         next(error);
     }
 });
+// Social media links, app versions and sign-in options, landing page, page meta.
+router.use('/v1/food/public', systemExtrasPublicRoutes);
 router.get('/v1/food/public/advertisements', promotionsController.listRunningAds);
 router.get('/v1/food/public/reels', promotionsController.listShowingReels);
 router.post('/v1/food/public/reels/:id/:event', promotionsController.countReelEvent);
+router.post('/v1/food/public/newsletter/subscribe', subscribeNewsletterController);
+router.get('/v1/food/public/campaigns', campaignsController.listRunning);
 
 router.use('/v1/food/admin', authMiddleware, requireRoles('ADMIN'), restaurantAdminRoutes);
 router.use('/v1/food/user', authMiddleware, requireRoles('USER'), userRoutes);

@@ -1,158 +1,130 @@
-import { useState, useMemo } from "react"
-import { Search, Download, ChevronDown, Mail, Calendar, Settings } from "lucide-react"
-import { emptySubscribedEmails } from "@food/utils/adminFallbackData"
+import { useEffect, useState } from "react"
+import { Download, Loader2, Mail, Search, Trash2 } from "@food/components/admin/theme/icons"
+import { toast } from "sonner"
+import {
+  customerExtrasAPI,
+  dataOf,
+  errorMessage,
+  formatDateTime,
+} from "@food/api/adminCustomerExtras"
+import { PageHeader, Pager, inputClass } from "./wallet/shared"
 
+/** Newsletter subscribers (old panel: Subscribed Mail List). */
 export default function SubscribedMailList() {
-  const [searchQuery, setSearchQuery] = useState("")
-  const [emails, setEmails] = useState(emptySubscribedEmails)
-  const [filters, setFilters] = useState({
-    subscriptionDate: "",
-    sortBy: "",
-    chooseFirst: "",
-  })
+  const [search, setSearch] = useState("")
+  const [page, setPage] = useState(1)
+  const [reload, setReload] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [exporting, setExporting] = useState(false)
+  const [data, setData] = useState({ subscribers: [], pagination: null })
 
-  const filteredEmails = useMemo(() => {
-    if (!searchQuery.trim()) {
-      return emails
+  useEffect(() => {
+    let cancelled = false
+    const timer = setTimeout(async () => {
+      try {
+        setLoading(true)
+        const res = await customerExtrasAPI.getSubscribers({ search: search.trim() || undefined, page, limit: 25 })
+        if (!cancelled) setData(dataOf(res))
+      } catch (err) {
+        if (!cancelled) {
+          toast.error(errorMessage(err, "Could not load the subscribers"))
+          setData({ subscribers: [], pagination: null })
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }, 250)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
     }
-    
-    const query = searchQuery.toLowerCase().trim()
-    return emails.filter(email =>
-      email.email.toLowerCase().includes(query)
-    )
-  }, [emails, searchQuery])
+  }, [search, page, reload])
 
-  const handleFilterChange = (field, value) => {
-    setFilters(prev => ({ ...prev, [field]: value }))
+  const exportCsv = async () => {
+    try {
+      setExporting(true)
+      const res = await customerExtrasAPI.exportSubscribers({ search: search.trim() || undefined })
+      const url = URL.createObjectURL(new Blob([res.data], { type: "text/csv;charset=utf-8" }))
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `subscribed-mail-list-${new Date().toISOString().slice(0, 10)}.csv`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch {
+      toast.error("Could not export the list")
+    } finally {
+      setExporting(false)
+    }
   }
 
+  const remove = async (s) => {
+    if (!window.confirm(`Remove ${s.email} from the mail list?`)) return
+    try {
+      await customerExtrasAPI.deleteSubscriber(s.id)
+      toast.success("Subscriber removed")
+      setReload((n) => n + 1)
+    } catch (err) {
+      toast.error(errorMessage(err, "Could not remove the subscriber"))
+    }
+  }
+
+  const rows = data.subscribers || []
+  const total = data.pagination?.total ?? rows.length
+  const offset = ((data.pagination?.page || 1) - 1) * (data.pagination?.limit || 25)
+
   return (
-    <div className="p-4 lg:p-6 bg-slate-50 min-h-screen">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
-          <div className="flex items-center gap-3 mb-6">
-            <Mail className="w-5 h-5 text-blue-600" />
-            <h1 className="text-2xl font-bold text-slate-900">Subscribed Mail List</h1>
-          </div>
+    <div className="min-h-screen bg-slate-50 p-4 lg:p-6">
+      <div className="mx-auto max-w-5xl space-y-6">
+        <PageHeader icon={Mail} title="Subscribed Mail List" description="Email addresses that signed up for the newsletter." />
 
-          {/* Filter Section */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">
-                Subscription Date
-              </label>
-              <div className="relative">
-                <input
-                  type="date"
-                  value={filters.subscriptionDate}
-                  onChange={(e) => handleFilterChange("subscriptionDate", e.target.value)}
-                  className="w-full px-4 py-2.5 pr-10 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
-                />
-                <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-6 py-4">
+            <h2 className="text-base font-semibold text-slate-900">Subscribers <span className="ml-1 text-sm font-normal text-slate-500">{total}</span></h2>
+            <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+              <div className="relative min-w-0 flex-1 sm:w-64">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input className={`${inputClass} pl-9`} placeholder="Search by email" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1) }} />
               </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">
-                Sort By
-              </label>
-              <select
-                value={filters.sortBy}
-                onChange={(e) => handleFilterChange("sortBy", e.target.value)}
-                className="w-full px-4 py-2.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
-              >
-                <option value="">Select Mail Sorting Order</option>
-                <option value="email-asc">Email (A-Z)</option>
-                <option value="email-desc">Email (Z-A)</option>
-                <option value="date-asc">Date (Oldest First)</option>
-                <option value="date-desc">Date (Newest First)</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">
-                Choose First
-              </label>
-              <input
-                type="number"
-                value={filters.chooseFirst}
-                onChange={(e) => handleFilterChange("chooseFirst", e.target.value)}
-                placeholder="Ex: 100"
-                className="w-full px-4 py-2.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
-              />
-            </div>
-
-            <div className="flex items-end">
-              <button className="px-6 py-2.5 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-all">
-                Filter
+              <button type="button" onClick={exportCsv} disabled={exporting || !total} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Export CSV
               </button>
             </div>
           </div>
-        </div>
-
-        {/* Mail List Section */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 relative">
-          {/* Settings Icon */}
-          <button className="absolute top-6 right-6 p-2 rounded-lg bg-slate-100 hover:bg-slate-200 transition-colors">
-            <Settings className="w-5 h-5 text-slate-600" />
-          </button>
-
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
-            <div className="flex items-center gap-2">
-              <h2 className="text-xl font-bold text-slate-900">Mail List</h2>
-              <span className="px-3 py-1 rounded-full text-sm font-semibold bg-slate-100 text-slate-700">
-                {filteredEmails.length}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <div className="relative flex-1 sm:flex-initial min-w-[200px]">
-                <input
-                  type="text"
-                  placeholder="Ex: search email"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 pr-4 py-2.5 w-full text-sm rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400"
-                />
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              </div>
-
-              <button className="px-4 py-2.5 text-sm font-medium rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-2 transition-all">
-                <Download className="w-4 h-4" />
-                <span>Export</span>
-                <ChevronDown className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-
-          {/* Table */}
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-slate-50 border-b border-slate-200">
-                <tr>
-                  <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">SI</th>
-                  <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">Email</th>
-                  <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">Created At</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-slate-100">
-                {filteredEmails.map((email) => (
-                  <tr key={email.sl} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="text-sm font-medium text-slate-700">{email.sl}</span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="text-sm font-medium text-slate-900">{email.email}</span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="text-sm text-slate-700">{email.createdAt}</span>
-                    </td>
+          {loading ? (
+            <div className="py-16 text-center"><Loader2 className="mx-auto h-6 w-6 animate-spin text-slate-400" /></div>
+          ) : !rows.length ? (
+            <p className="py-16 text-center text-sm text-slate-500">{search.trim() ? "No subscriber matches that search." : "No one has subscribed to the newsletter yet."}</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 text-left text-xs font-semibold text-slate-600">
+                  <tr>
+                    <th className="px-6 py-3">#</th>
+                    <th className="px-6 py-3">Email</th>
+                    <th className="px-6 py-3">Subscribed on</th>
+                    <th className="px-6 py-3 text-right">Action</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {rows.map((s, i) => (
+                    <tr key={s.id}>
+                      <td className="px-6 py-3 text-slate-500">{offset + i + 1}</td>
+                      <td className="px-6 py-3 font-medium text-slate-800">{s.email}</td>
+                      <td className="whitespace-nowrap px-6 py-3 text-slate-600">{formatDateTime(s.createdAt)}</td>
+                      <td className="px-6 py-3 text-right">
+                        <button type="button" onClick={() => remove(s)} className="rounded-lg border border-slate-300 p-1.5 text-rose-600 hover:bg-rose-50" aria-label={`Remove ${s.email}`}>
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <Pager pagination={data.pagination} onPage={setPage} />
         </div>
       </div>
     </div>

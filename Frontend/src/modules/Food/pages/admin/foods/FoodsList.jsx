@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useCallback } from "react"
 import { useSearchParams } from "react-router-dom"
-import { Search, Trash2, Loader2, Eye, Pencil, Plus, Save, ChevronDown, ChevronLeft, ChevronRight, FileUp, Download, X, Upload } from "lucide-react"
+import { Search, Trash2, Loader2, Eye, Pencil, Plus, Save, ChevronDown, ChevronLeft, ChevronRight, FileUp, Download, X, Upload } from "@food/components/admin/theme/icons"
 import { adminAPI, uploadAPI } from "@food/api"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@food/components/ui/dialog"
@@ -39,6 +39,8 @@ const createFoodForm = () => ({
   isAvailable: true,
   preparationTime: "",
   tags: "",
+  nutrition: "",
+  allergens: "",
 })
 
 const createVariantDraft = (variant = {}) => ({
@@ -214,6 +216,8 @@ export default function FoodsList() {
             description: f.description || "",
             preparationTime: f.preparationTime || "",
             tags: Array.isArray(f.tags) ? f.tags : [],
+            nutrition: Array.isArray(f.nutrition) ? f.nutrition : [],
+            allergens: Array.isArray(f.allergens) ? f.allergens : [],
             isAvailable: f.isAvailable !== false,
             createdAt: f.createdAt,
             updatedAt: f.updatedAt,
@@ -251,6 +255,40 @@ export default function FoodsList() {
 
   const [searchParams] = useSearchParams()
   const productIdFromUrl = searchParams.get("productId")
+  // ?editId=...&restaurantId=...&name=... opens that dish's edit form (the
+  // food gallery links here). The dish may not be on the current page, so it
+  // is fetched by its restaurant and name when it is not.
+  const editIdFromUrl = searchParams.get("editId")
+  const [editOpenedFor, setEditOpenedFor] = useState("")
+  useEffect(() => {
+    if (!editIdFromUrl || editOpenedFor === editIdFromUrl || loading) return
+    setEditOpenedFor(editIdFromUrl)
+    const local = foods.find((f) => f.id === editIdFromUrl || f._id === editIdFromUrl)
+    if (local) {
+      openEditFoodModal(local)
+      return
+    }
+    adminAPI
+      .getFoods({
+        restaurantId: searchParams.get("restaurantId") || undefined,
+        search: searchParams.get("name") || undefined,
+        limit: 100,
+      })
+      .then((res) => {
+        const raw = (res?.data?.data?.foods || []).find((f) => String(f.id || f._id) === editIdFromUrl)
+        if (!raw) {
+          toast.error("That dish could not be found")
+          return
+        }
+        openEditFoodModal({
+          ...raw,
+          id: String(raw.id || raw._id),
+          _id: raw._id || raw.id,
+          restaurantId: getEntityId(raw.restaurantId || raw.restaurant?._id || raw.restaurant),
+        })
+      })
+      .catch(() => toast.error("That dish could not be loaded"))
+  }, [editIdFromUrl, foods, loading])
 
   useEffect(() => {
     if (productIdFromUrl && foods.length > 0) {
@@ -383,6 +421,8 @@ export default function FoodsList() {
       isAvailable: food.isAvailable !== false,
       preparationTime: String(food.preparationTime || ""),
       tags: Array.isArray(food.tags) ? food.tags.join(", ") : "",
+      nutrition: Array.isArray(food.nutrition) ? food.nutrition.join(", ") : "",
+      allergens: Array.isArray(food.allergens) ? food.allergens.join(", ") : "",
     })
     setSelectedImageFile(null)
     setImagePreviewUrl(String(food.image || ""))
@@ -559,6 +599,8 @@ export default function FoodsList() {
         isAvailable: foodForm.isAvailable !== false,
         preparationTime: String(foodForm.preparationTime || "").trim(),
         tags: String(foodForm.tags || ""),
+        nutrition: String(foodForm.nutrition || ""),
+        allergens: String(foodForm.allergens || ""),
       }
 
       if (foodFormMode === "edit") {
@@ -1361,6 +1403,28 @@ export default function FoodsList() {
                 className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm bg-white"
               />
               <p className="mt-1 text-xs text-slate-500">Separate with commas. Customers searching any of these words find this dish.</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Nutrition</label>
+                <input
+                  value={foodForm.nutrition}
+                  onChange={(e) => setFoodForm((prev) => ({ ...prev, nutrition: e.target.value }))}
+                  placeholder="e.g. Calories 250 kcal, High protein"
+                  className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm bg-white"
+                />
+                <p className="mt-1 text-xs text-slate-500">Separate with commas. Shown to customers on the dish.</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Allergens</label>
+                <input
+                  value={foodForm.allergens}
+                  onChange={(e) => setFoodForm((prev) => ({ ...prev, allergens: e.target.value }))}
+                  placeholder="e.g. Peanuts, Gluten, Dairy"
+                  className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm bg-white"
+                />
+                <p className="mt-1 text-xs text-slate-500">Separate with commas. Shown to customers on the dish.</p>
+              </div>
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>

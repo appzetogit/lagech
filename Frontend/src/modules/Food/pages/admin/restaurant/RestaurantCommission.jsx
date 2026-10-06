@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from "react"
 import { 
   Search, Plus, Edit, Trash2, ArrowUpDown, 
   DollarSign, Percent, Loader2, X, Building2, IndianRupee
-} from "lucide-react"
+} from "@food/components/admin/theme/icons"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { adminAPI } from "@food/api"

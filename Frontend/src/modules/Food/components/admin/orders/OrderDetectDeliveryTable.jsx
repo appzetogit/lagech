@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react"
-import { Eye, Printer, ArrowUpDown, Phone, User } from "lucide-react"
+import { Eye, Printer, ArrowUpDown, Phone, User } from "@food/components/admin/theme/icons"
 
 const getStatusColor = (status) => {
   const colors = {

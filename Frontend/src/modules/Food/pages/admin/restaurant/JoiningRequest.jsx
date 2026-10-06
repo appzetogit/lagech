@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef } from "react"
 import { 
   Search, Filter, Eye, Check, X, UtensilsCrossed, ArrowUpDown, Loader2,
   FileText, Image as ImageIcon, ExternalLink, CreditCard, Calendar, Star, Building2, User, Phone, Mail, MapPin, Clock
-} from "lucide-react"
+} from "@food/components/admin/theme/icons"
 import { adminAPI, restaurantAPI } from "@food/api"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}

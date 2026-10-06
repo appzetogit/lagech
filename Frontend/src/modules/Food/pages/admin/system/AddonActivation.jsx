@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { ChevronDown, Settings } from "lucide-react"
+import { ChevronDown, Settings } from "@food/components/admin/theme/icons"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}

@@ -4,8 +4,8 @@
  * used to finding them.
  *
  * Only pages that actually work are listed. Features the old panel had that
- * this one does not yet (bulk import/export, disbursements, expenses, collect
- * cash, withdraw methods, advertisements, reels) get their entry when they are
+ * this one does not yet (expenses, collect
+ * cash, withdraw methods) get their entry when they are
  * built -- a link to a page that loads and saves nothing is worse than no link.
  * Pages the old panel never had (live tracking, duty log, subscriptions, ...)
  * sit in the nearest old section rather than being dropped.
@@ -42,6 +42,7 @@ export const adminSidebarMenu = [
         icon: "FileText",
         subItems: [
           { label: "All", path: "/admin/food/orders/all" },
+          { label: "Scheduled", path: "/admin/food/orders/scheduled" },
           { label: "Pending", path: "/admin/food/orders/pending", badge: "orders" },
           { label: "Processing", path: "/admin/food/orders/processing" },
           { label: "Order On The Way", path: "/admin/food/orders/food-on-the-way" },
@@ -74,6 +75,15 @@ export const adminSidebarMenu = [
     type: "section",
     label: "PROMOTION MANAGEMENT",
     items: [
+      {
+        type: "expandable",
+        label: "Campaigns",
+        icon: "Layers",
+        subItems: [
+          { label: "Basic Campaign", path: "/admin/food/campaigns/basic" },
+          { label: "Food Campaign", path: "/admin/food/campaigns/food" },
+        ],
+      },
       { type: "link", label: "Banners", path: "/admin/food/hero-banner-management", icon: "Image" },
       { type: "link", label: "Other Banners", path: "/admin/food/promotional-banner", icon: "Megaphone" },
       { type: "link", label: "Advertisements", path: "/admin/food/advertisements", icon: "Megaphone", badge: "pendingAds" },
@@ -95,13 +105,20 @@ export const adminSidebarMenu = [
         subItems: [
           { label: "Category", path: "/admin/food/categories" },
           { label: "Sub Category", path: "/admin/food/categories/sub" },
+          { label: "Bulk Import", path: "/admin/food/categories/bulk-import" },
+          { label: "Bulk Export", path: "/admin/food/categories/bulk-export" },
         ],
       },
       {
         type: "expandable",
         label: "Addons",
         icon: "PlusCircle",
-        subItems: [{ label: "List", path: "/admin/food/addons" }],
+        subItems: [
+          { label: "List", path: "/admin/food/addons" },
+          { label: "Addon Category", path: "/admin/food/addons/categories" },
+          { label: "Bulk Import", path: "/admin/food/addons/bulk-import" },
+          { label: "Bulk Export", path: "/admin/food/addons/bulk-export" },
+        ],
       },
       {
         type: "expandable",
@@ -111,6 +128,8 @@ export const adminSidebarMenu = [
         subItems: [
           { label: "List", path: "/admin/food/foods" },
           { label: "New Food Request", path: "/admin/food/food-approval", badge: "foodApprovals" },
+          { label: "Review", path: "/admin/food/foods/reviews" },
+          { label: "Food Gallery", path: "/admin/food/foods/gallery" },
         ],
       },
     ],
@@ -128,6 +147,9 @@ export const adminSidebarMenu = [
         badge: "restaurants",
       },
       { type: "link", label: "Add New Restaurant", path: "/admin/food/restaurants/add", icon: "PlusCircle" },
+      { type: "link", label: "Recommended Restaurants", path: "/admin/food/restaurants/recommended", icon: "Flame" },
+      { type: "link", label: "Bulk Import", path: "/admin/food/restaurants/bulk-import", icon: "Upload" },
+      { type: "link", label: "Bulk Export", path: "/admin/food/restaurants/bulk-export", icon: "Download" },
       {
         type: "expandable",
         label: "Restaurants",
@@ -166,6 +188,8 @@ export const adminSidebarMenu = [
     type: "section",
     label: "DELIVERYMAN SECTION",
     items: [
+      { type: "link", label: "Vehicles Category", path: "/admin/food/delivery-partners/vehicle-categories", icon: "Car" },
+      { type: "link", label: "Add Delivery Man", path: "/admin/food/delivery-partners/add", icon: "UserPlus" },
       {
         type: "link",
         label: "New Delivery Man",
@@ -230,7 +254,25 @@ export const adminSidebarMenu = [
     type: "section",
     label: "CUSTOMER SECTION",
     items: [
+      { type: "link", label: "User Overview", path: "/admin/food/user-overview", icon: "LayoutDashboard" },
       { type: "link", label: "Customers", path: "/admin/food/customers", icon: "Users" },
+      {
+        type: "expandable",
+        label: "Customer Wallet",
+        icon: "Wallet",
+        subItems: [
+          { label: "Add Fund", path: "/admin/food/wallet/add-fund" },
+          { label: "Report", path: "/admin/food/wallet/report" },
+          { label: "Bonus", path: "/admin/food/wallet/bonus" },
+        ],
+      },
+      {
+        type: "expandable",
+        label: "Customer Loyalty Point",
+        icon: "Award",
+        subItems: [{ label: "Report", path: "/admin/food/loyalty-point/report" }],
+      },
+      { type: "link", label: "Subscribed Mail List", path: "/admin/food/subscribed-mail-list", icon: "Mail" },
       { type: "link", label: "Live Chat", path: "/admin/food/chattings", icon: "MessagesSquare", badge: "liveChat" },
       {
         type: "link",
@@ -278,7 +320,12 @@ export const adminSidebarMenu = [
         icon: "Wallet",
         badge: "deliveryWithdrawals",
       },
+      { type: "link", label: "Delivery Man Disbursement", path: "/admin/food/deliveryman-disbursements", icon: "Wallet" },
+      { type: "link", label: "Delivery Man Payments", path: "/admin/food/deliveryman-payments", icon: "Send" },
       { type: "link", label: "Balance Sheet", path: "/admin/food/balance-sheet", icon: "Wallet" },
+      // The old panel's "Store Payments": payments made to restaurants by hand.
+      { type: "link", label: "Restaurant Payments", path: "/admin/food/restaurant-payments", icon: "CreditCard" },
+      { type: "link", label: "Withdraw Method", path: "/admin/food/withdraw-method", icon: "Wallet" },
     ],
   },
   {
@@ -289,9 +336,18 @@ export const adminSidebarMenu = [
       { type: "link", label: "Order Report", path: "/admin/food/order-report/regular", icon: "FileText" },
       { type: "link", label: "Restaurant Wise Report", path: "/admin/food/restaurant-report", icon: "FileText" },
       { type: "link", label: "Admin Earning Report", path: "/admin/food/admin-earning-report", icon: "IndianRupee" },
+      {
+        type: "link",
+        label: "Deliveryman Earning Report",
+        path: "/admin/food/deliveryman-earning-report",
+        icon: "IndianRupee",
+      },
       { type: "link", label: "Expense Report", path: "/admin/food/expense-report", icon: "Receipt" },
       { type: "link", label: "Item Report", path: "/admin/food/item-report", icon: "Utensils" },
       { type: "link", label: "Tax Report", path: "/admin/food/tax-report", icon: "Receipt" },
+      { type: "link", label: "Restaurant Earning Report", path: "/admin/food/restaurant-earning-report", icon: "IndianRupee" },
+      { type: "link", label: "Disbursement Report", path: "/admin/food/disbursement-report/restaurants", icon: "PiggyBank" },
+      { type: "link", label: "Restaurant VAT Report", path: "/admin/food/restaurant-vat-report", icon: "Receipt" },
       {
         type: "link",
         label: "Customer Feedback Report",
@@ -324,6 +380,20 @@ export const adminSidebarMenu = [
   },
   {
     type: "section",
+    label: "SYSTEM SETTINGS",
+    items: [
+      { type: "link", label: "App Settings", path: "/admin/food/app-web-settings", icon: "Phone" },
+      { type: "link", label: "Login Setup", path: "/admin/food/login-setup", icon: "LogIn" },
+      { type: "link", label: "Notification Channels", path: "/admin/food/notification-channels", icon: "Bell" },
+      { type: "link", label: "Email Templates", path: "/admin/food/email-template", icon: "Mail" },
+      { type: "link", label: "Landing Page", path: "/admin/food/landing-page-settings/react", icon: "Globe" },
+      { type: "link", label: "Website", path: "/admin/food/react-site", icon: "Globe" },
+      { type: "link", label: "Page Meta Data", path: "/admin/food/page-meta-data", icon: "Globe" },
+      { type: "link", label: "Gallery", path: "/admin/food/gallery", icon: "Image" },
+    ],
+  },
+  {
+    type: "section",
     label: "PAGES & SOCIAL MEDIA",
     items: [
       {
@@ -340,6 +410,7 @@ export const adminSidebarMenu = [
           { label: "Support", path: "/admin/food/pages-social-media/support" },
         ],
       },
+      { type: "link", label: "Social Media", path: "/admin/food/pages-social-media/social-media", icon: "Globe" },
     ],
   },
 ];

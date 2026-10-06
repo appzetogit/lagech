@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Info } from "lucide-react"
+import { Info } from "@food/components/admin/theme/icons"
 import mobileImage1 from "@food/assets/Transaction-report-icons/mobile_image1.png"
 import mobileImage2 from "@food/assets/Transaction-report-icons/mobile_image2.png"
 

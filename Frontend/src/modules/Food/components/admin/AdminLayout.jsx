@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, Suspense } from "react"
+import "./theme/admin-theme.css"
 import { Outlet, useLocation } from "react-router-dom"
 import { useFitTablesToViewport } from "./useFitTablesToViewport"
 import AdminSidebar from "./AdminSidebar"
@@ -115,7 +116,7 @@ export default function AdminLayout() {
   }, [location.pathname]);
 
   return (
-    <div className="h-screen bg-neutral-200 flex overflow-hidden">
+    <div className="admin-theme h-screen bg-[#FCFCFC] flex overflow-hidden">
       {/* Mobile Overlay */}
       {sidebarOpen && (
         <div
@@ -134,7 +135,7 @@ export default function AdminLayout() {
       {/* Main Content Area */}
       <div className={`
         flex-1 flex min-h-0 flex-col transition-all duration-300 ease-in-out min-w-0
-        ${isSidebarCollapsed ? 'lg:ml-20' : 'lg:ml-80'}
+        ${isSidebarCollapsed ? 'lg:ml-20' : 'lg:ml-[260px]'}
       `}>
         {/* Top Navbar */}
         <AdminNavbar onMenuClick={() => setSidebarOpen(!sidebarOpen)} />
@@ -149,7 +150,7 @@ export default function AdminLayout() {
         {/* Page Content */}
         <main
           ref={mainContentRef}
-          className="flex-1 min-h-0 w-full max-w-full overflow-x-hidden overflow-y-auto bg-neutral-100"
+          className="flex-1 min-h-0 w-full max-w-full overflow-x-hidden overflow-y-auto bg-[#FCFCFC]"
         >
           {/*
             The router lazy-loads every admin route, and its Suspense sits

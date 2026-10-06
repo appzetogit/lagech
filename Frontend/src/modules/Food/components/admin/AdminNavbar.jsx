@@ -19,7 +19,7 @@ import {
   PlusCircle,
   Bell,
   BellOff,
-} from "lucide-react";
+} from "@food/components/admin/theme/icons";
 import {
   Dialog,
   DialogContent,
@@ -267,7 +267,7 @@ export default function AdminNavbar({ onMenuClick }) {
 
   return (
     <>
-      <header className="sticky top-0 z-50 bg-white border-b border-neutral-200 shadow-sm">
+      <header className="sticky top-0 z-50 bg-white shadow-[0_4px_10px_rgba(0,0,0,0.05)]">
         <div className="flex items-center justify-between px-6 py-3">
           {/* Left: Logo and Mobile Menu */}
           <div className="flex items-center gap-3">
@@ -278,8 +278,8 @@ export default function AdminNavbar({ onMenuClick }) {
             >
               <Menu className="w-5 h-5" />
             </button>
-            {/* Logo */}
-            <div className="flex items-center gap-2">
+            {/* Logo: only while the sidebar (which carries it) is hidden */}
+            <div className="flex items-center gap-2 lg:hidden">
               <div className="w-24 h-12 rounded-lg bg-white flex items-center justify-center ring-neutral-200">
                 {businessSettings?.logo?.url ? (
                   <img

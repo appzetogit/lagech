@@ -22,6 +22,7 @@ import { importZones } from './steps/zones.mjs';
 import { importCategories } from './steps/categories.mjs';
 import { importRestaurants } from './steps/restaurants.mjs';
 import { importFoods } from './steps/foods.mjs';
+import { importNutrition } from './steps/nutrition.mjs';
 import { importCustomers } from './steps/customers.mjs';
 import { importDeliveryPartners } from './steps/deliveryPartners.mjs';
 import { importOrders } from './steps/orders.mjs';
@@ -33,15 +34,20 @@ import { importBanners } from './steps/banners.mjs';
 import { importCancelReasons } from './steps/cancelReasons.mjs';
 import { importPromotions } from './steps/promotions.mjs';
 import { importFavorites } from './steps/favorites.mjs';
+import { importNewsletter } from './steps/newsletter.mjs';
+import { importWithdrawalMethods } from './steps/withdrawalMethods.mjs';
+import { importSocialMedia } from './steps/socialMedia.mjs';
 
 const STEPS = [
     ['zones', importZones],
     ['categories', importCategories],
     ['restaurants', importRestaurants],
     ['foods', importFoods],
+    ['nutrition', importNutrition],
     ['customers', importCustomers],
     ['riders', importDeliveryPartners],
     ['payment-details', importPaymentDetails],
+    ['withdrawal-methods', importWithdrawalMethods],
     ['orders', importOrders],
     ['balances', importBalances],
     ['ratings', importRatings],
@@ -49,6 +55,8 @@ const STEPS = [
     ['cancel-reasons', importCancelReasons],
     ['promotions', importPromotions],
     ['favorites', importFavorites],
+    ['newsletter', importNewsletter],
+    ['social-media', importSocialMedia],
     ['settings', importSettings],
 ];
 

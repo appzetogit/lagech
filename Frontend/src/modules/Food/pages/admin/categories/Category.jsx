@@ -15,7 +15,7 @@ import {
   Trash2,
   Upload,
   X,
-} from "lucide-react"
+} from "@food/components/admin/theme/icons"
 import { adminAPI, uploadAPI } from "@food/api"
 import { API_BASE_URL } from "@food/api/config"
 import { toast } from "sonner"

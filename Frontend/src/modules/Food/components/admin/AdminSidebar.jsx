@@ -1,4 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react"
+import { tioIconFor } from "./theme/tioIcons"
 import { Link, useLocation } from "react-router-dom"
 import {
   Search,
@@ -51,6 +52,10 @@ import {
   Star,
   Store,
   UserPlus,
+  Layers,
+  Flame,
+  Upload,
+  Download,
 } from "lucide-react"
 import { cn } from "@food/utils/utils"
 import { Input } from "@food/components/ui/input"
@@ -112,6 +117,10 @@ const iconMap = {
   Star,
   Store,
   UserPlus,
+  Layers,
+  Flame,
+  Upload,
+  Download,
   X,
 }
 
@@ -659,7 +668,6 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
     }
 
     if (item.type === "link") {
-      const Icon = iconMap[item.icon] || Utensils
       const displayLabel = getDisplayLabel(item)
       return (
         <Link
@@ -671,42 +679,36 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
             }
           }}
           className={cn(
-            "flex items-center gap-2.5 px-3 py-2 rounded-lg transition-all duration-300 ease-out menu-item-animate text-left",
-            isInSection ? "text-sm font-semibold" : "text-sm",
+            "flex items-center gap-3 px-3 py-2 rounded-[5px] transition-colors duration-200 menu-item-animate text-left text-sm font-normal",
             isActive(item.path)
-              ? "bg-white/10 text-white border border-white/15 font-semibold"
-              : "text-neutral-100 hover:bg-white/5 hover:text-white",
+              ? "bg-white/10 text-[#5AFFBA]"
+              : "text-[#E9F3FF] hover:text-[#5AFFBA]",
             isCollapsed && "justify-center px-2"
           )}
           style={{ animationDelay: `${index * 0.05}s` }}
           title={isCollapsed ? displayLabel : undefined}
         >
-          <Icon className={cn(
-            "shrink-0 transition-all duration-300 text-left",
-            isInSection ? "w-4 h-4" : "w-4 h-4",
-            isActive(item.path) ? "text-white scale-110" : "text-neutral-100"
-          )} />
+          <i className={`tio-${tioIconFor(item)} tio-nav-icon text-[#5AFFBA]`} aria-hidden="true" />
           {!isCollapsed && (
             <div className="flex-1 flex items-center justify-between overflow-hidden">
-              <span className={cn("text-left truncate", isInSection ? "font-semibold" : "font-medium")}>
+              <span className="text-left truncate">
                 {displayLabel}
               </span>
               {getBadgeCount(item) > 0 && (
-                <span className="shrink-0 bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full ml-1 min-w-[18px] text-center">
+                <span className="shrink-0 bg-[#5AFFBA]/15 text-[#5AFFBA] ring-1 ring-[#5AFFBA]/40 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ml-1 min-w-[18px] text-center">
                   {getBadgeCount(item) > 99 ? "99+" : getBadgeCount(item)}
                 </span>
               )}
             </div>
           )}
           {isCollapsed && getBadgeCount(item) > 0 && (
-            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-600 rounded-full border-2 border-teal-800" />
+            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-600 rounded-full border-2 border-[#005555]" />
           )}
         </Link>
       )
     }
 
     if (item.type === "expandable") {
-      const Icon = iconMap[item.icon] || Utensils
       const sectionKey = item.label.toLowerCase().replace(/\s+/g, "")
       const isExpanded = expandedSections[sectionKey] || false
 
@@ -722,9 +724,9 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
               title={item.label}
             >
               <div className="relative">
-                <Icon className="w-4 h-4 shrink-0 text-neutral-100 transition-transform duration-300" />
+                <i className={`tio-${tioIconFor(item)} tio-nav-icon text-[#5AFFBA]`} aria-hidden="true" />
                 {getBadgeCount(item) > 0 && (
-                  <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-600 rounded-full border-2 border-teal-800" />
+                  <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-600 rounded-full border-2 border-[#005555]" />
                 )}
               </div>
             </button>
@@ -737,25 +739,25 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
           <button
             onClick={() => toggleSection(sectionKey)}
             className={cn(
-              "w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg transition-all duration-300 ease-out text-sm font-medium text-left",
-              "text-white hover:bg-white/5"
+              "w-full flex items-center justify-between gap-2 px-3 py-2 rounded-[5px] transition-colors duration-200 text-sm font-normal text-left",
+              "text-[#E9F3FF] hover:text-[#5AFFBA]"
             )}
           >
             <div className="flex items-center gap-2.5 text-left flex-1 min-w-0">
-              <Icon className="w-4 h-4 shrink-0 text-neutral-100 transition-transform duration-300" />
-              <span className="font-medium text-left truncate">{item.label}</span>
+              <i className={`tio-${tioIconFor(item)} tio-nav-icon text-[#5AFFBA]`} aria-hidden="true" />
+              <span className="text-left truncate">{item.label}</span>
               {getBadgeCount(item) > 0 && (
-                <span className="shrink-0 bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full ml-1 min-w-[18px] text-center">
+                <span className="shrink-0 bg-[#5AFFBA]/15 text-[#5AFFBA] ring-1 ring-[#5AFFBA]/40 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ml-1 min-w-[18px] text-center">
                   {getBadgeCount(item) > 99 ? "99+" : getBadgeCount(item)}
                 </span>
               )}
             </div>
             <div className="transition-transform duration-300 shrink-0" style={{ transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)' }}>
-              <ChevronDown className="w-4 h-4 shrink-0 text-neutral-100" />
+              <ChevronDown className="w-4 h-4 shrink-0 text-[#E9F3FF]/70" />
             </div>
           </button>
           {isExpanded && item.subItems && (
-            <div className="ml-5 mt-1 space-y-1 border-teal-600/60 pl-3 submenu-animate overflow-hidden">
+            <div className="mt-1 space-y-0.5 pl-6 submenu-animate overflow-hidden">
               {item.subItems.map((subItem, subIndex) => {
                 const allSubPaths = item.subItems.map(si => si.path)
                 const isSubItemActive = isActive(subItem.path, allSubPaths)
@@ -773,27 +775,27 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
                       }
                     }}
                     className={cn(
-                      "w-full grid grid-cols-[8px_minmax(0,1fr)_auto] items-center gap-2 px-3 py-1.5 rounded-md transition-all duration-300 ease-out text-sm font-normal text-left",
+                      "w-full grid grid-cols-[8px_minmax(0,1fr)_auto] items-center gap-2.5 px-3 py-1.5 rounded-[5px] transition-colors duration-200 text-sm font-normal text-left",
                       isSubItemActive
-                        ? "bg-white/10 text-white font-semibold"
-                        : "text-neutral-100 hover:bg-white/5 hover:text-white"
+                        ? "bg-white/10 text-[#5AFFBA]"
+                        : "text-[#E9F3FF] hover:text-[#5AFFBA]"
                     )}
                     style={{ animationDelay: `${subIndex * 0.03}s` }}
                   >
                     <span className={cn(
                       "w-1.5 h-1.5 rounded-full shrink-0 transition-all duration-300",
-                      isSubItemActive ? "bg-white scale-125" : "bg-neutral-400"
+                      isSubItemActive ? "bg-[#5AFFBA]" : "bg-[#E9F3FF]/60"
                     )}></span>
                     <span
                       className={cn(
                         "block text-left text-[13px] leading-5",
-                        isSubItemActive ? "text-white" : "text-neutral-100"
+                        isSubItemActive ? "text-[#5AFFBA]" : "text-[#E9F3FF]"
                       )}
                     >
                       {String(displaySubLabel || subItem?.label || subItem?.path || "Menu item")}
                     </span>
                     {getBadgeCount(subItem) > 0 && (
-                      <span className="shrink-0 bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full ml-1 min-w-[18px] text-center">
+                      <span className="shrink-0 bg-[#5AFFBA]/15 text-[#5AFFBA] ring-1 ring-[#5AFFBA]/40 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ml-1 min-w-[18px] text-center">
                         {getBadgeCount(subItem) > 99 ? "99+" : getBadgeCount(subItem)}
                       </span>
                     )}
@@ -881,16 +883,16 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
       `}</style>
       <div
         className={cn(
-          "bg-teal-800 border-r border-teal-600/60 h-screen fixed left-0 top-0 z-50 flex flex-col overflow-hidden",
+          "bg-[#005555] h-screen fixed left-0 top-0 z-50 flex flex-col overflow-hidden",
           "transform transition-all duration-300 ease-in-out",
           "lg:translate-x-0",
           isOpen ? "translate-x-0" : "-translate-x-full",
-          isCollapsed ? "w-20" : "w-80"
+          isCollapsed ? "w-20" : "w-[260px]"
         )}
       >
         {/* Header with Logo and Brand */}
-        <div className="shrink-0 px-3 py-3 border-b border-teal-600/60 bg-teal-700 animate-[fadeIn_0.4s_ease-out]">
-          <div className="flex items-center justify-between mb-3">
+        <div className="shrink-0 bg-[#005555] animate-[fadeIn_0.4s_ease-out]">
+          <div className="flex items-center justify-between h-[60px] px-4 bg-white">
             {!isCollapsed && (
               <div className="flex items-center gap-2 animate-[slideIn_0.3s_ease-out]">
                 <div className="w-24 h-12 rounded-lg flex items-center justify-center shadow-black/20">
@@ -940,7 +942,7 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
             <div className="flex items-center gap-2">
               <button
                 onClick={toggleCollapse}
-                className="text-neutral-100 hover:text-white transition-all duration-200 hover:scale-110 p-1.5 rounded-lg hover:bg-white/5"
+                className="text-slate-400 hover:text-slate-700 transition-colors duration-200 p-1.5 rounded-md"
                 title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
               >
                 {isCollapsed ? (
@@ -951,7 +953,7 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
               </button>
               <button
                 onClick={onClose}
-                className="lg:hidden text-neutral-100 hover:text-white transition-all duration-200 hover:scale-110"
+                className="lg:hidden text-slate-400 hover:text-slate-700 transition-colors duration-200"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -959,25 +961,18 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
           </div>
 
           {/* Admin Panel Label */}
-          {!isCollapsed && (
-            <div className="mb-3 animate-[slideIn_0.4s_ease-out_0.1s_both]">
-              <h2 className="text-sm font-semibold text-neutral-100 uppercase tracking-wider text-left">
-                Admin Panel
-              </h2>
-            </div>
-          )}
 
           {/* Search Bar */}
           {!isCollapsed && (
-            <div className="relative animate-[slideIn_0.4s_ease-out_0.2s_both]">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-neutral-200 w-4 h-4 z-10 transition-colors duration-200" />
+            <div className="relative mx-[10px] mt-5 mb-1 animate-[slideIn_0.4s_ease-out_0.2s_both]">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#99A7BA] w-4 h-4 z-10" />
               <Input
                 type="text"
                 placeholder="Search Menu..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className={cn(
-                  "w-full pl-9 py-2 bg-teal-700 border border-teal-800 rounded-lg text-sm text-white placeholder:text-neutral-300 focus:outline-none focus:ring-2 focus:ring-white/40 focus:border-white/40 transition-all duration-200 text-left",
+                  "w-full h-11 pl-9 py-2 bg-[rgba(162,200,200,0.1)] border border-[#E7EAF3]/70 rounded-[5px] text-sm text-white placeholder:text-[#99A7BA] focus:outline-none focus:border-[#5AFFBA] transition-colors duration-200 text-left",
                   searchQuery ? "pr-9" : "pr-3"
                 )}
               />
@@ -1014,14 +1009,14 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
                   <div
                     key={sectionStableKey}
                     className={cn(
-                      index > 0 ? "mt-4 pt-4 border-t border-teal-600/60" : "",
+                      index > 0 ? "mt-5" : "",
                       "animate-[fadeIn_0.4s_ease-out]"
                     )}
                     style={{ animationDelay: `${index * 0.1}s` }}
                   >
                     {!isCollapsed && (
-                      <div className="px-3 py-2 mb-2">
-                        <span className="text-neutral-200 font-bold text-sm uppercase tracking-wider text-left">
+                      <div className="px-3 pb-2">
+                        <span className="text-[#99A7BA] font-semibold text-xs uppercase tracking-[0.5px] text-left">
                           {item.label}
                         </span>
                       </div>

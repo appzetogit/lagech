@@ -242,6 +242,8 @@ Unauthenticated calls to the same handler fall through to the public, approved-o
         "rejectionReason": "",
         "requestedAt": "…", "approvedAt": "…", "rejectedAt": null,
         "preparationTime": "20",
+        "nutrition": ["Calories 250 kcal", "High protein"],   // always an array, may be empty
+        "allergens": ["Peanuts", "Gluten"],                   // always an array, may be empty
         "createdAt": "…", "updatedAt": "…"
       }]
     }],
@@ -271,9 +273,12 @@ Bulk menu update. → `{ menu }`
   "isAvailable": true,
   "isRecommended": false,
   "preparationTime": "20",
+  "nutrition": ["Calories 250 kcal"],   // optional; array or comma-separated string
+  "allergens": "Peanuts, Gluten",       // optional; array or comma-separated string
   "categoryId": "…"          // or categoryName — resolved server-side
 }
 ```
+`nutrition` and `allergens` are free text, shown to customers on the dish. Each entry is trimmed and kept as typed (case included); repeats are dropped (ignoring case); at most 30 entries of 60 characters. Send `[]` to clear. Changing them does not send the dish back for approval.
 → 201, `{ food }` with **`approvalStatus: "pending"`**. New items are invisible to customers until an admin approves; admins get a push at creation. Surface the pending badge or partners will think the item is live.
 
 ### `PATCH /food/restaurant/foods/:id`
@@ -462,6 +467,22 @@ Rejected with a rupee-formatted message if `amount > netAvailable`, and the mess
 
 ### `GET /food/restaurant/withdrawals`
 → `data` = **a bare array** of withdrawals, newest first (not `{ withdrawals: [...] }`).
+Rows with `source: "admin_payment"` are payments the admin recorded (already `approved`); `source: "disbursement"` rows come from the daily payout run.
+
+### Payout methods
+The admin defines how restaurants can be paid (e.g. "Bank transfer", "UPI") and which fields each needs. These are **in addition to** the bank/UPI fields on the profile, which stay as they are.
+
+`GET /food/restaurant/payout-methods` → `{ methods: [ { id, name, isDefault, fields: [ { key, label, type: "text"|"number"|"email", required, placeholder } ] } ] }`, active only, default first.
+
+`GET /food/restaurant/payout-details` → `{ selected: null | { methodId, methodName, methodIsActive, values: { [field key]: "…" }, updatedAt }, methods: [ …as above… ] }`. If `methodIsActive` is false the admin switched that method off — ask the restaurant to choose another.
+
+`PUT /food/restaurant/payout-details`
+```json
+{ "methodId": "…", "values": { "account_number": "00123", "ifsc_code": "…" } }
+```
+Values are keyed by each field's `key` and sent as strings (a `number` field is digits, leading zeros kept). Missing required fields, non-numbers in a `number` field and bad emails come back as one 400 listing every problem. → 200, same shape as GET.
+
+The chosen method is copied onto each new withdrawal request (`bankDetails.payoutMethod = { methodId, methodName, fields: [ { key, label, value } ] }`) when the request carries no `bankDetails` of its own, and the daily payout run pays to it when the restaurant has no bank account or UPI id.
 
 ---
 
@@ -572,6 +593,27 @@ Dashboard NPS/feedback submission.
 
 ### Cancel / reject reasons
 `GET /food/public/cancel-reasons?userType=restaurant` → `{ reasons: [ { id, reason } ] }`, kept by the admin. Offer these when rejecting an order.
+
+### App settings — force update and sign-in options (no auth)
+`GET /food/public/app-settings` →
+```json
+{
+  "apps": {
+    "customer":   { "android": { "minVersion": "", "latestVersion": "", "storeUrl": "" }, "ios": { … } },
+    "restaurant": { "android": { … }, "ios": { … } },
+    "rider":      { "android": { … }, "ios": { … } }
+  },
+  "login": {
+    "customer":   { "otpLogin": true, "googleLogin": false, "appleLogin": false },
+    "restaurant": { "otpLogin": true, "emailPasswordLogin": false },
+    "rider":      { "otpLogin": true }
+  },
+  "updatedAt": "…"
+}
+```
+On start, compare the app's version with `apps.restaurant.<platform>`: older than `minVersion` → block and send the user to `storeUrl`; older than `latestVersion` → offer the update. An empty string means "not set" — do nothing. Versions are dotted numbers; compare each part numerically (`2.10.0` is newer than `2.9.9`). `login` options other than `otpLogin` are saved by the admin for the apps to read; the backend has no email/password sign-in for restaurants yet, so do not show it.
+
+`GET /food/public/social-media` → `{ links: [ { platform, url } ] }` (active only, in the admin's order).
 
 ---
 

@@ -59,6 +59,10 @@ const ADMIN_PERMISSION_PATH_MAP = [
   { prefix: "/food/admin/business-settings", section: "system_settings" },
   { prefix: "/food/admin/power-scanning", section: "system_settings" },
   { prefix: "/food/admin/notifications", section: "system_settings" },
+  { prefix: "/food/admin/email-templates", section: "system_settings" },
+  { prefix: "/food/admin/system-settings", section: "system_settings" },
+  { prefix: "/food/admin/gallery", section: "system_settings" },
+  { prefix: "/food/admin/social-media", section: "pages_social_media" },
   { prefix: "/food/admin/pages-social-media", section: "pages_social_media" },
 ];
 

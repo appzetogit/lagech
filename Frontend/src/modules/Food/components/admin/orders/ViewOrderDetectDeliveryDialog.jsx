@@ -1,4 +1,4 @@
-import { X, Clock, CheckCircle, XCircle, User, Phone, Package, MapPin } from "lucide-react"
+import { X, Clock, CheckCircle, XCircle, User, Phone, Package, MapPin } from "@food/components/admin/theme/icons"
 
 const getStatusColor = (status) => {
   const colors = {

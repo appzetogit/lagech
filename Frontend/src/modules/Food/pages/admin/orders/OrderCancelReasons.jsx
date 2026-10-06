@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { AlertTriangle, Loader2, Plus, Trash2 } from "lucide-react"
+import { AlertTriangle, Loader2, Plus, Trash2 } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminAPI } from "@food/api"
 

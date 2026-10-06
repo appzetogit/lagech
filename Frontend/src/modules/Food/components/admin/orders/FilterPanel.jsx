@@ -1,4 +1,4 @@
-import { X } from "lucide-react"
+import { X } from "@food/components/admin/theme/icons"
 
 export default function FilterPanel({
   isOpen,

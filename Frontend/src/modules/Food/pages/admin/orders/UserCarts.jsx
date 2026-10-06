@@ -10,7 +10,7 @@ import {
   Phone,
   Mail,
   Clock,
-} from "lucide-react"
+} from "@food/components/admin/theme/icons"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
 import { Button } from "@food/components/ui/button"
