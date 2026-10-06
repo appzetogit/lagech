@@ -606,3 +606,19 @@ Poll `/orders/available` as a fallback — the modal must not depend on the sock
 3. Deposit-verify uses **snake_case** Razorpay keys; the user app's order-verify uses camelCase. Easy to get wrong.
 4. `note` on a delivery order = delivery instruction. `cookingNote` = kitchen note.
 5. Drop OTP is customer-held and never in your responses — only the verify call.
+
+## Several deliveries at once — `GET /v1/food/delivery/orders/current`
+
+A rider may hold up to the admin's limit (Business Settings → Deliveryman → Maximum assigned order limit; default 2, read live — never hard-code it). The response carries:
+
+```json
+{ "activeOrder": { "...": "the most recently updated delivery, as before" },
+  "activeOrders": [ { "...": "every delivery the rider holds, newest first" } ],
+  "orderLimit": 2,
+  "canAcceptMore": false }
+```
+
+- Show a switcher when `activeOrders` has more than one; every status action already takes the order id.
+- Show new offers only while `canAcceptMore` is true (the server refuses an accept beyond the limit anyway, with a message to show).
+- Older apps that read only `activeOrder` keep working.
+
