@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Bike } from "lucide-react"
+import { Bike } from "@food/components/admin/theme/icons"
 import { adminRiderExtrasAPI } from "@food/api/adminRiderExtras"
 import ReportShell, { rupees } from "./ReportShell"
 

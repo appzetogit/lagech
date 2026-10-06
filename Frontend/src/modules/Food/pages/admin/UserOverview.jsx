@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
-import { Bike, Loader2, UserCog, Users } from "lucide-react"
+import { Bike, Loader2, UserCog, Users } from "@food/components/admin/theme/icons"
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { toast } from "sonner"
 import { customerExtrasAPI, dataOf, errorMessage } from "@food/api/adminCustomerExtras"

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Download, Loader2 } from "lucide-react"
+import { Download, Loader2 } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminAPI } from "@food/api"
 

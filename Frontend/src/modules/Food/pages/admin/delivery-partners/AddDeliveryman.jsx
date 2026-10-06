@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
-import { Loader2, Upload, UserPlus, X } from "lucide-react"
+import { Loader2, Upload, UserPlus, X } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminAPI, uploadAPI } from "@food/api"
 import { adminRiderExtrasAPI } from "@food/api/adminRiderExtras"

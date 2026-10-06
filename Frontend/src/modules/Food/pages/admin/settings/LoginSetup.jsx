@@ -1,4 +1,4 @@
-import { LogIn } from "lucide-react"
+import { LogIn } from "@food/components/admin/theme/icons"
 import { PageFrame, Card, Switch, SaveButton, Loading, setIn, formatDateTime, useSettingsArea } from "../system/SettingsUi"
 
 const APP_LABELS = { customer: "Customer app", restaurant: "Restaurant app", rider: "Rider app" }

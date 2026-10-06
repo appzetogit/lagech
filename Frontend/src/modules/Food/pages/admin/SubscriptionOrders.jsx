@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react"
-import { Package, Calendar, CheckCircle } from "lucide-react"
+import { Package, Calendar, CheckCircle } from "@food/components/admin/theme/icons"
 import { emptySubscriptionOrders } from "@food/utils/adminFallbackData"
 import OrdersTopbar from "@food/components/admin/orders/OrdersTopbar"
 import SubscriptionOrdersTable from "@food/components/admin/orders/SubscriptionOrdersTable"

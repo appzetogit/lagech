@@ -4,7 +4,7 @@ import { Button } from "@food/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@food/components/ui/card"
 import { Input } from "@food/components/ui/input"
 import { Label } from "@food/components/ui/label"
-import { Clock, Loader2, Save } from "lucide-react"
+import { Clock, Loader2, Save } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 
 const MIN_MINUTES = 1

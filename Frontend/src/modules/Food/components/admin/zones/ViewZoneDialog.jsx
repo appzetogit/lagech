@@ -1,4 +1,4 @@
-import { Eye, MapPin } from "lucide-react"
+import { Eye, MapPin } from "@food/components/admin/theme/icons"
 import {
   Dialog,
   DialogContent,

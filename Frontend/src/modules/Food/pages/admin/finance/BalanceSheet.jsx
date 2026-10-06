@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react"
 import {
   Loader2, Search, IndianRupee, AlertTriangle, CheckCircle2, Info, History, Landmark,
-} from "lucide-react"
+} from "@food/components/admin/theme/icons"
 import { Link } from "react-router-dom"
 import { toast } from "sonner"
 import { adminAPI } from "@food/api"

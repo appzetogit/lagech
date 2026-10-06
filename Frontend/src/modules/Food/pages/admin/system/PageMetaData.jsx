@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { FileSearch } from "lucide-react"
+import { FileSearch } from "@food/components/admin/theme/icons"
 import { PageFrame, Card, Field, ImageInput, SaveButton, Loading, inputClass, setIn, formatDateTime, useSettingsArea } from "./SettingsUi"
 
 /** SEO title, description, keywords and share image for each public page. */

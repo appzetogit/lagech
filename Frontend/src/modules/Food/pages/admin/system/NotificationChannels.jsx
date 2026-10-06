@@ -1,4 +1,4 @@
-import { BellRing } from "lucide-react"
+import { BellRing } from "@food/components/admin/theme/icons"
 import { PageFrame, Card, Switch, SaveButton, Loading, setIn, formatDateTime, useSettingsArea } from "./SettingsUi"
 
 const CHANNELS = [

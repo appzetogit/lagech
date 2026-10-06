@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Clock, Loader2, Radio, AlertTriangle } from "lucide-react"
+import { Clock, Loader2, Radio, AlertTriangle } from "@food/components/admin/theme/icons"
 import { adminAPI } from "@food/api"
 
 /**

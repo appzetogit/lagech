@@ -5,7 +5,7 @@ import { Input } from "@food/components/ui/input"
 import { Button } from "@food/components/ui/button"
 import { Label } from "@food/components/ui/label"
 import { getGoogleMapsApiKey } from "@food/utils/googleMapsApiKey"
-import { ArrowLeft, Loader2, Trash2, Upload } from "lucide-react"
+import { ArrowLeft, Loader2, Trash2, Upload } from "@food/components/admin/theme/icons"
 
 const debugError = (..._args) => {}
 

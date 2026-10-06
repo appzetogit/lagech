@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Loader2, Medal, RotateCcw, Settings } from "lucide-react"
+import { Loader2, Medal, RotateCcw, Settings } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import {
   customerExtrasAPI,

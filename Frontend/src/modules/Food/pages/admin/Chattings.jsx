@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Info, Loader2, Paperclip, Search, Send, X } from "lucide-react"
+import { Info, Loader2, Paperclip, Search, Send, X } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 
 import { chatAPI } from "@food/api"

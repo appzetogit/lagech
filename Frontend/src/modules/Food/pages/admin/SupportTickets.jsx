@@ -11,7 +11,7 @@ import {
   ChevronRight,
   User,
   Store,
-} from "lucide-react"
+} from "@food/components/admin/theme/icons"
 import { supportAPI } from "@food/api"
 import { toast } from "sonner"
 import {

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react"
-import { Eye, Printer, ArrowUpDown } from "lucide-react"
+import { Eye, Printer, ArrowUpDown } from "@food/components/admin/theme/icons"
 import { restaurantLabel } from "@food/utils/entityLabels"
 
 export default function DispatchOrdersTable({ orders, visibleColumns, onViewOrder, onPrintOrder }) {

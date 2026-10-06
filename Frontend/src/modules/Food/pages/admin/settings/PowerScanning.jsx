@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Loader2, Save } from "lucide-react";
+import { Loader2, Save } from "@food/components/admin/theme/icons";
 import { toast } from "sonner";
 import { adminAPI } from "@food/api";
 import { getCachedSettings, setCachedSettings } from "@food/utils/businessSettings";

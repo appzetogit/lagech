@@ -7,7 +7,7 @@ import {
   RefreshCw,
   Search,
   Store,
-} from "lucide-react";
+} from "@food/components/admin/theme/icons";
 import { toast } from "sonner";
 import { adminAPI } from "@food/api";
 

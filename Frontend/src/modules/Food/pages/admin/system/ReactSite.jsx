@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom"
-import { Monitor } from "lucide-react"
+import { Monitor } from "@food/components/admin/theme/icons"
 import { PageFrame, Card, Field, Switch, SaveButton, Loading, inputClass, setIn, formatDateTime, useSettingsArea } from "./SettingsUi"
 
 /**

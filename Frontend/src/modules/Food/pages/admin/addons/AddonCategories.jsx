@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { FolderTree, Loader2, Pencil, Plus, Trash2, X } from "lucide-react"
+import { FolderTree, Loader2, Pencil, Plus, Trash2, X } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminCatalogExtrasAPI, errorMessage } from "@food/api/adminCatalogExtras"
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Loader2, Plus, Share2 } from "lucide-react"
+import { Loader2, Plus, Share2 } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminSystemExtrasAPI } from "@food/api/adminSystemExtras"
 import { PageFrame, Card, Field, Switch, Loading, inputClass, errorMessage } from "./SettingsUi"

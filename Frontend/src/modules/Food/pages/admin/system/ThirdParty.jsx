@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Settings, Info, Eye, EyeOff, CheckCircle, XCircle } from "lucide-react"
+import { Settings, Info, Eye, EyeOff, CheckCircle, XCircle } from "@food/components/admin/theme/icons"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}

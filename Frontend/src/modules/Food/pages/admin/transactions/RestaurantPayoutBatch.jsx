@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link, useParams } from "react-router-dom"
-import { ArrowLeft, CheckCircle2, Copy, Loader2, Search, XCircle } from "lucide-react"
+import { ArrowLeft, CheckCircle2, Copy, Loader2, Search, XCircle } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminAPI } from "@food/api"
 import { BATCH_STATUS } from "./RestaurantPayouts"

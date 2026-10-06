@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { UserPlus, User, Eye, EyeOff, Upload, ChevronDown } from "lucide-react"
+import { UserPlus, User, Eye, EyeOff, Upload, ChevronDown } from "@food/components/admin/theme/icons"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}

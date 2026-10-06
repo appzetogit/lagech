@@ -7,7 +7,7 @@ import SettingsDialog from "@food/components/admin/orders/SettingsDialog"
 import { useGenericTableManagement } from "@food/components/admin/orders/useGenericTableManagement"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
-import { Loader2 } from "lucide-react"
+import { Loader2 } from "@food/components/admin/theme/icons"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}

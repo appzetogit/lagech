@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { ArrowDown, ArrowUp, Flame, Loader2, Plus, Save, X } from "lucide-react"
+import { ArrowDown, ArrowUp, Flame, Loader2, Plus, Save, X } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminAPI } from "@food/api"
 import { adminCatalogExtrasAPI, errorMessage, loadRestaurantOptions } from "@food/api/adminCatalogExtras"

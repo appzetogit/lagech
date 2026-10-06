@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react"
-import { Search, ArrowUpDown, Settings, Folder, ChevronDown, Eye, Loader2, Star } from "lucide-react"
+import { Search, ArrowUpDown, Settings, Folder, ChevronDown, Eye, Loader2, Star } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminAPI } from "@food/api"
 import {

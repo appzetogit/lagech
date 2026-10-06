@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { BellRing, Loader2, Search, Send, Trash2 } from "lucide-react";
+import { BellRing, Loader2, Search, Send, Trash2 } from "@food/components/admin/theme/icons";
 import { adminAPI } from "@food/api";
 
 const TARGET_OPTIONS = [

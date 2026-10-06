@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import {
   Search, Trash2, Building2, User, Phone, Mail, MapPin, Calendar, 
   UtensilsCrossed, ArrowUpDown, Loader2, RefreshCw, AlertCircle, Eye, X
-} from "lucide-react";
+} from "@food/components/admin/theme/icons";
 import { adminAPI } from "@food/api";
 
 export default function UnregisteredRestaurants() {

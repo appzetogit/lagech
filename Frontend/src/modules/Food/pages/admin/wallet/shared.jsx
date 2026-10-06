@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { ChevronLeft, ChevronRight, Loader2, Search, X } from "lucide-react"
+import { ChevronLeft, ChevronRight, Loader2, Search, X } from "@food/components/admin/theme/icons"
 import { customerExtrasAPI, dataOf, formatMoney } from "@food/api/adminCustomerExtras"
 
 export const inputClass =

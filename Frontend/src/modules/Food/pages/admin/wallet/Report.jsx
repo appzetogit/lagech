@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { useSearchParams } from "react-router-dom"
-import { FileText, Loader2, RotateCcw } from "lucide-react"
+import { FileText, Loader2, RotateCcw } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import {
   customerExtrasAPI,

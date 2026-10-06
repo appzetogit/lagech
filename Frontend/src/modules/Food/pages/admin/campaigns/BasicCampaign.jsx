@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { Layers, Loader2, Pencil, Plus, Store, Trash2, X } from "lucide-react"
+import { Layers, Loader2, Pencil, Plus, Store, Trash2, X } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminAPI } from "@food/api"
 import { adminCatalogExtrasAPI, errorMessage, loadRestaurantOptions } from "@food/api/adminCatalogExtras"

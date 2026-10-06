@@ -19,7 +19,7 @@ import {
   PlusCircle,
   Bell,
   BellOff,
-} from "lucide-react";
+} from "@food/components/admin/theme/icons";
 import {
   Dialog,
   DialogContent,

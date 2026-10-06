@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect, useCallback } from "react"
-import { BarChart3, ChevronDown, Settings, FileText, FileSpreadsheet, Code, Loader2, Calendar } from "lucide-react"
+import { BarChart3, ChevronDown, Settings, FileText, FileSpreadsheet, Code, Loader2, Calendar } from "@food/components/admin/theme/icons"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"

@@ -11,7 +11,7 @@ import {
   CardTitle,
 } from "@food/components/ui/card";
 import { toast } from "sonner";
-import { User, Mail, Phone, Save, Loader2, Upload, X, Pencil, Eye, EyeOff } from "lucide-react";
+import { User, Mail, Phone, Save, Loader2, Upload, X, Pencil, Eye, EyeOff } from "@food/components/admin/theme/icons";
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}

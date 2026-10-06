@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link, useParams } from "react-router-dom"
-import { ArrowLeft, CheckCircle2, Copy, Loader2, Search, XCircle } from "lucide-react"
+import { ArrowLeft, CheckCircle2, Copy, Loader2, Search, XCircle } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminRiderExtrasAPI } from "@food/api/adminRiderExtras"
 import { DISBURSEMENT_STATUS, formatCurrency, formatDate } from "./DeliveryDisbursements"

@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Upload, X, RotateCcw, Plus, Save, Info } from "lucide-react"
+import { Upload, X, RotateCcw, Plus, Save, Info } from "@food/components/admin/theme/icons"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}

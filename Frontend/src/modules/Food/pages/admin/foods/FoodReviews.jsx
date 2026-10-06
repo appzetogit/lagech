@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Eye, EyeOff, Loader2, Search, Star } from "lucide-react"
+import { Eye, EyeOff, Loader2, Search, Star } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminAPI } from "@food/api"
 import { adminCatalogExtrasAPI, errorMessage, loadRestaurantOptions } from "@food/api/adminCatalogExtras"

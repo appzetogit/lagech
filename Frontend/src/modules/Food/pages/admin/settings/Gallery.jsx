@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Copy, FileText, Film, Images, Loader2, Search, Trash2 } from "lucide-react"
+import { Copy, FileText, Film, Images, Loader2, Search, Trash2 } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminSystemExtrasAPI } from "@food/api/adminSystemExtras"
 import { PageFrame, Card, Field, Loading, inputClass, errorMessage, formatDateTime } from "../system/SettingsUi"

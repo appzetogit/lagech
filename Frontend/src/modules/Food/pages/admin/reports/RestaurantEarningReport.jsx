@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Store } from "lucide-react"
+import { Store } from "@food/components/admin/theme/icons"
 import { adminSystemExtrasAPI } from "@food/api/adminSystemExtras"
 import ReportShell, { rupees } from "./ReportShell"
 

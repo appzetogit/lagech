@@ -1,4 +1,4 @@
-import { X } from "lucide-react"
+import { X } from "@food/components/admin/theme/icons"
 
 export default function SubscriptionFilterPanel({ isOpen, onClose, filters, setFilters, onApply, onReset, restaurants = [] }) {
   if (!isOpen) return null

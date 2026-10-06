@@ -1,5 +1,5 @@
 import { useRef, useState } from "react"
-import { AlertTriangle, CheckCircle2, Download, FileSpreadsheet, Loader2, Upload, X } from "lucide-react"
+import { AlertTriangle, CheckCircle2, Download, FileSpreadsheet, Loader2, Upload, X } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminCatalogExtrasAPI, blobErrorMessage, errorMessage, saveBlobResponse } from "@food/api/adminCatalogExtras"
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Download, FileSpreadsheet, Loader2 } from "lucide-react"
+import { Download, FileSpreadsheet, Loader2 } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminAPI } from "@food/api"
 import { adminCatalogExtrasAPI, blobErrorMessage, loadRestaurantOptions, saveBlobResponse } from "@food/api/adminCatalogExtras"

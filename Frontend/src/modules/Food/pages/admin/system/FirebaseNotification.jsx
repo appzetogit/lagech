@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Cloud, Settings, Info } from "lucide-react"
+import { Cloud, Settings, Info } from "@food/components/admin/theme/icons"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}

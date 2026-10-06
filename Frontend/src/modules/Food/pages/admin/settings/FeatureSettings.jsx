@@ -3,7 +3,7 @@ import { adminAPI } from '@/services/api';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@food/components/ui/card';
 import { Button } from '@food/components/ui/button';
 import { Switch } from '@food/components/ui/switch';
-import { Loader2, Save } from 'lucide-react';
+import { Loader2, Save } from "@food/components/admin/theme/icons";
 import { toast } from 'sonner';
 
 const FEATURE_KEYS = {

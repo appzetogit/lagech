@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Car, Loader2, Pencil, Plus, Search, Trash2, X } from "lucide-react"
+import { Car, Loader2, Pencil, Plus, Search, Trash2, X } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminRiderExtrasAPI } from "@food/api/adminRiderExtras"
 

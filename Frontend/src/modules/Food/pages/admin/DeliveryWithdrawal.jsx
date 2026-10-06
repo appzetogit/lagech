@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react"
-import { Search, Wallet, Eye, CheckCircle, XCircle, Loader2, Package, QrCode } from "lucide-react"
+import { Search, Wallet, Eye, CheckCircle, XCircle, Loader2, Package, QrCode } from "@food/components/admin/theme/icons"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
 import {

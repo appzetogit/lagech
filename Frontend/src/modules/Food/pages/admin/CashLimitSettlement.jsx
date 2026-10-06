@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect } from "react"
-import { Search, Receipt, Loader2, Package } from "lucide-react"
+import { Search, Receipt, Loader2, Package } from "@food/components/admin/theme/icons"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
 const debugLog = (...args) => {}

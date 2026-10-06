@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { AlertCircle } from "lucide-react"
+import { AlertCircle } from "@food/components/admin/theme/icons"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}

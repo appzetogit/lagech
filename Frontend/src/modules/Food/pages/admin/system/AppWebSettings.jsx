@@ -1,4 +1,4 @@
-import { Smartphone } from "lucide-react"
+import { Smartphone } from "@food/components/admin/theme/icons"
 import { PageFrame, Card, Field, SaveButton, Loading, inputClass, setIn, formatDateTime, useSettingsArea } from "./SettingsUi"
 
 /**

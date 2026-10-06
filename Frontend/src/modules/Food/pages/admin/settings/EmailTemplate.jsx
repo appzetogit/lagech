@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { Eye, Mail, RotateCcw } from "lucide-react"
+import { Eye, Mail, RotateCcw } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminSystemExtrasAPI } from "@food/api/adminSystemExtras"
 import { PageFrame, Card, Field, Switch, SaveButton, Loading, inputClass, errorMessage, formatDateTime } from "../system/SettingsUi"

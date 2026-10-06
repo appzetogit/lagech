@@ -1,4 +1,4 @@
-import { LayoutTemplate, Plus, Trash2 } from "lucide-react"
+import { LayoutTemplate, Plus, Trash2 } from "@food/components/admin/theme/icons"
 import { PageFrame, Card, Field, Switch, ImageInput, SaveButton, Loading, inputClass, setIn, formatDateTime, useSettingsArea } from "./SettingsUi"
 
 const APP_LINKS = [

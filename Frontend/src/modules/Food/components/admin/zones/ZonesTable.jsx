@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react"
-import { Pencil, Settings, ChevronLeft, ChevronRight } from "lucide-react"
+import { Pencil, Settings, ChevronLeft, ChevronRight } from "@food/components/admin/theme/icons"
 
 function ToggleSwitch({ enabled, onToggle }) {
   return (

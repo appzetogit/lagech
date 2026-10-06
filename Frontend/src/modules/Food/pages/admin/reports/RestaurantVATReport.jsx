@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Receipt } from "lucide-react"
+import { Receipt } from "@food/components/admin/theme/icons"
 import { adminSystemExtrasAPI } from "@food/api/adminSystemExtras"
 import ReportShell, { rupees } from "./ReportShell"
 
