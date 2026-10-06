@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react"
 import { tioIconFor } from "./theme/tioIcons"
-import { Link, useLocation } from "react-router-dom"
+import { Link, useLocation, useNavigate } from "react-router-dom"
 import {
   Search,
   FileText,
@@ -59,7 +59,7 @@ import {
 } from "lucide-react"
 import { cn } from "@food/utils/utils"
 import { Input } from "@food/components/ui/input"
-import { adminSidebarMenu } from "@food/utils/adminSidebarMenu"
+import { adminSidebarMenu, areaForPath, areaOfEntry } from "@food/utils/adminSidebarMenu"
 import { adminAPI } from "@food/api"
 import { getCachedSettings, loadBusinessSettings } from "@food/utils/businessSettings"
 import { canAccessFeatureSettings, canAccessSuperPowers } from "@food/utils/adminPermissions"
@@ -150,6 +150,7 @@ const SIDEBAR_LABEL_BY_PATH = buildLabelDictionary(adminSidebarMenu)
 
 export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange }) {
   const location = useLocation()
+  const navigate = useNavigate()
   const navRef = useRef(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [badges, setBadges] = useState({})
@@ -513,9 +514,29 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
 
 
   // Filter menu items based on search query
+  // The top bar picks an area (Food / Users / Transactions & Reports /
+  // Settings); the sidebar shows that area only, as the old panel did. The
+  // area follows the open page, so a direct link lands in the right one.
+  const activeArea = useMemo(() => areaForPath(location.pathname), [location.pathname])
+
+  useEffect(() => {
+    const onSelect = (event) => {
+      const area = event?.detail?.area
+      if (!area) return
+      const firstVisible = menuData
+        .filter((entry) => entry && areaOfEntry(entry) === area)
+        .flatMap((entry) => (entry.path ? [entry] : entry.items || []))
+        .map((item) => item.path || item.subItems?.[0]?.path)
+        .find(Boolean)
+      if (firstVisible) navigate(firstVisible)
+    }
+    window.addEventListener("admin-area-select", onSelect)
+    return () => window.removeEventListener("admin-area-select", onSelect)
+  }, [menuData, navigate])
+
   const filteredMenuData = useMemo(() => {
     if (!searchQuery.trim()) {
-      return menuData
+      return menuData.filter((entry) => entry && areaOfEntry(entry) === activeArea)
     }
 
     const query = searchQuery.toLowerCase().trim()
@@ -560,7 +581,7 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
     })
 
     return filtered
-  }, [menuData, searchQuery])
+  }, [menuData, searchQuery, activeArea])
 
   // Auto-expand sections with matches when searching
   useEffect(() => {
