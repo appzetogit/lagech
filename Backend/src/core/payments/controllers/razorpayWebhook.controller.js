@@ -5,6 +5,7 @@ import { remainderAmount } from '../../../modules/food/orders/services/partialPa
 import { config } from '../../../config/env.js';
 import { logger } from '../../../utils/logger.js';
 import { getThirdPartySettingsSync } from '../../thirdParty/thirdParty.runtime.js';
+import { emailOrderPlaced } from '../../notifications/emailEvents.js';
 
 /**
  * Razorpay webhook handler.
@@ -112,6 +113,8 @@ export const handleRazorpayWebhook = async (req, res) => {
                 } catch (finalizeErr) {
                     logger.error(`Webhook finalize error (Order ${order.orderId}): ${finalizeErr.message}`);
                 }
+                // Same key as verifyPayment's, so whichever runs second sends nothing.
+                emailOrderPlaced(order.id);
                 logger.info(`Webhook [payment.captured]: Synced Order ${order.orderId} (Status=paid)`);
             } else {
                 logger.warn(

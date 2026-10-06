@@ -20,6 +20,7 @@ import {
 } from '../../shared/geo.utils.js';
 import { getRestaurantSubscriptionSettings } from '../../admin/services/admin.service.js';
 import { GST_RATE } from './subscriptionPlan.service.js';
+import { emailNewRestaurantRegistration } from '../../../../core/notifications/emailEvents.js';
 import {
     createRazorpayOrder,
     getRazorpayKeyId,
@@ -1030,6 +1031,7 @@ export const registerRestaurant = async (payload, files) => {
         } catch (e) {
             logger.error('Failed to notify admins of new restaurant registration:', e);
         }
+        emailNewRestaurantRegistration(restaurant.id);
 
         return toRestaurant(restaurant);
     } catch (err) {

@@ -2,6 +2,7 @@ import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { NotFoundError, ValidationError } from '../../../../core/auth/errors.js';
 import { logger } from '../../../../utils/logger.js';
+import { emailDeliveryPartnerDecision, emailAccountSuspension } from '../../../../core/notifications/emailEvents.js';
 
 /**
  * The admin delivery-partner list and its money summary, extracted from
@@ -412,11 +413,22 @@ export async function getDeliveryJoinRequests(query = {}) {
 const decidePartner = async (id, data) => {
     if (!isId(id)) return null;
 
+    // As it was before, for the email: only a real change sends one.
+    const before = await prisma.foodDeliveryPartner.findUnique({
+        where: { id: String(id) },
+        select: { id: true, status: true, updatedAt: true },
+    });
     const { count } = await prisma.foodDeliveryPartner.updateMany({
         where: { id: String(id) },
         data,
     });
     if (!count) return null;
+
+    if (before && before.status !== data.status) {
+        // Approving a deactivated rider is lifting a suspension, not an approval.
+        if (before.status === 'deactivated' && data.status === 'approved') emailAccountSuspension('rider', before, false);
+        else emailDeliveryPartnerDecision(before, data.status === 'approved', data.rejectionReason);
+    }
 
     return prisma.foodDeliveryPartner.findUnique({ where: { id: String(id) } });
 };
@@ -568,6 +580,10 @@ export async function updateDeliveryPartnerProfile(id, { name, phone } = {}) {
 export async function deleteDeliveryPartner(id) {
     if (!isId(id)) throw new NotFoundError('Delivery partner not found');
 
+    const before = await prisma.foodDeliveryPartner.findUnique({
+        where: { id: String(id) },
+        select: { id: true, status: true, updatedAt: true },
+    });
     const { count } = await prisma.foodDeliveryPartner.updateMany({
         where: { id: String(id) },
         data: {
@@ -579,6 +595,7 @@ export async function deleteDeliveryPartner(id) {
         },
     });
     if (!count) throw new NotFoundError('Delivery partner not found');
+    if (before?.status === 'approved') emailAccountSuspension('rider', before, true);
 
     return prisma.foodDeliveryPartner.findUnique({ where: { id: String(id) } });
 }

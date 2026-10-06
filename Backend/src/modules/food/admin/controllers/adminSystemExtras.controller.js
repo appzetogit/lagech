@@ -77,6 +77,9 @@ export const getRestaurantVatReport = handle(200, 'Restaurant VAT report', (req)
 // ─── Email templates (admin) ─────────────────────────────────────────────────
 
 export const listEmailTemplates = handle(200, 'Email templates', () => emailTemplates.listEmailTemplates());
+export const getEmailSettings = handle(200, 'Email settings', () => emailTemplates.getEmailSettings());
+export const saveEmailSettings = handle(200, 'Email settings saved', (req) =>
+    emailTemplates.saveEmailSettings(req.body || {}, adminId(req)));
 export const getEmailTemplate = handle(200, 'Email template', (req) => emailTemplates.getEmailTemplate(req.params.key));
 export const saveEmailTemplate = handle(200, 'Email template saved', (req) =>
     emailTemplates.saveEmailTemplate(req.params.key, validate(emailTemplateSchema, req.body), adminId(req)));

@@ -9,6 +9,7 @@ import { buildOrderIdentityFilter, notifyOwnerSafely } from './order.helpers.js'
 import * as foodTransactionService from './foodTransaction.service.js';
 import { processRefundAdmin } from './order.service.js';
 import { reverseOrderLoyaltyPoints } from '../../user/services/loyaltyPoint.service.js';
+import { emailRefundDecision } from '../../../../core/notifications/emailEvents.js';
 
 /**
  * Customer refund requests (the old panel's Refund Requests).
@@ -458,6 +459,7 @@ export async function approveRefundRequest(id, adminId, body = {}) {
         },
     });
 
+    emailRefundDecision(updated.id);
     return serializeForAdmin(updated);
 }
 
@@ -490,5 +492,6 @@ export async function rejectRefundRequest(id, adminId, body = {}) {
             refundRequestId: updated.id,
         },
     });
+    emailRefundDecision(updated.id);
     return serializeForAdmin(updated);
 }

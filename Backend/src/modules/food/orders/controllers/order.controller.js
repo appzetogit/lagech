@@ -1,6 +1,7 @@
 import { sendResponse } from '../../../../utils/response.js';
 import * as orderService from '../services/order.service.js';
 import * as foodOrderPaymentService from '../services/foodOrderPayment.service.js';
+import { emailOrderPlaced } from '../../../../core/notifications/emailEvents.js';
 import {
     validateCalculateOrderDto,
     validateCreateOrderDto,
@@ -40,6 +41,8 @@ export async function verifyPaymentController(req, res, next) {
         const userId = req.user?.userId;
         const dto = validateVerifyPaymentDto(req.body);
         const result = await orderService.verifyPayment(userId, dto);
+        // Online orders are emailed once paid; the key makes a repeat a no-op.
+        emailOrderPlaced(result?.order?._id || result?.order?.id || dto.orderId);
         return sendResponse(res, 200, 'Payment verified', result);
     } catch (err) {
         next(err);

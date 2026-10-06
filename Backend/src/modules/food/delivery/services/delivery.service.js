@@ -7,6 +7,7 @@ import { upsertFirebaseDeviceToken } from '../../../../core/notifications/fireba
 import { logger } from '../../../../utils/logger.js';
 import { collectDynamicRegistration } from './driverRegistrationField.service.js';
 import { assertRiderMayGoOnline, getRiderCashStatus } from './riderCash.service.js';
+import { emailNewDeliveryPartnerRegistration } from '../../../../core/notifications/emailEvents.js';
 
 const num = (v) => Number(v) || 0;
 
@@ -175,6 +176,7 @@ export const registerDeliveryPartner = async (payload, files, rawBody = {}) => {
     } catch (e) {
         logger.warn(`Failed to notify admins of new delivery partner registration: ${e?.message || e}`);
     }
+    emailNewDeliveryPartnerRegistration(partner.id);
 
     return partner;
 };

@@ -27,6 +27,7 @@ export const adminSystemExtrasAPI = {
 
   // Email templates
   getEmailTemplates: () => apiClient.get(`${A}/email-templates`, admin),
+  saveEmailSettings: (body) => apiClient.put(`${A}/email-templates-settings`, body, admin),
   saveEmailTemplate: (key, body) => apiClient.put(`${A}/email-templates/${key}`, body, admin),
   resetEmailTemplate: (key) => apiClient.delete(`${A}/email-templates/${key}`, admin),
   previewEmailTemplate: (key, body) => apiClient.post(`${A}/email-templates/${key}/preview`, body, admin),

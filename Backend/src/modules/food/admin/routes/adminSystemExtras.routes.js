@@ -32,6 +32,10 @@ router.get('/reports/restaurant-vat', c.getRestaurantVatReport);
 
 // Email templates.
 router.get('/email-templates', c.listEmailTemplates);
+// Which emails are sent, and where admin notifications go (under the
+// /email-templates prefix, so the same permission guards it).
+router.get('/email-templates-settings', c.getEmailSettings);
+router.put('/email-templates-settings', c.saveEmailSettings);
 router.get('/email-templates/:key', c.getEmailTemplate);
 router.put('/email-templates/:key', c.saveEmailTemplate);
 router.delete('/email-templates/:key', c.resetEmailTemplate);

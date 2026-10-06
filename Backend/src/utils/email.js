@@ -51,7 +51,7 @@ async function getMailSettings() {
     return getThirdPartySettings('mail');
 }
 
-async function getTransporter() {
+export async function getTransporter() {
     const mail = await getMailSettings();
     if (!mail.enabled) {
         logger.warn('Email is switched off (3rd Party > Mail Config)');
@@ -72,7 +72,7 @@ async function getTransporter() {
     return { trans: transporter, mail };
 }
 
-const fromHeader = (mail) => {
+export const fromHeader = (mail) => {
     const from = mail.from || mail.username || config.emailFrom;
     return typeof from === 'string' && from.includes('<') ? from : `Lagech <${from}>`;
 };

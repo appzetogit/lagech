@@ -4058,6 +4058,28 @@ model FoodSystemSetting {
   @@map("food_system_settings")
 }
 
+/// Transactional emails already sent (or being sent), one row per event:
+/// `eventKey` is template + entity (+ the version it changed from), and its
+/// unique index is what stops a retry sending the same email twice.
+/// Written by core/email/transactionalEmail.js.
+model FoodEmailSendLog {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  eventKey    String @unique @db.VarChar(191)
+  templateKey String @db.VarChar(64)
+  recipient   String @default("")
+  /// sending | sent | failed
+  status      String @default("sending") @db.VarChar(16)
+  attempts    Int    @default(1)
+  error       String @default("")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@index([templateKey, createdAt])
+  @@map("food_email_send_logs")
+}
+
 /// Who changed which settings area, and which fields -- never the values.
 /// Written by the 3rd Party settings page (third_party.* areas).
 model FoodSettingsAuditLog {

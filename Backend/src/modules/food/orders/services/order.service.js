@@ -956,6 +956,7 @@ export async function createOrder(userId, dto) {
       await incrementCouponUsageForOrder(order, userId);
     }
 
+    void import("../../../../core/notifications/emailEvents.js").then((m) => m.emailOrderPlaced(order.id)).catch(() => {});
     const placed = normalizeOrderForClient(order);
     if (isTakeaway) placed.pickupCode = String(order.deliveryOtp || "");
     return { order: placed, razorpay: razorpayPayload };
