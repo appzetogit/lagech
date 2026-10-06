@@ -5,7 +5,7 @@ import { prisma } from '../../../../config/prisma.js';
 import { uniquePhone, uniqueTag } from '../../../../utils/testIds.js';
 import { testPatch } from '../../../../utils/testGeo.js';
 import { calculateOrder, createOrder, updateOrderStatusRestaurant } from './order.service.js';
-import { acceptOrderDelivery } from './order-delivery.service.js';
+import { acceptOrderDelivery, listActiveDeliveries } from './order-delivery.service.js';
 import { getBusyDeliveryPartnerIds } from './order.helpers.js';
 import { saveSystemSettings, getPublicBusinessSettings, getPublicReasons } from '../../admin/services/adminSystemExtras.service.js';
 import { invalidateBusinessSettings } from '../../shared/businessSettings.js';
@@ -170,6 +170,29 @@ test('a rider holds up to the maximum assigned order limit, and no more', async 
     await acceptOrderDelivery(c.id, rider.id);
     const held = await prisma.foodOrder.count({ where: { dispatchDeliveryPartnerId: rider.id, dispatchStatus: 'accepted', orderStatus: 'confirmed' } });
     assert.equal(held, 2);
+});
+
+test('the rider app gets every delivery it holds and the live limit', async () => {
+    await resetSettings();
+    const userId = await makeUser();
+    const rider = await makePartner();
+    const [a, b] = [await makeDispatchableOrder(userId), await makeDispatchableOrder(userId)];
+
+    let active = await listActiveDeliveries(rider.id);
+    assert.deepEqual([active.orders.length, active.orderLimit, active.canAcceptMore], [0, 2, true]);
+
+    await acceptOrderDelivery(a.id, rider.id);
+    await acceptOrderDelivery(b.id, rider.id);
+    active = await listActiveDeliveries(rider.id);
+    assert.equal(active.orders.length, 2);
+    assert.deepEqual(new Set(active.orders.map((o) => String(o.id || o._id))), new Set([a.id, b.id]));
+    assert.equal(active.canAcceptMore, false);
+
+    // The limit is the admin's setting, read live.
+    await set('business_deliveryman', { maxAssignedOrders: 3 });
+    active = await listActiveDeliveries(rider.id);
+    assert.deepEqual([active.orderLimit, active.canAcceptMore], [3, true]);
+    await resetSettings();
 });
 
 test('two accepts racing from one rider cannot pass the limit', async () => {

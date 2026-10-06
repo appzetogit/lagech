@@ -2166,6 +2166,10 @@ export async function getCurrentTripDelivery(deliveryPartnerId) {
   return deliveryService.getCurrentTripDelivery(deliveryPartnerId);
 }
 
+export async function listActiveDeliveries(deliveryPartnerId) {
+  return deliveryService.listActiveDeliveries(deliveryPartnerId);
+}
+
 // ----- Delivery: available, accept, reject, status -----
 export async function listOrdersAvailableDelivery(deliveryPartnerId, query) {
   return deliveryService.listOrdersAvailableDelivery(deliveryPartnerId, query);

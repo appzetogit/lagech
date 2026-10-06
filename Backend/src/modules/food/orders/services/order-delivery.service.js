@@ -201,6 +201,33 @@ export async function getCurrentTripDelivery(deliveryPartnerId) {
   );
 }
 
+/**
+ * Every delivery the rider holds right now (up to the admin's limit, Business
+ * Settings > Deliveryman), most recently updated first, plus that limit.
+ * `getCurrentTripDelivery` stays the single-order view older apps read.
+ */
+export async function listActiveDeliveries(deliveryPartnerId) {
+  if (!deliveryPartnerId) throw new ValidationError('Delivery partner ID required');
+  const [rows, orderLimit] = await Promise.all([
+    prisma.foodOrder.findMany({
+      where: {
+        dispatchDeliveryPartnerId: String(deliveryPartnerId),
+        dispatchStatus: 'accepted',
+        orderStatus: { in: ['confirmed', 'preparing', 'ready_for_pickup', 'picked_up'] },
+      },
+      include: deliveryInclude,
+      orderBy: { updatedAt: 'desc' },
+      take: 20,
+    }),
+    getRiderOrderLimit(),
+  ]);
+  const txByOrder = await loadTransactionsByOrder(rows.map((row) => row.id));
+  const orders = rows.map((row) =>
+    sanitizeOrderForDeliveryPartner(mergeTransactionIntoOrder(toOrder(row), txByOrder.get(row.id) || null)),
+  );
+  return { orders, orderLimit, canAcceptMore: orders.length < orderLimit };
+}
+
 export async function listOrdersAvailableDelivery(deliveryPartnerId, query) {
   const { page, limit, skip } = buildPaginationOptions(query);
   const partnerId = String(deliveryPartnerId);

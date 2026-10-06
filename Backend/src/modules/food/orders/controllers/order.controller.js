@@ -309,8 +309,18 @@ export async function updateOrderStatusDeliveryController(req, res, next) {
 export async function getCurrentTripDeliveryController(req, res, next) {
     try {
         const deliveryPartnerId = req.user?.userId;
-        const order = await orderService.getCurrentTripDelivery(deliveryPartnerId);
-        return sendResponse(res, 200, 'Current trip retrieved', { activeOrder: order });
+        const [order, active] = await Promise.all([
+            orderService.getCurrentTripDelivery(deliveryPartnerId),
+            orderService.listActiveDeliveries(deliveryPartnerId),
+        ]);
+        // activeOrder: the most recent one, as before. activeOrders: all of
+        // them, for riders holding more than one (admin's limit, default 2).
+        return sendResponse(res, 200, 'Current trip retrieved', {
+            activeOrder: order,
+            activeOrders: active.orders,
+            orderLimit: active.orderLimit,
+            canAcceptMore: active.canAcceptMore,
+        });
     } catch (err) {
         next(err);
     }
