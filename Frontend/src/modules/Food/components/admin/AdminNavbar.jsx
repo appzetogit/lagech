@@ -310,12 +310,12 @@ export default function AdminNavbar({ onMenuClick }) {
           <AdminAreaNav />
 
           {/* Search, as in the previous panel: "Search or Ctrl+K" */}
-          <div className="flex-1 flex justify-end max-w-xs mx-4">
+          <div className="flex-1 flex justify-end min-w-[190px] max-w-xs mx-4">
             <button
               onClick={() => setSearchOpen(true)}
               className="flex items-center gap-2 px-4 py-2.5 rounded-[5px] bg-[#F3F4F5] text-[#677788] cursor-pointer hover:bg-[#E7EAF3] transition-colors w-full"
             >
-              <span className="text-sm flex-1 text-left text-[#99A7BA]">Search or</span>
+              <span className="text-sm flex-1 text-left text-[#99A7BA] whitespace-nowrap">Search or</span>
               <span className="text-xs font-semibold px-1.5 py-0.5 rounded bg-[#E7EAF3] text-[#677788]">
                 Ctrl+K
               </span>

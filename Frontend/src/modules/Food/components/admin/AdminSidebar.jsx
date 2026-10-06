@@ -523,12 +523,15 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
     const onSelect = (event) => {
       const area = event?.detail?.area
       if (!area) return
-      const firstVisible = menuData
+      const visiblePaths = menuData
         .filter((entry) => entry && areaOfEntry(entry) === area)
         .flatMap((entry) => (entry.path ? [entry] : entry.items || []))
-        .map((item) => item.path || item.subItems?.[0]?.path)
-        .find(Boolean)
-      if (firstVisible) navigate(firstVisible)
+        .flatMap((item) => (item.path ? [item.path] : (item.subItems || []).map((sub) => sub.path)))
+        .filter(Boolean)
+      // The old panel opened Users on its overview page.
+      const preferred = { users: "/admin/food/user-overview" }[area]
+      const target = visiblePaths.includes(preferred) ? preferred : visiblePaths[0]
+      if (target) navigate(target)
     }
     window.addEventListener("admin-area-select", onSelect)
     return () => window.removeEventListener("admin-area-select", onSelect)
