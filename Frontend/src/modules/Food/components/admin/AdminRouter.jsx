@@ -46,6 +46,12 @@ const AddonsList = lazy(() => import("@food/pages/admin/addons/AddonsList"));
 // Promotions Management
 const BasicCampaign = lazy(() => import("@food/pages/admin/campaigns/BasicCampaign"));
 const FoodCampaign = lazy(() => import("@food/pages/admin/campaigns/FoodCampaign"));
+const FoodReviews = lazy(() => import("@food/pages/admin/foods/FoodReviews"));
+const FoodGallery = lazy(() => import("@food/pages/admin/foods/FoodGallery"));
+const AddonCategories = lazy(() => import("@food/pages/admin/addons/AddonCategories"));
+const RecommendedRestaurants = lazy(() => import("@food/pages/admin/restaurant/RecommendedRestaurants"));
+const BulkImport = lazy(() => import("@food/pages/admin/bulk/BulkImport"));
+const BulkExport = lazy(() => import("@food/pages/admin/bulk/BulkExport"));
 const Coupons = lazy(() => import("@food/pages/admin/Coupons"));
 const Cashback = lazy(() => import("@food/pages/admin/Cashback"));
 const Banners = lazy(() => import("@food/pages/admin/Banners"));
@@ -250,7 +256,7 @@ export default function AdminRouter() {
             
             {/* ORDER MANAGEMENT */}
             <Route path="orders/all" element={<OrdersPage statusKey="all" />} />
-            <Route path="orders/scheduled" element={<Navigate to="/admin/food/orders/pending" replace />} />
+            <Route path="orders/scheduled" element={<OrdersPage statusKey="scheduled" />} />
             <Route path="orders/pending" element={<OrdersPage statusKey="pending" />} />
             <Route path="orders/accepted" element={<Navigate to="/admin/food/orders/processing" replace />} />
             <Route path="orders/processing" element={<OrdersPage statusKey="processing" />} />
@@ -284,6 +290,7 @@ export default function AdminRouter() {
             <Route path="restaurants/reviews" element={<RestaurantReviews />} />
             <Route path="restaurants/bulk-import" element={<RestaurantsBulkImport />} />
             <Route path="restaurants/bulk-export" element={<RestaurantsBulkExport />} />
+            <Route path="restaurants/recommended" element={<RecommendedRestaurants />} />
             <Route path="restaurants/settings" element={<RestaurantSettings />} />
             <Route path="restaurants/subscription-settings" element={<SubscriptionSettings />} />
             <Route path="restaurants/subscription-history" element={<SubscriptionHistory />} />
@@ -299,6 +306,13 @@ export default function AdminRouter() {
             <Route path="foods" element={<FoodsList />} />
             <Route path="food/list" element={<FoodsList />} />
             <Route path="addons" element={<AddonsList />} />
+            <Route path="addons/categories" element={<AddonCategories />} />
+            <Route path="addons/bulk-import" element={<BulkImport key="addons-import" entity="addons" />} />
+            <Route path="addons/bulk-export" element={<BulkExport key="addons-export" entity="addons" />} />
+            <Route path="categories/bulk-import" element={<BulkImport key="categories-import" entity="categories" />} />
+            <Route path="categories/bulk-export" element={<BulkExport key="categories-export" entity="categories" />} />
+            <Route path="foods/reviews" element={<FoodReviews />} />
+            <Route path="foods/gallery" element={<FoodGallery />} />
 
             {/* PROMOTIONS, CUSTOMERS, DELIVERYMEN, etc. */}
             <Route path="campaigns/basic" element={<BasicCampaign />} />

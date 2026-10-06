@@ -28,6 +28,12 @@ const debugError = (...args) => {}
 // Status configuration with titles, colors, and icons
 const statusConfig = {
   "all": { title: "All Orders", color: "emerald", icon: FileText },
+  "scheduled": {
+    title: "Scheduled Orders",
+    subtitle: "Placed for a later time that is still ahead, soonest first",
+    color: "sky",
+    icon: Package,
+  },
   "pending": {
     title: "Pending Orders",
     subtitle: "Cash orders awaiting restaurant acceptance",

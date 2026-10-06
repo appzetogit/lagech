@@ -242,6 +242,8 @@ Unauthenticated calls to the same handler fall through to the public, approved-o
         "rejectionReason": "",
         "requestedAt": "…", "approvedAt": "…", "rejectedAt": null,
         "preparationTime": "20",
+        "nutrition": ["Calories 250 kcal", "High protein"],   // always an array, may be empty
+        "allergens": ["Peanuts", "Gluten"],                   // always an array, may be empty
         "createdAt": "…", "updatedAt": "…"
       }]
     }],
@@ -271,9 +273,12 @@ Bulk menu update. → `{ menu }`
   "isAvailable": true,
   "isRecommended": false,
   "preparationTime": "20",
+  "nutrition": ["Calories 250 kcal"],   // optional; array or comma-separated string
+  "allergens": "Peanuts, Gluten",       // optional; array or comma-separated string
   "categoryId": "…"          // or categoryName — resolved server-side
 }
 ```
+`nutrition` and `allergens` are free text, shown to customers on the dish. Each entry is trimmed and kept as typed (case included); repeats are dropped (ignoring case); at most 30 entries of 60 characters. Send `[]` to clear. Changing them does not send the dish back for approval.
 → 201, `{ food }` with **`approvalStatus: "pending"`**. New items are invisible to customers until an admin approves; admins get a push at creation. Surface the pending badge or partners will think the item is live.
 
 ### `PATCH /food/restaurant/foods/:id`

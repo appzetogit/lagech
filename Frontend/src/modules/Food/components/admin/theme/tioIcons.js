@@ -25,6 +25,8 @@ export const TIO_BY_LABEL = {
   Restaurants: "layout",
   "Restaurants List": "layout",
   "Recommended Restaurants": "hot",
+  "Bulk Import": "publish",
+  "Bulk Export": "download-to",
   // Users section.
   Cashback: "settings-back",
   "Vehicles Category": "car",
@@ -120,6 +122,10 @@ export const TIO_BY_ICON_KEY = {
   Settings: "settings-outlined",
   Zap: "lock-outlined",
   Globe: "pages-outlined",
+  Layers: "layers-outlined",
+  Flame: "hot",
+  Upload: "publish",
+  Download: "download-to",
 }
 
 export const tioIconFor = (item) =>

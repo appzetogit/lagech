@@ -52,6 +52,10 @@ import {
   Star,
   Store,
   UserPlus,
+  Layers,
+  Flame,
+  Upload,
+  Download,
 } from "lucide-react"
 import { cn } from "@food/utils/utils"
 import { Input } from "@food/components/ui/input"
@@ -113,6 +117,10 @@ const iconMap = {
   Star,
   Store,
   UserPlus,
+  Layers,
+  Flame,
+  Upload,
+  Download,
   X,
 }
 
