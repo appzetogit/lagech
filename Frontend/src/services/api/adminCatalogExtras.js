@@ -42,8 +42,13 @@ export const adminCatalogExtrasAPI = {
     apiClient.patch(`/food/admin/restaurants/${id(restaurantId)}/display-position`, { position }, admin),
 
   // Bulk import / export
-  downloadBulkTemplate: (entity, format = "xlsx") =>
-    apiClient.get(`${BULK_BASE[entity]}/template`, { params: { format }, responseType: "blob", ...admin }),
+  /** withData: the "Template with existing data" (current records in import columns). */
+  downloadBulkTemplate: (entity, format = "xlsx", withData = false) =>
+    apiClient.get(`${BULK_BASE[entity]}/template`, {
+      params: { format, ...(withData ? { withData: 1 } : {}) },
+      responseType: "blob",
+      ...admin,
+    }),
   bulkImport: (entity, file) => {
     const formData = new FormData()
     formData.append("file", file)
@@ -54,6 +59,20 @@ export const adminCatalogExtrasAPI = {
   },
   bulkExport: (entity, params = {}) =>
     apiClient.get(`${BULK_BASE[entity]}/export`, { params, responseType: "blob", ...admin }),
+
+  // Order lists' Export: every order matching the list's filters, built on the server.
+  exportOrders: (params = {}, format = "xlsx") =>
+    apiClient.get("/food/admin/orders/export", {
+      params: { ...params, format: format === "csv" ? "csv" : "xlsx" },
+      responseType: "blob",
+      timeout: 300000,
+      ...admin,
+    }),
+
+  // Restaurant list: Featured toggle and Verify all (approve every pending restaurant).
+  setRestaurantFeatured: (restaurantId, isFeatured) =>
+    apiClient.patch(`/food/admin/restaurants/${id(restaurantId)}/featured`, { isFeatured: Boolean(isFeatured) }, admin),
+  approveAllPendingRestaurants: () => apiClient.post("/food/admin/restaurants/approve-pending", {}, admin),
 
   // Campaigns
   getBasicCampaigns: (params = {}) => apiClient.get("/food/admin/campaigns/basic", { params, ...admin }),

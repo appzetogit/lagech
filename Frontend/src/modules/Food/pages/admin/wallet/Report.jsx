@@ -10,6 +10,22 @@ import {
   formatMoney,
 } from "@food/api/adminCustomerExtras"
 import { CustomerPicker, PageHeader, Pager, StatCard, inputClass } from "./shared"
+import ExportMenu from "@food/components/admin/ExportMenu"
+import { fetchAllPages, exportDate, exportMoney } from "@food/utils/listExport"
+
+const EXPORT_COLUMNS = [
+  { label: "Sl", value: (_, i) => i + 1 },
+  { label: "Transaction ID", value: (t) => t.id },
+  { label: "Date", value: (t) => exportDate(t.createdAt) },
+  { label: "Customer", value: (t) => t.customer?.name || "" },
+  { label: "Phone", value: (t) => t.customer?.phone || "" },
+  { label: "Source", value: (t) => t.sourceLabel },
+  { label: "Details", value: (t) => t.description || "" },
+  { label: "Added by", value: (t) => t.addedBy || "" },
+  { label: "Credit", value: (t) => (t.type === "credit" ? exportMoney(t.amount) : "") },
+  { label: "Debit", value: (t) => (t.type === "debit" ? exportMoney(t.amount) : "") },
+  { label: "Balance after", value: (t) => exportMoney(t.balanceAfter) },
+]
 
 const SOURCES = [
   { key: "add_fund", label: "Added by admin" },
@@ -63,6 +79,22 @@ export default function WalletReport() {
     setFilters((f) => ({ ...f, [key]: value }))
   }
 
+  // Every transaction matching the filters above, across all pages.
+  const getExportRows = () =>
+    fetchAllPages(
+      ({ page: pageNo, limit }) => {
+        const params = { page: pageNo, limit }
+        for (const [k, v] of Object.entries(filters)) if (v) params[k] = v
+        if (customer) params.userId = customer.id
+        return customerExtrasAPI.getWalletTransactions(params)
+      },
+      (res) => {
+        const d = dataOf(res)
+        return { rows: d.transactions || [], total: d.pagination?.total, pages: d.pagination?.pages }
+      },
+      { pageSize: 100 },
+    )
+
   const filtered = Boolean(customer || Object.values(filters).some(Boolean))
   const totals = data.totals || { credit: 0, debit: 0, net: 0, creditCount: 0, debitCount: 0 }
   const rows = data.transactions || []
@@ -70,7 +102,9 @@ export default function WalletReport() {
   return (
     <div className="min-h-screen bg-slate-50 p-4 lg:p-6">
       <div className="mx-auto max-w-7xl space-y-6">
-        <PageHeader icon={FileText} title="Customer Wallet Report" description="Every credit and debit on customer wallets: top-ups, bonuses, refunds, cashback, admin credits and order payments." />
+        <PageHeader icon={FileText} title="Customer Wallet Report" description="Every credit and debit on customer wallets: top-ups, bonuses, refunds, cashback, admin credits and order payments.">
+          <ExportMenu filename="customer_wallet_report" columns={EXPORT_COLUMNS} getRows={getExportRows} />
+        </PageHeader>
 
         <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">

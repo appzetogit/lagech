@@ -6,8 +6,37 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { toast } from "sonner"
 import { zoneLabel } from "@food/utils/entityLabels"
 import DeliveryDutyLog from "@food/components/admin/DeliveryDutyLog"
+import ExportMenu from "@food/components/admin/ExportMenu"
+import { exportMoney } from "@food/utils/listExport"
 const debugError = () => {}
 
+
+// The old panel's Availability column. "On a delivery" (an accepted order not
+// yet delivered) comes from the server and wins over online/offline.
+const AVAILABILITY = {
+  online: { label: "Online", className: "bg-emerald-50 text-emerald-700" },
+  offline: { label: "Offline", className: "bg-slate-100 text-slate-600" },
+  on_delivery: { label: "On a delivery", className: "bg-blue-50 text-blue-700" },
+}
+const availabilityOf = (dm) => {
+  if (AVAILABILITY[dm?.availability]) return dm.availability
+  return dm?.availabilityStatus === "online" || dm?.isOnline ? "online" : "offline"
+}
+
+const DELIVERYMAN_EXPORT_COLUMNS = [
+  { label: "Sl", value: (_dm, i) => i + 1 },
+  { label: "Name", value: (dm) => dm.name },
+  { label: "Email", value: (dm) => dm.email },
+  { label: "Phone", value: (dm) => dm.phone },
+  { label: "Zone", value: (dm) => zoneLabel(dm.zone) },
+  { label: "Total Completed Orders", value: (dm) => Number(dm.totalOrders) || 0 },
+  { label: "Orders In Progress", value: (dm) => Number(dm.activeOrders) || 0 },
+  { label: "Availability", value: (dm) => AVAILABILITY[availabilityOf(dm)].label },
+  { label: "Pocket Balance", value: (dm) => exportMoney(dm.pocketBalance) },
+  { label: "Cash In Hand", value: (dm) => exportMoney(dm.cashInHand) },
+  { label: "Remaining Cash Limit", value: (dm) => exportMoney(dm.remainingCashLimit) },
+  { label: "Status", value: (dm) => (dm.status === "approved" ? "Active" : dm.status || "") },
+]
 
 const formatCurrency = (amount) => {
   const numericAmount = Number(amount)
@@ -235,7 +264,7 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
     name: "Name",
     contact: "Contact",
     zone: "Zone",
-    totalOrders: "Total Orders",
+    totalOrders: "Total Completed Orders",
     pocketBalance: "Pocket Balance",
     cashInHand: "Cash In Hand",
     remainingCashLimit: "Remaining Cash Limit",
@@ -498,14 +527,8 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
                 <FileText className="w-4 h-4" />
                 <span className="text-black font-bold">PDF</span>
               </button>
-              <button
-                onClick={handleExportExcel}
-                className="px-4 py-2.5 text-sm font-medium rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-2 transition-all"
-                title="Export as Excel"
-              >
-                <FileSpreadsheet className="w-4 h-4" />
-                <span className="text-black font-bold">Excel</span>
-              </button>
+              {/* The list already holds every rider matching the search (up to 1,000). */}
+              <ExportMenu filename="deliveryman_list" sheetName="Deliverymen" columns={DELIVERYMAN_EXPORT_COLUMNS} getRows={() => filteredDeliverymen} />
               <button 
                 onClick={() => setIsSettingsOpen(true)}
                 className="p-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 transition-all"
@@ -583,7 +606,7 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
                     {visibleColumns.totalOrders && (
                       <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
                         <div className="flex items-center gap-2">
-                          <span>Total Orders</span>
+                          <span>Total Completed Orders</span>
                           <ArrowUpDown className="w-3 h-3 text-slate-400 cursor-pointer hover:text-slate-600" />
                         </div>
                       </th>
@@ -762,14 +785,17 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
                           <td className="px-6 py-4">
                             <div className="flex flex-col gap-1">
                               <span className="text-xs">
-                                Active Status: <span className={`${dm.status === 'Online' ? 'text-blue-600' : 'text-slate-600'} underline`}>{dm.status}</span>
+                                <span className={`inline-flex rounded-full px-2 py-0.5 font-semibold ${AVAILABILITY[availabilityOf(dm)].className}`}>
+                                  {AVAILABILITY[availabilityOf(dm)].label}
+                                </span>
+                                {dm.activeOrders > 1 ? <span className="ml-1 text-slate-500">({dm.activeOrders} orders)</span> : null}
                               </span>
                               {/* A rider with no push token cannot be sent an
                                   order however online they look, so say it here
                                   rather than leave it invisible. Only flagged
                                   while online — offline riders are not expected
                                   to be reachable. */}
-                              {dm.status === "Online" && dm.hasPushToken === false ? (
+                              {availabilityOf(dm) !== "offline" && dm.hasPushToken === false ? (
                                 <span
                                   title="This rider has no push token, so new orders cannot reach them. They need to open the app once."
                                   className="inline-flex w-fit items-center gap-1 rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-700"

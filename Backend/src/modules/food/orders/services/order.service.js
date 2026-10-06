@@ -2235,13 +2235,11 @@ function applyAdminAmountFilter(AND, minAmountRaw, maxAmountRaw) {
   if (Object.keys(total).length > 0) AND.push({ total });
 }
 
-export async function listOrdersAdmin(query) {
-  await expireStalePendingPaymentOrders();
-
-  const page = Math.max(parseInt(query.page, 10) || 1, 1);
-  const limit = Math.min(Math.max(parseInt(query.limit, 10) || 50, 1), 2000);
-  const skip = (page - 1) * limit;
-
+/**
+ * The admin order list's filters as a Prisma where, shared by the paged list
+ * and the export so a download always matches what the list shows.
+ */
+export function buildAdminOrdersWhere(query = {}) {
   const where = {};
   const AND = [];
 
@@ -2299,10 +2297,20 @@ export async function listOrdersAdmin(query) {
       case "refunded":
         where.paymentStatus = "refunded";
         break;
-      case "offline-payments":
+      case "offline-payments": {
         // Every offline-payment order: awaiting verification, verified, rejected.
         where.paymentMethod = "offline";
+        // The page's sub-tabs. Verify sets paymentStatus paid, Deny sets it
+        // failed; pending is what Verify/Deny can still act on.
+        const offlineStatus = typeof query.offlineStatus === "string" ? query.offlineStatus.trim().toLowerCase() : "";
+        if (offlineStatus === "verified") where.paymentStatus = "paid";
+        else if (offlineStatus === "denied") where.paymentStatus = "failed";
+        else if (offlineStatus === "pending") {
+          where.orderStatus = "pending_payment";
+          where.paymentStatus = { notIn: ["paid", "failed", "refunded"] };
+        }
         break;
+      }
       case "scheduled":
         // Placed for later: the delivery time is still ahead, and the order
         // is neither finished nor waiting on payment.
@@ -2344,12 +2352,24 @@ export async function listOrdersAdmin(query) {
   applyAdminAmountFilter(AND, query.minAmount, query.maxAmount);
   if (AND.length) where.AND = AND;
 
+  // Scheduled orders read soonest-due first; everything else newest first.
+  const orderBy = rawStatus === "scheduled" ? [{ scheduledAt: 'asc' }, { createdAt: 'desc' }] : { createdAt: 'desc' };
+  return { where, orderBy };
+}
+
+export async function listOrdersAdmin(query) {
+  await expireStalePendingPaymentOrders();
+
+  const page = Math.max(parseInt(query.page, 10) || 1, 1);
+  const limit = Math.min(Math.max(parseInt(query.limit, 10) || 50, 1), 2000);
+  const skip = (page - 1) * limit;
+  const { where, orderBy } = buildAdminOrdersWhere(query);
+
   const [rows, total] = await Promise.all([
     prisma.foodOrder.findMany({
       where,
       include: withRelations(RESTAURANT_ADMIN, PARTNER_CARD),
-      // Scheduled orders read soonest-due first; everything else newest first.
-      orderBy: rawStatus === "scheduled" ? [{ scheduledAt: 'asc' }, { createdAt: 'desc' }] : { createdAt: 'desc' },
+      orderBy,
       skip,
       take: limit,
     }),

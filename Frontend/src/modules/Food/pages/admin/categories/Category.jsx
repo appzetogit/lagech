@@ -20,6 +20,7 @@ import { adminAPI, uploadAPI } from "@food/api"
 import { API_BASE_URL } from "@food/api/config"
 import { toast } from "sonner"
 import { canCurrentAdminAction } from "@food/utils/adminRbac"
+import ExportMenu from "@food/components/admin/ExportMenu"
 
 const defaultFormData = {
   name: "",
@@ -61,6 +62,49 @@ const zoneLabel = (zone) => {
 }
 
 const resolveCategoryId = (category) => String(category?._id || category?.id || "").trim()
+
+/**
+ * The old panel's "Priority": sortOrder, lower shows first in the customer app.
+ * Saved on blur or Enter, and only when the number actually changed.
+ */
+function PriorityInput({ value, onSave }) {
+  const [draft, setDraft] = useState(String(value ?? 0))
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    setDraft(String(value ?? 0))
+  }, [value])
+
+  const commit = async () => {
+    const text = String(draft).trim()
+    const next = Number(text)
+    if (text === "" || !Number.isFinite(next)) {
+      setDraft(String(value ?? 0))
+      return
+    }
+    if (next === Number(value ?? 0)) return
+    setSaving(true)
+    const ok = await onSave(next)
+    setSaving(false)
+    if (!ok) setDraft(String(value ?? 0))
+  }
+
+  return (
+    <input
+      type="number"
+      value={draft}
+      disabled={saving}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") event.currentTarget.blur()
+      }}
+      className="w-16 rounded-lg border border-slate-300 px-2 py-1.5 text-center text-sm outline-none focus:border-slate-900 disabled:opacity-60"
+      aria-label="Priority"
+      title="Lower shows first in the customer app"
+    />
+  )
+}
 
 /**
  * The Category and Sub Category admin pages.
@@ -374,6 +418,32 @@ export default function Category({ variant = "category" }) {
     }
   }
 
+  const handlePriorityChange = async (id, sortOrder) => {
+    if (!ensureActionAccess("edit")) return false
+    try {
+      await adminAPI.updateCategory(String(id), { sortOrder: Number(sortOrder) })
+      setCategories((prev) =>
+        prev.map((category) => (resolveCategoryId(category) === String(id) ? { ...category, sortOrder } : category)),
+      )
+      toast.success("Priority updated")
+      return true
+    } catch (error) {
+      toast.error(error?.response?.data?.message || "Failed to update priority")
+      return false
+    }
+  }
+
+  // The page already holds every matching category (limit 1000 with the same
+  // search / pending / parent filters), so the export is the filtered list.
+  const exportColumns = [
+    { label: "Sl", value: (_row, index) => index + 1 },
+    { label: "Id", value: (category) => resolveCategoryId(category) },
+    { label: "Name", value: (category) => category?.name || "" },
+    ...(isSub ? [{ label: "Main Category", value: (category) => category?.parentName || "" }] : []),
+    { label: "Status", value: (category) => (category?.status ? "Active" : "Inactive") },
+    { label: "Priority", value: (category) => Number(category?.sortOrder || 0) },
+  ]
+
   const handleExportPDF = async () => {
     try {
       const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
@@ -550,13 +620,22 @@ export default function Category({ variant = "category" }) {
               />
             </div>
 
+            <ExportMenu
+              filename={isSub ? "sub_categories" : "categories"}
+              sheetName={isSub ? "Sub Categories" : "Categories"}
+              columns={exportColumns}
+              getRows={() => filteredCategories}
+              disabled={loading}
+              className="rounded-xl"
+            />
+
             <button
               onClick={handleExportPDF}
               disabled={filteredCategories.length === 0}
               className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Download className="h-4 w-4" />
-              Export
+              PDF
             </button>
 
             <button
@@ -575,30 +654,36 @@ export default function Category({ variant = "category" }) {
           <table className="min-w-full table-fixed">
             <thead className="border-b border-slate-200 bg-slate-50">
               <tr>
-                <th className="w-[25%] px-5 py-4 text-left text-[11px] font-bold uppercase tracking-wider text-slate-600">
+                <th className="w-[21%] px-5 py-4 text-left text-[11px] font-bold uppercase tracking-wider text-slate-600">
                   {isSub ? "Sub Category" : "Category"}
                 </th>
-                <th className="w-[17%] px-4 py-4 text-left text-[11px] font-bold uppercase tracking-wider text-slate-600">
+                <th className="w-[14%] px-4 py-4 text-left text-[11px] font-bold uppercase tracking-wider text-slate-600">
                   {isSub ? "Main Category" : "Owner"}
                 </th>
-                <th className="w-[15%] px-4 py-4 text-left text-[11px] font-bold uppercase tracking-wider text-slate-600">Zone</th>
-                <th className="w-[10%] px-4 py-4 text-center text-[11px] font-bold uppercase tracking-wider text-slate-600">Diet</th>
-                <th className="w-[10%] px-4 py-4 text-center text-[11px] font-bold uppercase tracking-wider text-slate-600">Status</th>
-                <th className="w-[13%] px-4 py-4 text-left text-[11px] font-bold uppercase tracking-wider text-slate-600">Approval</th>
-                <th className="w-[20%] px-5 py-4 text-right text-[11px] font-bold uppercase tracking-wider text-slate-600">Actions</th>
+                <th className="w-[12%] px-4 py-4 text-left text-[11px] font-bold uppercase tracking-wider text-slate-600">Zone</th>
+                <th className="w-[9%] px-4 py-4 text-center text-[11px] font-bold uppercase tracking-wider text-slate-600">Diet</th>
+                <th
+                  className="w-[8%] px-3 py-4 text-center text-[11px] font-bold uppercase tracking-wider text-slate-600"
+                  title="Lower shows first in the customer app"
+                >
+                  Priority
+                </th>
+                <th className="w-[8%] px-4 py-4 text-center text-[11px] font-bold uppercase tracking-wider text-slate-600">Status</th>
+                <th className="w-[12%] px-4 py-4 text-left text-[11px] font-bold uppercase tracking-wider text-slate-600">Approval</th>
+                <th className="w-[16%] px-5 py-4 text-right text-[11px] font-bold uppercase tracking-wider text-slate-600">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-20 text-center">
+                  <td colSpan={8} className="px-6 py-20 text-center">
                     <Loader2 className="mx-auto h-8 w-8 animate-spin text-blue-600" />
                     <p className="mt-2 text-sm text-slate-500">Loading categories...</p>
                   </td>
                 </tr>
               ) : filteredCategories.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-20 text-center">
+                  <td colSpan={8} className="px-6 py-20 text-center">
                     <p className="text-lg font-semibold text-slate-700">
                       {isSub ? "No sub categories found" : "No categories found"}
                     </p>
@@ -691,6 +776,12 @@ export default function Category({ variant = "category" }) {
                         <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold ${scopeBadgeClass(category?.foodTypeScope)}`}>
                           {category?.foodTypeScope || "Both"}
                         </span>
+                      </td>
+                      <td className="px-3 py-5 text-center">
+                        <PriorityInput
+                          value={Number(category?.sortOrder || 0)}
+                          onSave={(next) => handlePriorityChange(categoryId, next)}
+                        />
                       </td>
                       <td className="px-4 py-5 text-center">
                         <button

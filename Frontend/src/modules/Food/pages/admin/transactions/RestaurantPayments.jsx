@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react"
-import { Download, Loader2, Plus, Search, Send, X } from "@food/components/admin/theme/icons"
+import { Loader2, Plus, Search, Send, X } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminAPI } from "@food/api"
 import { adminSystemExtrasAPI } from "@food/api/adminSystemExtras"
 import { PageFrame, Card, Field, Loading, inputClass, errorMessage, formatDateTime } from "../system/SettingsUi"
-import { downloadCsv, rupees } from "../reports/ReportShell"
+import { rupees } from "../reports/ReportShell"
+import ExportMenu from "@food/components/admin/ExportMenu"
+import { exportDate, exportMoney, fetchAllPages } from "@food/utils/listExport"
 
 const METHODS = [
   ["bank_transfer", "Bank transfer"],
@@ -143,13 +145,14 @@ function PaymentForm({ restaurants, onClose, onSaved }) {
   )
 }
 
-const CSV_COLUMNS = [
-  { key: "paidAt", label: "Paid on", csv: (r) => formatDateTime(r.paidAt) },
-  { key: "restaurantName", label: "Restaurant" },
-  { key: "amount", label: "Amount" },
-  { key: "method", label: "Method", csv: (r) => methodLabel(r.method) },
-  { key: "reference", label: "Reference" },
-  { key: "note", label: "Note" },
+const EXPORT_COLUMNS = [
+  { label: "Sl", value: (r, i) => i + 1 },
+  { label: "Paid on", value: (r) => exportDate(r.paidAt) },
+  { label: "Restaurant", value: (r) => r.restaurantName || "" },
+  { label: "Amount", value: (r) => exportMoney(r.amount) },
+  { label: "Method", value: (r) => methodLabel(r.method) },
+  { label: "Reference", value: (r) => r.reference || "" },
+  { label: "Note", value: (r) => r.note || "" },
 ]
 
 /** The old panel's "Store payments": payments made to restaurants by hand. */
@@ -161,7 +164,6 @@ export default function RestaurantPayments() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [adding, setAdding] = useState(false)
-  const [exporting, setExporting] = useState(false)
 
   useEffect(() => {
     adminAPI
@@ -200,17 +202,15 @@ export default function RestaurantPayments() {
     setPage(1)
   }
 
-  const exportCsv = async () => {
-    try {
-      setExporting(true)
-      const res = await adminSystemExtrasAPI.getRestaurantPayments({ ...params, page: 1, limit: 500 })
-      downloadCsv("restaurant-payments.csv", CSV_COLUMNS, res?.data?.data?.payments || [])
-    } catch {
-      toast.error("Export failed")
-    } finally {
-      setExporting(false)
-    }
-  }
+  // Every payment matching the filters, page by page.
+  const exportAll = () =>
+    fetchAllPages(
+      ({ page: p, limit }) => adminSystemExtrasAPI.getRestaurantPayments({ ...params, page: p, limit }),
+      (res) => {
+        const d = res?.data?.data || {}
+        return { rows: d.payments || [], total: d.pagination?.total, pages: d.pagination?.pages }
+      },
+    )
 
   const rows = data?.payments || []
   const pages = data?.pagination?.pages || 1
@@ -250,9 +250,14 @@ export default function RestaurantPayments() {
               </div>
             </Field>
           </form>
-          <button type="button" onClick={exportCsv} disabled={exporting || !rows.length} className="ml-auto inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50">
-            {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} Export CSV
-          </button>
+          <ExportMenu
+            className="ml-auto"
+            filename="restaurant-payments"
+            sheetName="Restaurant Payments"
+            columns={EXPORT_COLUMNS}
+            getRows={exportAll}
+            disabled={!rows.length}
+          />
         </div>
       </Card>
 

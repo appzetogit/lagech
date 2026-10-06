@@ -1664,7 +1664,7 @@ const PUBLIC_CARD_SELECT = {
     offer: true, featuredDish: true, featuredPrice: true,
     rating: true, totalRatings: true, isAcceptingOrders: true, status: true,
     pureVegRestaurant: true, createdAt: true, zoneId: true,
-    isRecommended: true, recommendedSortOrder: true, displayPosition: true,
+    isRecommended: true, recommendedSortOrder: true, displayPosition: true, isFeatured: true,
     openingTime: true, closingTime: true, openDays: true,
     latitude: true, longitude: true, formattedAddress: true,
     addressLine1: true, addressLine2: true, state: true, pincode: true, landmark: true,
@@ -1782,6 +1782,8 @@ export const listApprovedRestaurants = async (query = {}) => {
     // The admin's hand-picked list (Recommended Restaurants), in the admin's order.
     const recommendedOnly = query.recommended === 'true';
     if (recommendedOnly) AND.push({ isRecommended: true });
+    // The admin's Featured toggle (restaurant list).
+    if (query.featured === 'true') AND.push({ isFeatured: true });
     if (query.trusted === 'true') AND.push({ totalRatings: { gte: 100 } });
 
     if (query.search && String(query.search).trim()) {
