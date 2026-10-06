@@ -5,6 +5,7 @@ import { prisma } from '../../config/prisma.js';
 import { config } from '../../config/env.js';
 import { logger } from '../../utils/logger.js';
 import { isMobilePlatform, normalizePlatform } from '../../utils/platform.js';
+import { isPushAllowed } from './notificationChannels.js';
 
 const FIREBASE_MESSAGING_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging';
 const OAUTH_TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -574,6 +575,10 @@ export const sendPushNotification = async (tokens, payload = {}) => {
 };
 
 export const sendNotificationToOwner = async ({ ownerType, ownerId, payload, platform } = {}) => {
+    // An event the admin switched off on Notification Channels is not pushed.
+    if (!(await isPushAllowed(payload, ownerType))) {
+        return { successCount: 0, failureCount: 0, results: [], skipped: 'channel_off' };
+    }
     // Clone payload to avoid side-effects across batched sends.
     const enrichedPayload = { ...payload };
 

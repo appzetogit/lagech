@@ -297,7 +297,7 @@ export async function payoutEntity(entityType, entityId, body = {}) {
     // move, so the same money stayed payable there and could be paid twice.
     if (entityType === 'restaurant') {
         throw new ValidationError(
-            'Restaurants are paid from Restaurant Disbursement or their withdrawal requests, so their balance stays right. Nothing was recorded here.',
+            'Restaurants are paid from Restaurant Disbursement, their withdrawal requests or Restaurant Payments, so their balance stays right. Nothing was recorded here.',
         );
     }
 

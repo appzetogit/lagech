@@ -4,6 +4,7 @@ import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { logger } from '../../../../utils/logger.js';
 import { getWalletSummaries } from './restaurantFinance.service.js';
+import { getPayoutSnapshots } from '../../admin/services/withdrawalMethods.service.js';
 
 /**
  * Automatic restaurant payouts, run the way the previous system ran them.
@@ -143,6 +144,19 @@ export function resolvePayee(restaurant) {
     return bank || upi;
 }
 
+/**
+ * Add the payee's chosen payout method to a resolved payee, or use the method
+ * alone when there is no bank account or UPI id. Null when there is neither.
+ */
+export function withPayoutMethod(payee, snapshot) {
+    if (!snapshot) return payee;
+    if (payee) return { ...payee, bankDetails: { ...payee.bankDetails, payoutMethod: snapshot } };
+    return {
+        paymentMethod: String(snapshot.methodName || 'payout_method').slice(0, 60),
+        bankDetails: { payoutMethod: snapshot },
+    };
+}
+
 const PAYEE_SELECT = {
     id: true, restaurantName: true, payoutMethod: true,
     accountHolderName: true, accountNumber: true, ifscCode: true, accountType: true,
@@ -198,18 +212,21 @@ export async function generateRestaurantPayouts({ now = new Date(), force = fals
     for (let i = 0; i < restaurants.length; i += 100) {
         const page = restaurants.slice(i, i + 100);
         const summaries = await getWalletSummaries(page.map((r) => r.id), { earnedBefore: cutoffAt });
+        // The payout method each restaurant chose, if any: the fallback when
+        // it has no bank account or UPI id, and shown to the admin either way.
+        const methods = await getPayoutSnapshots('restaurant', page.map((r) => r.id)).catch(() => new Map());
 
         for (const restaurant of page) {
             const owed = money(summaries.get(restaurant.id)?.availableBeforeCutoff);
             if (owed < minAmount) continue;
 
-            const payee = resolvePayee(restaurant);
+            const payee = withPayoutMethod(resolvePayee(restaurant), methods.get(restaurant.id));
             if (!payee) {
                 skipped.push({
                     restaurantId: restaurant.id,
                     name: restaurant.restaurantName,
                     amount: owed,
-                    reason: 'No bank account or UPI id on file',
+                    reason: 'No bank account, UPI id or payout method on file',
                 });
                 continue;
             }

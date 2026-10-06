@@ -301,6 +301,9 @@ export const adminSidebarMenu = [
       { type: "link", label: "Delivery Man Disbursement", path: "/admin/food/deliveryman-disbursements", icon: "Wallet" },
       { type: "link", label: "Delivery Man Payments", path: "/admin/food/deliveryman-payments", icon: "Send" },
       { type: "link", label: "Balance Sheet", path: "/admin/food/balance-sheet", icon: "Wallet" },
+      // The old panel's "Store Payments": payments made to restaurants by hand.
+      { type: "link", label: "Restaurant Payments", path: "/admin/food/restaurant-payments", icon: "CreditCard" },
+      { type: "link", label: "Withdraw Method", path: "/admin/food/withdraw-method", icon: "Wallet" },
     ],
   },
   {
@@ -320,6 +323,9 @@ export const adminSidebarMenu = [
       { type: "link", label: "Expense Report", path: "/admin/food/expense-report", icon: "Receipt" },
       { type: "link", label: "Item Report", path: "/admin/food/item-report", icon: "Utensils" },
       { type: "link", label: "Tax Report", path: "/admin/food/tax-report", icon: "Receipt" },
+      { type: "link", label: "Restaurant Earning Report", path: "/admin/food/restaurant-earning-report", icon: "IndianRupee" },
+      { type: "link", label: "Disbursement Report", path: "/admin/food/disbursement-report/restaurants", icon: "PiggyBank" },
+      { type: "link", label: "Restaurant VAT Report", path: "/admin/food/restaurant-vat-report", icon: "Receipt" },
       {
         type: "link",
         label: "Customer Feedback Report",
@@ -352,6 +358,20 @@ export const adminSidebarMenu = [
   },
   {
     type: "section",
+    label: "SYSTEM SETTINGS",
+    items: [
+      { type: "link", label: "App Settings", path: "/admin/food/app-web-settings", icon: "Phone" },
+      { type: "link", label: "Login Setup", path: "/admin/food/login-setup", icon: "LogIn" },
+      { type: "link", label: "Notification Channels", path: "/admin/food/notification-channels", icon: "Bell" },
+      { type: "link", label: "Email Templates", path: "/admin/food/email-template", icon: "Mail" },
+      { type: "link", label: "Landing Page", path: "/admin/food/landing-page-settings/react", icon: "Globe" },
+      { type: "link", label: "Website", path: "/admin/food/react-site", icon: "Globe" },
+      { type: "link", label: "Page Meta Data", path: "/admin/food/page-meta-data", icon: "Globe" },
+      { type: "link", label: "Gallery", path: "/admin/food/gallery", icon: "Image" },
+    ],
+  },
+  {
+    type: "section",
     label: "PAGES & SOCIAL MEDIA",
     items: [
       {
@@ -368,6 +388,7 @@ export const adminSidebarMenu = [
           { label: "Support", path: "/admin/food/pages-social-media/support" },
         ],
       },
+      { type: "link", label: "Social Media", path: "/admin/food/pages-social-media/social-media", icon: "Globe" },
     ],
   },
 ];

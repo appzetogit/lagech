@@ -3671,6 +3671,106 @@ model FoodLandingSettings {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Payout methods, email templates, social links, system settings
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A kind of payout the admin accepts ("Bank transfer", "UPI"), and the fields
+/// a restaurant or rider fills in to be paid that way. Additive to the fixed
+/// bank and UPI columns on restaurants and riders, which stay as they are.
+model FoodWithdrawalMethod {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  name      String  @db.VarChar(80)
+  /// [{ key, label, type: 'text'|'number'|'email', required, placeholder }]
+  fields    Json    @default("[]")
+  isActive  Boolean @default(true)
+  /// At most one method is the default; the service keeps it that way.
+  isDefault Boolean @default(false)
+  sortOrder Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  details FoodPayoutMethodDetail[]
+
+  @@index([isActive, sortOrder])
+  @@map("food_withdrawal_methods")
+}
+
+/// The method a restaurant or rider chose to be paid by, and what they filled
+/// in for its fields. One row per payee.
+model FoodPayoutMethodDetail {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  /// 'restaurant' or 'rider'.
+  ownerType String @db.VarChar(16)
+  ownerId   String @db.VarChar(24)
+  methodId  String @db.VarChar(24)
+  /// { [field key]: value }
+  values    Json   @default("{}")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  method FoodWithdrawalMethod @relation(fields: [methodId], references: [id], onDelete: Restrict)
+
+  @@unique([ownerType, ownerId])
+  @@index([methodId])
+  @@map("food_payout_method_details")
+}
+
+/// The admin's wording for an email the backend sends. `key` names the email
+/// (see emailTemplates.registry.js); a missing or switched-off row falls back
+/// to the built-in text.
+model FoodEmailTemplate {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  key       String  @unique @db.VarChar(64)
+  subject   String
+  /// HTML with {{placeholders}}.
+  body      String
+  isActive  Boolean @default(true)
+  updatedBy String? @db.VarChar(24)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("food_email_templates")
+}
+
+/// Social media profiles shown on the website and in the apps.
+model FoodSocialMediaLink {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  platform  String  @db.VarChar(40)
+  url       String
+  isActive  Boolean @default(true)
+  sortOrder Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, sortOrder])
+  @@map("food_social_media_links")
+}
+
+/// One JSON document per settings area: 'page_meta', 'app_settings',
+/// 'login_setup', 'notification_channels', 'landing_page', 'website'.
+/// Shapes and defaults live in systemSettings.defaults.js.
+model FoodSystemSetting {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  key       String  @unique @db.VarChar(64)
+  value     Json    @default("{}")
+  updatedBy String? @db.VarChar(24)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("food_system_settings")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Misc
 // ─────────────────────────────────────────────────────────────────────────────
 

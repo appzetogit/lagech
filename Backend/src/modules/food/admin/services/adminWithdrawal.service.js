@@ -76,8 +76,11 @@ export async function getWithdrawals(query = {}) {
         where.status = String(query.status).toLowerCase();
     }
     if (isId(query.restaurantId)) where.restaurantId = String(query.restaurantId);
-    // 'manual' (asked for by the restaurant) or 'disbursement' (daily payout run).
-    if (['manual', 'disbursement'].includes(query.source)) where.source = query.source;
+    // 'manual' (asked for by the restaurant), 'disbursement' (daily payout run)
+    // or 'admin_payment' (recorded on Restaurant Payments). Those payments were
+    // never requests, so the request list leaves them out unless asked.
+    if (['manual', 'disbursement', 'admin_payment'].includes(query.source)) where.source = query.source;
+    else where.source = { not: 'admin_payment' };
 
     const [withdrawals, total] = await Promise.all([
         prisma.foodRestaurantWithdrawal.findMany({

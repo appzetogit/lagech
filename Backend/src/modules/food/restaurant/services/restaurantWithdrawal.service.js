@@ -2,6 +2,7 @@ import { prisma } from '../../../../config/prisma.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { getRestaurantFinance } from './restaurantFinance.service.js';
 import { lockRestaurantBalance } from './restaurantPayout.service.js';
+import { getPayoutSnapshot } from '../../admin/services/withdrawalMethods.service.js';
 
 /**
  * A restaurant asking to be paid out. Admin acts on these in
@@ -16,6 +17,9 @@ const rupees = (value) => `₹${Number(value).toLocaleString('en-IN')}`;
 export async function createWithdrawalRequest(restaurantId, { amount, bankDetails } = {}) {
     const value = Number(amount);
     if (!Number.isFinite(value) || value <= 0) throw new ValidationError('Invalid withdrawal amount');
+    // The payout method the restaurant chose, kept on the request so the admin
+    // sees where to pay. Only when the panel sent no bank details of its own.
+    const payoutMethod = bankDetails ? null : await getPayoutSnapshot('restaurant', restaurantId);
 
     // Serialised with the nightly payout run and any other request for this
     // restaurant: the balance is derived, not stored, so two writers that both
@@ -43,7 +47,13 @@ export async function createWithdrawalRequest(restaurantId, { amount, bankDetail
         }
 
         const withdrawal = await tx.foodRestaurantWithdrawal.create({
-            data: { restaurantId, amount: value, bankDetails: bankDetails ?? undefined, status: 'pending', source: 'manual' },
+            data: {
+                restaurantId,
+                amount: value,
+                bankDetails: bankDetails ?? (payoutMethod ? { payoutMethod } : undefined),
+                status: 'pending',
+                source: 'manual',
+            },
         });
 
         return serialize(withdrawal);
