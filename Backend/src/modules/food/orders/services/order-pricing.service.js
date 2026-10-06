@@ -11,6 +11,7 @@ import { attachOutletTimingsToRestaurants } from '../../restaurant/services/outl
 import { getRestaurantAvailabilityStatus } from '../../restaurant/helpers/restaurantAvailability.helper.js';
 import { resolveOrderCartItems } from '../helpers/order-cart-items.helper.js';
 import { applyFeeSwitches } from './feeSwitches.js';
+import { evaluateCoupon, requiresFirstOrder, USED_ORDER_WHERE } from './couponRules.js';
 
 const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
 
@@ -413,6 +414,34 @@ async function resolveDeliveryAddress(userId, dto) {
   return chosen || dto.deliveryAddress;
 }
 
+/**
+ * Look a code up and decide whether it applies (see couponRules.js). Loads the
+ * two counts the rules need -- the customer's prior orders, for first-order
+ * coupons, and their uses of this coupon, for the per-customer limit -- only
+ * when the coupon has that rule.
+ *
+ * Uses are counted from orders (food_orders.couponId), not from a running
+ * counter, so a cancelled order or a failed payment gives the use back.
+ */
+export async function applyCouponCode(code, ctx = {}) {
+  const offer = await prisma.foodOffer.findUnique({ where: { couponCode: String(code) } });
+  if (!offer) return { ...evaluateCoupon(null, ctx), offer: null };
+
+  const userId = isId(ctx.userId) ? String(ctx.userId) : null;
+  let priorOrders = 0;
+  let userUses = 0;
+  if (userId && requiresFirstOrder(offer)) {
+    priorOrders = await prisma.foodOrder.count({ where: { userId, ...USED_ORDER_WHERE } });
+  }
+  if (userId && Number(offer.perUserLimit) > 0) {
+    userUses = await prisma.foodOrder.count({
+      where: { userId, couponId: offer.id, ...USED_ORDER_WHERE },
+    });
+  }
+
+  return { ...evaluateCoupon(offer, { ...ctx, priorOrders, userUses }), offer };
+}
+
 export async function calculateOrderPricing(userId, dto, options = {}) {
   const at = options.at instanceof Date ? options.at : new Date();
   const restaurant =
@@ -469,97 +498,49 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
   }
 
   const deliveryFeeResult = resolveUserDeliveryFee(feeSettings, { subtotal, distanceKm });
-  const deliveryFee = round2(deliveryFeeResult.deliveryFee);
+  const originalDeliveryFee = round2(deliveryFeeResult.deliveryFee);
   distanceKm = deliveryFeeResult.distanceKm ?? distanceKm;
 
-  let discount = 0;
-  let appliedCoupon = null;
+  const deliveryFeeGstRate = resolveDeliveryFeeGstRate(feeSettings);
+  const originalDeliveryFeeGst = computeDeliveryFeeGst(originalDeliveryFee, deliveryFeeGstRate);
+
   const codeRaw = dto.couponCode
     ? String(dto.couponCode).trim().toUpperCase()
     : "";
+  const coupon = codeRaw
+    ? await applyCouponCode(codeRaw, {
+        userId,
+        restaurantId: dto.restaurantId,
+        zoneId: pricingZoneId,
+        subtotal,
+        deliveryFee: originalDeliveryFee,
+        deliveryFeeGst: originalDeliveryFeeGst,
+        // A scheduled order is checked against the time it is for.
+        now: at > new Date() ? at : new Date(),
+      })
+    : null;
 
-  if (codeRaw) {
-    const now = new Date();
-    const offer = await prisma.foodOffer.findUnique({ where: { couponCode: codeRaw } });
-    if (offer) {
-      const offerEnd = offer.endDate ? new Date(offer.endDate) : null;
-      if (offerEnd && offerEnd.getHours() === 0 && offerEnd.getMinutes() === 0) {
-        offerEnd.setHours(23, 59, 59, 999);
-      }
-      const endOk = !offerEnd || now <= offerEnd;
-      const startOk = !offer.startDate || now >= new Date(offer.startDate);
-      const statusOk = offer.status === "active" && offer.showInCart !== false;
-      const selectedRestaurantIds = Array.isArray(offer.restaurantIds) && offer.restaurantIds.length > 0
-        ? offer.restaurantIds
-        : [offer.restaurantId].filter(Boolean);
-      const scopeOk =
-        offer.restaurantScope !== "selected" ||
-        selectedRestaurantIds.some((id) => String(id) === String(dto.restaurantId || ""));
-      const minOk = subtotal >= (Number(offer.minOrderValue) || 0);
-      let usageOk = true;
-      if (
-        Number(offer.usageLimit) > 0 &&
-        Number(offer.usedCount || 0) >= Number(offer.usageLimit)
-      ) {
-        usageOk = false;
-      }
+  const discount = coupon?.ok ? coupon.discount : 0;
+  // A free-delivery coupon waives the delivery fee and the GST charged on it.
+  // The rider's pay is worked out from the distance bands, not from this fee,
+  // so it is unchanged; the platform absorbs the waived amount.
+  const deliveryFeeWaived = coupon?.ok ? coupon.deliveryFeeWaived : 0;
+  const deliveryFee = deliveryFeeWaived > 0 ? 0 : originalDeliveryFee;
+  const deliveryFeeGst = deliveryFeeWaived > 0 ? 0 : originalDeliveryFeeGst;
 
-      let perUserOk = true;
-      if (isId(userId) && Number(offer.perUserLimit) > 0) {
-        const usage = await prisma.foodOfferUsage.findUnique({
-          where: { offerId_userId: { offerId: offer.id, userId: String(userId) } },
-        });
-        if (usage && Number(usage.count) >= Number(offer.perUserLimit)) {
-          perUserOk = false;
-        }
+  const appliedCoupon = coupon?.ok
+    ? {
+        code: codeRaw,
+        discount,
+        couponId: coupon.offer.id,
+        title: coupon.offer.title || "",
+        couponType: coupon.couponType,
+        freeDelivery: coupon.couponType === "free_delivery",
+        deliveryFeeWaived,
+        // What the customer saves in total, whichever way the coupon works.
+        savings: round2(discount + deliveryFeeWaived),
       }
-
-      // A coupon issued to named customers is not usable by anyone else, even
-      // if they somehow learn the code -- which is the whole point of issuing
-      // one. An anonymous cart fails this too: without a user there is nobody
-      // to match against the list.
-      let audienceOk = true;
-      if (offer.customerScope === 'specific') {
-        const allowList = Array.isArray(offer.customerIds) ? offer.customerIds.map(String) : [];
-        audienceOk = isId(userId) && allowList.includes(String(userId));
-      }
-
-      let firstOrderOk = true;
-      // Both flags mean the same thing — the customer must have no prior orders —
-      // so the count is fetched once instead of twice.
-      if (isId(userId) && (offer.customerScope === 'first_time' || offer.isFirstOrderOnly === true)) {
-        const priorOrders = await prisma.foodOrder.count({ where: { userId: String(userId) } });
-        firstOrderOk = priorOrders === 0;
-      }
-
-      const allowed =
-        statusOk &&
-        startOk &&
-        endOk &&
-        scopeOk &&
-        minOk &&
-        usageOk &&
-        perUserOk &&
-        audienceOk &&
-        firstOrderOk;
-
-      if (allowed) {
-        if (offer.discountType === "percentage") {
-          const raw = subtotal * (Number(offer.discountValue) / 100);
-          const capped = Number(offer.maxDiscount)
-            ? Math.min(raw, Number(offer.maxDiscount))
-            : raw;
-          discount = Math.max(0, Math.min(subtotal, Math.floor(capped)));
-        } else {
-          discount = Math.max(
-            0,
-            Math.min(subtotal, Math.floor(Number(offer.discountValue) || 0)),
-          );
-        }
-        appliedCoupon = { code: codeRaw, discount };
-      }
-    }
-  }
+    : null;
 
   // GST is charged on the post-discount item value (discount is already clamped to <= subtotal).
   const gstRate = Number(feeSettings.gstRate || 0);
@@ -567,9 +548,6 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
     Number.isFinite(gstRate) && gstRate > 0
       ? Math.round(Math.max(0, subtotal - discount) * (gstRate / 100))
       : 0;
-
-  const deliveryFeeGstRate = resolveDeliveryFeeGstRate(feeSettings);
-  const deliveryFeeGst = computeDeliveryFeeGst(deliveryFee, deliveryFeeGstRate);
 
   const total = round2(
     Math.max(
@@ -594,6 +572,13 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
     currency: "INR",
     couponCode: appliedCoupon?.code || codeRaw || null,
     appliedCoupon,
+    // Why a code that was sent did not apply, worded for the customer. Null
+    // when no code was sent or it applied.
+    couponError: coupon && !coupon.ok ? coupon.message : null,
+    couponErrorReason: coupon && !coupon.ok ? coupon.reason : null,
+    couponId: appliedCoupon?.couponId || null,
+    deliveryFeeWaived,
+    originalDeliveryFee,
     distanceKm: Number.isFinite(distanceKm) ? Number(distanceKm.toFixed(2)) : null,
     roadDistanceKm: Number.isFinite(distanceKm) ? Number(distanceKm.toFixed(2)) : null,
     straightLineDistanceKm: Number.isFinite(straightLineKm)
@@ -636,6 +621,8 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
         source: deliveryFeeResult.source,
         distanceKm: Number.isFinite(distanceKm) ? Number(distanceKm.toFixed(2)) : null,
         deliveryFee,
+        originalDeliveryFee,
+        deliveryFeeWaived,
         message: Number.isFinite(distanceKm)
           ? `Distance: ${Number(distanceKm).toFixed(1)} km`
           : null,

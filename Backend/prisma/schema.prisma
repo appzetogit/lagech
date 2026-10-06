@@ -1324,6 +1324,14 @@ model FoodOrder {
   restaurantCommission Decimal      @default(0) @db.Decimal(14, 2)
   discount             Decimal      @default(0) @db.Decimal(14, 2)
   couponCode           String?      @db.VarChar(64)
+  /// The coupon that was actually applied. couponCode alone is not proof: it
+  /// is also stored when a code was entered and rejected. Coupon uses (Total
+  /// Uses, the per-customer limit) are counted from this column.
+  couponId             String?      @db.VarChar(24)
+  /// What a free-delivery coupon took off: the delivery fee plus its GST.
+  /// The fee columns are already 0 on such an order; this keeps what the
+  /// platform absorbed. Rider pay (riderEarning) is not reduced by it.
+  couponDeliveryWaiver Decimal      @default(0) @db.Decimal(14, 2)
   total                Decimal      @db.Decimal(14, 2)
   currency             String       @default("INR") @db.VarChar(3)
   /// Straight-line restaurant ↔ customer km, used for fee calculation.
@@ -1414,6 +1422,7 @@ model FoodOrder {
   restaurant      FoodRestaurant       @relation(fields: [restaurantId], references: [id])
   zone            FoodZone?            @relation(fields: [zoneId], references: [id])
   deliveryPartner FoodDeliveryPartner? @relation(fields: [dispatchDeliveryPartnerId], references: [id])
+  coupon          FoodOffer?           @relation(fields: [couponId], references: [id], onDelete: SetNull)
 
   items          OrderItem[]
   itemRatings    OrderItemRating[]
@@ -1440,6 +1449,7 @@ model FoodOrder {
   @@index([paymentStatus, createdAt(sort: Desc)])
   @@index([paymentMethod, createdAt(sort: Desc)])
   @@index([zoneId])
+  @@index([couponId, userId])
   @@map("food_orders")
 }
 
@@ -2013,6 +2023,14 @@ model FoodOffer {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 
   couponCode    String       @unique @db.VarChar(64)
+  /// Shown in the admin list and to customers. Blank for coupons created
+  /// before titles existed; the code stands in for it then.
+  title         String       @default("") @db.VarChar(191)
+  /// The previous system's coupon types. store_wise mirrors
+  /// restaurantScope = selected, first_order mirrors isFirstOrderOnly; both
+  /// older columns are still what checkout reads, so a coupon written before
+  /// this column existed behaves exactly as it did.
+  couponType    FoodCouponType @default(default)
   discountType  DiscountType @default(percentage)
   discountValue Decimal      @db.Decimal(14, 2)
 
@@ -2026,6 +2044,9 @@ model FoodOffer {
   /// match how restaurantIds already works; a join table would buy nothing
   /// here, since the list is only ever read whole to check membership.
   customerIds String[]
+
+  /// zone_wise coupons: the zones an order's restaurant must be in.
+  zoneIds String[] @default([])
 
   minOrderValue Decimal  @default(0) @db.Decimal(14, 2)
   maxDiscount   Decimal? @db.Decimal(14, 2)
@@ -2049,6 +2070,7 @@ model FoodOffer {
 
   restaurant FoodRestaurant?  @relation(fields: [restaurantId], references: [id])
   usages     FoodOfferUsage[]
+  orders     FoodOrder[]
 
   @@index([restaurantId, createdAt(sort: Desc)])
   @@index([discountType])
@@ -2056,7 +2078,16 @@ model FoodOffer {
   @@index([restaurantScope])
   @@index([status])
   @@index([createdByRole])
+  @@index([couponType])
   @@map("food_offers")
+}
+
+enum FoodCouponType {
+  default
+  store_wise
+  zone_wise
+  free_delivery
+  first_order
 }
 
 model FoodOfferUsage {
