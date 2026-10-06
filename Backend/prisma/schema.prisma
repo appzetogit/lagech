@@ -772,6 +772,13 @@ model FoodRestaurant {
 
   /// The restaurant offers takeaway (when Business Settings > Order has it on).
   takeawayEnabled Boolean @default(true)
+  /// Extra packaging charge (Business Settings > Order, extraPackagingCharge):
+  /// the restaurant's own charge per order, paid to the restaurant. Charged
+  /// only while the global switch is on and this is on; `Required` adds it to
+  /// every order, otherwise the customer opts in (extraPackaging: true).
+  extraPackagingEnabled  Boolean @default(false)
+  extraPackagingAmount   Decimal @default(0) @db.Decimal(14, 2)
+  extraPackagingRequired Boolean @default(false)
   diningEnabled   Boolean @default(false)
   diningMaxGuests Int     @default(6)
   diningType      String  @default("family-dining")
@@ -1327,6 +1334,10 @@ model FoodOrder {
   platformFee          Decimal      @default(0) @db.Decimal(14, 2)
   /// Quick Mode surcharge; also included in platformFee.
   quickDeliveryFee     Decimal      @default(0) @db.Decimal(14, 2)
+  /// Business Settings > Business info "additional charge" (a flat platform
+  /// charge, e.g. a service charge); also included in platformFee.
+  additionalCharge     Decimal      @default(0) @db.Decimal(14, 2)
+  additionalChargeName String       @default("") @db.VarChar(60)
   deliveryMode         DeliveryMode @default(basic)
   restaurantCommission Decimal      @default(0) @db.Decimal(14, 2)
   discount             Decimal      @default(0) @db.Decimal(14, 2)

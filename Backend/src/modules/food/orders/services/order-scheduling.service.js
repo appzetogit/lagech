@@ -15,6 +15,7 @@ import {
     MAX_RIDER_TIP,
     TIP_PRESETS,
 } from './orderModes.js';
+import { additionalChargeFor, extraPackagingOffer } from './businessRules.js';
 
 /**
  * Scheduled orders, takeaway and tips at the restaurant level: what a
@@ -37,13 +38,22 @@ export async function getRestaurantOrderOptions(restaurantId, { now = new Date()
     } catch {
         throw new NotFoundError('Restaurant not found');
     }
-    const [orderRules, riderRules] = await Promise.all([
+    const [orderRules, riderRules, infoRules] = await Promise.all([
         getBusinessSettings('business_order'),
         getBusinessSettings('business_deliveryman'),
+        getBusinessSettings('business_info'),
     ]);
     const takeaway = Boolean(orderRules.takeaway && restaurant.takeawayEnabled !== false);
+    const additional = additionalChargeFor(infoRules);
     return {
         restaurantId: restaurant.id,
+        /** The restaurant's extra packaging: null, or { amount, required } (required: always charged). */
+        extraPackaging: (() => {
+            const offer = extraPackagingOffer(orderRules, restaurant);
+            return offer ? { amount: offer.amount, required: offer.required } : null;
+        })(),
+        /** The flat additional charge every order carries: null, or { name, amount }. */
+        additionalCharge: additional.amount > 0 ? additional : null,
         orderTypes: {
             delivery: orderRules.homeDelivery !== false,
             takeaway,
@@ -85,10 +95,15 @@ export async function releaseScheduledOrders(now = new Date()) {
     let alerted = 0;
     let dispatched = 0;
 
+    // When delivery partners confirm orders (Business Settings > Order) a
+    // scheduled order is confirmed at placement, and the restaurant has still
+    // not been told about it; otherwise a confirmed one was accepted early by
+    // the restaurant itself and needs no alert.
+    const { orderConfirmedBy } = await getBusinessSettings('business_order');
     const toAlert = await prisma.foodOrder.findMany({
         where: {
             releaseAt: { lte: now, gte: since },
-            orderStatus: 'created',
+            orderStatus: { in: orderConfirmedBy === 'deliveryman' ? ['created', 'confirmed'] : ['created'] },
             restaurantNotifiedAt: null,
         },
         include: orderInclude,

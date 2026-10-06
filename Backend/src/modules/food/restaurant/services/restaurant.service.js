@@ -1,4 +1,4 @@
-import { getPrioritySort } from '../../shared/businessSettings.js';
+import { assertSelfRegistrationOpen, getBusinessSettings, getPrioritySort } from '../../shared/businessSettings.js';
 import { logger } from '../../../../utils/logger.js';
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
@@ -423,6 +423,12 @@ const toRestaurantProfile = (doc) => {
         },
         isAcceptingOrders: doc.isAcceptingOrders !== false,
         takeawayEnabled: doc.takeawayEnabled !== false,
+        /** The restaurant's extra packaging charge (charged only while Business Settings allow it). */
+        extraPackaging: {
+            enabled: doc.extraPackagingEnabled === true,
+            amount: Number(doc.extraPackagingAmount) || 0,
+            required: doc.extraPackagingRequired === true,
+        },
         outsideHoursOverride: doc.outsideHoursOverride === true,
         subscriptionPlan: doc.subscriptionPlan || '',
         subscriptionAmount: Number.isFinite(Number(doc.subscriptionAmount)) ? Number(doc.subscriptionAmount) : 0,
@@ -476,6 +482,7 @@ const PROFILE_SELECT = {
     addressLine1: true, addressLine2: true, area: true, city: true,
     closingTime: true, coverImages: true, createdAt: true, cuisines: true,
     diningEnabled: true, diningMaxGuests: true, diningType: true, takeawayEnabled: true,
+    extraPackagingEnabled: true, extraPackagingAmount: true, extraPackagingRequired: true,
     estimatedDeliveryTime: true, estimatedDeliveryTimeMinutes: true,
     formattedAddress: true, fssaiExpiry: true, fssaiImage: true, fssaiNumber: true,
     gstAddress: true, gstImage: true, gstLegalName: true, gstNumber: true,
@@ -765,6 +772,9 @@ export const registerRestaurant = async (payload, files) => {
         fssaiImage: preUploadedFssaiImage,
         menuImages: preUploadedMenuImages
     } = payload;
+
+    // Business Settings > Vendor "self registration" off: only an admin adds restaurants.
+    await assertSelfRegistrationOpen('restaurant');
 
     if (!ownerPhone) {
         throw new ValidationError('Owner phone is required to register a restaurant');
@@ -1104,6 +1114,54 @@ export const updateRestaurantTakeaway = async (restaurantId, enabled) => {
         data: { takeawayEnabled: enabled === true || String(enabled) === 'true' },
     });
     if (!count) return null;
+    const doc = await prisma.foodRestaurant.findUnique({ where: { id: String(restaurantId) }, select: PROFILE_SELECT });
+    return toRestaurantProfile(toRestaurant(doc));
+};
+
+/** Most a restaurant may charge for extra packaging on one order. */
+export const MAX_EXTRA_PACKAGING = 500;
+
+/**
+ * The restaurant's own extra packaging charge (PATCH
+ * /food/restaurant/packaging-settings { enabled, amount, required }). Only
+ * offered while Business Settings > Order has "extra packaging charge" on;
+ * fields not sent keep their value.
+ */
+export const updateRestaurantPackaging = async (restaurantId, body = {}) => {
+    if (!isId(restaurantId)) throw new ValidationError('Invalid restaurant id');
+    const { extraPackagingCharge } = await getBusinessSettings('business_order');
+    if (!extraPackagingCharge) throw new ValidationError('Extra packaging charges are not allowed right now.');
+
+    const bool = (value, label) => {
+        if (typeof value === 'boolean') return value;
+        if (['true', 'false'].includes(String(value))) return String(value) === 'true';
+        throw new ValidationError(`${label} must be true or false`);
+    };
+    const data = {};
+    const enabled = body.enabled ?? body.extraPackagingEnabled;
+    const amount = body.amount ?? body.extraPackagingAmount;
+    const required = body.required ?? body.extraPackagingRequired;
+    if (enabled !== undefined) data.extraPackagingEnabled = bool(enabled, 'enabled');
+    if (required !== undefined) data.extraPackagingRequired = bool(required, 'required');
+    if (amount !== undefined) {
+        const n = Number(amount);
+        if (!Number.isFinite(n) || n < 0 || n > MAX_EXTRA_PACKAGING) {
+            throw new ValidationError(`Packaging charge must be between 0 and ${MAX_EXTRA_PACKAGING}`);
+        }
+        data.extraPackagingAmount = Math.round(n * 100) / 100;
+    }
+    if (!Object.keys(data).length) throw new ValidationError('Nothing to update');
+
+    const current = await prisma.foodRestaurant.findUnique({
+        where: { id: String(restaurantId) },
+        select: { extraPackagingAmount: true },
+    });
+    if (!current) return null;
+    const finalAmount = data.extraPackagingAmount ?? Number(current.extraPackagingAmount);
+    if (data.extraPackagingEnabled === true && !(finalAmount > 0)) {
+        throw new ValidationError('Enter the packaging charge before switching it on');
+    }
+    await prisma.foodRestaurant.update({ where: { id: String(restaurantId) }, data });
     const doc = await prisma.foodRestaurant.findUnique({ where: { id: String(restaurantId) }, select: PROFILE_SELECT });
     return toRestaurantProfile(toRestaurant(doc));
 };

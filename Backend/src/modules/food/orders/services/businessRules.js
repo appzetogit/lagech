@@ -79,3 +79,42 @@ export function percentageRiderEarning(originalDeliveryFee, commissionPercent) {
     const pct = Math.min(100, Math.max(0, Number(commissionPercent) || 0));
     return round2(Math.max(0, (fee * (100 - pct)) / 100));
 }
+
+/**
+ * The restaurant's extra packaging charge for one order, or 0 (Business
+ * Settings > Order "extra packaging charge", as in the old panel): charged
+ * only while the global switch is on and the restaurant has its own charge
+ * on; a restaurant that requires it adds it to every order, otherwise only
+ * when the customer asked for it (`requested`). It is the restaurant's money
+ * (packagingFee is part of the restaurant's share), takes no coupon and
+ * carries no commission.
+ */
+export function extraPackagingFee(orderRules, restaurant, requested = false) {
+    if (!orderRules?.extraPackagingCharge || !restaurant?.extraPackagingEnabled) return 0;
+    const amount = round2(Math.max(0, Number(restaurant.extraPackagingAmount) || 0));
+    if (amount <= 0) return 0;
+    const wanted = requested === true || requested === 'true';
+    return restaurant.extraPackagingRequired || wanted ? amount : 0;
+}
+
+/**
+ * What checkout should offer for extra packaging at this restaurant, or null
+ * when there is nothing to offer: { amount, required, applied }.
+ */
+export function extraPackagingOffer(orderRules, restaurant, chargedFee = 0) {
+    const amount = extraPackagingFee(orderRules, restaurant, true);
+    if (amount <= 0) return null;
+    return { amount, required: Boolean(restaurant.extraPackagingRequired), applied: Number(chargedFee) > 0 };
+}
+
+/**
+ * The flat additional charge on every order (Business Settings > Business
+ * info), as { amount, name }; { 0, '' } when off. The platform's money: it is
+ * added to platformFee, so every split, refund and report already counts it.
+ */
+export function additionalChargeFor(info) {
+    const rule = info?.additionalCharge;
+    const amount = round2(Math.max(0, Number(rule?.amount) || 0));
+    if (!rule?.enabled || amount <= 0) return { amount: 0, name: '' };
+    return { amount, name: String(rule.name || '').trim() || 'Additional charge' };
+}

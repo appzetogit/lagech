@@ -20,6 +20,7 @@ import {
 import { getRestaurantSubscriptionHistory } from '../services/subscriptionHistory.service.js';
 import { validateRestaurantRegisterDto } from '../validators/restaurant.validator.js';
 import { sendResponse, sendError } from '../../../../utils/response.js';
+import { assertSelfRegistrationOpen } from '../../shared/businessSettings.js';
 
 
 export const uploadRestaurantAttachmentController = async (req, res, next) => {
@@ -34,6 +35,8 @@ export const uploadRestaurantAttachmentController = async (req, res, next) => {
 
 export const registerRestaurantController = async (req, res, next) => {
     try {
+        // Closed sign-up says so before any field error.
+        await assertSelfRegistrationOpen('restaurant');
         const validated = validateRestaurantRegisterDto(req.body);
         const restaurant = await registerRestaurant(validated, req.files);
         return sendResponse(res, 201, 'Restaurant registered successfully', restaurant);
@@ -44,6 +47,8 @@ export const registerRestaurantController = async (req, res, next) => {
 
 export const createOnboardingFeeOrderController = async (req, res, next) => {
     try {
+        // The onboarding fee is paid only on the way to signing up.
+        await assertSelfRegistrationOpen('restaurant');
         const ownerPhone = String(req.body?.ownerPhone || '').trim();
         const data = await createRestaurantOnboardingFeeOrder({ ownerPhone });
         return sendResponse(res, 200, 'Onboarding fee order created', data);

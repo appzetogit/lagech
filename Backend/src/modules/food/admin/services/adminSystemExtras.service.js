@@ -15,8 +15,10 @@ import {
     cleanUrl,
 } from './systemSettings.defaults.js';
 import { BUSINESS_AREA_CATALOG } from './businessSettings.defaults.js';
-import { invalidateBusinessSettings, getBusinessSettings, getMaintenanceState } from '../../shared/businessSettings.js';
+import { invalidateBusinessSettings, getBusinessSettings, getMaintenanceState, isSubscriptionModelOn } from '../../shared/businessSettings.js';
+import { additionalChargeFor } from '../../orders/services/businessRules.js';
 import { TIP_PRESETS, MAX_RIDER_TIP } from '../../orders/services/orderModes.js';
+import { FEATURE_KEYS, isFeatureEnabled, updateFeatureSetting } from './featureSettings.service.js';
 
 /**
  * System settings stored one JSON document per area (page meta data, app
@@ -59,12 +61,31 @@ async function readArea(area) {
 export async function getSystemSettings(area) {
     assertArea(area);
     const { value, updatedAt } = await readArea(area);
+    // The subscription switch is the Restaurant Subscription feature flag.
+    if (area === 'business_info') value.subscriptionModel = await isFeatureEnabled(FEATURE_KEYS.RESTAURANT_SUBSCRIPTION, true);
     return { area, value, updatedAt, catalog: AREA_CATALOG[area] };
+}
+
+/**
+ * Business info's two business models. The subscription switch writes the
+ * Restaurant Subscription feature flag (only when it is sent: a body without
+ * it leaves the flag as it is), and at least one model must stay on.
+ */
+async function applyBusinessModels(value, input = {}) {
+    const sent = input && typeof input === 'object' && input.subscriptionModel !== undefined;
+    const subscriptionModel = sent ? value.subscriptionModel : await isFeatureEnabled(FEATURE_KEYS.RESTAURANT_SUBSCRIPTION, true);
+    if (!value.commissionModel && !subscriptionModel) {
+        throw new ValidationError('Keep at least one of the commission or subscription business model on');
+    }
+    if (sent) await updateFeatureSetting(FEATURE_KEYS.RESTAURANT_SUBSCRIPTION, { isEnabled: subscriptionModel });
+    value.subscriptionModel = subscriptionModel;
 }
 
 export async function saveSystemSettings(area, body = {}, adminId = null) {
     assertArea(area);
-    const value = cleanSettings(area, body.value ?? body);
+    const input = body.value ?? body;
+    const value = cleanSettings(area, input);
+    if (area === 'business_info') await applyBusinessModels(value, input);
     const row = await prisma.foodSystemSetting.upsert({
         where: { key: area },
         create: { key: area, value, updatedBy: adminId ? String(adminId) : null },
@@ -241,6 +262,8 @@ export async function getPublicBusinessSettings() {
         getOfflinePaymentSettings(),
         getMaintenanceState(),
     ]);
+    const subscriptionModel = await isSubscriptionModelOn();
+    const additional = additionalChargeFor(info);
     const nc = customer.newCustomerDiscount;
     return {
         maintenance,
@@ -259,7 +282,15 @@ export async function getPublicBusinessSettings() {
             scheduledOrder: order.scheduledOrder,
             scheduleSlotMinutes: order.scheduleSlotMinutes,
             freeDeliveryOver: order.freeDelivery.enabled ? order.freeDelivery.minSubtotal : null,
+            /** Restaurants may add an extra packaging charge (per restaurant: order-options). */
+            extraPackagingCharge: order.extraPackagingCharge,
+            /** 'restaurant' (default): the restaurant accepts each order. 'deliveryman': orders arrive confirmed. */
+            confirmedBy: order.orderConfirmedBy,
+            /** The flat charge every order carries (part of platformFee), or null. */
+            additionalCharge: additional.amount > 0 ? additional : null,
         },
+        /** Business models: restaurant apps hide subscription plans when subscriptionModel is false. */
+        business: { commissionModel: info.commissionModel, subscriptionModel },
         customer: {
             wallet: customer.walletEnabled,
             addFund: customer.walletEnabled && customer.addFundEnabled,

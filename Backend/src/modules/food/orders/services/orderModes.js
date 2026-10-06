@@ -34,6 +34,11 @@ export const TAKEAWAY_PAYMENT_METHODS = ['razorpay', 'card', 'wallet', 'offline'
 export function resolveOrderType(requested, { orderRules, restaurant } = {}) {
     const type = String(requested || 'delivery').trim().toLowerCase();
     if (!ORDER_TYPES.includes(type)) throw new ValidationError('Choose delivery or takeaway');
+    // The admin page refuses saving both off; a document written some other
+    // way still must not leave ordering half-open.
+    if (orderRules && orderRules.homeDelivery === false && !orderRules.takeaway) {
+        throw new ValidationError('Ordering is not available right now: neither home delivery nor takeaway is offered.');
+    }
     if (type === 'takeaway') {
         if (!orderRules?.takeaway) throw new ValidationError('Takeaway is not available right now.');
         if (restaurant && restaurant.takeawayEnabled === false) {

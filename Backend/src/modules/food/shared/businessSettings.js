@@ -1,5 +1,6 @@
 import { prisma } from '../../../config/prisma.js';
 import { logger } from '../../../utils/logger.js';
+import { ForbiddenError } from '../../../core/auth/errors.js';
 import { BUSINESS_SETTINGS_AREAS } from '../admin/services/businessSettings.defaults.js';
 
 /**
@@ -45,6 +46,64 @@ export async function getBusinessSettings(area) {
     }
     cache.set(area, { at: Date.now(), value });
     return value;
+}
+
+/**
+ * Business Settings > Business info "subscription business model". The switch
+ * is the existing Restaurant Subscription feature flag (food_feature_settings
+ * 'restaurant_subscription', on by default), not a second copy of it: the
+ * admin page reads and writes that flag, so the Feature settings page and
+ * this switch can never disagree. Cached like the areas.
+ */
+export const SUBSCRIPTION_FEATURE_KEY = 'restaurant_subscription';
+
+export async function isSubscriptionModelOn() {
+    const hit = cache.get(SUBSCRIPTION_FEATURE_KEY);
+    if (hit && Date.now() - hit.at < TTL_MS) return hit.value;
+    let value = true;
+    try {
+        const row = await prisma.foodFeatureSetting.findUnique({
+            where: { key: SUBSCRIPTION_FEATURE_KEY },
+            select: { isEnabled: true },
+        });
+        value = row ? Boolean(row.isEnabled) : true;
+    } catch (error) {
+        logger.warn(`Subscription model flag unreadable, treating as on: ${error?.message || error}`);
+        return true;
+    }
+    cache.set(SUBSCRIPTION_FEATURE_KEY, { at: Date.now(), value });
+    return value;
+}
+
+/** Which business models are on: { commissionModel, subscriptionModel }. */
+export async function getBusinessModels() {
+    const [info, subscriptionModel] = await Promise.all([getBusinessSettings('business_info'), isSubscriptionModelOn()]);
+    return { commissionModel: info.commissionModel, subscriptionModel };
+}
+
+const SELF_REGISTRATION = {
+    restaurant: {
+        area: 'business_vendor',
+        key: 'restaurantSelfRegistration',
+        message: 'Restaurant sign-up is closed right now. Please contact Lagech to list your restaurant.',
+    },
+    rider: {
+        area: 'business_deliveryman',
+        key: 'riderSelfRegistration',
+        message: 'Delivery partner sign-up is closed right now. Please contact Lagech to join as a delivery partner.',
+    },
+};
+
+/**
+ * Business Settings "restaurant / deliveryman self registration": refuses the
+ * public sign-up with a message for the app when it is off. Accounts an admin
+ * creates do not go through here.
+ */
+export async function assertSelfRegistrationOpen(kind) {
+    const rule = SELF_REGISTRATION[kind];
+    if (!rule) throw new Error(`Unknown self registration ${kind}`);
+    const settings = await getBusinessSettings(rule.area);
+    if (settings[rule.key] === false) throw new ForbiddenError(rule.message);
 }
 
 /** Customer ordering paused (the website area's maintenance switch). */

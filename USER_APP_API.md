@@ -262,6 +262,35 @@ Slots run today and tomorrow (restaurant timezone), on the admin's interval, fro
 | `orderType` | `"delivery"` (default) \| `"takeaway"` | Takeaway: refused unless on (400 "Takeaway is not available right now." / "… does not offer takeaway."). With home delivery off, `"delivery"` is refused. |
 | `scheduledAt` | ISO time of a slot | Refused when scheduling is off (more than 5 min ahead), sooner than the lead time, past tomorrow, or when the restaurant is closed then. |
 | `riderTip` | rupees, 0–500 | Refused when tips are off, on a takeaway, or above ₹500. |
+| `extraPackaging` | `true` / `false` | Ask for the restaurant's extra packaging (see below). Ignored when not offered. |
+
+**Home delivery off.** With `order.homeDelivery: false` only takeaway is offered: `"delivery"` (or no
+`orderType`) → 400 "Home delivery is not available right now. Please choose takeaway."
+
+### Extra packaging and additional charge (new bill lines)
+
+Two Business Settings charges, both off by default (then nothing below changes a bill):
+
+- **Extra packaging** — a restaurant's own packaging charge. `GET
+  /v1/food/public/restaurants/:restaurantId/order-options` → `extraPackaging: null` or `{ amount,
+  required }`. `required: true`: always charged, show it as a fixed line. Otherwise show an "Extra
+  packaging (₹amount)" checkbox and send `extraPackaging: true` on `/orders/calculate` and `POST
+  /orders` when ticked. The quote's `pricing.packagingFee` is what is charged (0 when not), and
+  `pricing.extraPackaging` repeats `{ amount, required, applied }` (or null). Paid to the restaurant;
+  no coupon or GST on it.
+- **Additional charge** — a flat charge on every order with a name the admin sets (e.g. "Service
+  charge"). `order-options` → `additionalCharge: null` or `{ name, amount }`; `GET
+  /v1/food/public/business-settings` → `order.additionalCharge` the same.
+  The quote and every order carry `pricing.additionalCharge` and `pricing.additionalChargeName`.
+  **It is included in `pricing.platformFee`** (as the Quick Mode surcharge `pricing.quickDeliveryFee`
+  already is), and in `total`. To show it as its own line: "<additionalChargeName>" =
+  `additionalCharge`, and "Platform fee" = `platformFee − quickDeliveryFee − additionalCharge`
+  (hide when 0).
+
+The apps have no generic list of bill lines: each line is its own `pricing` field. **Flutter:** add the
+packaging line (`packagingFee`, label "Extra packaging"), the additional charge line (labelled with
+`additionalChargeName`), the opt-in checkbox, and subtract `additionalCharge` from the platform fee
+line as above.
 
 **Takeaway.** No delivery fee or its GST (`pricing.deliveryFee: 0`), no Quick Mode, no rider. Paid
 in the app only: `razorpay` / `card`, `wallet` or `offline` (cash and `razorpay_qr` → 400 "Takeaway
@@ -834,8 +863,12 @@ below whatever the app shows.
   "order": {
     "homeDelivery": true, "takeaway": false,               // takeaway on: offer Delivery / Takeaway (see §5)
     "scheduledOrder": false, "scheduleSlotMinutes": 30,    // slot length; slots come from /restaurants/:id/order-options
-    "freeDeliveryOver": null                               // or 499: item total from which delivery is free
+    "freeDeliveryOver": null,                              // or 499: item total from which delivery is free
+    "extraPackagingCharge": false,                         // restaurants may charge extra packaging (order-options says how much)
+    "confirmedBy": "restaurant",                           // or "deliveryman": delivery orders are confirmed at once
+    "additionalCharge": null                               // or { "name": "Service charge", "amount": 10 } on every order
   },
+  "business": { "commissionModel": true, "subscriptionModel": true },   // restaurant app: hide plans when subscriptionModel is false
   "customer": {
     "wallet": true, "addFund": false,                      // addFund: show "Add money" in the wallet
     "vegNonVegToggle": true, "guestCheckout": false,       // stored only: every order needs a phone-OTP login (see §5 Guest checkout)
@@ -848,6 +881,11 @@ below whatever the app shows.
 }
 ```
 
+- **Who confirms.** With `order.confirmedBy: "deliveryman"` a delivery order goes from placed (or
+  paid) straight to `confirmed` — show "Confirmed" rather than "Waiting for the restaurant"; it is
+  never cancelled for the restaurant not accepting. Takeaway orders still wait for the restaurant.
+- **Self registration.** `restaurant.selfRegistration` / `rider.selfRegistration` false: the public
+  restaurant and rider sign-ups return 403 with a message; the website and apps hide those buttons.
 - **Maintenance.** While `maintenanceMode` is on, `POST /v1/food/orders` returns 400 with
   `maintenanceMessage` (or a default text). Show the message and disable checkout.
 - **Scheduled orders.** With `scheduledOrder` off, a `scheduledAt` more than 5 minutes ahead is

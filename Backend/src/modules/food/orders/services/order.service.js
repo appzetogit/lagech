@@ -421,6 +421,59 @@ export async function expireUnacceptedOrderById(orderMongoId) {
   return expireUnacceptedOrders({ id: String(orderMongoId) });
 }
 
+/**
+ * Business Settings > Order, "who confirms the order" = deliveryman (the old
+ * panel's order_confirmation_model): a delivery order is confirmed the moment
+ * it is placed (or its payment is confirmed), with no acceptance window for
+ * the restaurant to miss, and the rider hunt starts at once -- a scheduled one
+ * at its release time, which tryAutoAssign enforces itself. The restaurant is
+ * still told (the new-order alert) and still moves it to preparing and ready.
+ *
+ * A takeaway has no rider, so the restaurant still confirms it. With the
+ * setting on 'restaurant' (the default) this does nothing.
+ *
+ * The status guard is in the WHERE clause, so it cannot overtake a
+ * restaurant that already acted or a cancellation.
+ *
+ * @returns {Promise<object|null>} the confirmed order, or null when untouched.
+ */
+export async function autoConfirmForDeliverymanModel(orderId) {
+  const id = String(orderId || "");
+  if (!isId(id)) return null;
+  const { orderConfirmedBy } = await getBusinessSettings('business_order');
+  if (orderConfirmedBy !== 'deliveryman') return null;
+
+  const { count } = await prisma.foodOrder.updateMany({
+    where: { id, orderStatus: "created", orderType: { not: "takeaway" } },
+    data: { orderStatus: "confirmed", acceptanceDeadlineAt: null },
+  });
+  if (!count) return null;
+
+  await pushStatusHistory(id, {
+    byRole: "SYSTEM",
+    from: "created",
+    to: "confirmed",
+    note: "Confirmed automatically: delivery partners confirm orders (Business Settings)",
+  });
+  const updated = toOrder(await prisma.foodOrder.findUnique({ where: { id }, include: orderInclude }));
+
+  try {
+    const io = getIO();
+    if (io) {
+      const payload = { orderMongoId: id, orderId: id, orderStatus: "confirmed" };
+      io.to(rooms.user(updated.userId)).emit("order_status_update", payload);
+      io.to(rooms.restaurant(updated.restaurantId)).emit("order_status_update", payload);
+    }
+  } catch (err) {
+    logger.warn(`autoConfirmForDeliverymanModel socket emit failed: ${err?.message || err}`);
+  }
+
+  void dispatchService.tryAutoAssign(id).catch((err) => {
+    logger.warn(`Auto-assign after automatic confirmation failed for ${id}: ${err?.message || err}`);
+  });
+  return updated;
+}
+
 // ----- Settings -----
 export async function getDispatchSettings() {
   return dispatchService.getDispatchSettings();
@@ -643,6 +696,7 @@ export async function createOrder(userId, dto) {
         deliveryMode: dto.deliveryMode || "basic",
         orderType,
         riderTip: dto.riderTip,
+        extraPackaging: dto.extraPackaging,
       },
       { at: orderAt, restaurant, skipAvailabilityCheck: true },
     );
@@ -672,6 +726,8 @@ export async function createOrder(userId, dto) {
       deliveryFeeGst: Number(pricingResult.pricing?.deliveryFeeGst) || 0,
       platformFee: Number(pricingResult.pricing?.platformFee) || 0,
       quickDeliveryFee: Number(pricingResult.pricing?.quickDeliveryFee) || 0,
+      additionalCharge: Number(pricingResult.pricing?.additionalCharge) || 0,
+      additionalChargeName: String(pricingResult.pricing?.additionalChargeName || "").slice(0, 60),
       deliveryMode:
         pricingResult.pricing?.deliveryMode === "quick" || dto.deliveryMode === "quick"
           ? "quick"
@@ -926,6 +982,14 @@ export async function createOrder(userId, dto) {
       } catch (err) {
         logger.error(`[CRITICAL] Initial transaction failed for order ${order.id}: ${err.message}`);
       }
+      // Delivery partners confirm orders (Business Settings > Order): no
+      // restaurant acceptance, straight to dispatch.
+      try {
+        const confirmed = await autoConfirmForDeliverymanModel(order.id);
+        if (confirmed) order = { ...confirmed, platformProfit: order.platformProfit };
+      } catch (err) {
+        logger.warn(`Automatic confirmation failed for order ${order.id}: ${err?.message || err}`);
+      }
     }
 
     try {
@@ -1134,11 +1198,20 @@ export async function finalizeOrderPayment(orderId, { source = "SYSTEM", userId 
     recordedById: userId ? String(userId) : undefined,
   });
 
+  // Delivery partners confirm orders (Business Settings > Order).
+  let current = updated;
+  try {
+    const confirmed = await autoConfirmForDeliverymanModel(orderId);
+    if (confirmed) current = { ...confirmed, platformProfit: updated.platformProfit };
+  } catch (err) {
+    logger.warn(`Automatic confirmation failed for order ${orderId}: ${err?.message || err}`);
+  }
+
   // Now that payment is confirmed, tell the restaurant about the new order --
   // a scheduled one at its release time instead (releaseScheduledOrders).
-  if (!isHeldForSchedule(updated)) await notifyRestaurantNewOrder(updated);
+  if (!isHeldForSchedule(current)) await notifyRestaurantNewOrder(current);
 
-  return updated;
+  return current;
 }
 
 export async function abandonOnlinePaymentOrder(userId, orderId) {

@@ -164,6 +164,17 @@ router.patch('/takeaway-settings', authMiddleware, requireRestaurant, async (req
         next(error);
     }
 });
+// The restaurant's extra packaging charge (only while Business Settings allow it).
+router.patch('/packaging-settings', authMiddleware, requireRestaurant, async (req, res, next) => {
+    try {
+        await invalidateCache('restaurant_detail:*');
+        const { updateRestaurantPackaging } = await import('../services/restaurant.service.js');
+        const restaurant = await updateRestaurantPackaging(req.user?.userId, req.body || {});
+        res.status(200).json({ success: true, message: 'Packaging charge updated', data: { restaurant } });
+    } catch (error) {
+        next(error);
+    }
+});
 router.patch('/dining-settings', authMiddleware, requireRestaurant, async (req, res, next) => {
     await invalidateCache('restaurants:*');
     next();
