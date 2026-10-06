@@ -83,6 +83,13 @@ export const TIO_BY_LABEL = {
   "Business Pages": "pages-outlined",
   "Social Media": "share-vs",
   "Email Templates": "email-outlined",
+  "App Settings": "android-phone",
+  "Login Setup": "sign-in",
+  "Notification Channels": "notifications-on-outlined",
+  "Landing Page": "pages",
+  Website: "website",
+  "Page Meta Data": "document-text-outlined",
+  Gallery: "photo-gallery-outlined",
 }
 
 /** Fallbacks by the menu's lucide icon key, for anything not named above. */

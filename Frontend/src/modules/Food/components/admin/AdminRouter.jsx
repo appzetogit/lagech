@@ -107,6 +107,9 @@ const OrderCancelReasons = lazy(() => import("@food/pages/admin/orders/OrderCanc
 const RestaurantPayouts = lazy(() => import("@food/pages/admin/transactions/RestaurantPayouts"));
 const RestaurantPayoutBatch = lazy(() => import("@food/pages/admin/transactions/RestaurantPayoutBatch"));
 const WithdrawMethod = lazy(() => import("@food/pages/admin/transactions/WithdrawMethod"));
+const RestaurantPayments = lazy(() => import("@food/pages/admin/transactions/RestaurantPayments"));
+const RestaurantEarningReport = lazy(() => import("@food/pages/admin/reports/RestaurantEarningReport"));
+const SocialMedia = lazy(() => import("@food/pages/admin/system/SocialMedia"));
 // Employee Management
 const EmployeeRole = lazy(() => import("@food/pages/admin/employees/EmployeeRole"));
 const AddEmployee = lazy(() => import("@food/pages/admin/employees/AddEmployee"));
@@ -364,6 +367,9 @@ export default function AdminRouter() {
             <Route path="restaurant-disbursements/:batchId" element={<RestaurantPayoutBatch />} />
             <Route path="balance-sheet" element={<BalanceSheet />} />
             <Route path="withdraw-method" element={<WithdrawMethod />} />
+            <Route path="restaurant-payments" element={<RestaurantPayments />} />
+            <Route path="restaurant-earning-report" element={<RestaurantEarningReport />} />
+            <Route path="pages-social-media/social-media" element={<SocialMedia />} />
             
             <Route path="employee-role" element={<EmployeeRole />} />
             <Route path="employees" element={<EmployeeList />} />
