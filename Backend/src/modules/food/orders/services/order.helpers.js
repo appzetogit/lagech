@@ -586,8 +586,16 @@ export async function notifyRestaurantNewOrder(orderDoc) {
       : "";
     const total = orderDoc.pricing?.total ?? 0;
     
+    // Already confirmed (Business Settings > Order > confirmed by delivery
+    // partner): nothing to accept, the restaurant just starts preparing. The
+    // apps read needsAcceptance to drop Accept/Reject and the looping alarm.
+    const orderStatus = String(orderDoc.orderStatus || orderDoc.status || "");
+    const needsAcceptance = !["confirmed", "preparing", "ready_for_pickup"].includes(orderStatus);
+
     // Construct rich body for the custom notification layout in Flutter
-    let bodyText = `Order #${orderDoc.order_id || orderDoc._id} is waiting for review.`;
+    let bodyText = needsAcceptance
+      ? `Order #${orderDoc.order_id || orderDoc._id} is waiting for review.`
+      : `Order #${orderDoc.order_id || orderDoc._id} is confirmed. Please start preparing.`;
     if (itemsList) bodyText += `\nItems: ${itemsList}`;
     if (total > 0) bodyText += `\nTotal: ₹${total}`;
     if (orderDoc.customerName) bodyText += `\nCustomer: ${orderDoc.customerName}`;
@@ -628,6 +636,8 @@ export async function notifyRestaurantNewOrder(orderDoc) {
           paymentMethod: str(orderDoc.payment?.method),
           acceptanceDeadlineAt: str(orderDoc.acceptanceDeadlineAt?.toISOString?.() || ""),
           orderType: str(orderDoc.orderType || "delivery"),
+          orderStatus: str(orderStatus),
+          needsAcceptance: needsAcceptance ? "true" : "false",
           scheduledAt: str(orderDoc.releaseAt && orderDoc.scheduledAt ? new Date(orderDoc.scheduledAt).toISOString() : ""),
         },
       },

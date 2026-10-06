@@ -755,3 +755,15 @@ The order alarm must not depend on the socket alone — poll `/orders` with a sh
 5. Register is FormData: arrays are comma-joined strings and lat/lng are strings. Everything after registration is normal JSON.
 6. Location edits go to `pendingLocation` for admin review, not straight to `location`.
 7. `GET /withdrawals` returns a bare array; most other list endpoints return `{ data, meta }` or a named key. Don't assume one shape.
+
+## New-order push: already-confirmed orders
+
+The `new_order` push (data-only, Android tag `order_<id>`, channel `new_order_channel`) now also carries:
+
+| Field | Values |
+|---|---|
+| `orderStatus` | the order's status when the alert was sent, e.g. `created`, `confirmed` |
+| `needsAcceptance` | `"true"` or `"false"` |
+
+When Business Settings → Order → "Who confirms the order" is the delivery partner, delivery orders reach the restaurant already `confirmed`: `needsAcceptance` is `"false"` and the body reads "Order #… is confirmed. Please start preparing." Show a plain notification (open the order on tap) without Accept/Reject and without the looping alarm. Missing field (older server) = treat as `"true"`.
+
