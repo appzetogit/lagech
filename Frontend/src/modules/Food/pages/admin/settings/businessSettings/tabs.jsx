@@ -361,11 +361,20 @@ export function RefundTab() {
         <Card title="Refund" description="Reasons a customer can pick when asking for a refund (GET /food/public/refund-reasons).">
           <SwitchRow
             label="Refund request"
-            hint="Customers can ask for a refund from the app. The customer refund request itself is not built yet; admins refund from the order."
+            hint="Customers can ask for a refund on a delivered, paid order from the app. Requests appear under Order Refunds > Refund Requests."
             checked={v.refundRequestEnabled}
             onChange={(x) => area.set("refundRequestEnabled", x)}
-            notApplied
           />
+          <div className="grid gap-4 sm:grid-cols-2 mt-4">
+            <NumberField
+              label="Request window after delivery (hours)"
+              hint="How long after delivery a customer may still ask. 0 = no limit."
+              value={v.requestWindowHours}
+              onChange={(x) => area.set("requestWindowHours", x)}
+              max={720}
+              suffix="h"
+            />
+          </div>
           <div className="mt-4">
             <p className="text-xs font-semibold text-slate-600 mb-2">Refund reasons</p>
             <ReasonListEditor reasons={v.reasons} onChange={(next) => area.set("reasons", next)} placeholder="e.g. Food was cold" />

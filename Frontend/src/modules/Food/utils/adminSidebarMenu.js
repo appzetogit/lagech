@@ -302,6 +302,7 @@ export const adminSidebarMenu = [
         icon: "MessageSquare",
         badge: "userSupportTickets",
       },
+      { type: "link", label: "Order Issue Reports", path: "/admin/food/order-issue-reports", icon: "AlertTriangle" },
       { type: "link", label: "Contact Messages", path: "/admin/food/contact-messages", icon: "Mail" },
       {
         type: "link",

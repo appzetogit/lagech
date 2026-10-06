@@ -650,12 +650,14 @@ its own wallet entry ("Top-up bonus: <title>"), and the verify response carries
 { "enabled": true, "points": 120, "worth": 12, "totalEarned": 220, "totalConverted": 100,
   "settings": { "pointsPerHundred": 5, "pointsPerRupee": 10, "minimumConvertPoints": 50 },
   "transactions": [ { "id": "…", "type": "credit | debit", "points": 25, "balanceAfter": 120,
-                      "source": "order | conversion", "orderId": "…", "walletAmount": 0,
+                      "source": "order | conversion | refund", "orderId": "…", "walletAmount": 0,
                       "note": "Order FOD-…", "createdAt": "…" } ],
   "pagination": { "page": 1, "limit": 20, "total": 3, "pages": 1 } }
 ```
 Points are earned when an order is **delivered**: `pointsPerHundred` points per ₹100 of the
-order total, rounded down. `worth` is what the current points convert into, in rupees.
+order total, rounded down. When that order is refunded, its points are taken back once (a
+`debit` with `source: "refund"`); points already converted stay converted, so the balance
+never goes below 0. `worth` is what the current points convert into, in rupees.
 Hide the section when `enabled` is false.
 
 ### `POST /v1/food/user/loyalty-points/convert`
@@ -699,7 +701,7 @@ below whatever the app shows.
   },
   "rider": { "maxAssignedOrders": 2, "canCancelOrder": false, "showEarning": true, "pictureUpload": true, "selfRegistration": true },
   "restaurant": { "canCancelOrder": false, "canReplyToReviews": false, "dishApprovalRequired": true, "selfRegistration": true },
-  "refund": { "requestEnabled": true }
+  "refund": { "requestEnabled": true, "requestWindowHours": 24 }   // 0 = no time limit; see section 18
 }
 ```
 
@@ -724,15 +726,15 @@ below whatever the app shows.
 ### `GET /v1/food/public/refund-reasons`
 
 `{ "reasons": [{ "id": "a1b2c3d4e5f6", "text": "Food was cold" }] }` — the active reasons a customer
-can pick when asking for a refund. The ids are stable across admin edits. (A customer
-refund-request endpoint does not exist yet; `refund.requestEnabled` says whether to show the option
-once it does.)
+can pick when asking for a refund. The ids are stable across admin edits. Send the `id` as
+`reasonId` to `POST /v1/food/user/orders/:orderId/refund-request` (section 18).
 
 ### `GET /v1/food/public/order-issue-reasons`
 
 `{ "reasons": [{ "id": "...", "text": "Item missing" }] }` — the predefined messages a customer can
 pick when reporting a problem with an order (Business Settings → Automated message). Replaces the
-hard-coded list in the app.
+hard-coded list in the app. Send the `id` as `reasonId` to `POST /v1/food/user/orders/:orderId/issues`
+(section 18).
 
 ### List order (Priority setup)
 
@@ -749,4 +751,109 @@ Priority setup), else their usual default:
 
 An explicit `sortBy` from the app always wins. The lists are cached for a few minutes, so a change
 can take that long to show.
+
+## 18. Refund requests and order issue reports — `/v1/food/user` (Bearer USER)
+
+`:orderId` is the order's id or its display id (`FOD-…`); only the signed-in customer's own
+orders are found (`404` "Order not found" otherwise). Photos are optional: send the request as
+`multipart/form-data` with up to 3 image files in the field `images` (and the other fields as
+form fields), or as plain JSON without photos. Every `400` carries a `message` to show as is.
+
+### `GET /v1/food/user/orders/:orderId/refund-request`
+
+Whether the customer may ask for a refund on this order now, and the requests already made.
+Call it on the order details screen and show **Request refund** only when `eligible` is true;
+otherwise show `message` (and the latest request's status, if there is one).
+
+```jsonc
+{
+  "eligible": false,
+  "message": "A refund request for this order is already being reviewed",
+  "maxAmount": 0,                    // what can still be refunded (₹) when eligible
+  "windowEndsAt": "2026-10-07T…",    // last moment to ask, or null (no limit / not delivered)
+  "refundTo": "wallet",              // "razorpay" (original payment method) or "wallet"
+  "request": { /* the latest request, or null — shape below */ },
+  "requests": [ /* every request on this order, newest first */ ]
+}
+```
+
+Rules (the server enforces them; `POST` answers `400` with the same `message`):
+
+- Business Settings → Refund → *Refund request* is on (`refund.requestEnabled`).
+- The order is **delivered** and **paid** (`paymentStatus: "paid"`: online payments, wallet,
+  verified offline payments, and cash-on-delivery once the cash was collected).
+- Within `refund.requestWindowHours` (default 24) of delivery; `0` means no limit.
+- One open request per order: while one is `pending`, another is refused. After a rejection
+  the customer may ask again (still within the window). Once refunded, never again.
+
+### `POST /v1/food/user/orders/:orderId/refund-request`
+
+Fields: `reasonId` (an id from `GET /v1/food/public/refund-reasons`) **or** `reason` (free text,
+≤ 200 chars, for "Other"), `note` (optional, ≤ 1000 chars), `images` (optional files, ≤ 3).
+`201` → `{ "request": RefundRequest }`.
+
+```jsonc
+// RefundRequest
+{
+  "id": "…", "orderId": "<order row id>", "orderDisplayId": "FOD-…",
+  "status": "pending",               // pending | approved (being processed) | refunded | rejected
+  "reasonId": "a1b2c3d4e5f6", "reason": "Food was cold", "note": "…",
+  "images": ["https://…/food/refund-requests/….jpg"],
+  "requestedAmount": 540,            // what was refundable when asked
+  "refundedAmount": null,            // set when refunded (may be less: partial refund)
+  "refundMethod": "",                // when refunded: "razorpay" or "wallet"
+  "adminNote": "",                   // the admin's note; always set on a rejection
+  "createdAt": "…", "decidedAt": null, "updatedAt": "…"
+}
+```
+
+Where the money goes when the admin approves (all or part of it):
+
+| Order paid by | Refunded to |
+|---|---|
+| Razorpay (card, UPI, …) | the original payment method (5–7 working days) |
+| Wallet | the wallet |
+| Cash on delivery | the wallet |
+| Offline payment verified by the admin, Razorpay QR | the wallet |
+
+Wallet refunds show in `GET /v1/food/user/refunds` and the wallet history like any order refund.
+Loyalty points the order earned are taken back (section 15).
+
+The customer gets a push (also in the notification inbox): `data.type = "refund_processed"`
+when refunded, `"refund_request_rejected"` when rejected, each with `orderId` (display id),
+`orderRowId` and `refundRequestId`.
+
+### `GET /v1/food/user/refund-requests?page=1&limit=20&status=`
+
+The customer's requests across all orders, newest first. `status` optional
+(`pending|approved|refunded|rejected`). → `{ "requests": [RefundRequest], "pagination": { "page", "limit", "total", "pages" } }`.
+
+### `POST /v1/food/user/orders/:orderId/issues`
+
+"Report an issue" on an order, at any point after it was placed (not while it is still waiting
+for its online payment). Fields: `reasonId` (an id from `GET /v1/food/public/order-issue-reasons`;
+required while the admin has any reasons set up — with none, send `reason` as free text), `note`
+(optional, ≤ 1000 chars), `images` (optional files, ≤ 3). One open report per order: until the
+admin resolves it, another is refused ("You have already reported an issue on this order; …").
+`201` → `{ "issue": OrderIssue }`.
+
+```jsonc
+// OrderIssue
+{
+  "id": "…", "orderId": "<order row id>", "orderDisplayId": "FOD-…",
+  "reasonId": "…", "reason": "Item missing", "note": "…", "images": ["https://…"],
+  "status": "open",                  // open | in-progress | resolved
+  "adminResponse": "",               // the admin's reply, when there is one
+  "createdAt": "…", "updatedAt": "…"
+}
+```
+
+A report is a support ticket of type `order`: it also appears in `GET /v1/food/user/support/my-tickets`.
+When the admin replies, the customer gets a push (and an inbox entry) with
+`data.type = "SUPPORT_RESPONSE"`, `ticketId` and `orderId` (order row id).
+
+### `GET /v1/food/user/orders/:orderId/issues` · `GET /v1/food/user/order-issues?page=1&limit=20`
+
+One order's reports, or all of the customer's order reports, newest first →
+`{ "issues": [OrderIssue], "pagination": { "page", "limit", "total", "pages" } }`.
 

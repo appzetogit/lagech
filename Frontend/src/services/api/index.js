@@ -931,6 +931,15 @@ export const adminAPI = {
     apiClient.post(`/food/admin/orders/${String(orderId)}/refund`, data ?? {}, {
       contextModule: "admin",
     }),
+  // Customer refund requests (query: status, restaurantId, from, to, search, page, limit).
+  getRefundRequests: (params = {}) =>
+    apiClient.get("/food/admin/orders/refund-requests", { params, contextModule: "admin" }),
+  getRefundRequest: (id) =>
+    apiClient.get(`/food/admin/orders/refund-requests/${String(id)}`, { contextModule: "admin" }),
+  approveRefundRequest: (id, body = {}) =>
+    apiClient.patch(`/food/admin/orders/refund-requests/${String(id)}/approve`, body, { contextModule: "admin" }),
+  rejectRefundRequest: (id, body = {}) =>
+    apiClient.patch(`/food/admin/orders/refund-requests/${String(id)}/reject`, body, { contextModule: "admin" }),
   // Offline payments: confirm the money arrived, or reject with a reason.
   verifyOfflinePayment: (orderId, note = "") =>
     apiClient.patch(`/food/admin/orders/${String(orderId)}/offline-payment/verify`, { note }, {
