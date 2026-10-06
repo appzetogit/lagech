@@ -11,6 +11,7 @@ import {
 } from '../../shared/restaurantQuery.util.js';
 import { fromRestaurantLocation, toRestaurant } from '../restaurant.mapper.js';
 import { attachOutletTimingsToRestaurants } from './outletTimings.service.js';
+import { USED_ORDER_WHERE } from '../../orders/services/couponRules.js';
 import { getRestaurantOperationalStatus } from '../helpers/restaurantAvailability.helper.js';
 import {
     calculateDistanceKm,
@@ -202,7 +203,12 @@ const formatRestaurantOfferSummary = (offer) => {
     const minOrderValue = Number(offer.minOrderValue) || 0;
 
     let summary = '';
-    if (discountType === 'flat-price') {
+    if (offer.couponType === 'free_delivery') {
+        summary = 'Free delivery';
+    } else if (discountType === 'flat_price' || discountType === 'flat-price') {
+        // Prisma hands back the enum name (flat_price); 'flat-price' is its
+        // database value. Only the second was checked, so every flat coupon
+        // was summarised as a percentage.
         summary = `Flat ₹${discountValue} OFF`;
     } else {
         summary = `${discountValue}% OFF`;
@@ -256,12 +262,15 @@ const attachPublicOffersToRestaurants = async (restaurants = []) => {
             id: true, couponCode: true, discountType: true, discountValue: true,
             minOrderValue: true, maxDiscount: true,
             restaurantScope: true, restaurantId: true, restaurantIds: true,
+            couponType: true, zoneIds: true, title: true,
         },
         orderBy: { createdAt: 'desc' },
     });
 
     const globalOfferSummaries = [];
     const selectedOfferMap = new Map();
+    /** zone_wise coupons, shown only on restaurants in one of their zones. */
+    const zoneOffers = [];
 
     for (const offer of offers) {
         const summary = formatRestaurantOfferSummary(offer);
@@ -278,8 +287,14 @@ const attachPublicOffersToRestaurants = async (restaurants = []) => {
             minOrderValue: Number(offer.minOrderValue) || 0,
             maxDiscount: Number.isFinite(Number(offer.maxDiscount)) ? Number(offer.maxDiscount) : null,
             restaurantScope: offer.restaurantScope,
+            couponType: offer.couponType,
+            title: offer.title || '',
         };
 
+        if (offer.restaurantScope === 'all' && offer.couponType === 'zone_wise') {
+            zoneOffers.push({ payload, zones: new Set((offer.zoneIds || []).map(String)) });
+            continue;
+        }
         if (offer.restaurantScope === 'all') {
             globalOfferSummaries.push(payload);
             continue;
@@ -299,8 +314,10 @@ const attachPublicOffersToRestaurants = async (restaurants = []) => {
 
     return restaurants.map((restaurant) => {
         const restaurantId = idOf(restaurant);
+        const zoneId = String(restaurant?.zoneId || '');
         const combinedOffers = [
             ...globalOfferSummaries,
+            ...zoneOffers.filter((z) => zoneId && z.zones.has(zoneId)).map((z) => z.payload),
             ...(selectedOfferMap.get(restaurantId) || []),
         ];
         // A restaurant can be named both directly and by an all-restaurants
@@ -1646,7 +1663,7 @@ const PUBLIC_CARD_SELECT = {
     estimatedDeliveryTime: true, estimatedDeliveryTimeMinutes: true,
     offer: true, featuredDish: true, featuredPrice: true,
     rating: true, totalRatings: true, isAcceptingOrders: true, status: true,
-    pureVegRestaurant: true, createdAt: true,
+    pureVegRestaurant: true, createdAt: true, zoneId: true,
     isRecommended: true, recommendedSortOrder: true, displayPosition: true,
     openingTime: true, closingTime: true, openDays: true,
     latitude: true, longitude: true, formattedAddress: true,
@@ -1946,14 +1963,36 @@ export const listPublicOffers = async (query = {}) => {
         filter.AND.push({ customerScope: { not: 'specific' } });
     }
 
-    // A returning customer does not see first-order-only coupons.
+    // A returning customer does not see first-order-only coupons. "Returning"
+    // is the same test checkout applies: an order that was placed and not
+    // cancelled or left unpaid (USED_ORDER_WHERE).
     if (isId(userId)) {
-        const orderCount = await prisma.foodOrder.count({ where: { userId: String(userId) } });
+        const orderCount = await prisma.foodOrder.count({ where: { userId: String(userId), ...USED_ORDER_WHERE } });
         if (orderCount > 0) {
             // The enum's Prisma name is first_time; 'first-time' is its @map.
-            filter.AND.push({ customerScope: { not: 'first_time' }, isFirstOrderOnly: false });
+            filter.AND.push({
+                customerScope: { not: 'first_time' },
+                isFirstOrderOnly: false,
+                couponType: { not: 'first_order' },
+            });
         }
     }
+
+    // Zone-wise coupons only where the zone is known and matches: the
+    // restaurant's zone when one is named, else the zone the app sent.
+    let zoneForCoupons = isId(query.zoneId) ? String(query.zoneId) : null;
+    if (isId(restaurantId)) {
+        const r = await prisma.foodRestaurant.findUnique({
+            where: { id: String(restaurantId) },
+            select: { zoneId: true },
+        });
+        zoneForCoupons = r?.zoneId || zoneForCoupons;
+    }
+    filter.AND.push(
+        zoneForCoupons
+            ? { OR: [{ couponType: { not: 'zone_wise' } }, { zoneIds: { has: zoneForCoupons } }] }
+            : { couponType: { not: 'zone_wise' } },
+    );
 
     if (subtotal !== undefined && subtotal !== null && subtotal !== '' && !isNaN(Number(subtotal))) {
         const numericSubtotal = Number(subtotal);
@@ -2009,13 +2048,22 @@ export const listPublicOffers = async (query = {}) => {
 
         const discountValue = Number(o.discountValue) || 0;
         const title =
-            o.discountType === 'percentage' ? `${discountValue}% OFF` : `Flat ₹${discountValue} OFF`;
+            o.couponType === 'free_delivery'
+                ? 'Free Delivery'
+                : o.discountType === 'percentage' ? `${discountValue}% OFF` : `Flat ₹${discountValue} OFF`;
 
         return {
             id: o.id,
             offerId: o.id,
             couponCode: o.couponCode,
             title,
+            // The name the admin gave the coupon ("Diwali offer"); `title`
+            // stays the discount headline the app already shows.
+            couponTitle: o.title || '',
+            couponType: o.couponType,
+            freeDelivery: o.couponType === 'free_delivery',
+            zoneIds: o.zoneIds || [],
+            startDate: o.startDate || null,
             discountType: o.discountType,
             discountValue,
             maxDiscount: o.maxDiscount === null ? null : Number(o.maxDiscount),
@@ -2037,13 +2085,17 @@ export const listPublicOffers = async (query = {}) => {
         };
     });
 
-    // Drop coupons this user has already used up.
-    if (isId(userId)) {
-        const usages = await prisma.foodOfferUsage.findMany({
-            where: { userId: String(userId) },
-            select: { offerId: true, count: true },
+    // Drop coupons this user has already used up. Uses are counted from their
+    // orders, the same way checkout counts them, so a cancelled order does not
+    // hide a coupon they can still use.
+    const limited = allOffers.filter((o) => Number(o.perUserLimit || 0) > 0).map((o) => o.id);
+    if (isId(userId) && limited.length) {
+        const usages = await prisma.foodOrder.groupBy({
+            by: ['couponId'],
+            where: { userId: String(userId), couponId: { in: limited }, ...USED_ORDER_WHERE },
+            _count: { _all: true },
         });
-        const usageMap = new Map(usages.map((u) => [u.offerId, Number(u.count || 0)]));
+        const usageMap = new Map(usages.map((u) => [u.couponId, Number(u._count._all || 0)]));
 
         allOffers = allOffers.filter((o) => {
             const perUserLimit = Number(o.perUserLimit || 0);
@@ -2072,6 +2124,9 @@ export async function createRestaurantOffer(restaurantId, body) {
                 discountType: body.discountType,
                 discountValue: body.discountValue,
                 customerScope: body.customerScope || 'all',
+                // A restaurant's own coupon is, in the old system's terms,
+                // store wise: it only applies at that restaurant.
+                couponType: 'store_wise',
                 restaurantScope: 'selected',
                 restaurantId: String(restaurantId),
                 minOrderValue: body.minOrderValue ?? 0,

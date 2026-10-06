@@ -96,6 +96,9 @@ export function toOrder(row) {
             restaurantCommission: money(row.restaurantCommission),
             discount: money(row.discount),
             couponCode: row.couponCode,
+            couponId: row.couponId ?? null,
+            /** Delivery fee + its GST taken off by a free-delivery coupon. */
+            deliveryFeeWaived: money(row.couponDeliveryWaiver),
             total: money(row.total),
             currency: row.currency,
             distanceKm: num(row.distanceKm),
@@ -254,7 +257,7 @@ export function fromOrder(input = {}) {
         'deliveryAddress', 'deliveryVerification', 'lastRiderLocation',
         // relations and derived fields, never columns
         'items', 'statusHistory', 'itemRatings', 'dispatchOffers',
-        'restaurant', 'user', 'deliveryPartner', 'zone', 'foodTransaction',
+        'restaurant', 'user', 'deliveryPartner', 'zone', 'coupon', 'foodTransaction',
         'payments', 'refunds', 'transactions', 'chatMessages',
         '_id', 'id', 'orderId',
     ]);
@@ -290,7 +293,7 @@ export function fromOrder(input = {}) {
     if (pricing) {
         for (const key of ['subtotal', 'tax', 'packagingFee', 'deliveryFee', 'deliveryFeeGst',
                            'platformFee', 'quickDeliveryFee', 'deliveryMode', 'restaurantCommission',
-                           'discount', 'couponCode', 'total', 'currency', 'distanceKm',
+                           'discount', 'couponCode', 'couponId', 'couponDeliveryWaiver', 'total', 'currency', 'distanceKm',
                            'roadDistanceKm', 'roadDurationMins']) {
             set(key, pricing[key]);
         }

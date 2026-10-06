@@ -37,6 +37,7 @@ import { importFavorites } from './steps/favorites.mjs';
 import { importNewsletter } from './steps/newsletter.mjs';
 import { importWithdrawalMethods } from './steps/withdrawalMethods.mjs';
 import { importSocialMedia } from './steps/socialMedia.mjs';
+import { importCoupons } from './steps/coupons.mjs';
 
 const STEPS = [
     ['zones', importZones],
@@ -54,6 +55,7 @@ const STEPS = [
     ['banners', importBanners],
     ['cancel-reasons', importCancelReasons],
     ['promotions', importPromotions],
+    ['coupons', importCoupons],
     ['favorites', importFavorites],
     ['newsletter', importNewsletter],
     ['social-media', importSocialMedia],

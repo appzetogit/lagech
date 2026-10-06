@@ -31,6 +31,7 @@ Steps run in this order whatever order they are named in.
 | `orders` | Orders as `FOD-<old id>`, items, history, reviews, the old ledger's split |
 | `balances` | Rider cash collections, withdrawals and payouts; restaurant withdrawals and payouts; opening-balance adjustments so every wallet equals the old one |
 | `ratings` | Restaurant and rider star ratings recomputed from rated orders |
+| `coupons` | Food-module coupons with their type (default, store wise, zone wise, free delivery, first order), title, dates (whole IST days), per-customer limit and customer restriction; store/zone/customer ids mapped through `legacy.id_map`. A vendor's coupon becomes a restaurant-funded store wise coupon. Imported orders that used a code are linked so Total Uses counts them (run after `orders`). A coupon whose restaurants, zones or customers were not imported comes in switched off |
 | `newsletter` | Newsletter subscribers (Subscribed Mail List), emails lower-cased |
 | `settings` | Restaurant subscriptions off (old system was commission-only); rider cash limit |
 | `social-media` | Social media links (name, link, on/off) |
@@ -45,7 +46,7 @@ DATABASE_URL='postgresql://<user>:<pass>@127.0.0.1:5432/<database>?schema=public
 UPLOAD_STORAGE_ROOT=/srv/lagech/uploads UPLOAD_BASE_URL=/uploads \
 REDIS_URL= NODE_ENV=development \
 node scripts/legacy-import/index.mjs zones categories restaurants foods nutrition customers riders \
-  payment-details orders balances ratings settings
+  payment-details orders balances ratings coupons settings
 ```
 
 Copy the old `storage/app/public/{category,product,store,profile,delivery-man}`

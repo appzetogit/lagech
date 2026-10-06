@@ -381,12 +381,18 @@ async function incrementCouponUsageForOrder(order, userId) {
     ? String(order.couponCode).trim().toUpperCase()
     : "";
   if (!couponCode) return;
-  // A stored code with no applied discount means the coupon was rejected at
-  // pricing time — don't consume the user's/offer's usage allowance for it.
-  if (!(Number(order?.discount) > 0)) return;
+  // couponId is only set when the coupon actually applied; a stored code
+  // without it was rejected at pricing time. Orders from before couponId
+  // existed fall back to "it had a discount".
+  const applied = order?.couponId
+    ? true
+    : Number(order?.discount) > 0;
+  if (!applied) return;
 
   try {
-    const offer = await prisma.foodOffer.findUnique({ where: { couponCode } });
+    const offer = order?.couponId
+      ? await prisma.foodOffer.findUnique({ where: { id: String(order.couponId) } })
+      : await prisma.foodOffer.findUnique({ where: { couponCode } });
     if (!offer) return;
 
     // Conditional increment so concurrent orders cannot push usedCount past usageLimit.
@@ -497,6 +503,19 @@ export async function createOrder(userId, dto) {
       { at: orderAt, restaurant, skipAvailabilityCheck: true },
     );
 
+    // The customer was shown a saving at checkout and the coupon no longer
+    // gives it (it expired, hit its limit, the cart changed...). Placing the
+    // order anyway would charge more than they agreed to, so stop and say why.
+    // A client that echoes a code which never applied (discount 0 in the
+    // pricing it sends back) is unaffected, as before.
+    const promisedSaving =
+      (Number(dto.pricing?.discount) || 0) + (Number(dto.pricing?.deliveryFeeWaived) || 0);
+    if (dto.pricing?.couponCode && promisedSaving > 0 && !pricingResult.pricing?.appliedCoupon) {
+      throw new ValidationError(
+        `${pricingResult.pricing?.couponError || "This coupon can no longer be applied"}. Please review your cart and try again.`,
+      );
+    }
+
     const resolvedItems = pricingResult.items || [];
     const normalizedPricing = {
       subtotal: Number(pricingResult.pricing?.subtotal) || 0,
@@ -514,6 +533,8 @@ export async function createOrder(userId, dto) {
       couponCode: pricingResult.pricing?.couponCode
         ? String(pricingResult.pricing.couponCode).trim().toUpperCase()
         : null,
+      couponId: pricingResult.pricing?.couponId || null,
+      couponDeliveryWaiver: Number(pricingResult.pricing?.deliveryFeeWaived) || 0,
       total: Number(pricingResult.pricing?.total) || 0,
       currency: String(pricingResult.pricing?.currency || "INR"),
       distanceKm: Number.isFinite(Number(pricingResult.pricing?.distanceKm))

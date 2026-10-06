@@ -183,6 +183,56 @@ POST /v1/food/orders
 }
 ```
 
+### Coupons at checkout
+
+Unchanged contract: send the code as `couponCode` to `POST /orders/calculate`, then send the
+`pricing` it returns (which carries `couponCode`) with `POST /orders`. Codes are matched
+case-insensitively. A code that does not apply never fails `/calculate`; the cart is priced
+without it and the reason comes back. Fields added to `pricing` (all additive):
+
+```jsonc
+{
+  "discount": 50,                 // item discount (0 for a free-delivery coupon)
+  "deliveryFee": 0,               // after a free-delivery coupon
+  "deliveryFeeGst": 0,
+  "originalDeliveryFee": 40,      // before any waiver
+  "deliveryFeeWaived": 47.2,      // delivery fee + its GST taken off by a free-delivery coupon, else 0
+  "couponId": "6a6…",             // the coupon that applied, else null
+  "couponError": null,            // why the sent code did not apply, ready to show, e.g.
+                                  // "This coupon expired on 9 Oct 2026",
+                                  // "Add items worth ₹100 more to use this coupon (minimum purchase ₹600)"
+  "couponErrorReason": null,      // machine-readable: not_found | inactive | not_started | expired |
+                                  // wrong_restaurant | wrong_zone | login_required | not_eligible |
+                                  // not_first_order | min_purchase | limit_reached | user_limit_reached
+  "appliedCoupon": {              // null when no code applied; `code` and `discount` as before
+    "code": "SAVE50", "discount": 50, "couponId": "6a6…", "title": "Weekend treat",
+    "couponType": "default",      // default | store_wise | zone_wise | free_delivery | first_order
+    "freeDelivery": false, "deliveryFeeWaived": 0,
+    "savings": 50                 // discount + deliveryFeeWaived
+  }
+}
+```
+
+Rules: `store_wise` only at its restaurant(s); `zone_wise` only when the order's zone (the `zoneId`
+sent, else the restaurant's) is one of its zones; `free_delivery` waives the delivery fee and its
+GST (item GST, platform fee and the Quick Mode surcharge are still charged); `first_order` only while
+the customer has no placed order (cancelled orders, unpaid online orders and failed payments do not
+count); `default` any order. Every coupon also checks: switched on, between its start date (00:00
+IST) and expire date (23:59 IST), customer restriction, minimum purchase on the item subtotal, the
+percent cap (`maxDiscount`), and "limit for same user" (counted from the customer's orders with that
+coupon, again excluding cancelled/unpaid/failed).
+
+`POST /orders` with a `pricing.discount` (or `pricing.deliveryFeeWaived`) above 0 for a coupon that no
+longer applies returns 400 with the reason, e.g. `"This coupon is not active. Please review your
+cart and try again."` — re-run `/calculate` and show the new total. Echoing a code that never
+applied (discount 0) places the order as before. Orders read back carry `pricing.couponId` and
+`pricing.deliveryFeeWaived`.
+
+`GET /v1/food/restaurant/offers` (coupon list): each entry adds `couponTitle` (the admin's title),
+`couponType`, `freeDelivery`, `zoneIds`, `startDate`; `title` stays the headline ("20% OFF",
+"Flat ₹50 OFF", now "Free Delivery" for free-delivery coupons). Zone-wise coupons are listed only
+when the zone is known (from `restaurantId`, or a `zoneId` query param) and matches.
+
 ### Payment methods
 
 `"razorpay" | "razorpay_qr" | "card" | "wallet"`
