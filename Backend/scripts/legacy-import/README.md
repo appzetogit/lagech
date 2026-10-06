@@ -19,7 +19,7 @@ Steps run in this order whatever order they are named in.
 
 | Step | What it brings over |
 |---|---|
-| `zones` | Delivery zones and their boundaries |
+| `zones` | Delivery zones and their boundaries, the Cash On Delivery / Digital Payment switches and the default flag |
 | `categories` | Categories and sub-categories, with images |
 | `restaurants` | Restaurants, approval state, per-day hours, commission, logo and cover |
 | `foods` | Dishes, variations as variants, other option groups as add-ons |
@@ -32,6 +32,7 @@ Steps run in this order whatever order they are named in.
 | `balances` | Rider cash collections, withdrawals and payouts; restaurant withdrawals and payouts; opening-balance adjustments so every wallet equals the old one |
 | `ratings` | Restaurant and rider star ratings recomputed from rated orders |
 | `coupons` | Food-module coupons with their type (default, store wise, zone wise, free delivery, first order), title, dates (whole IST days), per-customer limit and customer restriction; store/zone/customer ids mapped through `legacy.id_map`. A vendor's coupon becomes a restaurant-funded store wise coupon. Imported orders that used a code are linked so Total Uses counts them (run after `orders`). A coupon whose restaurants, zones or customers were not imported comes in switched off |
+| `banners` | Food-module home banners (`banners`) with title, zone, type (store wise → restaurant, item wise → dish, default → link), target, Featured and status; images from `legacy/banner` (run after `zones restaurants foods`) |
 | `newsletter` | Newsletter subscribers (Subscribed Mail List), emails lower-cased |
 | `settings` | Restaurant subscriptions off (old system was commission-only); rider cash limit |
 | `social-media` | Social media links (name, link, on/off) |

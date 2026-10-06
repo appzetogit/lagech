@@ -61,6 +61,43 @@ token gets 403 on those, not 404.
 
 > The non-`/public` variants of the banner routes are **admin-only** and will 403.
 
+### Home banners (`/hero-banners/public`) — zone, type and target
+
+`GET /v1/food/hero-banners/public?lat=..&lng=..` (or `?zoneId=..`, like the restaurant list) returns
+the banners for **every zone plus the customer's zone**; with neither, every active banner (as
+before). A point outside every zone returns `{ "banners": [], "outOfService": true }`.
+`&featured=true` returns only banners the admin marked Featured.
+
+Every field the app already reads is unchanged (`imageUrl`, `title`, `ctaText`, `ctaLink`,
+`linkedRestaurants`, `sortOrder`, ...). Added per banner:
+
+```jsonc
+{
+  "bannerType": "restaurant",            // restaurant | food | link — what a tap opens
+  "linkedRestaurantIds": ["<restaurantId>"], // bannerType restaurant (linkedRestaurants has the cards)
+  "linkedFoodId": null,                   // bannerType food: the dish id
+  "linkedFood": null,                     // { id, name, image, price, foodType, restaurantId } for food banners
+  "zoneId": null,                         // null = shown in every zone
+  "isFeatured": false
+}
+```
+Tap: `restaurant` → open `linkedRestaurantIds[0]`; `food` → open the dish (`linkedFood.restaurantId` +
+`linkedFoodId`); `link` → open `ctaLink` if set, otherwise do nothing. A food banner whose dish was
+deleted or unapproved has `linkedFood: null` — treat it as a plain image.
+
+### Zones: payment switches and default zone
+
+`/zones/detect` (`data.zone`) and `/zones/public` / `/zones/nearby` (each zone) now also carry
+`cashOnDelivery`, `digitalPayment` and `isDefault`; `/zones/public` adds `data.defaultZoneId`.
+
+```jsonc
+GET /v1/food/zones/payment-options?restaurantId=<id>   // or ?zoneId=..  or ?lat=..&lng=..   — Public
+// -> data: { "zoneId": "...", "cashOnDelivery": true, "digitalPayment": false, "wallet": true }
+```
+An order's zone is the `zoneId` sent with it, else the restaurant's zone, else the **default zone**;
+so pass `restaurantId` at checkout to get exactly what order placement will accept.
+`POST /v1/food/orders/calculate` also returns the same object as `data.paymentOptions`.
+
 ### Recommended restaurants
 Every restaurant in `GET /v1/food/restaurant/restaurants` carries `isRecommended` (boolean) and
 `recommendedSortOrder` (number). The admin picks and orders the recommended ones
@@ -250,6 +287,12 @@ with a switched-off method returns 400 with a message for the customer:
 Partial payment (part wallet, rest online or cash) is **not** available yet:
 `business.payment.partialPayment` is published for later but a wallet order
 must still cover the whole total.
+
+**Per-zone switches (Zone setup).** Each zone can switch off Cash On Delivery (`cash`) and/or
+Digital Payment (`razorpay`, `card`, `razorpay_qr`). Placing an order with a switched-off method
+returns 400, e.g. `"Cash on Delivery is not available in Phaltan. Please choose another payment
+method."` / `"Online payment is not available in Phaltan. ..."`. `wallet` and `offline` are not
+zone-governed. Hide the methods using `paymentOptions` (see §2 Zones) rather than waiting for the 400.
 
 **`razorpay_qr` is the pay-at-the-door replacement.** Same UX as COD: nothing is
 charged upfront, the order dispatches immediately, `payment.status` stays
@@ -490,6 +533,13 @@ User-facing pushes carry `data.type = "order_status_update"` with `orderId`,
 `high_importance_channel` — which the user app already creates at
 `Importance.max`. Keep that channel id, or Android silently downgrades the
 notification to a non-heads-up default channel.
+
+Admin push notifications (Push Notification page) arrive with `data.type: "admin_broadcast"`,
+`broadcastId`, `link`, `couponCode` and, when the admin attached one, `data.image` (absolute URL;
+also set as the FCM notification image). The matching inbox row carries the same image at
+`metadata.image`. The admin can **Resend** one: the same inbox row comes back unread (no duplicate,
+same `broadcastId`), so dedupe local notifications by `broadcastId`. Switching one off removes it
+from the inbox list.
 
 Other order pushes: `order_created` (order placed / offline payment verified),
 `order_cancelled`, `refund_processed`, `delivery_accepted` (rider assigned) and

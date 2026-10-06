@@ -8,7 +8,10 @@ import {
     uploadHeroBannersController,
     deleteHeroBannerController,
     updateHeroBannerOrderController,
-    toggleHeroBannerStatusController
+    toggleHeroBannerStatusController,
+    createHeroBannerController,
+    updateHeroBannerController,
+    toggleHeroBannerFeaturedController
 } from '../controllers/heroBanner.controller.js';
 import {
     listTopBannersController,
@@ -65,7 +68,7 @@ import {
     getPublicLandingSettingsController,
     getPublicTopBannersController
 } from '../controllers/publicLanding.controller.js';
-import { detectZonePublicController, listZonesPublicController, listZonesNearbyPublicController } from '../controllers/zonePublic.controller.js';
+import { detectZonePublicController, listZonesPublicController, listZonesNearbyPublicController, zonePaymentOptionsPublicController } from '../controllers/zonePublic.controller.js';
 import {
     listGourmetAdmin,
     createGourmetAdmin,
@@ -141,6 +144,9 @@ router.post(
 router.delete('/hero-banners/:id', deleteHeroBannerController);
 router.patch('/hero-banners/:id/order', updateHeroBannerOrderController);
 router.patch('/hero-banners/:id/status', toggleHeroBannerStatusController);
+router.patch('/hero-banners/:id/featured', toggleHeroBannerFeaturedController);
+// The Banners page: one banner with its zone, type and target.
+router.post('/hero-banners', upload.single('file'), createHeroBannerController);
 
 // Admin top banners
 router.get('/top-banners', listTopBannersController);
@@ -212,6 +218,7 @@ router.patch('/hero-banners/gourmet/:id/order', updateGourmetOrderAdmin);
 router.patch('/hero-banners/gourmet/:id/status', toggleGourmetStatusAdmin);
 
 // Public landing endpoints (Food user app)
+router.patch('/hero-banners/:id', upload.single('file'), updateHeroBannerController);
 router.get('/hero-banners/public', getPublicHeroBannersController);
 router.get('/top-banners/public', getPublicTopBannersController);
 router.get('/hero-banners/under-250/public', getPublicUnder250BannersController);
@@ -223,6 +230,7 @@ router.get('/landing/settings/public', getPublicLandingSettingsController);
 router.get('/zones/detect', detectZonePublicController);
 router.get('/zones/nearby', listZonesNearbyPublicController);
 router.get('/zones/public', listZonesPublicController);
+router.get('/zones/payment-options', zonePaymentOptionsPublicController);
 // Admin landing settings
 router.get('/hero-banners/landing/settings', getAdminLandingSettingsController);
 router.patch('/hero-banners/landing/settings', updateAdminLandingSettingsController);
