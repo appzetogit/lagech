@@ -72,12 +72,9 @@ export const setRestaurantDisplayPosition = handle(
     { message: 'Position saved' },
 );
 
-// Bulk import / export: categories, addons, restaurants
+// Bulk import / export: categories, addons, restaurants, foods
+const IMPORTERS = { categories: bulk.importCategories, addons: bulk.importAddons, restaurants: bulk.importRestaurants, foods: bulk.importFoods };
+const EXPORTERS = { categories: bulk.exportCategories, addons: bulk.exportAddons, restaurants: bulk.exportRestaurants, foods: bulk.exportFoods };
 export const bulkTemplate = (entity) => download((req) => bulk.buildTemplate(entity, req.query?.format));
-export const bulkImport = (entity) =>
-    handle(
-        (req) => ({ categories: bulk.importCategories, addons: bulk.importAddons, restaurants: bulk.importRestaurants }[entity])(req.file),
-        { message: 'Import finished' },
-    );
-export const bulkExport = (entity) =>
-    download((req) => ({ categories: bulk.exportCategories, addons: bulk.exportAddons, restaurants: bulk.exportRestaurants }[entity])(req.query || {}));
+export const bulkImport = (entity) => handle((req) => IMPORTERS[entity](req.file), { message: 'Import finished' });
+export const bulkExport = (entity) => download((req) => EXPORTERS[entity](req.query || {}));

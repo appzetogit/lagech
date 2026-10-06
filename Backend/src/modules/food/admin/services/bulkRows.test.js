@@ -13,6 +13,10 @@ import {
     addonExportRow,
     restaurantExportRow,
     phoneKey,
+    FOOD_COLUMNS,
+    FOOD_EXPORT_COLUMNS,
+    validateFoodRow,
+    foodExportRow,
 } from './bulkRows.js';
 import { parseCsv, rowsToRecords, toCsv, missingHeaders, headerKey } from '../../shared/sheet.util.js';
 
@@ -90,4 +94,69 @@ test('restaurant rows need the same fields as adding a restaurant by hand', () =
     assert.equal(phoneKey('+91 98765-43210'), '9876543210');
     assert.equal(restaurantExportRow({ id: 'r', cuisines: [] }).length, RESTAURANT_EXPORT_COLUMNS.length);
     assert.equal(RESTAURANT_EXPORT_COLUMNS.length, RESTAURANT_COLUMNS.length + 5);
+});
+
+test('food rows need a name, restaurant, category and a price above 0', () => {
+    const rid = 'a'.repeat(24);
+    const cid = 'b'.repeat(24);
+    const sid = 'c'.repeat(24);
+    const ok = validateFoodRow(rec({
+        'Name*': 'Paneer Tikka', 'Restaurant Id*': rid.toUpperCase(), 'Category Id*': cid, 'Sub Category Id': sid,
+        'Price*': '1,250', 'Compare-at Price': '1400', 'Food Type (Veg/Non-Veg)': 'veg', 'Available (Yes/No)': 'no',
+        Nutrition: 'Calories 250 kcal, High protein', 'Image URL': 'https://cdn.example.com/p.webp',
+    }));
+    assert.equal(ok.value.restaurantId, rid, 'ids are lowercased');
+    assert.equal(ok.value.subCategoryId, sid);
+    assert.equal(ok.value.price, 1250);
+    assert.equal(ok.value.otherPrice, 1400);
+    assert.equal(ok.value.foodType, 'Veg');
+    assert.equal(ok.value.isAvailable, false);
+    assert.equal(ok.value.nutrition, 'Calories 250 kcal, High protein');
+
+    const blankType = validateFoodRow(rec({ 'Name*': 'Dal', 'Restaurant Id*': rid, 'Category Id*': cid, 'Price*': '90' }));
+    assert.equal(blankType.value.foodType, null, 'blank food type is decided by the service');
+    assert.equal(blankType.value.isAvailable, true);
+    assert.equal(blankType.value.otherPrice, 0);
+
+    const bad = validateFoodRow(rec({
+        Id: 'x', 'Restaurant Id*': 'nope', 'Sub Category Id': 'zz', 'Price*': '0', 'Food Type (Veg/Non-Veg)': 'egg', 'Image URL': 'ftp://x',
+    }));
+    assert.deepEqual(bad.errors, [
+        'Id is not a valid id (leave it blank to add a new row)',
+        'Name is required',
+        'Restaurant Id is not a valid id',
+        'Category Id is required',
+        'Sub Category Id is not a valid id',
+        'Price must be more than 0',
+        'Food Type must be Veg or Non-Veg',
+        'Image URL must be a web address (https://...) or an uploaded file path',
+    ]);
+    assert.deepEqual(validateFoodRow(rec({ 'Name*': 'A', 'Restaurant Id*': rid, 'Category Id*': cid })).errors, ['Price is required']);
+});
+
+test('a food export row splits a sub-category from its parent and reads back through the import rules', () => {
+    const rid = 'a'.repeat(24);
+    const row = foodExportRow({
+        id: 'd'.repeat(24), name: 'Momos', description: '', restaurantId: rid, restaurant: { restaurantName: 'R' },
+        categoryId: 'c'.repeat(24), categoryName: 'Steamed', category: { name: 'Steamed', parentId: 'b'.repeat(24), parent: { name: 'Chinese' } },
+        price: '120.00', otherPrice: '0', foodType: 'NonVeg', tags: ['momos'], nutrition: [], allergens: ['Gluten', 'Soy'],
+        isAvailable: true, approvalStatus: 'approved', variants: [{ name: 'Half', price: '70' }, { name: 'Full', price: '120' }],
+    });
+    assert.equal(row.length, FOOD_EXPORT_COLUMNS.length);
+    assert.equal(FOOD_EXPORT_COLUMNS.length, FOOD_COLUMNS.length + 3);
+    const data = Object.fromEntries(FOOD_COLUMNS.map((h, i) => [headerKey(h), String(row[i])]));
+    assert.equal(data['category id'], 'b'.repeat(24));
+    assert.equal(data['sub category id'], 'c'.repeat(24));
+    assert.equal(data['category name'], 'Chinese');
+    assert.equal(data['food type (veg/non-veg)'], 'Non-Veg');
+    assert.equal(row[FOOD_EXPORT_COLUMNS.indexOf('Sizes')], 'Half: 70 | Full: 120');
+    const back = validateFoodRow(data);
+    assert.equal(back.errors, undefined);
+    assert.equal(back.value.id, 'd'.repeat(24));
+    assert.equal(back.value.allergens, 'Gluten, Soy');
+
+    const top = foodExportRow({ id: 'e', restaurantId: rid, categoryId: 'b'.repeat(24), category: { name: 'Chinese', parentId: null }, foodType: 'Veg' });
+    assert.equal(top[FOOD_COLUMNS.indexOf('Category Id*')], 'b'.repeat(24));
+    assert.equal(top[FOOD_COLUMNS.indexOf('Sub Category Id')], '');
+    assert.equal(top[FOOD_COLUMNS.indexOf('Food Type (Veg/Non-Veg)')], 'Veg');
 });

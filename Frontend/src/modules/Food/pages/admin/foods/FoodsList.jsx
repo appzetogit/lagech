@@ -60,7 +60,8 @@ const FOOD_FALLBACK_IMAGE =
     </svg>`
   )
 
-export default function FoodsList() {
+/** `openAdd` (Food Setup -> Add new in the sidebar) opens the add form on arrival. */
+export default function FoodsList({ openAdd = false } = {}) {
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedRestaurant, setSelectedRestaurant] = useState("all")
   const [foods, setFoods] = useState([])
@@ -402,6 +403,12 @@ export default function FoodsList() {
     setCategoryPopoverOpen(false)
     setShowFoodFormModal(true)
   }
+
+  useEffect(() => {
+    // Once on arrival; the route remounts the page each time it is opened.
+    if (openAdd) openAddFoodModal()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openAdd])
 
   const openEditFoodModal = (food) => {
     if (!ensureActionAccess("edit")) return

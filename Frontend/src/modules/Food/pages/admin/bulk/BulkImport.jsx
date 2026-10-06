@@ -31,9 +31,18 @@ const COPY = {
       "Zone is the zone's name. Without one, the zone is found from Latitude and Longitude when given.",
     ],
   },
+  foods: {
+    title: "Food Bulk Import",
+    what: "dishes",
+    tips: [
+      "Restaurant Id and Category Id come from the restaurant and category exports; Sub Category Id must be a sub-category of that category.",
+      "Leave Id blank to add a dish; keep the Id from a food export to update that dish. Imported dishes are approved straight away.",
+      "Food Type is Veg or Non-Veg. Tags, Nutrition and Allergens are comma-separated. A dish with sizes keeps its size prices.",
+    ],
+  },
 }
 
-/** Upload a CSV/Excel file of categories, add-ons or restaurants, with per-row errors. */
+/** Upload a CSV/Excel file of categories, add-ons, restaurants or foods, with per-row errors. */
 export default function BulkImport({ entity }) {
   const copy = COPY[entity]
   const [file, setFile] = useState(null)

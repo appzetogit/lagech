@@ -35,7 +35,7 @@ router.put('/restaurants/recommended', extras.saveRecommendedRestaurants);
 router.patch('/restaurants/:id/display-position', extras.setRestaurantDisplayPosition);
 
 // ----- Bulk import / export -----
-for (const [base, entity] of [['/categories', 'categories'], ['/addons', 'addons'], ['/restaurants', 'restaurants']]) {
+for (const [base, entity] of [['/categories', 'categories'], ['/addons', 'addons'], ['/restaurants', 'restaurants'], ['/foods', 'foods']]) {
     router.get(`${base}/bulk/template`, extras.bulkTemplate(entity));
     router.post(`${base}/bulk/import`, upload.single('file'), extras.bulkImport(entity));
     router.get(`${base}/bulk/export`, extras.bulkExport(entity));

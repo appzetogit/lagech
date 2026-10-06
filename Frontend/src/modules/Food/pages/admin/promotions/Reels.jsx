@@ -112,12 +112,12 @@ function ReelForm({ reel, restaurants, onClose, onSaved }) {
   )
 }
 
-/** Short restaurant videos shown in the customer app. */
-export default function Reels() {
+/** Short restaurant videos shown in the customer app. `openNew` (Create Reels) opens the form on arrival. */
+export default function Reels({ openNew = false } = {}) {
   const [reels, setReels] = useState([])
   const [loading, setLoading] = useState(true)
   const [restaurants, setRestaurants] = useState([])
-  const [editing, setEditing] = useState(null)
+  const [editing, setEditing] = useState(openNew ? {} : null)
 
   const load = async () => {
     try {

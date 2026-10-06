@@ -8,20 +8,36 @@ const COPY = {
   categories: { title: "Category Bulk Export", what: "global categories and sub-categories" },
   addons: { title: "Addon Bulk Export", what: "add-ons (deleted ones are left out)" },
   restaurants: { title: "Restaurant Bulk Export", what: "restaurants" },
+  foods: { title: "Food Bulk Export", what: "dishes" },
 }
 
-/** Download the current categories, add-ons or restaurants as CSV or Excel. */
+/** Download the current categories, add-ons, restaurants or foods as CSV or Excel. */
 export default function BulkExport({ entity }) {
   const copy = COPY[entity]
   const [format, setFormat] = useState("xlsx")
   const [filters, setFilters] = useState({})
   const [restaurants, setRestaurants] = useState([])
+  const [categories, setCategories] = useState([])
   const [busy, setBusy] = useState(false)
   const set = (k, v) => setFilters((f) => ({ ...f, [k]: v }))
 
   useEffect(() => {
-    if (entity !== "addons") return
+    if (entity !== "addons" && entity !== "foods") return
     loadRestaurantOptions(adminAPI).then(setRestaurants).catch(() => {})
+    if (entity !== "foods") return
+    // Top-level categories: choosing one also exports its sub-categories' dishes.
+    adminAPI
+      .getCategories({ parentId: "root", limit: 1000 })
+      .then((res) => {
+        const list = res?.data?.data?.categories || []
+        setCategories(
+          list
+            .map((c) => ({ id: String(c.id || c._id || ""), name: String(c.name || "").trim() }))
+            .filter((c) => c.id && c.name)
+            .sort((a, b) => a.name.localeCompare(b.name)),
+        )
+      })
+      .catch(() => {})
   }, [entity])
 
   const run = async () => {
@@ -89,6 +105,42 @@ export default function BulkExport({ entity }) {
                     <option value="approved">Approved</option>
                     <option value="pending">Pending</option>
                     <option value="rejected">Rejected</option>
+                  </select>
+                </label>
+              </>
+            )}
+
+            {entity === "foods" && (
+              <>
+                <label className="block space-y-1">
+                  <span className="text-xs font-semibold text-slate-600">Restaurant</span>
+                  <select className={select} value={filters.restaurantId || ""} onChange={(e) => set("restaurantId", e.target.value)}>
+                    <option value="">All restaurants</option>
+                    {restaurants.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                  </select>
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-xs font-semibold text-slate-600">Category</span>
+                  <select className={select} value={filters.categoryId || ""} onChange={(e) => set("categoryId", e.target.value)}>
+                    <option value="">All categories</option>
+                    {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-xs font-semibold text-slate-600">Approval</span>
+                  <select className={select} value={filters.approvalStatus || ""} onChange={(e) => set("approvalStatus", e.target.value)}>
+                    <option value="">Any</option>
+                    <option value="approved">Approved</option>
+                    <option value="pending">Pending</option>
+                    <option value="rejected">Rejected</option>
+                  </select>
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-xs font-semibold text-slate-600">Status</span>
+                  <select className={select} value={filters.available || ""} onChange={(e) => set("available", e.target.value)}>
+                    <option value="">Any</option>
+                    <option value="yes">Available</option>
+                    <option value="no">Unavailable</option>
                   </select>
                 </label>
               </>

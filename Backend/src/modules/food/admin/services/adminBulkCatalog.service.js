@@ -7,24 +7,30 @@ import {
     ADDON_NOTES,
     CATEGORY_COLUMNS,
     CATEGORY_NOTES,
+    FOOD_COLUMNS,
+    FOOD_EXPORT_COLUMNS,
+    FOOD_NOTES,
     RESTAURANT_COLUMNS,
     RESTAURANT_EXPORT_COLUMNS,
     RESTAURANT_NOTES,
     addonExportRow,
     categoryExportRow,
+    foodExportRow,
     phoneKey,
     restaurantExportRow,
     validateAddonRow,
     validateCategoryRow,
+    validateFoodRow,
     validateRestaurantRow,
 } from './bulkRows.js';
 import { createCategory, updateCategory } from './adminCategory.service.js';
+import { createFood, updateFood } from './adminFood.service.js';
 import { createRestaurantByAdmin } from './adminRestaurantWrite.service.js';
 import { findZoneForPoint } from '../../shared/zone.service.js';
 
 /**
- * Bulk import and export of categories, add-ons and restaurants, as the old
- * panel had for each. Every import:
+ * Bulk import and export of categories, add-ons, restaurants and foods, as the
+ * old panel had for each. Every import:
  *
  *   - takes CSV or Excel with the template's headers (extra columns ignored);
  *   - checks every row first and reports each bad row with all its problems;
@@ -32,7 +38,8 @@ import { findZoneForPoint } from '../../shared/zone.service.js';
  *     forms, so an import can never create something the form would refuse;
  *   - returns { created, updated, failed, errors: [{ row, name, errors }] }.
  *
- * Foods already have their own bulk upload (bulkUpload.service.js).
+ * Foods also keep the older one-restaurant menu upload (bulkUpload.service.js);
+ * the import here is the old panel's: any restaurant per row, and updates.
  */
 
 const SPECS = {
@@ -43,6 +50,12 @@ const SPECS = {
         columns: RESTAURANT_COLUMNS,
         notes: RESTAURANT_NOTES,
         required: ['Restaurant Name*', 'Owner Name*', 'Owner Phone*'],
+    },
+    foods: {
+        name: 'Foods',
+        columns: FOOD_COLUMNS,
+        notes: FOOD_NOTES,
+        required: ['Name*', 'Restaurant Id*', 'Category Id*', 'Price*'],
     },
 };
 
@@ -315,6 +328,153 @@ export async function exportAddons(query = {}) {
         take: 20000,
     });
     return writeSheet({ format: formatOf(query.format), name: 'Addons', headers: ADDON_COLUMNS, rows: rows.map(addonExportRow) });
+}
+
+// ─── foods ───────────────────────────────────────────────────────────────────
+
+const lower = (value) => String(value || '').trim().toLowerCase();
+
+export async function importFoods(file) {
+    const records = await readRecords('foods', file);
+    const report = newReport();
+
+    const idsIn = (header) => [...new Set(records.map((r) => lower(r.data[header])).filter(isId))];
+    const restaurantIds = idsIn('restaurant id');
+    const [restaurants, categories, targets, sameRestaurantFoods] = await Promise.all([
+        prisma.foodRestaurant.findMany({ where: { id: { in: restaurantIds } }, select: { id: true, pureVegRestaurant: true } }),
+        prisma.foodCategory.findMany({
+            where: { id: { in: [...new Set([...idsIn('category id'), ...idsIn('sub category id')])] } },
+            select: { id: true, name: true, parentId: true, restaurantId: true },
+        }),
+        prisma.foodItem.findMany({
+            where: { id: { in: idsIn('id') } },
+            select: { id: true, restaurantId: true, approvalStatus: true, _count: { select: { variants: true } } },
+        }),
+        prisma.foodItem.findMany({ where: { restaurantId: { in: restaurantIds } }, select: { id: true, restaurantId: true, name: true } }),
+    ]);
+    const restaurantById = new Map(restaurants.map((r) => [r.id, r]));
+    const categoryById = new Map(categories.map((c) => [c.id, c]));
+    const targetById = new Map(targets.map((f) => [f.id, f]));
+    const nameKey = (restaurantId, name) => `${restaurantId}|${lower(name)}`;
+    const idByName = new Map(sameRestaurantFoods.map((f) => [nameKey(f.restaurantId, f.name), f.id]));
+
+    // A category private to one restaurant cannot hold another's dish.
+    const belongsElsewhere = (category, restaurantId) => Boolean(category.restaurantId && category.restaurantId !== restaurantId);
+
+    const now = new Date();
+    for (const { row, data } of records) {
+        const checked = validateFoodRow(data);
+        if (checked.errors) {
+            fail(report, row, data.name, checked.errors);
+            continue;
+        }
+        const v = checked.value;
+        const errors = [];
+        const restaurant = restaurantById.get(v.restaurantId);
+        if (!restaurant) errors.push('No restaurant has this Restaurant Id');
+
+        const category = categoryById.get(v.categoryId);
+        if (!category) errors.push('No category has this Category Id');
+        else if (category.parentId) errors.push('Category Id is a sub-category: put it in Sub Category Id and its parent in Category Id');
+        else if (belongsElsewhere(category, v.restaurantId)) errors.push('This category belongs to a different restaurant');
+
+        let sub = null;
+        if (v.subCategoryId) {
+            sub = categoryById.get(v.subCategoryId);
+            if (!sub) errors.push('No category has this Sub Category Id');
+            else if (sub.parentId !== v.categoryId) errors.push('Sub Category Id is not a sub-category of this Category Id');
+            else if (belongsElsewhere(sub, v.restaurantId)) errors.push('This sub-category belongs to a different restaurant');
+        }
+
+        const target = v.id ? targetById.get(v.id) : null;
+        if (v.id && !target) errors.push('No dish has this Id; leave Id blank to add it as new');
+        if (target && target.restaurantId !== v.restaurantId) errors.push('This dish belongs to a different restaurant');
+        const sameName = idByName.get(nameKey(v.restaurantId, v.name));
+        if (sameName && sameName !== v.id) errors.push(`The restaurant already has a dish named "${v.name}"`);
+        if (errors.length) {
+            fail(report, row, v.name, errors);
+            continue;
+        }
+
+        const body = {
+            name: v.name,
+            description: v.description,
+            categoryId: sub ? sub.id : category.id,
+            isAvailable: v.isAvailable,
+            preparationTime: v.preparationTime,
+            tags: v.tags,
+            nutrition: v.nutrition,
+            allergens: v.allergens,
+            ...(v.image ? { image: v.image } : {}),
+        };
+        // A dish with sizes is priced from them; its base price is not edited.
+        if (!target?._count?.variants) Object.assign(body, { price: v.price, otherPrice: v.otherPrice });
+
+        try {
+            // The same services as the admin food form: diet and category
+            // rules, image list, tags and nutrition tidying all come from there.
+            if (target) {
+                if (v.foodType) body.foodType = v.foodType;
+                const saved = await updateFood(target.id, body);
+                if (!saved) {
+                    fail(report, row, v.name, 'No dish has this Id; leave Id blank to add it as new');
+                    continue;
+                }
+                if (saved.approvalStatus !== 'approved') {
+                    // An admin's edit is the approval, as for imported add-ons.
+                    await prisma.foodItem.update({
+                        where: { id: saved.id },
+                        data: { approvalStatus: 'approved', approvedAt: now, rejectedAt: null, rejectionReason: '' },
+                    });
+                }
+                idByName.set(nameKey(v.restaurantId, v.name), saved.id);
+                report.updated += 1;
+            } else {
+                body.restaurantId = v.restaurantId;
+                body.foodType = v.foodType || (restaurant.pureVegRestaurant ? 'Veg' : 'Non-Veg');
+                if (!v.image) body.images = [];
+                const saved = await createFood(body);
+                idByName.set(nameKey(v.restaurantId, v.name), saved.id);
+                report.created += 1;
+            }
+        } catch (error) {
+            fail(report, row, v.name, error?.message || 'Could not be saved');
+        }
+    }
+
+    // What the admin food routes clear after a create or edit.
+    if (report.created || report.updated) await dropCaches(['restaurant_menu:*', 'public_foods:*']);
+    return report;
+}
+
+export async function exportFoods(query = {}) {
+    const where = {};
+    if (isId(query.restaurantId)) where.restaurantId = String(query.restaurantId);
+    if (isId(query.categoryId)) {
+        // A top-level category covers the dishes filed under its sub-categories.
+        const subs = await prisma.foodCategory.findMany({ where: { parentId: String(query.categoryId) }, select: { id: true } });
+        where.categoryId = { in: [String(query.categoryId), ...subs.map((s) => s.id)] };
+    }
+    if (['pending', 'approved', 'rejected'].includes(String(query.approvalStatus || ''))) {
+        where.approvalStatus = String(query.approvalStatus);
+    }
+    if (query.available === 'yes') where.isAvailable = true;
+    else if (query.available === 'no') where.isAvailable = false;
+    if (query.search && String(query.search).trim()) {
+        const contains = { contains: String(query.search).trim(), mode: 'insensitive' };
+        where.OR = [{ name: contains }, { categoryName: contains }];
+    }
+    const rows = await prisma.foodItem.findMany({
+        where,
+        orderBy: [{ restaurantId: 'asc' }, { createdAt: 'asc' }],
+        include: {
+            restaurant: { select: { restaurantName: true } },
+            category: { select: { name: true, parentId: true, parent: { select: { name: true } } } },
+            variants: { orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }], select: { name: true, price: true } },
+        },
+        take: 20000,
+    });
+    return writeSheet({ format: formatOf(query.format), name: 'Foods', headers: FOOD_EXPORT_COLUMNS, rows: rows.map(foodExportRow) });
 }
 
 // ─── restaurants ─────────────────────────────────────────────────────────────
