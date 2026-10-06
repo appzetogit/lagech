@@ -3,6 +3,7 @@ import { prisma } from '../../../config/prisma.js';
 import { finalizeOrderPayment } from '../../../modules/food/orders/services/order.service.js';
 import { config } from '../../../config/env.js';
 import { logger } from '../../../utils/logger.js';
+import { getThirdPartySettingsSync } from '../../thirdParty/thirdParty.runtime.js';
 
 /**
  * Razorpay webhook handler.
@@ -19,23 +20,28 @@ import { logger } from '../../../utils/logger.js';
  */
 export const handleRazorpayWebhook = async (req, res) => {
     const signature = req.headers['x-razorpay-signature'];
-    const secret = config.razorpayWebhookSecret;
+    // The admin's saved webhook secret (3rd Party > Payment Setup) and the
+    // server's: either proves the call came from Razorpay, and accepting both
+    // keeps webhooks working while the dashboard and this server are switched over.
+    const secrets = [...new Set([
+        getThirdPartySettingsSync('payment').webhookSecret,
+        config.razorpayWebhookSecret,
+    ].filter(Boolean))];
 
     // 1. Verify the signature against the raw body buffer.
-    if (!signature || !secret || !req.rawBody) {
+    if (!signature || !secrets.length || !req.rawBody) {
         logger.warn('Razorpay Webhook: Missing signature or rawBody buffer.');
         return res.status(400).send('Invalid signature');
     }
 
-    const expected = crypto.createHmac('sha256', secret).update(req.rawBody).digest('hex');
-
     // timingSafeEqual, not !==: a plain string compare returns as soon as it
     // finds a differing byte, which leaks how much of a forged signature was
     // right. Length is checked first because timingSafeEqual throws on a mismatch.
-    const expectedBuf = Buffer.from(expected, 'utf8');
     const actualBuf = Buffer.from(String(signature), 'utf8');
-    const signatureValid =
-        expectedBuf.length === actualBuf.length && crypto.timingSafeEqual(expectedBuf, actualBuf);
+    const signatureValid = secrets.some((secret) => {
+        const expectedBuf = Buffer.from(crypto.createHmac('sha256', secret).update(req.rawBody).digest('hex'), 'utf8');
+        return expectedBuf.length === actualBuf.length && crypto.timingSafeEqual(expectedBuf, actualBuf);
+    });
 
     if (!signatureValid) {
         logger.warn('Razorpay Webhook: Signature verification failed.');

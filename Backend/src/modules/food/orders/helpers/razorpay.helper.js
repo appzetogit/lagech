@@ -10,24 +10,49 @@ try {
 
 import { config } from '../../../../config/env.js';
 import { logger } from '../../../../utils/logger.js';
+import { getThirdPartySettingsSync } from '../../../../core/thirdParty/thirdParty.runtime.js';
 
-const KEY_ID = config.razorpayKeyId || process.env.RAZORPAY_KEY_ID || '';
-const KEY_SECRET = config.razorpayKeySecret || process.env.RAZORPAY_KEY_SECRET || '';
+/**
+ * The keys in use: the pair an admin saved under 3rd Party > Payment Setup,
+ * otherwise the server's RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET. The catalog
+ * only lets the id and secret be saved together, so the pair never mixes.
+ */
+const serverKeyId = () => config.razorpayKeyId || process.env.RAZORPAY_KEY_ID || '';
+const serverKeySecret = () => config.razorpayKeySecret || process.env.RAZORPAY_KEY_SECRET || '';
+
+export function getRazorpaySettings() {
+    const saved = getThirdPartySettingsSync('payment');
+    return {
+        keyId: saved.keyId || serverKeyId(),
+        keySecret: saved.keySecret || serverKeySecret(),
+        // Off stops new payments only; verification and refunds keep working.
+        enabled: saved.enabled !== false,
+    };
+}
 
 export function isRazorpayConfigured() {
-    return Boolean(KEY_ID && KEY_SECRET && Razorpay);
+    const { keyId, keySecret } = getRazorpaySettings();
+    return Boolean(keyId && keySecret && Razorpay);
 }
 
 export function getRazorpayKeyId() {
-    return KEY_ID;
+    return getRazorpaySettings().keyId;
 }
 
 export function getRazorpayInstance() {
     if (!isRazorpayConfigured()) return null;
-    return new Razorpay({ key_id: KEY_ID, key_secret: KEY_SECRET });
+    const { keyId, keySecret } = getRazorpaySettings();
+    return new Razorpay({ key_id: keyId, key_secret: keySecret });
 }
 
+const assertNewPaymentsAllowed = () => {
+    if (!getRazorpaySettings().enabled) return Promise.reject(new Error('Online payments are switched off'));
+    return null;
+};
+
 export function createRazorpayOrder(amountPaise, currency = 'INR', receipt = '') {
+    const blocked = assertNewPaymentsAllowed();
+    if (blocked) return blocked;
     const instance = getRazorpayInstance();
     if (!instance) return Promise.reject(new Error('Razorpay not configured'));
     return instance.orders.create({
@@ -38,6 +63,8 @@ export function createRazorpayOrder(amountPaise, currency = 'INR', receipt = '')
 }
 
 export function createPaymentLink({ amountPaise, currency = 'INR', description, orderId, customerName, customerEmail, customerPhone }) {
+    const blocked = assertNewPaymentsAllowed();
+    if (blocked) return blocked;
     const instance = getRazorpayInstance();
     if (!instance) return Promise.reject(new Error('Razorpay not configured'));
     return instance.paymentLink.create({
@@ -52,11 +79,21 @@ export function createPaymentLink({ amountPaise, currency = 'INR', description, 
     });
 }
 
+/**
+ * Checks the signature against the secret in use and, when an admin has saved
+ * a different one, against the server's secret too: a payment started just
+ * before the keys were changed was signed with the old secret and must still
+ * verify. Both secrets are ours, so accepting either proves the same thing.
+ */
 export function verifyPaymentSignature(orderId, paymentId, signature) {
-    if (!KEY_SECRET) return false;
+    const secrets = [...new Set([getRazorpaySettings().keySecret, serverKeySecret()].filter(Boolean))];
+    if (!secrets.length || typeof signature !== 'string' || !signature) return false;
     const body = `${orderId}|${paymentId}`;
-    const expected = crypto.createHmac('sha256', KEY_SECRET).update(body).digest('hex');
-    return expected === signature;
+    return secrets.some((secret) => {
+        const expected = Buffer.from(crypto.createHmac('sha256', secret).update(body).digest('hex'), 'utf8');
+        const actual = Buffer.from(signature, 'utf8');
+        return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+    });
 }
 
 /**

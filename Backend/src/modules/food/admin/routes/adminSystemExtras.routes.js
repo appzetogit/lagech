@@ -1,5 +1,6 @@
 import express from 'express';
 import * as c from '../controllers/adminSystemExtras.controller.js';
+import thirdPartyRoutes from './adminThirdParty.routes.js';
 
 /**
  * Admin routes for withdrawal methods, restaurant payments, the money
@@ -38,6 +39,8 @@ router.post('/email-templates/:key/preview', c.previewEmailTemplate);
 
 // Settings areas: page_meta, app_settings, login_setup, notification_channels,
 // landing_page, website, push_messages, offline_payment, analytics_scripts.
+// 3rd Party credentials (super admin only, secrets masked) -- adminThirdParty.routes.js.
+router.use('/system-settings/third-party', thirdPartyRoutes);
 router.get('/system-settings/:area', c.getSystemSettings);
 router.put('/system-settings/:area', c.saveSystemSettings);
 

@@ -17,6 +17,7 @@ import { logger } from './src/utils/logger.js';
 import { mountDeployWebhook } from './src/middleware/deployWebhook.js';
 import { initializeFirebaseRealtime } from './src/config/firebase.js';
 import { ensureUploadStorageReady } from './src/services/storage.service.js';
+import { warmThirdPartySettings } from './src/core/thirdParty/thirdParty.runtime.js';
 
 const SHUTDOWN_TIMEOUT_MS = 10000;
 let server = null;
@@ -107,6 +108,8 @@ const startServer = async () => {
         logger.info(`Upload storage ready at ${path.resolve(config.uploadStorageRoot)}`);
 
         await connectDB();
+        // Saved 3rd Party keys (payments, SMS, mail) in place before the first request.
+        await warmThirdPartySettings();
 
         const httpServer = http.createServer(app);
 

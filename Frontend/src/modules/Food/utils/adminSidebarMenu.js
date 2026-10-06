@@ -428,6 +428,7 @@ export const adminSidebarMenu = [
         label: "3rd Party & Configurations",
         icon: "Settings",
         subItems: [
+          { label: "3rd Party", path: "/admin/food/3rd-party-configurations/third-party" },
           { label: "Firebase Notification", path: "/admin/food/3rd-party-configurations/firebase" },
           { label: "Offline Payment Setup", path: "/admin/food/3rd-party-configurations/offline-payment" },
           { label: "Analytics Script", path: "/admin/food/3rd-party-configurations/analytics" },
