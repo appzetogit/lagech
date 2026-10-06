@@ -202,6 +202,8 @@ const cleanRefund = (value) => {
     const input = obj(value);
     return {
         refundRequestEnabled: bool(input.refundRequestEnabled, true),
+        /** Hours after delivery a customer may still ask for a refund; 0 = no limit. */
+        requestWindowHours: num(input.requestWindowHours, { max: 720, fallback: 24, integer: true, label: 'Refund request window' }),
         reasons: cleanReasons(input.reasons, 'refund reasons'),
     };
 };

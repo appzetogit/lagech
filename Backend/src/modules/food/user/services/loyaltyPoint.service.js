@@ -182,6 +182,61 @@ export const convertLoyaltyPoints = async (userId, body = {}) => {
 };
 
 /**
+ * Take back the points an order earned, when the order is refunded.
+ *
+ * Idempotent per order (`loyalty_reverse:<orderId>` is unique); never takes the
+ * balance below zero -- points already converted to wallet money stay spent, and
+ * only what is left is deducted. An order that earned nothing changes nothing.
+ * Never throws: a points problem must not undo a refund that already happened.
+ */
+export const reverseOrderLoyaltyPoints = async (orderId) => {
+    try {
+        if (!isId(orderId)) return { reversed: false, reason: 'invalid_order' };
+        const id = String(orderId);
+        const earned = await prisma.foodLoyaltyPointTransaction.findUnique({
+            where: { idempotencyKey: `loyalty_earn:${id}` },
+        });
+        if (!earned || earned.points <= 0) return { reversed: false, reason: 'nothing_earned' };
+
+        const idempotencyKey = `loyalty_reverse:${id}`;
+        const row = await prisma.$transaction(async (tx) => {
+            const already = await tx.foodLoyaltyPointTransaction.findUnique({ where: { idempotencyKey }, select: { id: true } });
+            if (already) return null;
+            await ensureAccount(tx, earned.userId);
+            // Lock the balance row so a conversion racing this sees the result.
+            const [account] = await tx.$queryRaw`
+                SELECT "points" FROM "food_loyalty_point_accounts" WHERE "userId" = ${earned.userId} FOR UPDATE
+            `;
+            const deduct = Math.min(earned.points, Math.max(0, Number(account?.points) || 0));
+            const after = await tx.foodLoyaltyPointAccount.update({
+                where: { userId: earned.userId },
+                data: { points: { decrement: deduct } },
+            });
+            return tx.foodLoyaltyPointTransaction.create({
+                data: {
+                    userId: earned.userId,
+                    type: 'debit',
+                    points: deduct,
+                    balanceAfter: after.points,
+                    source: 'refund',
+                    orderId: id,
+                    note: deduct < earned.points
+                        ? `Order refunded: ${earned.points} points earned, ${deduct} left to take back`
+                        : `Order refunded: ${deduct} points taken back`,
+                    idempotencyKey,
+                },
+            });
+        });
+        if (!row) return { reversed: false, reason: 'already_reversed' };
+        return { reversed: true, points: row.points };
+    } catch (e) {
+        if (e?.code === 'P2002') return { reversed: false, reason: 'already_reversed' };
+        logger.warn(`reverseOrderLoyaltyPoints failed: ${e?.message || e}`);
+        return { reversed: false, reason: 'error' };
+    }
+};
+
+/**
  * Credit the points a delivered order earns. Called after delivery; idempotent
  * by order (`loyalty_earn:<orderId>` is unique) and never throws -- a points
  * failure must not affect the delivery.

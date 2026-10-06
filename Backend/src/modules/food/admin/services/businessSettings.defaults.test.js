@@ -31,7 +31,7 @@ test('every business area cleans {} to the old panel values', () => {
     assert.equal(clean('business_vendor').restaurantCanCancelOrder, false);
     assert.equal(clean('business_vendor').dishApprovalRequired, true, 'kept on: dishes have always needed approval here');
     assert.deepEqual(clean('business_disbursement').rider, { enabled: true, runTime: '01:01', minAmount: 1, waitingDays: 1 });
-    assert.deepEqual(clean('business_refund'), { refundRequestEnabled: true, reasons: [] });
+    assert.deepEqual(clean('business_refund'), { refundRequestEnabled: true, requestWindowHours: 24, reasons: [] });
 });
 
 test('numbers are range-checked, blanks fall back', () => {
