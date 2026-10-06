@@ -622,3 +622,12 @@ A rider may hold up to the admin's limit (Business Settings → Deliveryman → 
 - Show new offers only while `canAcceptMore` is true (the server refuses an accept beyond the limit anyway, with a message to show).
 - Older apps that read only `activeOrder` keep working.
 
+## Cancelling an accepted delivery — `PATCH /v1/food/delivery/orders/:orderId/reject`
+
+Body (optional): `{ "reason": "Bike broke down" }` (max 300 characters).
+
+- Declining an **offer** (not yet accepted) always works, as before.
+- Cancelling an order the rider has **accepted** works only while the admin allows it (Business Settings → Deliveryman → "Deliveryman can cancel order"; published to the app as `business.deliveryman.canCancelOrder`, off by default). When off the server answers `400` "Cancelling an accepted order is turned off. Please contact support if you cannot deliver it." Show the Cancel button only when the flag is true.
+- Never after pickup (`400`, use the emergency reassignment request instead).
+- On success the order goes back to dispatch for another rider; the reason is recorded in the order's history.
+
