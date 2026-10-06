@@ -149,6 +149,7 @@ export async function getRestaurantReviews(query = {}) {
             select: {
                 id: true, orderId: true, order_id: true,
                 restaurantRating: true, restaurantRatingComment: true, createdAt: true,
+                restaurantReply: true, restaurantRepliedAt: true,
                 user: { select: { id: true, name: true, email: true, phone: true } },
                 restaurant: { select: { id: true, restaurantName: true } },
             },
@@ -165,6 +166,8 @@ export async function getRestaurantReviews(query = {}) {
         customerId: doc.user?.id || 'N/A',
         review: doc.restaurantRatingComment || '',
         rating: doc.restaurantRating || 0,
+        storeReply: doc.restaurantReply || '',
+        storeRepliedAt: doc.restaurantRepliedAt || null,
         submittedAt: doc.createdAt,
     }));
 

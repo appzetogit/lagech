@@ -105,6 +105,8 @@ export function toOrder(row) {
             newCustomerDiscount: money(row.newCustomerDiscount),
             /** Tip for the rider; part of `total` and of riderEarning. */
             riderTip: money(row.riderTip),
+            /** Part of `discount`: what food campaign dishes took off (platform-funded). */
+            campaignDiscount: money(row.campaignDiscount),
             total: money(row.total),
             currency: row.currency,
             distanceKm: num(row.distanceKm),
@@ -161,6 +163,10 @@ export function toOrder(row) {
 
         ratings: {
             restaurant: entityRating(row.restaurantRating, row.restaurantRatingComment, row.restaurantRatedAt),
+            /** The restaurant's reply to that review, or null. */
+            restaurantReply: row.restaurantReply
+                ? { text: row.restaurantReply, repliedAt: row.restaurantRepliedAt ?? null }
+                : null,
             deliveryPartner: entityRating(row.partnerRating, row.partnerRatingComment, row.partnerRatedAt),
             customer: entityRating(row.customerRating, row.customerRatingComment, row.customerRatedAt),
             items: (row.itemRatings || []).map(({ itemId, name, rating, comment, ratedAt }) => ({
@@ -309,7 +315,7 @@ export function fromOrder(input = {}) {
         for (const key of ['subtotal', 'tax', 'packagingFee', 'deliveryFee', 'deliveryFeeGst',
                            'platformFee', 'quickDeliveryFee', 'deliveryMode', 'restaurantCommission',
                            'discount', 'couponCode', 'couponId', 'couponDeliveryWaiver', 'freeDeliveryWaiver',
-                           'newCustomerDiscount', 'total', 'currency', 'distanceKm',
+                           'newCustomerDiscount', 'campaignDiscount', 'total', 'currency', 'distanceKm',
                            'roadDistanceKm', 'roadDurationMins']) {
             set(key, pricing[key]);
         }

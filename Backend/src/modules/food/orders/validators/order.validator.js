@@ -13,6 +13,8 @@ const orderItemSchema = z.object({
     isVeg: z.boolean().optional().default(true),
     image: z.string().optional(),
     notes: z.string().optional(),
+    /** A food campaign dish: the campaign's id (priced from the campaign, never from `price`). */
+    campaignId: z.string().optional(),
     /**
      * Add-ons chosen for this line.
      *
@@ -75,6 +77,8 @@ const pricingSchema = z.object({
     discount: z.number().min(0).optional(),
     /** From /calculate, for a free-delivery coupon. */
     deliveryFeeWaived: z.number().min(0).optional(),
+    /** From /calculate: the part of `discount` food campaign dishes gave. */
+    campaignDiscount: z.number().min(0).optional(),
     total: z.number().min(0),
     currency: z.string().optional(),
     couponCode: z.string().nullable().optional()

@@ -9,7 +9,7 @@ import {
 import { fetchDrivingRoute } from '../utils/googleMaps.js';
 import { attachOutletTimingsToRestaurants } from '../../restaurant/services/outletTimings.service.js';
 import { getRestaurantAvailabilityStatus } from '../../restaurant/helpers/restaurantAvailability.helper.js';
-import { resolveOrderCartItems } from '../helpers/order-cart-items.helper.js';
+import { cartCampaignDiscount, resolveCartWithCampaigns } from '../../campaigns/campaignCart.js';
 import { applyFeeSwitches } from './feeSwitches.js';
 import { evaluateCoupon, requiresFirstOrder, USED_ORDER_WHERE } from './couponRules.js';
 import { freeDeliveryOverWaiver, newCustomerDiscount } from './businessRules.js';
@@ -465,7 +465,8 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
     await resolveDeliveryAddress(userId, dto),
   );
 
-  const resolvedItems = await resolveOrderCartItems(dto.restaurantId, dto.items);
+  // Menu lines and food campaign dishes (campaignCart.js), priced server-side.
+  const resolvedItems = await resolveCartWithCampaigns(dto.restaurantId, dto.items, at);
   const items = resolvedItems.map((item) => ({
     ...item,
     price: Number(item.price) || 0,
@@ -477,6 +478,10 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
       0,
     ),
   );
+  // Platform-funded; part of `discount`. Coupons and the other offers are
+  // worked out on what is left after it.
+  const campaignDiscount = cartCampaignDiscount(items);
+  const offerSubtotal = round2(subtotal - campaignDiscount);
 
   // Zone comes from the restaurant, matching how an order records its zone
   // (order.service.js falls back to restaurant.zoneId), so the quote a
@@ -537,7 +542,7 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
         userId,
         restaurantId: dto.restaurantId,
         zoneId: pricingZoneId,
-        subtotal,
+        subtotal: offerSubtotal,
         deliveryFee: originalDeliveryFee,
         deliveryFeeGst: originalDeliveryFeeGst,
         // A scheduled order is checked against the time it is for.
@@ -555,7 +560,7 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
   // new customer's first order. Both are the platform's cost, like the coupon
   // waiver above; neither stacks with a coupon doing the same thing.
   const freeDeliveryWaived = freeDeliveryOverWaiver(orderRules.freeDelivery, {
-    subtotal,
+    subtotal: offerSubtotal,
     deliveryFee: originalDeliveryFee,
     deliveryFeeGst: originalDeliveryFeeGst,
     couponWaived: deliveryFeeWaived,
@@ -568,15 +573,15 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
       prisma.foodUser.findUnique({ where: { id: String(userId) }, select: { createdAt: true } }),
     ]);
     firstOrderDiscount = newCustomerDiscount(ncRule, {
-      subtotal,
+      subtotal: offerSubtotal,
       priorOrders,
       accountCreatedAt: user?.createdAt,
       couponDiscount,
     });
   }
   // `discount` is everything taken off the items: the coupon's and the
-  // new-customer discount's (they never both apply).
-  const discount = round2(Math.min(subtotal, couponDiscount + firstOrderDiscount));
+  // new-customer discount's (they never both apply), and the campaigns'.
+  const discount = round2(Math.min(subtotal, campaignDiscount + couponDiscount + firstOrderDiscount));
 
   const feeWaived = deliveryFeeWaived > 0 || freeDeliveryWaived > 0;
   const deliveryFee = feeWaived ? 0 : originalDeliveryFee;
@@ -641,6 +646,8 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
     freeDeliveryOver: orderRules.freeDelivery.enabled ? orderRules.freeDelivery.minSubtotal : null,
     /** Part of `discount`: the first-order discount for new customers. */
     newCustomerDiscount: firstOrderDiscount,
+    /** Part of `discount`: what food campaign dishes took off (platform-funded). */
+    campaignDiscount,
     originalDeliveryFee,
     distanceKm: Number.isFinite(distanceKm) ? Number(distanceKm.toFixed(2)) : null,
     roadDistanceKm: Number.isFinite(distanceKm) ? Number(distanceKm.toFixed(2)) : null,
@@ -664,7 +671,8 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
       if (!resolved) return null;
 
       const previousPrice = Number(rawItem?.price);
-      const nextPrice = Number(resolved.price);
+      // A campaign dish is shown at its campaign price.
+      const nextPrice = Number(resolved.campaignPrice ?? resolved.price);
       if (!Number.isFinite(previousPrice) || previousPrice === nextPrice) return null;
 
       return {

@@ -73,7 +73,9 @@ const PARTIAL = Prisma.sql`(o."walletAmount" > 0 AND o."paymentMethod" <> 'walle
  */
 const MONEY = [
     ['totalItemAmount', Prisma.sql`o."subtotal"`, false],
-    ['couponDiscount', Prisma.sql`o."discount"`, false],
+    // A food campaign dish's discount is part of o."discount" but is not a coupon's.
+    ['couponDiscount', Prisma.sql`(o."discount" - o."campaignDiscount")`, false],
+    ['campaignDiscount', Prisma.sql`o."campaignDiscount"`, false],
     ['freeDeliveryDiscount', Prisma.sql`o."couponDeliveryWaiver"`, false],
     ['discountedAmount', Prisma.sql`(o."discount" + o."couponDeliveryWaiver")`, false],
     ['vatTax', Prisma.sql`o."tax"`, false],
@@ -335,7 +337,8 @@ export const ORDER_MONEY_COLUMNS = [
     { key: 'orderStatus', label: 'Order status' },
     { key: 'totalItemAmount', label: 'Total item amount' },
     { key: 'couponDiscount', label: 'Coupon discount' },
-    { key: 'freeDeliveryDiscount', label: 'Free delivery (coupon)' },
+    { key: 'campaignDiscount', label: 'Campaign discount (platform)' },
+    { key: 'freeDeliveryDiscount',label: 'Free delivery (coupon)' },
     { key: 'discountedAmount', label: 'Discounted amount' },
     { key: 'vatTax', label: 'Vat/tax' },
     { key: 'deliveryCharge', label: 'Delivery charge' },
