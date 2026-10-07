@@ -48,6 +48,7 @@ import {
     listWalletBonusesController
 } from '../controllers/customerRewards.controller.js';
 import refundIssueRoutes from './refundIssue.routes.js';
+import { getOrderInvoiceUserController } from '../../orders/controllers/order.controller.js';
 
 const router = express.Router();
 
@@ -81,6 +82,9 @@ router.get('/safety-emergency-reports', listMySafetyEmergencyReportsController);
 // Support tickets (Bearer USER)
 router.post('/support/ticket', createSupportTicketController);
 router.get('/support/my-tickets', listMySupportTicketsController);
+
+// Order invoice, customer copy (Bearer USER): JSON, or ?format=html (thermal; &size=a4).
+router.get('/orders/:orderId/invoice', getOrderInvoiceUserController);
 
 // Refund requests and order issue reports (Bearer USER)
 router.use(refundIssueRoutes);

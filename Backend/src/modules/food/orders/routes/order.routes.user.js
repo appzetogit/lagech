@@ -11,7 +11,8 @@ import {
     submitOrderRatingsController,
     getOrderDropOtpUserController,
     updateOrderInstructionsController,
-    getOrderRouteUserController
+    getOrderRouteUserController,
+    getOrderInvoiceUserController
 } from '../controllers/order.controller.js';
 
 const router = express.Router();
@@ -25,6 +26,8 @@ router.get('/:orderId/payments', getOrderPaymentsUserController);
 router.get('/:orderId/drop-otp', getOrderDropOtpUserController);
 // Live route from the rider's current position to their next stop, for the tracking map.
 router.get('/:orderId/route', getOrderRouteUserController);
+// Customer copy of the invoice; same handler as /v1/food/user/orders/:orderId/invoice.
+router.get('/:orderId/invoice', getOrderInvoiceUserController);
 router.get('/:orderId', getOrderByIdUserController);
 router.patch('/:orderId/cancel', cancelOrderController);
 router.patch('/:orderId/ratings', submitOrderRatingsController);

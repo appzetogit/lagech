@@ -1,6 +1,8 @@
+import { randomBytes } from 'node:crypto';
 import { sendResponse } from '../../../../utils/response.js';
 import * as orderService from '../services/order.service.js';
 import * as foodOrderPaymentService from '../services/foodOrderPayment.service.js';
+import * as orderInvoiceService from '../services/orderInvoice.service.js';
 import { emailOrderPlaced } from '../../../../core/notifications/emailEvents.js';
 import {
     validateCalculateOrderDto,
@@ -539,6 +541,54 @@ export async function handoverTakeawayRestaurantController(req, res, next) {
         const restaurantId = req.user?.userId;
         const order = await orderService.handoverTakeawayRestaurant(req.params.orderId, restaurantId, req.body?.code ?? req.body?.otp);
         return sendResponse(res, 200, 'Order handed over', { order });
+    } catch (err) {
+        next(err);
+    }
+}
+
+// ─── Invoice / bill (one shared builder for all three copies) ───────────────
+
+/**
+ * JSON by default; `?format=html` returns the printable page (80 mm thermal,
+ * `&size=a4` for A4, `&print=1` opens the print dialog on load).
+ */
+async function sendOrderInvoice(req, res, options) {
+    const invoice = await orderInvoiceService.getOrderInvoice(req.params.orderId, options);
+    const format = String(req.query.format || 'json').toLowerCase();
+    if (format === 'html') {
+        const size = String(req.query.size || 'thermal').toLowerCase() === 'a4' ? 'a4' : 'thermal';
+        const autoPrint = ['1', 'true', 'yes'].includes(String(req.query.print || '').toLowerCase());
+        const nonce = randomBytes(16).toString('base64');
+        res.setHeader('Content-Security-Policy', orderInvoiceService.invoiceCsp(nonce));
+        res.setHeader('Cache-Control', 'private, no-store');
+        res.type('html');
+        return res.status(200).send(orderInvoiceService.renderInvoiceHtml(invoice, { size, autoPrint, nonce }));
+    }
+    return sendResponse(res, 200, 'Invoice retrieved', { invoice });
+}
+
+/** GET /food/admin/orders/:orderId/invoice */
+export async function getOrderInvoiceAdminController(req, res, next) {
+    try {
+        return await sendOrderInvoice(req, res, { copy: 'admin' });
+    } catch (err) {
+        next(err);
+    }
+}
+
+/** GET /food/restaurant/orders/:orderId/invoice -- own orders; carries the restaurant's earning. */
+export async function getOrderInvoiceRestaurantController(req, res, next) {
+    try {
+        return await sendOrderInvoice(req, res, { copy: 'restaurant', restaurantId: req.user?.userId });
+    } catch (err) {
+        next(err);
+    }
+}
+
+/** GET /food/user/orders/:orderId/invoice (also /food/orders/:orderId/invoice) -- own orders. */
+export async function getOrderInvoiceUserController(req, res, next) {
+    try {
+        return await sendOrderInvoice(req, res, { copy: 'customer', userId: req.user?.userId });
     } catch (err) {
         next(err);
     }

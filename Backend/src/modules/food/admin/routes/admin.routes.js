@@ -566,6 +566,8 @@ router.get(
 // Before /orders/:orderId, which would otherwise take "dispatch-board" as an order id.
 router.get('/orders/dispatch-board', adminController.getDispatchBoard);
 router.get('/orders/:orderId', orderController.getOrderByIdAdminController);
+// Printable invoice: JSON, or ?format=html (thermal 80 mm; &size=a4).
+router.get('/orders/:orderId/invoice', orderController.getOrderInvoiceAdminController);
 router.patch('/orders/:orderId/accept', orderController.acceptOrderAdminController);
 router.patch('/orders/:orderId/reject', orderController.rejectOrderAdminController);
 // Assigning a rider by hand. The controller existed but no route reached it,

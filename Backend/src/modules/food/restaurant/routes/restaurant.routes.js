@@ -312,6 +312,8 @@ router.delete('/addons/:id', authMiddleware, requireRestaurant, deleteAddonContr
 // Orders (restaurant dashboard)
 router.get('/orders', authMiddleware, requireRestaurant, orderController.listOrdersRestaurantController);
 router.get('/orders/:orderId', authMiddleware, requireRestaurant, orderController.getOrderByIdRestaurantController);
+// The bill for the restaurant's own order (restaurant copy, with its earning): JSON or ?format=html.
+router.get('/orders/:orderId/invoice', authMiddleware, requireRestaurant, orderController.getOrderInvoiceRestaurantController);
 router.patch('/orders/:orderId/status', authMiddleware, requireRestaurant, orderController.updateOrderStatusRestaurantController);
 // A takeaway handed to the customer against their pickup code.
 router.post('/orders/:orderId/handover', authMiddleware, requireRestaurant, orderController.handoverTakeawayRestaurantController);
