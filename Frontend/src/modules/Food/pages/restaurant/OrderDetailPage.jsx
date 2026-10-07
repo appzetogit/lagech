@@ -25,6 +25,7 @@ import { toast } from "sonner"
 import useRestaurantBackNavigation from "@food/hooks/useRestaurantBackNavigation"
 import { getTimelineStatusLabel, getTimelineRoleLabel } from "@food/utils/orderStatus"
 import { getRestaurantCookingNote } from "@food/utils/orderCookingNote"
+import { printOrderInvoice } from "@food/utils/printInvoice"
 
 const formatMoney = (value) => `₹${Number(value || 0).toFixed(2)}`
 const toNumber = (value) => {
@@ -78,6 +79,22 @@ export default function OrderDetailPage({
       return
     }
     goBack()
+  }
+
+  const [invoiceSize, setInvoiceSize] = useState("thermal")
+  const [printing, setPrinting] = useState(false)
+
+  /** The bill (restaurant copy, with this restaurant's earning), thermal 80 mm or A4. */
+  const handlePrintInvoice = async () => {
+    if (!id || printing) return
+    setPrinting(true)
+    try {
+      await printOrderInvoice((params) => restaurantAPI.getOrderInvoice(order?._id || order?.id || id, params), { size: invoiceSize })
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Could not load the invoice")
+    } finally {
+      setPrinting(false)
+    }
   }
 
   const handleCopyId = (e) => {
@@ -170,6 +187,26 @@ export default function OrderDetailPage({
             <h1 className="text-lg font-black text-gray-900 leading-none">Order Details</h1>
             <p className="text-[10px] font-bold text-gray-400 mt-1 tracking-wider uppercase">{createdAt}</p>
           </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <select
+            value={invoiceSize}
+            onChange={(e) => setInvoiceSize(e.target.value)}
+            className="h-9 rounded-xl border border-gray-200 bg-white px-2 text-xs font-bold text-gray-700"
+            aria-label="Bill paper size"
+          >
+            <option value="thermal">80 mm</option>
+            <option value="a4">A4</option>
+          </select>
+          <button
+            type="button"
+            onClick={handlePrintInvoice}
+            disabled={printing}
+            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-gray-900 px-3 text-xs font-black text-white disabled:opacity-60"
+          >
+            {printing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+            Print invoice
+          </button>
         </div>
       </header>
 

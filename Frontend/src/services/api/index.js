@@ -901,6 +901,13 @@ export const adminAPI = {
     apiClient.get(`/food/admin/orders/${String(orderId)}`, {
       contextModule: "admin",
     }),
+  /** Invoice data (JSON) or, with { format: "html", size: "thermal" | "a4" }, the printable page as text. */
+  getOrderInvoice: (orderId, params = {}) =>
+    apiClient.get(`/food/admin/orders/${encodeURIComponent(String(orderId))}/invoice`, {
+      contextModule: "admin",
+      params,
+      ...(params.format === "html" ? { responseType: "text" } : {}),
+    }),
   acceptOrder: (orderId) =>
     apiClient.patch(`/food/admin/orders/${String(orderId)}/accept`, {}, {
       contextModule: "admin",
@@ -1666,6 +1673,13 @@ export const restaurantAPI = {
   getOrderById: (orderId) =>
     apiClient.get(`/food/restaurant/orders/${String(orderId)}`, {
       contextModule: "restaurant",
+    }),
+  /** The bill (restaurant copy, with its earning): JSON, or { format: "html" } for the printable page. */
+  getOrderInvoice: (orderId, params = {}) =>
+    apiClient.get(`/food/restaurant/orders/${encodeURIComponent(String(orderId))}/invoice`, {
+      contextModule: "restaurant",
+      params,
+      ...(params.format === "html" ? { responseType: "text" } : {}),
     }),
   updateMenu: (body) =>
     apiClient.patch("/food/restaurant/menu", body ?? {}, {
@@ -2875,6 +2889,13 @@ export const uploadAPI = {
 };
 /** Order API (user app – Bearer USER token). Minimal calls: single create/verify, list/details cached by caller. */
 export const orderAPI = {
+  /** Customer copy of the invoice: JSON, or { format: "html" } for the printable page. */
+  getOrderInvoice: (orderId, params = {}) =>
+    apiClient.get(`/food/user/orders/${encodeURIComponent(String(orderId))}/invoice`, {
+      contextModule: "user",
+      params,
+      ...(params.format === "html" ? { responseType: "text" } : {}),
+    }),
   calculateOrder: (payload) =>
     apiClient.post("/food/orders/calculate", payload ?? {}, {
       contextModule: "user",

@@ -351,6 +351,25 @@ Only orders that are actually payable are returned: payment method `cash`/`walle
 
 ### `GET /food/restaurant/orders/:orderId` → `{ order }`
 
+### `GET /food/restaurant/orders/:orderId/invoice` -- the bill ("Print bill")
+The restaurant copy of the order invoice, for the restaurant's **own** orders only (anyone else's is 404).
+Same builder and numbers as the customer and admin copies; laid out like the old panel's thermal receipt:
+restaurant name / address / phone, "Cash receipt", Order id, date ("14/Sep/2026 01:27:pm"), Contact name /
+Phone / Address ("Takeaway" for takeaway), Desc / Qty / Price (size and add-ons under the item), Subtotal,
+Discount, Coupon discount, [Campaign discount, New customer discount, GST, Extra packaging -- when not zero],
+Delivery charge, [GST on delivery, Platform fee, Quick delivery], Delivery man tips, Additional charge,
+**Total**, "Payment: <method> · <Paid/Unpaid>", then "Your earning": Item total, [Extra packaging],
+Commission, [Discount you fund], **You'll receive**. Footer "THANK YOU" + business line.
+
+- Default: JSON `{ invoice }`. `invoice.lines` are signed amounts whose `inTotal` lines sum to `invoice.total`;
+  `display` replaces the amount text ("Free delivery", "Takeaway"); `info` lines (Items price, Addon cost)
+  break the Subtotal down. `invoice.restaurantEarning = { lines: [{ key, label, amount, sign }], netPayout, isSettled }`.
+- `?format=html` → printable HTML page, 80 mm thermal by default (`@page size: 80mm auto`), `&size=a4` for A4,
+  `&print=1` to open the print dialog on load. Self-contained (inline CSS; only the business logo is external).
+- **App "Print bill":** open `{HOST}/api/v1/food/restaurant/orders/<id>/invoice?format=html` in a WebView with
+  `Authorization: Bearer <accessToken>` and print it (Android print service / a Bluetooth thermal printer
+  driver that accepts HTML), or draw the receipt from the JSON for ESC/POS printers.
+
 ### `PATCH /food/restaurant/orders/:orderId/status`
 ```json
 { "orderStatus": "preparing", "note": "optional" }

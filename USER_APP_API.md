@@ -208,6 +208,69 @@ published record — client prices are ignored.
 | PATCH | `/v1/food/orders/:orderId/cancel` | Cancel |
 | PATCH | `/v1/food/orders/:orderId/ratings` | **Ratings — see §7** |
 | PATCH | `/v1/food/orders/:orderId/instructions` | Update delivery instructions |
+| GET | `/v1/food/user/orders/:orderId/invoice` | **Invoice / bill -- see "Invoice" below** (also at `/v1/food/orders/:orderId/invoice`) |
+
+### Invoice ("Download invoice")
+
+`GET /v1/food/user/orders/:orderId/invoice` (Bearer USER; `:orderId` is the order id or the display id `FOD-...`).
+
+- Default: JSON `{ "invoice": { ... } }` to draw the bill natively.
+- `?format=html`: a self-contained printable page (the old panel's receipt: restaurant header, "Cash receipt",
+  Desc / Qty / Price, bill lines, Total, Payment). `&size=a4` for an A4 page (default is an 80 mm thermal
+  receipt); `&print=1` opens the print dialog when the page loads. No external assets except the business logo.
+- **Flutter "Download invoice":** load
+  `{HOST}/api/v1/food/user/orders/<id>/invoice?format=html&size=a4` in an in-app WebView with the header
+  `Authorization: Bearer <accessToken>` (the URL itself carries no token -- a plain browser link would get 401),
+  then print / save as PDF from the WebView (e.g. the `printing` package's `Printing.layoutPdf` with
+  `convertHtml`, or the platform print of the WebView). Alternatively fetch the HTML with the header and hand
+  the string to the printing package.
+
+`invoice` (identical numbers on the customer, restaurant and admin copies -- one builder):
+
+```json
+{
+  "copy": "customer",
+  "title": "Cash receipt",
+  "orderId": "FOD-1234567890",
+  "id": "<order id>",
+  "date": "14/Sep/2026 01:27:pm",
+  "orderStatus": "delivered", "isCancelled": false, "orderType": "delivery",
+  "restaurant": { "name": "...", "address": "...", "phone": "...", "gstNumber": "", "fssaiNumber": "" },
+  "customer": { "name": "...", "phone": "...", "address": "1 Test Street, Indore, MP, 452001" },
+  "items": [
+    { "sl": 1, "name": "Pizza", "variantName": "Large", "addons": [{ "name": "Cheese", "price": 30 }],
+      "notes": "", "quantity": 2, "unitPrice": 330, "basePrice": 300, "addonPrice": 30, "lineTotal": 660, "campaign": false }
+  ],
+  "lines": [
+    { "key": "itemsPrice", "label": "Items price", "amount": 600, "sign": "+", "inTotal": false, "info": true },
+    { "key": "addonCost", "label": "Addon cost", "amount": 60, "sign": "+", "inTotal": false, "info": true },
+    { "key": "subtotal", "label": "Subtotal", "amount": 660, "sign": "+", "inTotal": true },
+    { "key": "discount", "label": "Discount", "amount": 0, "sign": "-", "inTotal": true },
+    { "key": "couponDiscount", "label": "Coupon discount (SAVE10)", "amount": -66, "sign": "-", "inTotal": true },
+    { "key": "tax", "label": "GST", "amount": 30, "sign": "+", "inTotal": true },
+    { "key": "deliveryFee", "label": "Delivery charge", "amount": 0, "sign": "+", "inTotal": true, "display": "Free delivery" },
+    { "key": "riderTip", "label": "Delivery man tips", "amount": 0, "sign": "+", "inTotal": true },
+    { "key": "additionalCharge", "label": "Service charge", "amount": 7, "sign": "+", "inTotal": true }
+  ],
+  "total": 631,
+  "payment": { "method": "cash", "methodLabel": "Cash on delivery", "status": "cod_pending", "statusLabel": "Unpaid",
+               "isPartial": false, "walletAmount": 0, "amountDue": null, "split": [], "refund": null },
+  "footer": { "thanks": "THANK YOU", "text": "(c) LAGECH. (c) 2026 Food Delivery. All rights reserved." },
+  "business": { "name": "Lagech", "logoUrl": "...", "address": "...", "phone": "...", "email": "..." },
+  "restaurantEarning": null
+}
+```
+
+- Print `lines` in order, then **Total**. `amount` is signed; the lines with `inTotal: true` always add up to
+  `total`. `display`, when present, replaces the amount ("Free delivery", "Takeaway"). `Items price` and
+  `Addon cost` (`info: true`) break the Subtotal down and are not added again.
+- Always present: Subtotal, Discount, Coupon discount, Delivery charge, Delivery man tips, Additional charge
+  (labelled with the admin's name for it). Only when not zero: Campaign discount, New customer discount, GST,
+  Extra packaging, GST on delivery, Platform fee, Quick delivery.
+- `payment.split` is the partial-payment breakdown ("Paid by wallet", "Paid by cash on delivery");
+  `methodLabel` then reads "Wallet ₹ 100 + Cash on delivery ₹ 531". `statusLabel`: Paid / Unpaid /
+  Partially paid / Refunded / Failed.
+- Someone else's order, or one still waiting for its online payment, is **404**.
 
 ### Placing an order
 
