@@ -11,7 +11,7 @@ import { deleteRestaurant } from '../../admin/services/adminRestaurantLifecycle.
 
 /**
  * What the restaurant partner app relies on, end to end over HTTP:
- *  - a logo change goes live at once and leaves an approved restaurant approved;
+ *  - a logo change is saved and sends the restaurant back to pending for review;
  *  - DELETE /v1/food/restaurant/me deletes the account, 400 with history, and
  *    keeps its support tickets and feedback for the admin;
  *  - the admin's reply to a ticket reaches the restaurant as adminResponse +
@@ -74,7 +74,7 @@ test.after(async () => {
 
 // ─── 1. Logo ────────────────────────────────────────────────────────────────
 
-test('an approved restaurant changes its logo: live at once, still approved, still taking orders', async () => {
+test('an approved restaurant changes its logo: saved, and the restaurant goes back to pending for review', async () => {
     const r = await makeRestaurant();
     const token = tokenOf(r);
 
@@ -83,39 +83,26 @@ test('an approved restaurant changes its logo: live at once, still approved, sti
     assert.ok(up.body.data.profileImage.url);
 
     const row = await prisma.foodRestaurant.findUnique({ where: { id: r.id } });
-    assert.equal(row.status, 'approved');
-    assert.equal(row.approvedAt.toISOString(), '2026-01-01T00:00:00.000Z', 'the approval is not cleared');
-    assert.equal(row.isAcceptingOrders, true);
-    assert.ok(row.profileImage, 'the logo is saved on the restaurant, not parked for review');
+    assert.equal(row.status, 'pending', 'a new logo goes back to admin review');
+    assert.equal(row.approvedAt, null);
+    assert.ok(row.profileImage, 'the new logo is saved on the restaurant');
 
     const current = await http.get(`${BASE}/current`, { token });
     assert.equal(current.status, 200);
-    assert.equal(current.body.data.restaurant.status, 'approved');
+    assert.equal(current.body.data.restaurant.status, 'pending');
     const fileName = row.profileImage.split('/').pop();
     assert.ok(
         String(current.body.data.restaurant.profileImage?.url || '').includes(fileName),
         'GET /current returns the new logo straight away',
     );
-
-    // Customers see it too: the public detail serves the new logo.
-    const pub = await http.get(`${BASE}/restaurants/${r.id}`);
-    assert.equal(pub.status, 200);
-    assert.ok(JSON.stringify(pub.body).includes(fileName));
 });
 
-test('setting the logo through PATCH /profile does not send the restaurant back to review either', async () => {
+test('setting the logo through PATCH /profile also sends the restaurant back to review', async () => {
     const r = await makeRestaurant();
     const updated = await updateRestaurantProfile(r.id, { profileImage: 'https://cdn.example.com/new-logo.png' });
-    assert.equal(updated.status, 'approved');
-
+    assert.equal(updated.status, 'pending');
     const row = await prisma.foodRestaurant.findUnique({ where: { id: r.id } });
-    assert.equal(row.status, 'approved');
-    assert.ok(row.approvedAt);
     assert.ok(String(row.profileImage).includes('new-logo.png'));
-
-    // A KYC field still does.
-    const renamed = await updateRestaurantProfile(r.id, { panNumber: 'ABCDE1234F' });
-    assert.equal(renamed.status, 'pending');
 });
 
 // ─── 2 & 3. Delete account ────────────────────────────────────────────────────

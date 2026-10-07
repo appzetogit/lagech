@@ -159,10 +159,10 @@ it applies at once and never changes `status` or `isAcceptingOrders`.
 → `data` = upload result with the stored URL(s).
 
 **Logo — `POST /food/restaurant/profile/profile-image`** (multipart field `file`) →
-`data: { "profileImage": { "url": "…" } }`. Saved directly, no admin approval: an approved restaurant stays
-`approved` and `isAcceptingOrders` is unchanged. `GET /food/restaurant/current` returns the new
-`profileImage.url` immediately, and the customer listing/detail caches are cleared on upload.
-(`cover-images` / `menu-images` still go back to review.)
+`data: { "profileImage": { "url": "…" } }`. The new logo is saved and the restaurant goes back to
+**`pending`** for admin review (like `cover-images` / `menu-images`); the admins are notified. Show
+"Your profile is under review" after the upload. `GET /food/restaurant/current` returns the new
+`profileImage.url` and `status: "pending"` immediately.
 
 ---
 

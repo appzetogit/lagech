@@ -1569,8 +1569,8 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
         'accountType',
         'upiId',
         'upiQrImage',
-        // profileImage (the logo) is deliberately absent: a logo change goes
-        // live at once and never takes the restaurant back to `pending`.
+        // A new logo goes back to admin review, like the cover and menu photos.
+        'profileImage',
         'coverImages',
         'menuImages'
     ]);
@@ -1634,10 +1634,9 @@ const mergeImageUrls = (existing = [], added = [], cap = 20) => {
 };
 
 /**
- * The restaurant's logo. Applied at once: no admin review, and the status and
- * isAcceptingOrders are left exactly as they were (an approved restaurant stays
- * approved and keeps taking orders). The public list/detail caches are dropped
- * after the write, so customers see the new logo on their next load.
+ * The restaurant's logo. A new logo goes back to admin review: the restaurant
+ * returns to `pending` (as for cover and menu photos) and the admins are told.
+ * The public list/detail caches are dropped after the write.
  */
 export const uploadRestaurantProfileImage = async (restaurantId, file) => {
     if (!isId(restaurantId)) throw new ValidationError('Invalid restaurant id');
@@ -1646,15 +1645,20 @@ export const uploadRestaurantProfileImage = async (restaurantId, file) => {
 
     const current = await prisma.foodRestaurant.findUnique({
         where: { id },
-        select: { id: true },
+        select: { restaurantName: true, status: true },
     });
     if (!current) throw new ValidationError('Restaurant not found');
 
     const url = await uploadImageBuffer(file.buffer, 'food/restaurants/profile');
     await prisma.foodRestaurant.update({
         where: { id },
-        data: { profileImage: url },
+        data: { profileImage: url, ...BACK_TO_REVIEW },
     });
+
+    // Only tell the admins if this actually re-opened a settled decision.
+    if (current.status !== 'pending') {
+        void notifyAdminsAboutRestaurantProfileReview(id, current.restaurantName || '');
+    }
 
     await dropPublicRestaurantCaches();
 
