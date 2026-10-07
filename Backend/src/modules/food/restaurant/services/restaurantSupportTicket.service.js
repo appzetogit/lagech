@@ -5,7 +5,8 @@ import { ValidationError } from '../../../../core/auth/errors.js';
  * Support tickets a restaurant raises with the platform.
  *
  * Admin reads these through adminSupportTicket.service.js; this is only the
- * restaurant's own side of them.
+ * restaurant's own side of them. Rows go out as stored, so the admin's reply is
+ * `adminResponse` ('' until answered) and `respondedAt` (null until answered).
  */
 
 const CATEGORIES = ['orders', 'payments', 'menu', 'restaurant', 'technical', 'other'];
@@ -23,9 +24,17 @@ export async function createRestaurantSupportTicket(restaurantId, body = {}) {
     if (!issueType) throw new ValidationError('issueType required');
     if (!PRIORITIES.includes(priority)) throw new ValidationError('Invalid priority');
 
+    // The name is kept on the ticket so the admin's history still says who
+    // raised it after a restaurant deletes its account.
+    const restaurant = await prisma.foodRestaurant.findUnique({
+        where: { id: String(restaurantId) },
+        select: { restaurantName: true },
+    });
+
     return prisma.foodRestaurantSupportTicket.create({
         data: {
             restaurantId,
+            restaurantName: restaurant?.restaurantName || '',
             category,
             issueType,
             priority,

@@ -141,6 +141,10 @@ router.get('/categories/public', cacheResponse(600, 'categories'), listCategorie
 
 // Restaurant dashboard/profile (Bearer token + RESTAURANT role)
 router.get('/current', authMiddleware, requireRestaurant, getCurrentRestaurantController);
+// Delete the logged-in restaurant's account. 400 when it has order/billing
+// history. (Customer: DELETE /v1/food/user/profile; rider: DELETE
+// /v1/food/delivery/profile/account.)
+router.delete('/me', authMiddleware, requireRestaurant, deleteCurrentRestaurantAccountController);
 router.patch('/profile', authMiddleware, requireRestaurant, async (req, res, next) => {
     // Invalidate caches when profile is updated
     await invalidateCache('restaurants:*');
@@ -199,16 +203,13 @@ router.get('/subscription/overview', authMiddleware, requireRestaurant, getSubsc
 router.get('/subscription/invoices', authMiddleware, requireRestaurant, listSubscriptionInvoicesController);
 router.get('/subscription/invoices/:invoiceId', authMiddleware, requireRestaurant, getSubscriptionInvoiceController);
 router.get('/subscription/transactions', authMiddleware, requireRestaurant, listSubscriptionTransactionsController);
+// The logo goes live at once (no review, status untouched); the service drops
+// the public caches after the write, not before it.
 router.post(
     '/profile/profile-image',
     authMiddleware,
     requireRestaurant,
     upload.single('file'),
-    async (req, res, next) => {
-        await invalidateCache('restaurants:*');
-        await invalidateCache('restaurant_detail:*');
-        next();
-    },
     uploadRestaurantProfileImageController
 );
 router.post(

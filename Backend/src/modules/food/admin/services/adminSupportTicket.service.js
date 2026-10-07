@@ -101,11 +101,15 @@ const mapRestaurantTicket = (t) => {
         priority: t.priority || 'medium',
         status: toStatusApi(t.status),
         adminResponse: t.adminResponse,
+        respondedAt: t.respondedAt || null,
         createdAt: t.createdAt,
         updatedAt: t.updatedAt,
         user: null,
         restaurant,
-        restaurantName: restaurant?.name || '',
+        // A deleted restaurant's tickets stay, detached, under the name they
+        // were raised with.
+        restaurantName: restaurant?.name || t.restaurantName || '',
+        restaurantDeleted: !t.restaurantId,
     };
 };
 
@@ -163,6 +167,7 @@ export async function getSupportTickets(query = {}) {
             { subject: contains },
             { description: contains },
             { orderRef: contains },
+            { restaurantName: contains },
         ];
 
         if (restaurantIds.length) {
@@ -288,6 +293,8 @@ export async function updateSupportTicket(id, body = {}) {
     if (API_STATUSES.includes(String(body.status))) data.status = toStatusColumn(body.status);
     if (typeof body.adminResponse === 'string') data.adminResponse = body.adminResponse;
     if (!Object.keys(data).length) return null;
+    // Only restaurant tickets carry the column; the restaurant app shows it.
+    if (isRestaurant && data.adminResponse) data.respondedAt = new Date();
 
     const delegate = isRestaurant ? prisma.foodRestaurantSupportTicket : prisma.foodSupportTicket;
 

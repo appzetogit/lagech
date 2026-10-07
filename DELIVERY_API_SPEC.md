@@ -581,6 +581,8 @@ Errors to handle: `Emergency reassignment is available only for an accepted orde
 
 Same as the user app: `POST /fcm-tokens/mobile/save`, `DELETE /fcm-tokens/remove`, or pass `fcmToken` + `platform: "mobile"` at OTP verify.
 
+Chat message push: `data = { type: "chat_message", conversationId, orderId }` — `orderId` is the order's database id (not `FOD-…`), `""` when the chat has no order.
+
 Inbox: `GET /food/notifications/inbox`, `PATCH /food/notifications/:id/read`, `DELETE /food/notifications/:id`, `DELETE /food/notifications/inbox/all`.
 
 The admin can switch some push events off (Notification Channels): order status, cancellations, refunds, rider progress, chat and wallet messages. New-order offers to riders are never switched off.
@@ -603,7 +605,13 @@ Handshake with the access token (`auth.token`, `Authorization` header, or `?toke
 | `join-delivery` | `deliveryPartnerId` | explicit re-join; ack `delivery-room-joined`. Rejected if the id isn't yours or your role isn't DELIVERY_PARTNER |
 | `join-tracking` | `orderId` | ack `tracking-room-joined` |
 | `leave-tracking` | `orderId` | |
-| location ping | `{ orderId, lat, lng, userId, restaurantId }` | broadcast to the tracking room as `location-update` |
+| `update-location` | `{ orderId, lat, lng, heading?, speed?, accuracy?, userId?, restaurantId?, status? }` | broadcast to the tracking room as `location-update` (at most one per order every 2 s). Send every ~10 s per active order |
+
+**`update-location` details.** `orderId` is the order's database id (the same id the customer joins
+`tracking:<orderId>` with and that `active_orders/{orderId}` in RTDB uses). `heading` is degrees 0–360;
+**omit it (or send `null`) when the device has no bearing** — don't send `0` for "unknown" (on Android,
+only send it when the fix has a bearing). A ping without a heading keeps the order's last known heading,
+so the customer's bike icon no longer snaps to north. Negative values (iOS `-1`) count as missing.
 
 **Listen:**
 | Event | Meaning |

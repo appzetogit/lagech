@@ -790,10 +790,10 @@ Rooms: `user:<userId>`, `tracking:<orderId>`.
 
 | Event | Direction | Meaning |
 |---|---|---|
-| `location-update` | in | Rider moved: `{ lat, lng, heading }` |
+| `location-update` | in | Rider moved: `{ orderId, lat, lng, heading, headingFromDevice, speed, accuracy, timestamp }` — `heading` (degrees) is always a number: when the rider's ping had none it is the order's last known heading (`headingFromDevice: false`), so keep rotating the bike icon to `heading` |
 | `order_status_update` | in | Status changed — refetch the order over REST |
 | `delivery_drop_otp` | in | Handover OTP |
-| `new_message` | in | Chat message |
+| `chat:message` | in | Chat message (the push for it has `data: { type: "chat_message", conversationId, orderId }`; `orderId` = order database id, `""` when the chat has no order) |
 
 REST is authoritative. Treat socket events as a signal to refetch, not as the
 source of truth.

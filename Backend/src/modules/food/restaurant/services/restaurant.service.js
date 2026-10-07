@@ -1,6 +1,7 @@
 import { assertSelfRegistrationOpen, getBusinessSettings, getPrioritySort } from '../../shared/businessSettings.js';
 import { logger } from '../../../../utils/logger.js';
 import { prisma } from '../../../../config/prisma.js';
+import { invalidateCache } from '../../../../middleware/cache.js';
 import { isId } from '../../../../utils/helpers.js';
 import { uploadImageBuffer } from '../../../../services/cloudinary.service.js';
 import { normalizeMediaUrlForStorage } from '../../../../services/storage.service.js';
@@ -12,6 +13,7 @@ import {
 } from '../../shared/restaurantQuery.util.js';
 import { fromRestaurantLocation, toRestaurant } from '../restaurant.mapper.js';
 import { attachOutletTimingsToRestaurants } from './outletTimings.service.js';
+import { detachRestaurantHistory } from './restaurantDeletion.helpers.js';
 import { USED_ORDER_WHERE } from '../../orders/services/couponRules.js';
 import { getRestaurantOperationalStatus } from '../helpers/restaurantAvailability.helper.js';
 import {
@@ -1567,7 +1569,8 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
         'accountType',
         'upiId',
         'upiQrImage',
-        'profileImage',
+        // profileImage (the logo) is deliberately absent: a logo change goes
+        // live at once and never takes the restaurant back to `pending`.
         'coverImages',
         'menuImages'
     ]);
@@ -1630,6 +1633,12 @@ const mergeImageUrls = (existing = [], added = [], cap = 20) => {
     return urls.slice(0, cap);
 };
 
+/**
+ * The restaurant's logo. Applied at once: no admin review, and the status and
+ * isAcceptingOrders are left exactly as they were (an approved restaurant stays
+ * approved and keeps taking orders). The public list/detail caches are dropped
+ * after the write, so customers see the new logo on their next load.
+ */
 export const uploadRestaurantProfileImage = async (restaurantId, file) => {
     if (!isId(restaurantId)) throw new ValidationError('Invalid restaurant id');
     if (!file?.buffer) throw new ValidationError('Image file is required');
@@ -1637,22 +1646,32 @@ export const uploadRestaurantProfileImage = async (restaurantId, file) => {
 
     const current = await prisma.foodRestaurant.findUnique({
         where: { id },
-        select: { restaurantName: true, status: true },
+        select: { id: true },
     });
     if (!current) throw new ValidationError('Restaurant not found');
 
     const url = await uploadImageBuffer(file.buffer, 'food/restaurants/profile');
     await prisma.foodRestaurant.update({
         where: { id },
-        data: { profileImage: url, ...BACK_TO_REVIEW },
+        data: { profileImage: url },
     });
 
-    // Only tell the admins if this actually re-opened a settled decision.
-    if (current.status !== 'pending') {
-        void notifyAdminsAboutRestaurantProfileReview(id, current.restaurantName || '');
-    }
+    await dropPublicRestaurantCaches();
 
     return { profileImage: { url } };
+};
+
+/** Customer-facing caches that carry a restaurant's card or detail. */
+const dropPublicRestaurantCaches = async () => {
+    try {
+        await Promise.all([
+            invalidateCache('restaurants:*'),
+            invalidateCache('restaurant_detail:*'),
+            invalidateCache('search_unified:*'),
+        ]);
+    } catch (err) {
+        logger.warn(`Restaurant cache invalidation failed: ${err?.message || err}`);
+    }
 };
 
 export const uploadRestaurantMenuImage = async (file) => {
@@ -2300,8 +2319,12 @@ export async function updateRestaurantOfferStatus(restaurantId, offerId, status)
  * destroyed: a restaurant that has ever traded cannot be erased.
  *
  * What the restaurant genuinely owns — its dishes, addons, timings, banners —
- * goes with it, most of it through ON DELETE CASCADE.
+ * goes with it, most of it through ON DELETE CASCADE. Its support tickets and
+ * feedback are kept for the admin, detached (restaurantDeletion.helpers.js).
  */
+export const RESTAURANT_HAS_HISTORY_MESSAGE =
+    'Restaurants with order history cannot be deleted. Please contact support.';
+
 export const deleteCurrentRestaurantAccount = async (restaurantId) => {
     if (!isId(restaurantId)) throw new ValidationError('Invalid restaurant id');
     const id = String(restaurantId);
@@ -2316,9 +2339,8 @@ export const deleteCurrentRestaurantAccount = async (restaurantId) => {
     ]);
 
     if (orders || transactions || invoices) {
-        throw new ValidationError(
-            'This restaurant has order or billing history and cannot be deleted. Contact support to close the account instead.',
-        );
+        // ValidationError -> HTTP 400.
+        throw new ValidationError(RESTAURANT_HAS_HISTORY_MESSAGE);
     }
 
     await prisma.$transaction(async (tx) => {
@@ -2330,9 +2352,8 @@ export const deleteCurrentRestaurantAccount = async (restaurantId) => {
             data: { createdByRestaurantId: null },
         });
         await tx.foodOffer.deleteMany({ where: { restaurantId: id } });
-        await tx.foodSupportTicket.deleteMany({ where: { restaurantId: id } });
-        await tx.foodRestaurantSupportTicket.deleteMany({ where: { restaurantId: id } });
-        await tx.feedbackExperience.deleteMany({ where: { restaurantId: id } });
+        // Support tickets and feedback stay for the admin, detached.
+        await detachRestaurantHistory(tx, restaurant);
         await tx.foodRestaurantWithdrawal.deleteMany({ where: { restaurantId: id } });
         await tx.foodSubscriptionTransaction.deleteMany({ where: { restaurantId: id } });
         await tx.foodRestaurantSubscriptionHistory.deleteMany({ where: { restaurantId: id } });
@@ -2341,6 +2362,8 @@ export const deleteCurrentRestaurantAccount = async (restaurantId) => {
         // all cascade from this.
         await tx.foodRestaurant.delete({ where: { id } });
     });
+
+    await dropPublicRestaurantCaches();
 
     return { success: true };
 };

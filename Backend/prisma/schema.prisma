@@ -3389,8 +3389,12 @@ model FoodRefundRequest {
 }
 
 model FoodRestaurantSupportTicket {
-  id           String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
-  restaurantId String @db.VarChar(24)
+  id           String  @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  /// Null once the restaurant deleted its account: the ticket stays for the
+  /// admin's history, named by restaurantName.
+  restaurantId String? @db.VarChar(24)
+  /// The restaurant's name when the ticket was raised (kept after deletion).
+  restaurantName String @default("")
 
   category    RestaurantTicketCategory
   issueType   String
@@ -3401,11 +3405,13 @@ model FoodRestaurantSupportTicket {
   priority      TicketPriority @default(medium)
   status        TicketStatus   @default(open)
   adminResponse String         @default("")
+  /// When the admin last wrote adminResponse; null until then.
+  respondedAt   DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  restaurant FoodRestaurant @relation(fields: [restaurantId], references: [id])
+  restaurant FoodRestaurant? @relation(fields: [restaurantId], references: [id], onDelete: SetNull)
 
   @@index([restaurantId, createdAt(sort: Desc)])
   @@index([status, createdAt(sort: Desc)])

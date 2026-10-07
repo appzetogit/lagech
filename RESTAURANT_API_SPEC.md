@@ -130,9 +130,22 @@ Body also takes `folder`. → `data` = upload result (URL). Use this to pre-uplo
 | PATCH | `/food/restaurant/profile` | partial restaurant fields | `{ restaurant }` |
 | PATCH | `/food/restaurant/availability` | `{ "isAcceptingOrders": true }` | `{ restaurant }` |
 | PATCH | `/food/restaurant/dining-settings` | `{ "isEnabled": true, "maxGuests": 6, "diningType": "family-dining" }` | `{ restaurant }` |
-| DELETE | *(none — deletion is `deleteCurrentRestaurantAccount`, not routed publicly)* | | |
+| DELETE | `/food/restaurant/me` | — | `{ "success": true }` |
 
 `maxGuests` is clamped to ≥ 1 (default 6); `isEnabled` accepts booleans or `"true"/"1"/"yes"` strings.
+
+**Delete account — `DELETE /v1/food/restaurant/me`** (Bearer, restaurant token). This is the only
+delete route; `/food/auth/restaurant/account` and `/food/auth/account` do not exist (404). Same naming
+family as the customer (`DELETE /food/user/profile`) and rider (`DELETE /food/delivery/profile/account`).
+- 200 → `{ "success": true, "message": "Restaurant account deleted successfully", "data": { "success": true } }`. Log the user out.
+- 400 → `{ "success": false, "message": "Restaurants with order history cannot be deleted. Please contact support." }`
+  when the restaurant has any order, transaction or subscription invoice. Show `message` as is.
+- Dishes, add-ons, timings, offers and banners go with the account. Support tickets and feedback are
+  kept for Lagech's records (detached from the deleted account).
+
+**Profile edits that need approval.** Changing name, owner/contact details, PAN/GST/FSSAI, bank/UPI, or
+cover/menu photos puts the restaurant back to `status: "pending"`. The **logo (`profileImage`) does not**:
+it applies at once and never changes `status` or `isAcceptingOrders`.
 
 ### Image uploads (all Bearer, all multipart)
 
@@ -144,6 +157,12 @@ Body also takes `folder`. → `data` = upload result (URL). Use this to pre-uplo
 | POST | `/food/restaurant/profile/menu-images` | `files` | 20 |
 
 → `data` = upload result with the stored URL(s).
+
+**Logo — `POST /food/restaurant/profile/profile-image`** (multipart field `file`) →
+`data: { "profileImage": { "url": "…" } }`. Saved directly, no admin approval: an approved restaurant stays
+`approved` and `isAcceptingOrders` is unchanged. `GET /food/restaurant/current` returns the new
+`profileImage.url` immediately, and the customer listing/detail caches are cleared on upload.
+(`cover-images` / `menu-images` still go back to review.)
 
 ---
 
@@ -675,7 +694,21 @@ Query passes through to the admin complaint service (pagination + filters). → 
 ```
 → 201, `{ ticket }`. Invalid `category` / `priority` → 400. Note: `priority` here has no `urgent` — that's the delivery app's enum.
 
-### `GET /food/restaurant/support/tickets` → `{ tickets: [...] }` (+ pagination)
+### `GET /food/restaurant/support/tickets` → `{ tickets: [...], total, page, limit }`
+
+Query: `page`, `limit` (≤ 100), `status` (`open | in-progress | resolved`), `search`.
+```jsonc
+{
+  "id": "…", "restaurantId": "…", "restaurantName": "…",
+  "category": "technical", "issueType": "App crash", "subject": "…", "description": "…", "orderRef": "",
+  "priority": "high",
+  "status": "open",              // open | in_progress | resolved  (note the underscore in responses)
+  "adminResponse": "",           // the admin's reply; "" until answered
+  "respondedAt": null,           // ISO time of the admin's last reply; null until answered
+  "createdAt": "…", "updatedAt": "…"
+}
+```
+When the admin replies, the restaurant also gets a push `{ type: "SUPPORT_RESPONSE", ticketId, source: "restaurant" }`.
 
 **Food campaign dishes on an order.** A line with `itemCampaignId` set is a food campaign dish the admin
 created for this restaurant (`itemId` is then the campaign id, not a menu item). Its `price` is the
@@ -742,6 +775,11 @@ Same as the other apps: `POST /fcm-tokens/mobile/save`, `DELETE /fcm-tokens/remo
 
 Inbox: `GET /food/notifications/inbox`, `PATCH /food/notifications/:id/read`, `DELETE /food/notifications/:id`, `DELETE /food/notifications/inbox/all`.
 
+**Chat message push** (all three apps): `data = { "type": "chat_message", "conversationId": "…", "orderId": "<order database id>" }`.
+`orderId` is the order's database `id` (24 hex), never the display number (`FOD-…`), and `""` for a chat with
+no order (admin support). All data values are strings. Admin-edited push texts change `title`/`body` only,
+never these data fields.
+
 ---
 
 ## 12. Realtime
@@ -759,7 +797,7 @@ Handshake with the access token. On connect the server auto-joins `restaurant:<r
 |---|---|
 | `new_order` | a paid order landed — ring the alarm, start the acceptance countdown |
 | `order_status_update` | status changed by anyone |
-| `location-update` | rider position for an order you're tracking |
+| `location-update` | rider position for an order you're tracking: `{ orderId, lat, lng, heading, headingFromDevice, speed, accuracy, timestamp, … }` — `heading` is the last known one when the rider's ping had none |
 
 The order alarm must not depend on the socket alone — poll `/orders` with a short interval as a fallback, and reconcile against `acceptanceDeadlineAt`.
 

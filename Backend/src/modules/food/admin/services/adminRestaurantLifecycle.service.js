@@ -2,6 +2,7 @@ import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { fromRestaurantLocation, toRestaurant } from '../../restaurant/restaurant.mapper.js';
+import { detachRestaurantHistory } from '../../restaurant/services/restaurantDeletion.helpers.js';
 import { logger } from '../../../../utils/logger.js';
 import { emailRestaurantDecision, emailAccountSuspension } from '../../../../core/notifications/emailEvents.js';
 
@@ -326,9 +327,8 @@ export async function deleteRestaurant(id) {
         });
 
         await tx.foodOffer.deleteMany({ where: { restaurantId: restaurant.id } });
-        await tx.foodSupportTicket.deleteMany({ where: { restaurantId: restaurant.id } });
-        await tx.foodRestaurantSupportTicket.deleteMany({ where: { restaurantId: restaurant.id } });
-        await tx.feedbackExperience.deleteMany({ where: { restaurantId: restaurant.id } });
+        // Support tickets and feedback are kept, detached, for the history.
+        await detachRestaurantHistory(tx, restaurant);
         await tx.foodRestaurantWithdrawal.deleteMany({ where: { restaurantId: restaurant.id } });
         await tx.foodSubscriptionTransaction.deleteMany({ where: { restaurantId: restaurant.id } });
         await tx.foodRestaurantSubscriptionHistory.deleteMany({ where: { restaurantId: restaurant.id } });
