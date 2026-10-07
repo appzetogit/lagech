@@ -538,6 +538,17 @@ export async function notifyRestaurantNewOrder(orderDoc) {
   try {
     if (!orderDoc || !canExposeOrderToRestaurant(orderDoc)) return;
 
+    // The restaurant's own money for this order (items + packaging − commission
+    // − its share of discounts), as on the order list and details. The popup and
+    // the push show this, not the customer's bill (delivery fee, platform fee).
+    let finance = null;
+    try {
+      const { buildRestaurantFinanceView } = await import("./order.service.js");
+      finance = await buildRestaurantFinanceView({ ...orderDoc, id: String(orderDoc._id || orderDoc.id) });
+    } catch {
+      // The app falls back to fetching the order.
+    }
+
     const io = getIO();
     if (io) {
       const payload = {
@@ -548,6 +559,7 @@ export async function notifyRestaurantNewOrder(orderDoc) {
       // A takeaway's pickup code is the customer's to show, never the restaurant's to read.
       delete payload.deliveryOtp;
       delete payload.offlinePayment;
+      if (finance) payload.finance = finance;
       logger.info(
         `[RestaurantOrders] Emitting new_order to ${rooms.restaurant(orderDoc.restaurantId)} for order ${orderDoc._id?.toString?.() || ''}`,
       );
@@ -597,7 +609,10 @@ export async function notifyRestaurantNewOrder(orderDoc) {
       ? `Order #${orderDoc.order_id || orderDoc._id} is waiting for review.`
       : `Order #${orderDoc.order_id || orderDoc._id} is confirmed. Please start preparing.`;
     if (itemsList) bodyText += `\nItems: ${itemsList}`;
-    if (total > 0) bodyText += `\nTotal: ₹${total}`;
+    // The restaurant's earning (after commission), not the customer's total.
+    const earning = finance ? Number(finance.netPayout) : NaN;
+    if (Number.isFinite(earning)) bodyText += `\nYou earn: ₹${earning}`;
+    else if (total > 0) bodyText += `\nTotal: ₹${total}`;
     if (orderDoc.customerName) bodyText += `\nCustomer: ${orderDoc.customerName}`;
     if (addressStr) bodyText += `\nAddress: ${addressStr}`;
 
@@ -633,6 +648,10 @@ export async function notifyRestaurantNewOrder(orderDoc) {
           itemsList: str(itemsList),
           address: str(addressStr),
           total: str(total),
+          // What the restaurant gets (after commission); show this, not total.
+          restaurantEarning: str(finance ? finance.netPayout : ""),
+          itemTotal: str(finance ? finance.itemTotal : orderDoc.pricing?.subtotal ?? ""),
+          commission: str(finance ? finance.commission : ""),
           paymentMethod: str(orderDoc.payment?.method),
           acceptanceDeadlineAt: str(orderDoc.acceptanceDeadlineAt?.toISOString?.() || ""),
           orderType: str(orderDoc.orderType || "delivery"),

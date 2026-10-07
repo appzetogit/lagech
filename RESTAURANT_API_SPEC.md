@@ -767,3 +767,15 @@ The `new_order` push (data-only, Android tag `order_<id>`, channel `new_order_ch
 
 When Business Settings → Order → "Who confirms the order" is the delivery partner, delivery orders reach the restaurant already `confirmed`: `needsAcceptance` is `"false"` and the body reads "Order #… is confirmed. Please start preparing." Show a plain notification (open the order on tap) without Accept/Reject and without the looping alarm. Missing field (older server) = treat as `"true"`.
 
+## Showing the restaurant's earning, not the customer's bill
+
+Every order the restaurant app receives carries a `finance` block — on the order list, the order details, status updates, and now also on the `new_order` socket payload:
+
+```json
+"finance": { "itemTotal": 180, "packagingFee": 0, "commission": 27, "restaurantDiscountShare": 0,
+             "discount": 0, "taxAmount": 0, "totalCustomerPaid": 260, "netPayout": 153,
+             "isSettled": false, "settledAt": null }
+```
+
+Show the restaurant **item total, packaging, commission (−), its share of discounts (−) and `netPayout` ("You'll receive")** — not the customer's delivery fee, platform fee, tip or grand total (those are not the restaurant's money). The `new_order` push data also carries `restaurantEarning` (= netPayout), `itemTotal` and `commission`, and its body reads "You earn: ₹…" instead of the customer total.
+

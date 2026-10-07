@@ -1444,7 +1444,7 @@ function buildRestaurantFinanceViewSync(order, tx = null) {
   };
 }
 
-async function buildRestaurantFinanceView(order) {
+export async function buildRestaurantFinanceView(order) {
   try {
     const tx = await foodTransactionService.getTransactionByOrder(order.id);
     return buildRestaurantFinanceViewSync(order, tx);
