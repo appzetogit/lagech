@@ -293,26 +293,72 @@ legitimately returns a 2-point polyline. That's correct, not a bug.
 
 ## 5. Payment collection at the door
 
+An unpaid `cash` / `razorpay_qr` order is collected one of two ways: the rider takes cash, or the
+customer scans a **Razorpay QR** on the rider's phone and pays the platform directly. The rider's own
+UPI QR is no longer used — money paid to a rider's personal UPI never reached the platform's books.
+
+**Amount to collect.** Every order sent to the rider carries `amountToCollect`: what to take at
+the door for an unpaid `cash` / `razorpay_qr` order, 0 otherwise. Show this, not `pricing.total`:
+a customer who paid part with their wallet (`payment.isPartial: true`, `payment.walletAmount`)
+owes only the rest (total − wallet part). The QR is raised for exactly this amount.
+
+**Flow.**
+1. At the door, offer **Collect cash** and **Customer pays by QR**.
+2. Cash: `POST …/collect/cash`, then complete the delivery as before (`PATCH …/complete`).
+3. QR: `POST …/collect/qr` → show `imageUrl` full screen with the amount and a countdown to
+   `expiresAt`. When `imageUrl` is null (`kind: "link"`), draw a QR from `shortUrl` (or show the link
+   to copy/share).
+4. Watch for payment: listen for the `payment_received` socket event **and** poll
+   `GET …/payment-status` every ~3 s (the server asks Razorpay itself if the webhook is late).
+5. On `paid: true` show "Paid ✓ ₹X received" and continue to `PATCH …/complete`.
+6. "Switch to cash" at any point → `POST …/collect/cash` (closes the QR). When `qr.status` is
+   `expired`, offer "Create new QR" (`POST …/collect/qr` again).
+
+`PATCH …/complete` (and `PATCH …/status` with `delivered`) on a `razorpay_qr` order that is not paid
+→ 400 `QR payment not verified yet. …` — switch to cash or wait for the payment.
+
 ### `POST /food/delivery/orders/:orderId/collect/qr`
-Body (optional, falls back to the order's customer): `{ "name": "…", "email": "…", "phone": "…" }`
+Body (optional, used only for the payment-link fallback): `{ "name": "…", "email": "…", "phone": "…" }`
 
 →
 ```json
 {
-  "shortUrl": "https://rzp.io/i/xxxx",
-  "imageUrl": "https://rzp.io/i/xxxx",
+  "kind": "qr",
+  "qrId": "qr_XXXXXXXX",
+  "paymentLinkId": null,
+  "imageUrl": "https://rzp.io/i/…png",
+  "shortUrl": null,
   "amount": 546,
-  "expiresAt": "2026-07-24T19:30:00.000Z"
+  "expiresAt": "2026-10-07T19:30:00.000Z",
+  "status": "created",
+  "reused": false
 }
 ```
 
-Errors: `Order already paid`, `No amount due` (due < ₹1), `QR payment not configured` (Razorpay keys missing), `Not your order`.
+- A single-use, fixed-amount UPI QR (Razorpay QR Codes), valid ~15 minutes.
+- Calling it again while that QR is still open (same amount, more than a minute left) returns the
+  same QR with `reused: true` — no duplicate QRs. An expired QR is closed and a new one raised.
+- If QR Codes is not enabled on the Razorpay account the server raises a payment link instead:
+  `kind: "link"`, `paymentLinkId`, `shortUrl`, `imageUrl: null` (~20 minutes).
+
+Errors (400 unless noted): `Order already paid`, `This order is not paid at delivery, so there is
+nothing to collect` (prepaid order), `Order is cancelled`, `Order is already delivered`,
+`No amount due` (due < ₹1), `QR payment not configured` (Razorpay keys missing), 403 `Not your order`.
 
 ### `GET /food/delivery/orders/:orderId/payment-status`
-Polls and syncs the Razorpay link status server-side. Poll this after showing the QR.
+Safe to poll every 3 s. While a QR is open and unpaid the server also checks Razorpay itself (at most
+once per 5 s per order), so a missing webhook does not leave the rider stuck.
 ```json
 {
-  "payment": { "method": "razorpay_qr", "status": "paid", "amountDue": 546, "qr": { … }, "refund": { … } },
+  "paid": true,
+  "method": "razorpay_qr",
+  "status": "paid",
+  "amount": 546,
+  "paidByQr": true,
+  "collectCash": false,
+  "qr": { "kind": "qr", "qrId": "qr_…", "imageUrl": "…", "shortUrl": null, "amount": 546,
+          "expiresAt": "…", "status": "paid" },
+  "payment": { "method": "razorpay_qr", "status": "paid", "amountDue": 546, "qr": { … } },
   "latestPaymentSnapshot": { … },
   "riderEarning": 42,
   "platformProfit": 18,
@@ -320,17 +366,24 @@ Polls and syncs the Razorpay link status server-side. Poll this after showing th
   "transactionStatus": "captured"
 }
 ```
+`qr.status`: `created` (open), `expired` (offer "Create new QR"), `paid`. `qr` is null for a cash order.
 
 ### `POST /food/delivery/orders/:orderId/collect/cash`
-Falls back from QR to physical cash. → `data: { "success": true }`
+Switches to cash: closes any open QR / payment link at Razorpay first, then the order is `cash` /
+`cod_pending`. → `data: { "success": true, "method": "cash", "amount": 546 }`
 
-**Amount to collect.** Every order sent to the rider carries `amountToCollect`: what to take at
-the door for an unpaid `cash` / `razorpay_qr` order, 0 otherwise. Show this, not `pricing.total`:
-a customer who paid part with their wallet (`payment.isPartial: true`, `payment.walletAmount`)
-owes only the rest (`payment.amountDue` = total − wallet part). Cash in hand and the cash
-limit count only the cash part.
+- 400 `Order is already paid by QR. Do not collect cash.` when the customer already paid the QR.
+- If a QR payment still lands after the switch (the customer scanned just before it closed), it is
+  recorded as a QR payment and the rider gets `payment_received` with `collectCash: false` and
+  "Do NOT collect cash".
+- Any second payment for an order that is already paid (e.g. cash taken and delivered, then the old
+  QR paid) is refunded to the customer automatically.
 
 Rejected unless the order's payment method is `cash` or `razorpay_qr` and it is not already paid — online-prepaid orders cannot be switched.
+
+**Money.** A QR-paid order is `paymentMethod: "razorpay_qr"`: the money is in the platform's
+Razorpay account, so it is **not** cash in hand — it does not count toward the cash limit, deposits
+or the rider cash report. Rider earning and restaurant settlement are the same as for cash.
 
 ---
 
@@ -621,6 +674,7 @@ so the customer's bike icon no longer snaps to north. Negative values (iOS `-1`)
 | `order_deassigned` | the order was taken off you |
 | `order_ready` | restaurant marked ready for pickup |
 | `order_status_update` | any status change |
+| `payment_received` | the customer paid the door QR: `{ orderId, orderCode, method: "razorpay_qr", amount, paymentId, paid: true, collectCash: false, message }`. `orderId` is the database id. Show "Paid ✓ ₹amount received" and move to complete; never take cash after this |
 
 Poll `/orders/available` as a fallback — the modal must not depend on the socket alone.
 

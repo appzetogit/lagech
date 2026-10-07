@@ -134,7 +134,7 @@ const PAYMENT_METHODS = ['cash', 'razorpay', 'razorpay_qr', 'wallet', 'offline',
 const PAYMENT_LABEL = {
     cash: 'Cash on delivery',
     razorpay: 'Online (Razorpay)',
-    razorpay_qr: 'Online (QR)',
+    razorpay_qr: 'Razorpay QR',
     wallet: 'Wallet',
     offline: 'Offline payment',
 };
@@ -153,7 +153,9 @@ const paymentLabel = (method, partial) => (partial
 
 /**
  * Who holds the customer's money: the rider collects cash, everything else
- * reaches the platform. A partial payment's wallet part is the platform's.
+ * reaches the platform -- including a door QR (razorpay_qr), which the customer
+ * pays into the platform's Razorpay account. A partial payment's wallet part
+ * is the platform's.
  */
 const receivedBy = (method, partial = false) => {
     if (method !== 'cash') return 'Admin';

@@ -469,6 +469,15 @@ charged upfront, the order dispatches immediately, `payment.status` stays
 `pending_qr`, and the rider presents a QR on arrival. No `verify-payment` call.
 If the QR fails the rider can switch the order to cash from their side.
 
+The same door QR is offered on any cash order: the rider can show a Razorpay QR
+instead of taking cash. When the customer pays it, the order becomes
+`payment.method: "razorpay_qr"`, `payment.status: "paid"`, and the customer app
+receives the socket event `payment_received`
+`{ orderId, orderCode, method: "razorpay_qr", amount, paymentId, paid: true }`
+(room `user:<userId>`) — show "Payment received". A second payment for an
+already-paid order (e.g. the customer paid cash and then scanned an old QR) is
+refunded to the original UPI/card automatically.
+
 For `razorpay` / `card`, call `verify-payment` after checkout:
 
 ```jsonc

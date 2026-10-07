@@ -986,7 +986,9 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
   if (payMethod === 'razorpay_qr') {
     const syncedPayment = await syncRazorpayQrPayment(order);
     if (String(syncedPayment?.status || '').toLowerCase() !== 'paid') {
-      throw new ValidationError('QR payment not verified yet');
+      // Cash-due order on QR: the customer has to have paid it. The cash path
+      // (collect/cash, then complete) stays as it was.
+      throw new ValidationError('QR payment not verified yet. Wait for the customer to pay the QR, or switch to cash.');
     }
   }
 
@@ -1087,6 +1089,13 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
 export async function updateOrderStatusDelivery(orderId, deliveryPartnerId, orderStatus) {
   const { row } = await loadOrder(orderId);
   assertOwnedBy(row, deliveryPartnerId);
+
+  // 'delivered' goes through completeDelivery and its guards (pickup done,
+  // handover OTP, a door QR actually paid). Setting it here directly skipped
+  // all of them, so an unpaid QR order could be marked delivered.
+  if (String(orderStatus || '').toLowerCase() === 'delivered' && row.orderStatus !== 'delivered') {
+    return completeDelivery(orderId, deliveryPartnerId, {});
+  }
 
   const from = row.orderStatus;
   // A repeated status (retry, double tap) changes nothing.

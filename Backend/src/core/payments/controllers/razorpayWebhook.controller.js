@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { prisma } from '../../../config/prisma.js';
 import { finalizeOrderPayment } from '../../../modules/food/orders/services/order.service.js';
+import { handleCollectWebhookEvent } from '../../../modules/food/orders/services/order-payment.service.js';
 import { remainderAmount } from '../../../modules/food/orders/services/partialPayment.service.js';
 import { config } from '../../../config/env.js';
 import { logger } from '../../../utils/logger.js';
@@ -54,8 +55,22 @@ export const handleRazorpayWebhook = async (req, res) => {
     logger.info(`Razorpay Webhook Received: ${event}`);
 
     try {
+        // --- Customer paid the rider's door-collection QR / payment link ---
+        // Recognised by the QR's notes (purpose 'cod_collect'); everything else
+        // falls through to the checkout handling below.
+        if (['qr_code.credited', 'payment.captured', 'payment_link.paid'].includes(event)) {
+            if (await handleCollectWebhookEvent(event, payload)) {
+                return res.status(200).json({ status: 'ok' });
+            }
+        }
+
         // --- Payment captured ---
-        if (event === 'payment.captured') {
+        if (event === 'payment.captured' && !payload?.payment?.entity?.order_id) {
+            // A payment with no Razorpay order (a QR or link payment that is not
+            // ours). Matching on a null order id would select every order that
+            // has none, so nothing is looked up.
+            logger.warn(`Webhook [payment.captured]: payment ${payload?.payment?.entity?.id} has no order_id; ignored`);
+        } else if (event === 'payment.captured') {
             const paymentObj = payload.payment.entity;
             const rzOrderId = paymentObj.order_id;
             const rzPaymentId = paymentObj.id;

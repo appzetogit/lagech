@@ -165,14 +165,16 @@ export async function getRiderBalances(query = {}) {
                 bankAccountHolderName: true, upiId: true,
             },
         }),
-        // Cash the rider took at the door, in this period.
+        // Cash the rider took at the door, in this period. Only cash: a
+        // customer who paid the door QR paid the platform's Razorpay account
+        // (paymentMethod 'razorpay_qr'), so the rider never held that money.
         prisma.foodTransaction.groupBy({
             by: ['deliveryPartnerId'],
             where: {
                 ...periodWhere(start, end),
                 isRiderSettled: false,
                 deliveryPartnerId: { in: partnerIds },
-                paymentMethod: { in: ['cash', 'razorpay_qr'] },
+                paymentMethod: 'cash',
             },
             // Less a partial payment's wallet part, which the rider never held.
             _sum: { totalCustomerPaid: true, walletAmount: true },

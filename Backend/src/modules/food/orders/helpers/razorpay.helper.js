@@ -30,7 +30,19 @@ export function getRazorpaySettings() {
     };
 }
 
+/**
+ * Tests install a fake client here (setRazorpayClientForTests) so the suite
+ * never reaches a real Razorpay account, whatever keys the machine carries.
+ */
+let testClient = null;
+
+/** Install (or with null, remove) a fake Razorpay client for tests. */
+export function setRazorpayClientForTests(client) {
+    testClient = client || null;
+}
+
 export function isRazorpayConfigured() {
+    if (testClient) return true;
     const { keyId, keySecret } = getRazorpaySettings();
     return Boolean(keyId && keySecret && Razorpay);
 }
@@ -40,6 +52,7 @@ export function getRazorpayKeyId() {
 }
 
 export function getRazorpayInstance() {
+    if (testClient) return testClient;
     if (!isRazorpayConfigured()) return null;
     const { keyId, keySecret } = getRazorpaySettings();
     return new Razorpay({ key_id: keyId, key_secret: keySecret });
@@ -62,7 +75,7 @@ export function createRazorpayOrder(amountPaise, currency = 'INR', receipt = '')
     });
 }
 
-export function createPaymentLink({ amountPaise, currency = 'INR', description, orderId, customerName, customerEmail, customerPhone }) {
+export function createPaymentLink({ amountPaise, currency = 'INR', description, orderId, customerName, customerEmail, customerPhone, notes, expireBy }) {
     const blocked = assertNewPaymentsAllowed();
     if (blocked) return blocked;
     const instance = getRazorpayInstance();
@@ -71,6 +84,8 @@ export function createPaymentLink({ amountPaise, currency = 'INR', description, 
         amount: Math.round(amountPaise),
         currency,
         description: description || `Order ${orderId}`,
+        ...(notes ? { notes } : {}),
+        ...(expireBy ? { expire_by: expireBy } : {}),
         customer: {
             name: customerName || 'Customer',
             email: customerEmail || 'customer@example.com',
@@ -167,6 +182,62 @@ export async function fetchRazorpayPaymentLink(paymentLinkId) {
     if (!instance) throw new Error('Razorpay not configured');
     if (!paymentLinkId) throw new Error('paymentLinkId is required');
     return instance.paymentLink.fetch(String(paymentLinkId));
+}
+
+/**
+ * A single-use, fixed-amount UPI QR (Razorpay QR Codes API) the customer scans
+ * at the door. Needs QR Codes enabled on the Razorpay account; callers fall back
+ * to a payment link when this fails.
+ *
+ * @param {object} p
+ * @param {number} p.amountPaise
+ * @param {number} p.closeBy  unix seconds; Razorpay wants it at least 2 minutes ahead
+ */
+export function createQrCode({ amountPaise, closeBy, name, description, notes }) {
+    const blocked = assertNewPaymentsAllowed();
+    if (blocked) return blocked;
+    const instance = getRazorpayInstance();
+    if (!instance) return Promise.reject(new Error('Razorpay not configured'));
+    return instance.qrCode.create({
+        type: 'upi_qr',
+        name: name || 'Lagech',
+        usage: 'single_use',
+        fixed_amount: true,
+        payment_amount: Math.round(amountPaise),
+        description: description || '',
+        close_by: Math.floor(closeBy),
+        notes: notes || {},
+    });
+}
+
+export async function fetchQrCode(qrId) {
+    const instance = getRazorpayInstance();
+    if (!instance) throw new Error('Razorpay not configured');
+    if (!qrId) throw new Error('qrId is required');
+    return instance.qrCode.fetch(String(qrId));
+}
+
+/** The payments made against a QR code (newest first, as Razorpay returns them). */
+export async function fetchQrCodePayments(qrId) {
+    const instance = getRazorpayInstance();
+    if (!instance) throw new Error('Razorpay not configured');
+    if (!qrId) throw new Error('qrId is required');
+    const res = await instance.qrCode.fetchAllPayments(String(qrId));
+    return Array.isArray(res?.items) ? res.items : [];
+}
+
+export async function closeQrCode(qrId) {
+    const instance = getRazorpayInstance();
+    if (!instance) throw new Error('Razorpay not configured');
+    if (!qrId) throw new Error('qrId is required');
+    return instance.qrCode.close(String(qrId));
+}
+
+export async function cancelPaymentLink(paymentLinkId) {
+    const instance = getRazorpayInstance();
+    if (!instance) throw new Error('Razorpay not configured');
+    if (!paymentLinkId) throw new Error('paymentLinkId is required');
+    return instance.paymentLink.cancel(String(paymentLinkId));
 }
 
 /**
