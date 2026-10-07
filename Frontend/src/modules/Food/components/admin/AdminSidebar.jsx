@@ -519,6 +519,21 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
   // area follows the open page, so a direct link lands in the right one.
   const activeArea = useMemo(() => areaForPath(location.pathname), [location.pathname])
 
+  // The top-bar area links (Users, Transactions & Reports, Settings) only fit
+  // from the xl breakpoint up. Below it they are hidden, so the sidebar shows
+  // every area — otherwise Settings and the rest could not be reached on a phone.
+  const [areaNavVisible, setAreaNavVisible] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia ? window.matchMedia("(min-width: 1280px)").matches : true
+  )
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return undefined
+    const mq = window.matchMedia("(min-width: 1280px)")
+    const onChange = (e) => setAreaNavVisible(e.matches)
+    setAreaNavVisible(mq.matches)
+    mq.addEventListener ? mq.addEventListener("change", onChange) : mq.addListener(onChange)
+    return () => (mq.removeEventListener ? mq.removeEventListener("change", onChange) : mq.removeListener(onChange))
+  }, [])
+
   useEffect(() => {
     const onSelect = (event) => {
       const area = event?.detail?.area
@@ -539,6 +554,7 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
 
   const filteredMenuData = useMemo(() => {
     if (!searchQuery.trim()) {
+      if (!areaNavVisible) return menuData
       return menuData.filter((entry) => entry && areaOfEntry(entry) === activeArea)
     }
 
@@ -584,7 +600,7 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
     })
 
     return filtered
-  }, [menuData, searchQuery, activeArea])
+  }, [menuData, searchQuery, activeArea, areaNavVisible])
 
   // Auto-expand sections with matches when searching
   useEffect(() => {
