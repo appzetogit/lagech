@@ -242,11 +242,18 @@ test('detaching takes the token off every owner and both platforms', async () =>
     // phone. Left attached, the previous owner keeps receiving the new
     // owner's order notifications.
     const token = `shared-device-${Date.now()}`;
-    await Promise.all([
-        upsertFirebaseDeviceToken({ ownerType: 'USER', ownerId: userId, token, platform: 'web' }),
-        upsertFirebaseDeviceToken({ ownerType: 'USER', ownerId: userId, token, platform: 'android' }),
-        upsertFirebaseDeviceToken({ ownerType: 'USER', ownerId: otherUserId, token, platform: 'web' }),
-    ]);
+    // Written directly: registering through upsertFirebaseDeviceToken moves a
+    // device between owners, so three concurrent registrations raced and the
+    // fixture came out different from run to run. The state under test is
+    // "attached to both", whatever produced it.
+    await prisma.foodUser.update({
+        where: { id: userId },
+        data: { fcmTokens: { push: token }, fcmTokenMobile: { push: token } },
+    });
+    await prisma.foodUser.update({
+        where: { id: otherUserId },
+        data: { fcmTokens: { push: token } },
+    });
 
     const before = await prisma.foodUser.findMany({
         where: { id: { in: [userId, otherUserId] } },
