@@ -2368,16 +2368,6 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
         }
       }
 
-      // The restaurant started cooking -> tell the assigned rider at once, so
-      // their app shows "Preparing food" now rather than on its next poll.
-      if (String(orderStatus) === 'preparing' && String(from) !== 'preparing' && row.dispatchDeliveryPartnerId) {
-        io.to(rooms.delivery(row.dispatchDeliveryPartnerId)).emit('order_status_update', {
-          orderId: updated.id,
-          orderMongoId: updated.id,
-          orderDisplayId: updated.order_id || updated.orderId || '',
-          orderStatus: 'preparing',
-        });
-      }
     }
   } catch (err) {
     logger.warn(`updateOrderStatusRestaurant delivery notification failed: ${err?.message || err}`);
