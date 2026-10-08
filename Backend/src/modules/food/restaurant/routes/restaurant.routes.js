@@ -32,6 +32,7 @@ import {
     createRestaurantSupportTicketController,
     listRestaurantSupportTicketsController
 } from '../controllers/supportTicket.controller.js';
+import { listOwnReviewsController, replyToReviewController } from '../controllers/restaurantReviews.controller.js';
 import {
     createWithdrawalRequestController,
     listMyWithdrawalsController
@@ -140,6 +141,10 @@ router.get('/categories/public', cacheResponse(600, 'categories'), listCategorie
 
 // Restaurant dashboard/profile (Bearer token + RESTAURANT role)
 router.get('/current', authMiddleware, requireRestaurant, getCurrentRestaurantController);
+// Delete the logged-in restaurant's account. 400 when it has order/billing
+// history. (Customer: DELETE /v1/food/user/profile; rider: DELETE
+// /v1/food/delivery/profile/account.)
+router.delete('/me', authMiddleware, requireRestaurant, deleteCurrentRestaurantAccountController);
 router.patch('/profile', authMiddleware, requireRestaurant, async (req, res, next) => {
     // Invalidate caches when profile is updated
     await invalidateCache('restaurants:*');
@@ -151,6 +156,29 @@ router.patch('/availability', authMiddleware, requireRestaurant, async (req, res
     await invalidateCache('restaurant_detail:*');
     next();
 }, updateRestaurantAcceptingOrdersController);
+// Takeaway on/off for this restaurant (only offered while Business Settings have takeaway on).
+router.patch('/takeaway-settings', authMiddleware, requireRestaurant, async (req, res, next) => {
+    try {
+        await invalidateCache('restaurants:*');
+        await invalidateCache('restaurant_detail:*');
+        const { updateRestaurantTakeaway } = await import('../services/restaurant.service.js');
+        const restaurant = await updateRestaurantTakeaway(req.user?.userId, req.body?.takeawayEnabled ?? req.body?.enabled);
+        res.status(200).json({ success: true, message: 'Takeaway setting updated', data: { restaurant } });
+    } catch (error) {
+        next(error);
+    }
+});
+// The restaurant's extra packaging charge (only while Business Settings allow it).
+router.patch('/packaging-settings', authMiddleware, requireRestaurant, async (req, res, next) => {
+    try {
+        await invalidateCache('restaurant_detail:*');
+        const { updateRestaurantPackaging } = await import('../services/restaurant.service.js');
+        const restaurant = await updateRestaurantPackaging(req.user?.userId, req.body || {});
+        res.status(200).json({ success: true, message: 'Packaging charge updated', data: { restaurant } });
+    } catch (error) {
+        next(error);
+    }
+});
 router.patch('/dining-settings', authMiddleware, requireRestaurant, async (req, res, next) => {
     await invalidateCache('restaurants:*');
     next();
@@ -175,16 +203,13 @@ router.get('/subscription/overview', authMiddleware, requireRestaurant, getSubsc
 router.get('/subscription/invoices', authMiddleware, requireRestaurant, listSubscriptionInvoicesController);
 router.get('/subscription/invoices/:invoiceId', authMiddleware, requireRestaurant, getSubscriptionInvoiceController);
 router.get('/subscription/transactions', authMiddleware, requireRestaurant, listSubscriptionTransactionsController);
+// The logo goes live at once (no review, status untouched); the service drops
+// the public caches after the write, not before it.
 router.post(
     '/profile/profile-image',
     authMiddleware,
     requireRestaurant,
     upload.single('file'),
-    async (req, res, next) => {
-        await invalidateCache('restaurants:*');
-        await invalidateCache('restaurant_detail:*');
-        next();
-    },
     uploadRestaurantProfileImageController
 );
 router.post(
@@ -288,13 +313,21 @@ router.delete('/addons/:id', authMiddleware, requireRestaurant, deleteAddonContr
 // Orders (restaurant dashboard)
 router.get('/orders', authMiddleware, requireRestaurant, orderController.listOrdersRestaurantController);
 router.get('/orders/:orderId', authMiddleware, requireRestaurant, orderController.getOrderByIdRestaurantController);
+// The bill for the restaurant's own order (restaurant copy, with its earning): JSON or ?format=html.
+router.get('/orders/:orderId/invoice', authMiddleware, requireRestaurant, orderController.getOrderInvoiceRestaurantController);
 router.patch('/orders/:orderId/status', authMiddleware, requireRestaurant, orderController.updateOrderStatusRestaurantController);
+// A takeaway handed to the customer against their pickup code.
+router.post('/orders/:orderId/handover', authMiddleware, requireRestaurant, orderController.handoverTakeawayRestaurantController);
 router.post('/orders/:orderId/resend-notification', authMiddleware, requireRestaurant, orderController.resendDeliveryNotificationRestaurantController);
 
 // Complaints (restaurant dashboard)
 router.get('/complaints', authMiddleware, requireRestaurant, getRestaurantComplaintsController);
 router.post('/support/tickets', authMiddleware, requireRestaurant, createRestaurantSupportTicketController);
 router.get('/support/tickets', authMiddleware, requireRestaurant, listRestaurantSupportTicketsController);
+
+// Customer reviews of this restaurant, and its replies (Business Settings switch).
+router.get('/reviews', authMiddleware, requireRestaurant, listOwnReviewsController);
+router.put('/reviews/:orderId/reply', authMiddleware, requireRestaurant, replyToReviewController);
 
 // Offers (restaurant dashboard)
 router.get('/my-offers', authMiddleware, requireRestaurant, listRestaurantOffersController);

@@ -10,24 +10,62 @@ try {
 
 import { config } from '../../../../config/env.js';
 import { logger } from '../../../../utils/logger.js';
+import { getThirdPartySettingsSync } from '../../../../core/thirdParty/thirdParty.runtime.js';
 
-const KEY_ID = config.razorpayKeyId || process.env.RAZORPAY_KEY_ID || '';
-const KEY_SECRET = config.razorpayKeySecret || process.env.RAZORPAY_KEY_SECRET || '';
+/**
+ * The keys in use: the pair an admin saved under 3rd Party > Payment Setup,
+ * otherwise the server's RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET. The catalog
+ * only lets the id and secret be saved together, so the pair never mixes.
+ */
+const serverKeyId = () => config.razorpayKeyId || process.env.RAZORPAY_KEY_ID || '';
+const serverKeySecret = () => config.razorpayKeySecret || process.env.RAZORPAY_KEY_SECRET || '';
+
+export function getRazorpaySettings() {
+    const saved = getThirdPartySettingsSync('payment');
+    return {
+        keyId: saved.keyId || serverKeyId(),
+        keySecret: saved.keySecret || serverKeySecret(),
+        // Off stops new payments only; verification and refunds keep working.
+        enabled: saved.enabled !== false,
+    };
+}
+
+/**
+ * Tests install a fake client here (setRazorpayClientForTests) so the suite
+ * never reaches a real Razorpay account, whatever keys the machine carries.
+ */
+let testClient = null;
+
+/** Install (or with null, remove) a fake Razorpay client for tests. */
+export function setRazorpayClientForTests(client) {
+    testClient = client || null;
+}
 
 export function isRazorpayConfigured() {
-    return Boolean(KEY_ID && KEY_SECRET && Razorpay);
+    if (testClient) return true;
+    const { keyId, keySecret } = getRazorpaySettings();
+    return Boolean(keyId && keySecret && Razorpay);
 }
 
 export function getRazorpayKeyId() {
-    return KEY_ID;
+    return getRazorpaySettings().keyId;
 }
 
 export function getRazorpayInstance() {
+    if (testClient) return testClient;
     if (!isRazorpayConfigured()) return null;
-    return new Razorpay({ key_id: KEY_ID, key_secret: KEY_SECRET });
+    const { keyId, keySecret } = getRazorpaySettings();
+    return new Razorpay({ key_id: keyId, key_secret: keySecret });
 }
 
+const assertNewPaymentsAllowed = () => {
+    if (!getRazorpaySettings().enabled) return Promise.reject(new Error('Online payments are switched off'));
+    return null;
+};
+
 export function createRazorpayOrder(amountPaise, currency = 'INR', receipt = '') {
+    const blocked = assertNewPaymentsAllowed();
+    if (blocked) return blocked;
     const instance = getRazorpayInstance();
     if (!instance) return Promise.reject(new Error('Razorpay not configured'));
     return instance.orders.create({
@@ -37,13 +75,17 @@ export function createRazorpayOrder(amountPaise, currency = 'INR', receipt = '')
     });
 }
 
-export function createPaymentLink({ amountPaise, currency = 'INR', description, orderId, customerName, customerEmail, customerPhone }) {
+export function createPaymentLink({ amountPaise, currency = 'INR', description, orderId, customerName, customerEmail, customerPhone, notes, expireBy }) {
+    const blocked = assertNewPaymentsAllowed();
+    if (blocked) return blocked;
     const instance = getRazorpayInstance();
     if (!instance) return Promise.reject(new Error('Razorpay not configured'));
     return instance.paymentLink.create({
         amount: Math.round(amountPaise),
         currency,
         description: description || `Order ${orderId}`,
+        ...(notes ? { notes } : {}),
+        ...(expireBy ? { expire_by: expireBy } : {}),
         customer: {
             name: customerName || 'Customer',
             email: customerEmail || 'customer@example.com',
@@ -52,11 +94,21 @@ export function createPaymentLink({ amountPaise, currency = 'INR', description, 
     });
 }
 
+/**
+ * Checks the signature against the secret in use and, when an admin has saved
+ * a different one, against the server's secret too: a payment started just
+ * before the keys were changed was signed with the old secret and must still
+ * verify. Both secrets are ours, so accepting either proves the same thing.
+ */
 export function verifyPaymentSignature(orderId, paymentId, signature) {
-    if (!KEY_SECRET) return false;
+    const secrets = [...new Set([getRazorpaySettings().keySecret, serverKeySecret()].filter(Boolean))];
+    if (!secrets.length || typeof signature !== 'string' || !signature) return false;
     const body = `${orderId}|${paymentId}`;
-    const expected = crypto.createHmac('sha256', KEY_SECRET).update(body).digest('hex');
-    return expected === signature;
+    return secrets.some((secret) => {
+        const expected = Buffer.from(crypto.createHmac('sha256', secret).update(body).digest('hex'), 'utf8');
+        const actual = Buffer.from(signature, 'utf8');
+        return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+    });
 }
 
 /**
@@ -130,6 +182,62 @@ export async function fetchRazorpayPaymentLink(paymentLinkId) {
     if (!instance) throw new Error('Razorpay not configured');
     if (!paymentLinkId) throw new Error('paymentLinkId is required');
     return instance.paymentLink.fetch(String(paymentLinkId));
+}
+
+/**
+ * A single-use, fixed-amount UPI QR (Razorpay QR Codes API) the customer scans
+ * at the door. Needs QR Codes enabled on the Razorpay account; callers fall back
+ * to a payment link when this fails.
+ *
+ * @param {object} p
+ * @param {number} p.amountPaise
+ * @param {number} p.closeBy  unix seconds; Razorpay wants it at least 2 minutes ahead
+ */
+export function createQrCode({ amountPaise, closeBy, name, description, notes }) {
+    const blocked = assertNewPaymentsAllowed();
+    if (blocked) return blocked;
+    const instance = getRazorpayInstance();
+    if (!instance) return Promise.reject(new Error('Razorpay not configured'));
+    return instance.qrCode.create({
+        type: 'upi_qr',
+        name: name || 'Lagech',
+        usage: 'single_use',
+        fixed_amount: true,
+        payment_amount: Math.round(amountPaise),
+        description: description || '',
+        close_by: Math.floor(closeBy),
+        notes: notes || {},
+    });
+}
+
+export async function fetchQrCode(qrId) {
+    const instance = getRazorpayInstance();
+    if (!instance) throw new Error('Razorpay not configured');
+    if (!qrId) throw new Error('qrId is required');
+    return instance.qrCode.fetch(String(qrId));
+}
+
+/** The payments made against a QR code (newest first, as Razorpay returns them). */
+export async function fetchQrCodePayments(qrId) {
+    const instance = getRazorpayInstance();
+    if (!instance) throw new Error('Razorpay not configured');
+    if (!qrId) throw new Error('qrId is required');
+    const res = await instance.qrCode.fetchAllPayments(String(qrId));
+    return Array.isArray(res?.items) ? res.items : [];
+}
+
+export async function closeQrCode(qrId) {
+    const instance = getRazorpayInstance();
+    if (!instance) throw new Error('Razorpay not configured');
+    if (!qrId) throw new Error('qrId is required');
+    return instance.qrCode.close(String(qrId));
+}
+
+export async function cancelPaymentLink(paymentLinkId) {
+    const instance = getRazorpayInstance();
+    if (!instance) throw new Error('Razorpay not configured');
+    if (!paymentLinkId) throw new Error('paymentLinkId is required');
+    return instance.paymentLink.cancel(String(paymentLinkId));
 }
 
 /**

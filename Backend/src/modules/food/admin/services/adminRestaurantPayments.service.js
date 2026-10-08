@@ -4,6 +4,7 @@ import { ValidationError, NotFoundError } from '../../../../core/auth/errors.js'
 import { getWalletSummaries } from '../../restaurant/services/restaurantFinance.service.js';
 import { lockRestaurantBalance } from '../../restaurant/services/restaurantPayout.service.js';
 import { getPayoutSnapshot } from './withdrawalMethods.service.js';
+import { emailWithdrawalDecision } from '../../../../core/notifications/emailEvents.js';
 
 /**
  * Restaurant payments: the old panel's "provide payment". The admin has paid
@@ -109,7 +110,7 @@ export async function recordRestaurantPayment(restaurantId, body = {}, adminId =
     const { amount, method, reference, note, requestKey } = readPaymentBody(body);
     const id = String(restaurantId);
 
-    return prisma.$transaction(async (tx) => {
+    const payment = await prisma.$transaction(async (tx) => {
         await lockRestaurantBalance(tx, id);
 
         const restaurant = await tx.foodRestaurant.findUnique({ where: { id }, select: { id: true } });
@@ -164,6 +165,9 @@ export async function recordRestaurantPayment(restaurantId, body = {}, adminId =
         });
         return serialize(row);
     }, { timeout: 20000 });
+    // A repeat of the same request hands back the same row, so the same email key.
+    emailWithdrawalDecision('restaurant', payment?.id);
+    return payment;
 }
 
 const parseDay = (value, endOfDay) => {

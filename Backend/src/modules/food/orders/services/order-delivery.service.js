@@ -15,6 +15,7 @@ import * as foodTransactionService from './foodTransaction.service.js';
 import * as dispatchService from './order-dispatch.service.js';
 import * as paymentService from './order-payment.service.js';
 import { assertRiderCanTakeOrder } from '../../delivery/services/riderCash.service.js';
+import { getBusinessSettings } from '../../shared/businessSettings.js';
 
 import {
   buildOrderIdentityFilter,
@@ -24,7 +25,8 @@ import {
   haversineKm,
   notifyOwnerSafely,
   notifyOwnersSafely,
-  partnerHasActiveDelivery,
+  countPartnerActiveDeliveries,
+  getRiderOrderLimit,
   pushStatusHistory,
   sanitizeOrderForDeliveryPartner,
   TERMINAL_ORDER_STATUSES,
@@ -117,7 +119,9 @@ function emitOrderUpdate(order, deliveryPartnerId) {
 
       if (order.payment?.method === 'cash' || order.paymentMethod === 'cash') {
         riderTitle = 'Payment collected!';
-        const amt = order.pricing?.total || order.amounts?.totalCustomerPaid || 0;
+        // A partial payment's wallet part was not collected at the door.
+        const amt =
+          (order.pricing?.total || order.amounts?.totalCustomerPaid || 0) - (Number(order.payment?.walletAmount) || 0);
         riderBody = `You have collected Rs ${amt} cash for Order #${orderId}.`;
       }
     }
@@ -200,10 +204,44 @@ export async function getCurrentTripDelivery(deliveryPartnerId) {
   );
 }
 
+/**
+ * Every delivery the rider holds right now (up to the admin's limit, Business
+ * Settings > Deliveryman), most recently updated first, plus that limit.
+ * `getCurrentTripDelivery` stays the single-order view older apps read.
+ */
+export async function listActiveDeliveries(deliveryPartnerId) {
+  if (!deliveryPartnerId) throw new ValidationError('Delivery partner ID required');
+  const [rows, orderLimit] = await Promise.all([
+    prisma.foodOrder.findMany({
+      where: {
+        dispatchDeliveryPartnerId: String(deliveryPartnerId),
+        dispatchStatus: 'accepted',
+        orderStatus: { in: ['confirmed', 'preparing', 'ready_for_pickup', 'picked_up'] },
+      },
+      include: deliveryInclude,
+      orderBy: { updatedAt: 'desc' },
+      take: 20,
+    }),
+    getRiderOrderLimit(),
+  ]);
+  const txByOrder = await loadTransactionsByOrder(rows.map((row) => row.id));
+  const orders = rows.map((row) =>
+    sanitizeOrderForDeliveryPartner(mergeTransactionIntoOrder(toOrder(row), txByOrder.get(row.id) || null)),
+  );
+  return { orders, orderLimit, canAcceptMore: orders.length < orderLimit };
+}
+
 export async function listOrdersAvailableDelivery(deliveryPartnerId, query) {
   const { page, limit, skip } = buildPaginationOptions(query);
   const partnerId = String(deliveryPartnerId);
-  const hasActiveDelivery = await partnerHasActiveDelivery(partnerId);
+  // At the limit (Business Settings > Deliveryman, maximum assigned orders)
+  // the rider sees only their own deliveries, as a rider on one trip always
+  // did. Below it they also see new offers next to the deliveries they hold.
+  const [activeCount, orderLimit] = await Promise.all([
+    countPartnerActiveDeliveries(partnerId),
+    getRiderOrderLimit(),
+  ]);
+  const hasActiveDelivery = activeCount >= orderLimit;
 
   const where = hasActiveDelivery
     ? {
@@ -219,6 +257,9 @@ export async function listOrdersAvailableDelivery(deliveryPartnerId, query) {
             // record for this rider on this order.
             dispatchOffers: { none: { partnerId, action: 'deassigned' } },
             orderStatus: { in: ['confirmed', 'preparing', 'ready_for_pickup'] },
+            // Never a takeaway, nor a scheduled order before its release time.
+            orderType: { not: 'takeaway' },
+            AND: [{ OR: [{ releaseAt: null }, { releaseAt: { lte: new Date() } }] }],
           },
           {
             dispatchDeliveryPartnerId: partnerId,
@@ -333,31 +374,45 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
 
   const requested = await prisma.foodOrder.findFirst({
     where: identity,
-    select: { id: true, paymentMethod: true, paymentStatus: true, total: true },
+    select: { id: true, paymentMethod: true, paymentStatus: true, total: true, orderType: true, releaseAt: true },
   });
   if (!requested) throw new NotFoundError('Order not found');
   const id = requested.id;
-
-  const alreadyOnTrip = await partnerHasActiveDelivery(partnerId);
-  if (alreadyOnTrip) {
-    const existingActive = await prisma.foodOrder.findFirst({
-      where: {
-        dispatchDeliveryPartnerId: partnerId,
-        dispatchStatus: 'accepted',
-        orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
-      },
-      select: { id: true },
-    });
-
-    if (existingActive?.id && existingActive.id === id) {
-      const { order } = await loadOrder(id, deliveryInclude);
-      return sanitizeOrderForDeliveryPartner(order);
-    }
-
-    throw new ValidationError(
-      'You already have an active delivery. Complete it before accepting another order.',
-    );
+  if (requested.orderType === 'takeaway') {
+    throw new ValidationError('This is a takeaway order; the customer collects it from the restaurant.');
   }
+  if (requested.releaseAt && new Date(requested.releaseAt) > now) {
+    throw new ValidationError('This scheduled order is not open for delivery yet.');
+  }
+
+  // Already this rider's: accepting again is a no-op, whatever the limit.
+  const existingMine = await prisma.foodOrder.findFirst({
+    where: {
+      id,
+      dispatchDeliveryPartnerId: partnerId,
+      dispatchStatus: 'accepted',
+      orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
+    },
+    select: { id: true },
+  });
+  if (existingMine) {
+    const { order } = await loadOrder(id, deliveryInclude);
+    return sanitizeOrderForDeliveryPartner(order);
+  }
+
+  const orderLimit = await getRiderOrderLimit();
+  const assertBelowLimit = async (client) => {
+    const held = await countPartnerActiveDeliveries(partnerId, { excludeOrderId: id, client });
+    if (held >= orderLimit) {
+      throw new ValidationError(
+        orderLimit === 1
+          ? 'You already have an active delivery. Complete it before accepting another order.'
+          : `You already have ${held} active deliveries, the most you can hold at once. Complete one before accepting another order.`,
+      );
+    }
+  };
+  // Cheap early refusal; the authoritative count is repeated under the lock below.
+  await assertBelowLimit(prisma);
 
   // Refuse before claiming the order, not after. This is the authoritative
   // check: dispatch skips blocked riders, but an offer sent a moment before a
@@ -366,24 +421,31 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
 
   // Atomic claim. The guard replaces findOneAndUpdate's filter — only one rider
   // can flip the order to accepted.
-  const { count } = await prisma.foodOrder.updateMany({
-    where: {
-      id,
-      orderStatus: { in: acceptedStatuses },
-      OR: [
-        {
-          dispatchStatus: 'unassigned',
-          dispatchOffers: { none: { partnerId, action: 'deassigned' } },
-        },
-        { dispatchStatus: 'assigned', dispatchDeliveryPartnerId: partnerId },
-      ],
-    },
-    data: {
-      dispatchDeliveryPartnerId: partnerId,
-      dispatchStatus: 'accepted',
-      dispatchAssignedAt: now,
-      dispatchAcceptedAt: now,
-    },
+  // Under a per-rider advisory lock, so two accepts racing from the same
+  // rider cannot both see room below the limit and both claim.
+  const count = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`rider-accept:${partnerId}`}))`;
+    await assertBelowLimit(tx);
+    const claimed = await tx.foodOrder.updateMany({
+      where: {
+        id,
+        orderStatus: { in: acceptedStatuses },
+        OR: [
+          {
+            dispatchStatus: 'unassigned',
+            dispatchOffers: { none: { partnerId, action: 'deassigned' } },
+          },
+          { dispatchStatus: 'assigned', dispatchDeliveryPartnerId: partnerId },
+        ],
+      },
+      data: {
+        dispatchDeliveryPartnerId: partnerId,
+        dispatchStatus: 'accepted',
+        dispatchAssignedAt: now,
+        dispatchAcceptedAt: now,
+      },
+    });
+    return claimed.count;
   });
 
   if (count === 0) {
@@ -584,9 +646,24 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
   return responseOrder;
 }
 
-export async function rejectOrderDelivery(orderId, deliveryPartnerId) {
+export async function rejectOrderDelivery(orderId, deliveryPartnerId, { reason = '' } = {}) {
   const { row, order } = await loadOrder(orderId);
   assertOwnedBy(row, deliveryPartnerId);
+
+  // Declining an offer is always allowed. Giving back an order the rider has
+  // already accepted is a cancellation, and that follows the admin's switch
+  // (Business Settings > Deliveryman > Deliveryman can cancel order; off by
+  // default, as in the previous panel).
+  const cancellingAccepted = String(row.dispatchStatus || '') === 'accepted';
+  if (cancellingAccepted) {
+    const rules = await getBusinessSettings('business_deliveryman');
+    if (!rules?.riderCanCancelOrder) {
+      throw new ValidationError(
+        'Cancelling an accepted order is turned off. Please contact support if you cannot deliver it.',
+      );
+    }
+  }
+  const cleanReason = String(reason || '').trim().slice(0, 300);
 
   // Only an order that hasn't been collected may be rejected. Without this a rider
   // could pick the food up and then reject: the order was re-dispatched while rider
@@ -626,9 +703,11 @@ export async function rejectOrderDelivery(orderId, deliveryPartnerId) {
   await pushStatusHistory(row.id, {
     byRole: 'DELIVERY_PARTNER',
     byId: deliveryPartnerId,
-    from: 'assigned',
+    from: cancellingAccepted ? 'accepted' : 'assigned',
     to: 'unassigned',
-    note: 'Rejected',
+    note: cancellingAccepted
+      ? `Cancelled by delivery partner${cleanReason ? `: ${cleanReason}` : ''}`
+      : 'Rejected',
   });
 
   enqueueOrderEvent('delivery_rejected', {
@@ -907,7 +986,9 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
   if (payMethod === 'razorpay_qr') {
     const syncedPayment = await syncRazorpayQrPayment(order);
     if (String(syncedPayment?.status || '').toLowerCase() !== 'paid') {
-      throw new ValidationError('QR payment not verified yet');
+      // Cash-due order on QR: the customer has to have paid it. The cash path
+      // (collect/cash, then complete) stays as it was.
+      throw new ValidationError('QR payment not verified yet. Wait for the customer to pay the QR, or switch to cash.');
     }
   }
 
@@ -1008,6 +1089,13 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
 export async function updateOrderStatusDelivery(orderId, deliveryPartnerId, orderStatus) {
   const { row } = await loadOrder(orderId);
   assertOwnedBy(row, deliveryPartnerId);
+
+  // 'delivered' goes through completeDelivery and its guards (pickup done,
+  // handover OTP, a door QR actually paid). Setting it here directly skipped
+  // all of them, so an unpaid QR order could be marked delivered.
+  if (String(orderStatus || '').toLowerCase() === 'delivered' && row.orderStatus !== 'delivered') {
+    return completeDelivery(orderId, deliveryPartnerId, {});
+  }
 
   const from = row.orderStatus;
   // A repeated status (retry, double tap) changes nothing.

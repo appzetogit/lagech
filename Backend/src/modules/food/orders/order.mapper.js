@@ -92,10 +92,24 @@ export function toOrder(row) {
             deliveryFeeGst: money(row.deliveryFeeGst),
             platformFee: money(row.platformFee),
             quickDeliveryFee: money(row.quickDeliveryFee),
+            /** Part of platformFee: Business Settings' additional charge, named additionalChargeName. */
+            additionalCharge: money(row.additionalCharge),
+            additionalChargeName: row.additionalChargeName || '',
             deliveryMode: row.deliveryMode,
             restaurantCommission: money(row.restaurantCommission),
             discount: money(row.discount),
             couponCode: row.couponCode,
+            couponId: row.couponId ?? null,
+            /** Delivery fee + its GST taken off by a free-delivery coupon. */
+            deliveryFeeWaived: money(row.couponDeliveryWaiver),
+            /** Delivery fee + its GST waived by "free delivery over" (Business Settings). */
+            freeDeliveryWaived: money(row.freeDeliveryWaiver),
+            /** Part of `discount`: the new-customer first-order discount. */
+            newCustomerDiscount: money(row.newCustomerDiscount),
+            /** Tip for the rider; part of `total` and of riderEarning. */
+            riderTip: money(row.riderTip),
+            /** Part of `discount`: what food campaign dishes took off (platform-funded). */
+            campaignDiscount: money(row.campaignDiscount),
             total: money(row.total),
             currency: row.currency,
             distanceKm: num(row.distanceKm),
@@ -107,6 +121,9 @@ export function toOrder(row) {
             method: row.paymentMethod,
             status: row.paymentStatus,
             amountDue: num(row.paymentAmountDue),
+            /** Partial payment: the wallet part; `method` pays the rest (`amountDue`). 0 otherwise. */
+            walletAmount: row.paymentMethod === 'wallet' ? 0 : money(row.walletAmount),
+            isPartial: row.paymentMethod !== 'wallet' && money(row.walletAmount) > 0,
             razorpay: {
                 orderId: row.razorpayOrderId,
                 paymentId: row.razorpayPaymentId,
@@ -149,6 +166,10 @@ export function toOrder(row) {
 
         ratings: {
             restaurant: entityRating(row.restaurantRating, row.restaurantRatingComment, row.restaurantRatedAt),
+            /** The restaurant's reply to that review, or null. */
+            restaurantReply: row.restaurantReply
+                ? { text: row.restaurantReply, repliedAt: row.restaurantRepliedAt ?? null }
+                : null,
             deliveryPartner: entityRating(row.partnerRating, row.partnerRatingComment, row.partnerRatedAt),
             customer: entityRating(row.customerRating, row.customerRatingComment, row.customerRatedAt),
             items: (row.itemRatings || []).map(({ itemId, name, rating, comment, ratedAt }) => ({
@@ -162,7 +183,11 @@ export function toOrder(row) {
 
         lastRiderLocation: geoPoint(row.riderLat, row.riderLng),
 
+        walletAmount: money(row.walletAmount),
         riderEarning: money(row.riderEarning),
+        riderTip: money(row.riderTip),
+        orderType: row.orderType || 'delivery',
+        isScheduled: Boolean(row.releaseAt),
         platformProfit: money(row.platformProfit),
         tripDistanceKm: num(row.tripDistanceKm)
     };
@@ -211,6 +236,8 @@ export function toFoodTransaction(row) {
             // snapshot's own restaurantCommission; callers still read `amounts.restaurantCommission`.
             restaurantCommission: money(row.commissionAmount),
             riderShare: money(row.riderShare),
+            /** Part of riderShare: the customer's tip. */
+            riderTip: money(row.riderTip),
             platformNetProfit: money(row.platformNetProfit),
             taxAmount: money(row.taxAmount),
             adminDiscountShare: money(row.adminDiscountShare),
@@ -254,9 +281,9 @@ export function fromOrder(input = {}) {
         'deliveryAddress', 'deliveryVerification', 'lastRiderLocation',
         // relations and derived fields, never columns
         'items', 'statusHistory', 'itemRatings', 'dispatchOffers',
-        'restaurant', 'user', 'deliveryPartner', 'zone', 'foodTransaction',
+        'restaurant', 'user', 'deliveryPartner', 'zone', 'coupon', 'foodTransaction',
         'payments', 'refunds', 'transactions', 'chatMessages',
-        '_id', 'id', 'orderId',
+        '_id', 'id', 'orderId', 'isScheduled',
     ]);
 
     for (const [key, value] of Object.entries(input)) {
@@ -289,8 +316,10 @@ export function fromOrder(input = {}) {
 
     if (pricing) {
         for (const key of ['subtotal', 'tax', 'packagingFee', 'deliveryFee', 'deliveryFeeGst',
-                           'platformFee', 'quickDeliveryFee', 'deliveryMode', 'restaurantCommission',
-                           'discount', 'couponCode', 'total', 'currency', 'distanceKm',
+                           'platformFee', 'quickDeliveryFee', 'additionalCharge', 'additionalChargeName',
+                           'deliveryMode', 'restaurantCommission',
+                           'discount', 'couponCode', 'couponId', 'couponDeliveryWaiver', 'freeDeliveryWaiver',
+                           'newCustomerDiscount', 'campaignDiscount', 'total', 'currency', 'distanceKm',
                            'roadDistanceKm', 'roadDurationMins']) {
             set(key, pricing[key]);
         }

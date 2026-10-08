@@ -27,8 +27,191 @@ export const EMAIL_TEMPLATES = {
 <p style="color: #666; font-size: 14px;">If you did not request this, you can ignore this email.</p>
 <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
 <p style="color: #999; font-size: 12px;">{{companyName}} Admin</p>`,
+        audience: ['admin'],
+        // A locked-out admin's only way back in; not switchable.
+        canDisable: false,
     },
+    ...transactionalTemplates(),
 };
+
+/** Common footer and placeholder descriptions for the event emails. */
+function transactionalTemplates() {
+    const P = {
+        companyName: { key: 'companyName', description: 'Company name from Business Setup' },
+        userName: { key: 'userName', description: 'Name of the person the email is to' },
+        restaurantName: { key: 'restaurantName', description: 'Restaurant name' },
+        ownerName: { key: 'ownerName', description: 'Restaurant owner name' },
+        phone: { key: 'phone', description: 'Phone number given at sign-up' },
+        email: { key: 'email', description: 'Email given at sign-up' },
+        riderName: { key: 'riderName', description: 'Delivery partner name' },
+        orderId: { key: 'orderId', description: 'Order number the customer sees' },
+        amount: { key: 'amount', description: 'Amount in rupees' },
+        reason: { key: 'reason', description: 'Reason the admin gave' },
+        transactionId: { key: 'transactionId', description: 'Payment reference, if any' },
+        balance: { key: 'balance', description: 'Wallet balance after the credit' },
+        accountType: { key: 'accountType', description: 'restaurant, delivery partner or customer' },
+    };
+    const foot = '<hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">\n<p style="color: #999; font-size: 12px;">{{companyName}}</p>';
+    const t = (name, description, audience, placeholders, subject, body) => ({
+        name,
+        description,
+        audience,
+        placeholders: [...placeholders.map((k) => P[k]), P.companyName],
+        subject,
+        body: `${body}\n${foot}`,
+    });
+    return {
+        admin_new_restaurant: t(
+            'New restaurant registration (to admin)',
+            'Sent to the admin addresses when a restaurant registers and is waiting for approval.',
+            ['admin'],
+            ['restaurantName', 'ownerName', 'phone', 'email'],
+            'New restaurant registration: {{restaurantName}}',
+            `<h2 style="color: #111;">New restaurant registration</h2>
+<p><strong>{{restaurantName}}</strong> has registered and is waiting for approval.</p>
+<p>Owner: {{ownerName}}<br>Phone: {{phone}}<br>Email: {{email}}</p>
+<p>Review it under Restaurants &gt; New joining requests.</p>`,
+        ),
+        admin_new_delivery_partner: t(
+            'New delivery man registration (to admin)',
+            'Sent to the admin addresses when a delivery partner signs up and is waiting for approval.',
+            ['admin'],
+            ['riderName', 'phone', 'email'],
+            'New delivery partner registration: {{riderName}}',
+            `<h2 style="color: #111;">New delivery partner registration</h2>
+<p><strong>{{riderName}}</strong> has signed up as a delivery partner and is waiting for approval.</p>
+<p>Phone: {{phone}}<br>Email: {{email}}</p>
+<p>Review it under Delivery men &gt; New joining requests.</p>`,
+        ),
+        restaurant_approved: t(
+            'Restaurant registration approved',
+            'Sent to the restaurant owner when an admin approves the registration.',
+            ['restaurant'],
+            ['userName', 'restaurantName'],
+            'Your restaurant {{restaurantName}} is approved',
+            `<h2 style="color: #111;">Welcome aboard!</h2>
+<p>Hi {{userName}},</p>
+<p>Your restaurant <strong>{{restaurantName}}</strong> has been approved. You can now sign in to the restaurant app and start taking orders.</p>`,
+        ),
+        restaurant_rejected: t(
+            'Restaurant registration denied',
+            'Sent to the restaurant owner when an admin rejects the registration.',
+            ['restaurant'],
+            ['userName', 'restaurantName', 'reason'],
+            'Update on your restaurant registration',
+            `<h2 style="color: #111;">Registration not approved</h2>
+<p>Hi {{userName}},</p>
+<p>We could not approve the registration for <strong>{{restaurantName}}</strong>.</p>
+<p>Reason: {{reason}}</p>
+<p>You can correct the details and apply again.</p>`,
+        ),
+        delivery_partner_approved: t(
+            'Delivery man registration approved',
+            'Sent to the delivery partner when an admin approves the application.',
+            ['rider'],
+            ['userName'],
+            'Your delivery partner application is approved',
+            `<h2 style="color: #111;">Welcome aboard!</h2>
+<p>Hi {{userName}},</p>
+<p>Your delivery partner application has been approved. You can now go online in the app and start earning.</p>`,
+        ),
+        delivery_partner_rejected: t(
+            'Delivery man registration denied',
+            'Sent to the delivery partner when an admin rejects the application.',
+            ['rider'],
+            ['userName', 'reason'],
+            'Update on your delivery partner application',
+            `<h2 style="color: #111;">Application not approved</h2>
+<p>Hi {{userName}},</p>
+<p>We could not approve your delivery partner application.</p>
+<p>Reason: {{reason}}</p>`,
+        ),
+        withdraw_approved: t(
+            'Withdraw request approved',
+            'Sent to the restaurant or delivery partner when a withdrawal or payout is approved and paid.',
+            ['restaurant', 'rider'],
+            ['userName', 'amount', 'transactionId'],
+            'Your withdrawal of ₹{{amount}} is approved',
+            `<h2 style="color: #111;">Withdrawal approved</h2>
+<p>Hi {{userName}},</p>
+<p>Your withdrawal of <strong>₹{{amount}}</strong> has been approved and paid.</p>
+<p>Reference: {{transactionId}}</p>`,
+        ),
+        withdraw_rejected: t(
+            'Withdraw request denied',
+            'Sent to the restaurant or delivery partner when a withdrawal or payout is rejected.',
+            ['restaurant', 'rider'],
+            ['userName', 'amount', 'reason'],
+            'Your withdrawal of ₹{{amount}} was not approved',
+            `<h2 style="color: #111;">Withdrawal not approved</h2>
+<p>Hi {{userName}},</p>
+<p>Your withdrawal of <strong>₹{{amount}}</strong> was not approved. The amount stays in your wallet.</p>
+<p>Reason: {{reason}}</p>`,
+        ),
+        order_placed: t(
+            'Order placed',
+            'Sent to the customer when an order is placed (after payment, for online payments). Only customers with an email address get it.',
+            ['customer'],
+            ['userName', 'orderId', 'restaurantName', 'amount'],
+            'Order #{{orderId}} confirmed',
+            `<h2 style="color: #111;">Thanks for your order!</h2>
+<p>Hi {{userName}},</p>
+<p>Your order <strong>#{{orderId}}</strong> from {{restaurantName}} has been placed.</p>
+<p>Order total: <strong>₹{{amount}}</strong></p>`,
+        ),
+        refund_approved: t(
+            'Refund request approved',
+            'Sent to the customer when an admin approves a refund request. Only customers with an email address get it.',
+            ['customer'],
+            ['userName', 'orderId', 'amount'],
+            'Your refund for order #{{orderId}} is approved',
+            `<h2 style="color: #111;">Refund approved</h2>
+<p>Hi {{userName}},</p>
+<p>Your refund of <strong>₹{{amount}}</strong> for order #{{orderId}} has been approved and sent.</p>`,
+        ),
+        refund_rejected: t(
+            'Refund request denied',
+            'Sent to the customer when an admin rejects a refund request. Only customers with an email address get it.',
+            ['customer'],
+            ['userName', 'orderId', 'reason'],
+            'Update on your refund request for order #{{orderId}}',
+            `<h2 style="color: #111;">Refund request declined</h2>
+<p>Hi {{userName}},</p>
+<p>Your refund request for order #{{orderId}} was declined.</p>
+<p>Reason: {{reason}}</p>`,
+        ),
+        wallet_credited: t(
+            'Add fund (wallet credited)',
+            'Sent to the customer when an admin adds money to their wallet. Only customers with an email address get it.',
+            ['customer'],
+            ['userName', 'amount', 'balance'],
+            '₹{{amount}} added to your wallet',
+            `<h2 style="color: #111;">Money added to your wallet</h2>
+<p>Hi {{userName}},</p>
+<p><strong>₹{{amount}}</strong> has been added to your wallet. Your balance is now ₹{{balance}}.</p>`,
+        ),
+        account_suspended: t(
+            'Account suspended',
+            'Sent to a restaurant, delivery partner or customer when an admin suspends or deactivates the account.',
+            ['restaurant', 'rider', 'customer'],
+            ['userName', 'accountType'],
+            'Your {{companyName}} account has been suspended',
+            `<h2 style="color: #111;">Account suspended</h2>
+<p>Hi {{userName}},</p>
+<p>Your {{accountType}} account has been suspended. Please contact support if you think this is a mistake.</p>`,
+        ),
+        account_unsuspended: t(
+            'Account unsuspended',
+            'Sent to a restaurant, delivery partner or customer when an admin reactivates the account.',
+            ['restaurant', 'rider', 'customer'],
+            ['userName', 'accountType'],
+            'Your {{companyName}} account is active again',
+            `<h2 style="color: #111;">Account active again</h2>
+<p>Hi {{userName}},</p>
+<p>Your {{accountType}} account has been reactivated. Welcome back!</p>`,
+        ),
+    };
+}
 
 const PLACEHOLDER = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
 

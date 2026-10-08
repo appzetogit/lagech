@@ -345,6 +345,17 @@ export default function AdminRouter() {
             
             <Route path="customers" element={<Customers />} />
             <Route path="support-tickets" element={<SupportTickets />} />
+            <Route
+              path="order-issue-reports"
+              element={
+                <SupportTickets
+                  key="order-issues"
+                  preset={{ source: "user", type: "order" }}
+                  title="Order Issue Reports"
+                  subtitle="Problems customers reported on their orders from the app. A response is pushed to the customer."
+                />
+              }
+            />
             <Route path="wallet/add-fund" element={<AddFund />} />
             <Route path="wallet/bonus" element={<Bonus />} />
             <Route path="wallet/report" element={<WalletReport />} />
@@ -432,6 +443,7 @@ export default function AdminRouter() {
             <Route path="pages-social-media/cancellation" element={<CancellationPolicy />} />
             <Route path="pages-social-media/react-registration" element={<ReactRegistration />} />
 
+            <Route path="3rd-party-configurations/third-party" element={<ThirdParty />} />
             <Route path="3rd-party-configurations/firebase" element={<FirebaseNotification />} />
             <Route path="3rd-party-configurations/offline-payment" element={<OfflinePaymentSetup />} />
             <Route path="3rd-party-configurations/join-us" element={<JoinUsPageSetup />} />

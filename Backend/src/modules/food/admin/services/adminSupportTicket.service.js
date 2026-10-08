@@ -29,6 +29,7 @@ const USER_TICKET_INCLUDE = {
     order: {
         select: {
             id: true,
+            order_id: true,
             restaurantId: true,
             restaurant: { select: { id: true, restaurantName: true, city: true, area: true } },
         },
@@ -61,6 +62,11 @@ const mapUserTicket = (t) => {
         userId: t.userId,
         type: t.type,
         orderId: t.orderId || null,
+        // The order number the admin searches by; order issue reports carry
+        // the reason picked and the customer's photos.
+        orderDisplayId: t.order?.order_id || null,
+        reasonId: t.reasonId || '',
+        images: t.images || [],
         restaurantId: restaurant?._id || t.restaurantId || t.order?.restaurantId || null,
         issueType: t.issueType,
         description: t.description,
@@ -95,11 +101,15 @@ const mapRestaurantTicket = (t) => {
         priority: t.priority || 'medium',
         status: toStatusApi(t.status),
         adminResponse: t.adminResponse,
+        respondedAt: t.respondedAt || null,
         createdAt: t.createdAt,
         updatedAt: t.updatedAt,
         user: null,
         restaurant,
-        restaurantName: restaurant?.name || '',
+        // A deleted restaurant's tickets stay, detached, under the name they
+        // were raised with.
+        restaurantName: restaurant?.name || t.restaurantName || '',
+        restaurantDeleted: !t.restaurantId,
     };
 };
 
@@ -157,6 +167,7 @@ export async function getSupportTickets(query = {}) {
             { subject: contains },
             { description: contains },
             { orderRef: contains },
+            { restaurantName: contains },
         ];
 
         if (restaurantIds.length) {
@@ -282,6 +293,8 @@ export async function updateSupportTicket(id, body = {}) {
     if (API_STATUSES.includes(String(body.status))) data.status = toStatusColumn(body.status);
     if (typeof body.adminResponse === 'string') data.adminResponse = body.adminResponse;
     if (!Object.keys(data).length) return null;
+    // Only restaurant tickets carry the column; the restaurant app shows it.
+    if (isRestaurant && data.adminResponse) data.respondedAt = new Date();
 
     const delegate = isRestaurant ? prisma.foodRestaurantSupportTicket : prisma.foodSupportTicket;
 
@@ -321,7 +334,14 @@ export async function updateSupportTicket(id, body = {}) {
                 payload: {
                     title: 'Support Ticket Response',
                     body: message,
-                    data: { type: 'SUPPORT_RESPONSE', ticketId: String(updated.id), source },
+                    // The inbox row was written just above, with its own category.
+                    skipInbox: true,
+                    data: {
+                        type: 'SUPPORT_RESPONSE',
+                        ticketId: String(updated.id),
+                        source,
+                        ...(updated.orderId ? { orderId: String(updated.orderId) } : {}),
+                    },
                 },
             }).catch((err) => logger.error('Error sending support push notification:', err));
         }

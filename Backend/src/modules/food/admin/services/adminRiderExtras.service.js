@@ -375,8 +375,22 @@ const serializeBatch = (batch, lines = []) => {
  * batch made at the same time finds nothing left to pay; a failed line gives
  * the money back.
  */
-export async function generateRiderDisbursement(body = {}, adminId = null) {
+export async function generateRiderDisbursement(body = {}, adminId = null, { holdBackSince = null } = {}) {
     const { minAmount } = validateGenerateDisbursementDto(body);
+
+    // The scheduled run (Business Settings > Disbursement) holds back what
+    // riders earned on orders placed since the cut-off, the waiting days, so
+    // an order settled or disputed the next day is sorted out before money
+    // leaves. A run by hand pays the whole balance, as it always has.
+    const recentEarnings = async (ids, db = prisma) => {
+        if (!(holdBackSince instanceof Date)) return new Map();
+        const rows = await db.foodOrder.groupBy({
+            by: ['dispatchDeliveryPartnerId'],
+            where: { dispatchDeliveryPartnerId: { in: ids }, orderStatus: 'delivered', createdAt: { gte: holdBackSince } },
+            _sum: { riderEarning: true },
+        });
+        return new Map(rows.map((r) => [r.dispatchDeliveryPartnerId, Number(r._sum.riderEarning) || 0]));
+    };
 
     const riders = await prisma.foodDeliveryPartner.findMany({
         where: { status: 'approved' },
@@ -395,9 +409,10 @@ export async function generateRiderDisbursement(body = {}, adminId = null) {
     for (let i = 0; i < riders.length; i += 100) {
         const page = riders.slice(i, i + 100);
         const balances = await loadRiderBalances(page.map((r) => r.id));
+        const recent = await recentEarnings(page.map((r) => r.id));
 
         for (const rider of page) {
-            const owed = balances.get(rider.id)?.available || 0;
+            const owed = money(Math.max(0, (balances.get(rider.id)?.available || 0) - (recent.get(rider.id) || 0)));
             if (owed < minAmount) continue;
 
             const payee = resolveRiderPayee(rider);
@@ -412,7 +427,8 @@ export async function generateRiderDisbursement(body = {}, adminId = null) {
                     // the page was read must not be paid a second time here.
                     await lockRiderBalance(tx, rider.id);
                     const figures = (await loadRiderBalances([rider.id], tx)).get(rider.id);
-                    const value = money(figures?.available);
+                    const held = (await recentEarnings([rider.id], tx)).get(rider.id) || 0;
+                    const value = money(Math.max(0, (Number(figures?.available) || 0) - held));
                     if (value < minAmount) return 0;
 
                     const line = await tx.foodDeliveryWithdrawal.create({
@@ -596,7 +612,7 @@ export async function getDeliverymanEarningReport(query = {}) {
             SELECT o."dispatchDeliveryPartnerId" AS id,
                    COUNT(*)::int AS deliveries,
                    SUM(o."riderEarning") AS earning,
-                   SUM(CASE WHEN o."paymentMethod" = 'cash' THEN o.total ELSE 0 END) AS "codCollected"
+                   SUM(CASE WHEN o."paymentMethod" = 'cash' THEN o.total - o."walletAmount" ELSE 0 END) AS "codCollected"
               FROM food_orders o
              WHERE o."orderStatus" = 'delivered'
                AND o."dispatchDeliveryPartnerId" IS NOT NULL

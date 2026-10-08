@@ -13,6 +13,8 @@ const orderItemSchema = z.object({
     isVeg: z.boolean().optional().default(true),
     image: z.string().optional(),
     notes: z.string().optional(),
+    /** A food campaign dish: the campaign's id (priced from the campaign, never from `price`). */
+    campaignId: z.string().optional(),
     /**
      * Add-ons chosen for this line.
      *
@@ -57,6 +59,17 @@ const addressSchema = z.object({
         .optional()
 });
 
+/**
+ * Business Settings order options: delivery or takeaway, and a tip for the
+ * rider (rupees). Both optional; the service checks them against the settings.
+ */
+const orderModeFields = {
+    orderType: z.enum(['delivery', 'takeaway'], { errorMap: () => ({ message: 'Choose delivery or takeaway' }) }).optional(),
+    riderTip: z.number().min(0, 'Enter a valid tip amount').optional(),
+    /** The customer asked for the restaurant's extra packaging (when offered). */
+    extraPackaging: z.boolean().optional()
+};
+
 const pricingSchema = z.object({
     subtotal: z.number().min(0),
     tax: z.number().min(0).optional(),
@@ -64,6 +77,10 @@ const pricingSchema = z.object({
     deliveryFee: z.number().min(0).optional(),
     platformFee: z.number().min(0).optional(),
     discount: z.number().min(0).optional(),
+    /** From /calculate, for a free-delivery coupon. */
+    deliveryFeeWaived: z.number().min(0).optional(),
+    /** From /calculate: the part of `discount` food campaign dishes gave. */
+    campaignDiscount: z.number().min(0).optional(),
     total: z.number().min(0),
     currency: z.string().optional(),
     couponCode: z.string().nullable().optional()
@@ -88,7 +105,8 @@ export function validateCalculateOrderDto(body) {
             })
             .passthrough()
             .optional(),
-        scheduledAt: z.string().datetime().optional()
+        scheduledAt: z.string().datetime().optional(),
+        ...orderModeFields
     });
     const result = schema.safeParse(body);
     if (!result.success) {
@@ -103,7 +121,8 @@ export function validateCalculateOrderDto(body) {
 export function validateCreateOrderDto(body) {
     const schema = z.object({
         items: z.array(orderItemSchema).min(1, 'At least one item required'),
-        address: addressSchema,
+        // Optional for a takeaway only: the service records the restaurant's.
+        address: addressSchema.optional(),
         restaurantId: z.string().min(1, 'Restaurant id required'),
         restaurantName: z.string().optional(),
         customerName: z.string().optional(),
@@ -119,11 +138,31 @@ export function validateCreateOrderDto(body) {
         // 'cash' is accepted here regardless so the service can return the friendly
         // "not available" message when COD_ENABLED is off, rather than a generic
         // enum error that names every method.
-        paymentMethod: z.enum(['razorpay', 'razorpay_qr', 'card', 'wallet', 'cash'], {
+        // 'offline' is a bank transfer / UPI the customer makes outside the app,
+        // verified by the admin; offlinePayment says which method and carries
+        // what the customer filled in (checked against the method in the service).
+        paymentMethod: z.enum(['razorpay', 'razorpay_qr', 'card', 'wallet', 'cash', 'offline'], {
             errorMap: () => ({ message: 'Unsupported payment method' }),
         }),
+        offlinePayment: z
+            .object({
+                methodId: z.string().min(1, 'Choose an offline payment method'),
+                fields: z.record(z.union([z.string(), z.number()])).optional(),
+                note: z.string().max(300).optional(),
+            })
+            .optional(),
         zoneId: z.string().nullable().optional(),
-        scheduledAt: z.string().datetime().optional()
+        scheduledAt: z.string().datetime().optional(),
+        // Partial payment: pay part from the wallet, the rest with paymentMethod
+        // ('razorpay'/'card' or 'cash'). walletAmount is the wallet part the
+        // customer was shown; omitted, the whole balance (up to the total) is used.
+        useWallet: z.boolean().optional(),
+        walletAmount: z.number().positive().optional(),
+        ...orderModeFields
+    }).refine((value) => value.paymentMethod !== 'offline' || Boolean(value.offlinePayment), {
+        message: 'Choose an offline payment method',
+    }).refine((value) => value.orderType === 'takeaway' || Boolean(value.address), {
+        message: 'Delivery address required',
     });
     const result = schema.safeParse(body);
     if (!result.success) {

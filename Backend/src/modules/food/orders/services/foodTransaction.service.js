@@ -1,6 +1,7 @@
 import { prisma } from '../../../../config/prisma.js';
 import { toFoodTransaction } from '../order.mapper.js';
 import { resolveDiscountSplitByCoupon } from '../../shared/discountSplit.util.js';
+import { getBusinessSettings, isSubscriptionModelOn } from '../../shared/businessSettings.js';
 
 const RESTAURANT_COMMISSION_CACHE_MS = 60 * 1000;
 let restaurantCommissionRulesCache = null;
@@ -19,6 +20,14 @@ async function getActiveRestaurantCommissionRules() {
   restaurantCommissionRulesCache = list || [];
   restaurantCommissionRulesLoadedAt = now;
   return restaurantCommissionRulesCache;
+}
+
+/** The default commission as a rule, or null when there is none to charge. */
+async function getDefaultCommissionRule() {
+  const info = await getBusinessSettings('business_info');
+  const value = Number(info.defaultCommissionPercent) || 0;
+  if (!info.commissionModel || value <= 0) return null;
+  return { commissionType: 'percentage', commissionValue: value, isDefault: true };
 }
 
 /**
@@ -167,7 +176,11 @@ export async function getRestaurantCommissionSnapshot(orderDoc) {
   if (!restaurantIdRaw) return empty;
   const restaurantId = String(restaurantIdRaw);
 
-  const billingMode = await getRestaurantBillingMode(restaurantId);
+  let billingMode = await getRestaurantBillingMode(restaurantId);
+  // Business Settings > Business info: with the subscription business model
+  // off there are no plans, so a restaurant set to subscription is on
+  // commission like everyone else.
+  if (billingMode === 'subscription' && !(await isSubscriptionModelOn())) billingMode = 'commission_overall';
 
   // The restaurant pays a monthly plan instead. Charging commission as well
   // would bill them twice for the same order.
@@ -176,7 +189,9 @@ export async function getRestaurantCommissionSnapshot(orderDoc) {
   }
 
   const rules = await getActiveRestaurantCommissionRules();
-  const rule = rules.find((r) => String(r.restaurantId) === restaurantId) || null;
+  // A restaurant with no commission row of its own pays the platform default
+  // (Business Settings > Business info), unless the commission model is off.
+  const rule = rules.find((r) => String(r.restaurantId) === restaurantId) || (await getDefaultCommissionRule());
 
   if (billingMode === 'commission_dish') {
     const lines = orderLines(orderDoc);
@@ -211,7 +226,9 @@ export async function createInitialTransaction(order) {
   }));
 
   const totalCustomerPaid = Number(order.total) || 0;
+  // riderEarning includes the customer's tip, which is the rider's alone.
   const riderShare = Number(order.riderEarning) || 0;
+  const riderTip = Math.min(riderShare, Number(order.riderTip) || 0);
 
   // Prefer the commission already computed and stored on the order (source of truth
   // for this order); fall back to the rule snapshot for older orders.
@@ -230,21 +247,34 @@ export async function createInitialTransaction(order) {
   const tax = Number(order.tax) || 0;
 
   let restaurantNet = subtotal + packagingFee - restaurantCommission;
+  // The tip comes in with the order and goes straight out in riderShare, so
+  // it nets to nothing for the platform.
   let platformNetProfit =
-    platformFee + deliveryFee + deliveryFeeGst + restaurantCommission - riderShare;
+    platformFee + deliveryFee + deliveryFeeGst + restaurantCommission + riderTip - riderShare;
   let adminDiscountShare = 0;
   let restaurantDiscountShare = 0;
   let discountAdminBearPercentage = 0;
   let discountRestaurantBearPercentage = 0;
 
   // Discount attribution goes through the shared split util (single source of truth).
+  // The new-customer discount (Business Settings) and the food campaign
+  // discount are part of `discount` and are the platform's alone; only the
+  // rest is the coupon's to split.
+  const campaignDiscount = Math.min(discount, Number(order.campaignDiscount) || 0);
+  const newCustomerDiscount = Math.min(discount - campaignDiscount, Number(order.newCustomerDiscount) || 0);
+  const couponDiscount = Math.round((discount - newCustomerDiscount - campaignDiscount) * 100) / 100;
   const couponCode = order.couponCode;
-  if (discount > 0 && couponCode) {
-    const split = await resolveDiscountSplitByCoupon({ couponCode, discount });
+  if (couponDiscount > 0 && couponCode) {
+    const split = await resolveDiscountSplitByCoupon({ couponCode, discount: couponDiscount });
     adminDiscountShare = split.adminDiscountShare;
     restaurantDiscountShare = split.restaurantDiscountShare;
     discountAdminBearPercentage = split.adminBearPercentage;
     discountRestaurantBearPercentage = split.restaurantBearPercentage;
+  }
+  const platformOnlyDiscount = newCustomerDiscount + campaignDiscount;
+  if (platformOnlyDiscount > 0) {
+    adminDiscountShare = Math.round((adminDiscountShare + platformOnlyDiscount) * 100) / 100;
+    if (!couponDiscount) discountAdminBearPercentage = 100;
   }
   restaurantNet -= restaurantDiscountShare;
   platformNetProfit -= adminDiscountShare;
@@ -265,7 +295,9 @@ export async function createInitialTransaction(order) {
 
       paymentStatusLabel: String(order.paymentStatus || 'cod_pending'),
       amountDue: Number(order.paymentAmountDue ?? totalCustomerPaid) || 0,
-      gatewayProvider: 'razorpay',
+      // Partial payment: the wallet part of totalCustomerPaid (0 otherwise).
+      walletAmount: order.paymentMethod === 'wallet' ? 0 : Number(order.walletAmount) || 0,
+      gatewayProvider: order.paymentMethod === 'offline' ? 'offline' : 'razorpay',
       razorpayOrderId: order.razorpayOrderId || null,
       razorpayPaymentId: order.razorpayPaymentId || null,
       razorpaySignature: order.razorpaySignature || null,
@@ -287,6 +319,7 @@ export async function createInitialTransaction(order) {
       restaurantShare: Math.max(0, restaurantNet),
       commissionAmount: restaurantCommission,
       riderShare,
+      riderTip,
       platformNetProfit,
       taxAmount: tax,
       adminDiscountShare,

@@ -9,8 +9,13 @@ import {
 import { fetchDrivingRoute } from '../utils/googleMaps.js';
 import { attachOutletTimingsToRestaurants } from '../../restaurant/services/outletTimings.service.js';
 import { getRestaurantAvailabilityStatus } from '../../restaurant/helpers/restaurantAvailability.helper.js';
-import { resolveOrderCartItems } from '../helpers/order-cart-items.helper.js';
+import { cartCampaignDiscount, resolveCartWithCampaigns } from '../../campaigns/campaignCart.js';
 import { applyFeeSwitches } from './feeSwitches.js';
+import { evaluateCoupon, requiresFirstOrder, USED_ORDER_WHERE } from './couponRules.js';
+import { additionalChargeFor, extraPackagingFee, extraPackagingOffer, freeDeliveryOverWaiver, newCustomerDiscount } from './businessRules.js';
+import { resolveOrderType, cleanRiderTip } from './orderModes.js';
+import { getBusinessSettings } from '../../shared/businessSettings.js';
+import { resolveOrderZoneId, getZonePaymentOptions } from '../../shared/zonePayment.js';
 
 const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
 
@@ -76,6 +81,15 @@ export async function loadRestaurantForOrdering(restaurantId) {
       openingTime: true,
       closingTime: true,
       openDays: true,
+      takeawayEnabled: true,
+      extraPackagingEnabled: true,
+      extraPackagingAmount: true,
+      extraPackagingRequired: true,
+      addressLine1: true,
+      area: true,
+      city: true,
+      state: true,
+      pincode: true,
     },
   });
 
@@ -413,6 +427,34 @@ async function resolveDeliveryAddress(userId, dto) {
   return chosen || dto.deliveryAddress;
 }
 
+/**
+ * Look a code up and decide whether it applies (see couponRules.js). Loads the
+ * two counts the rules need -- the customer's prior orders, for first-order
+ * coupons, and their uses of this coupon, for the per-customer limit -- only
+ * when the coupon has that rule.
+ *
+ * Uses are counted from orders (food_orders.couponId), not from a running
+ * counter, so a cancelled order or a failed payment gives the use back.
+ */
+export async function applyCouponCode(code, ctx = {}) {
+  const offer = await prisma.foodOffer.findUnique({ where: { couponCode: String(code) } });
+  if (!offer) return { ...evaluateCoupon(null, ctx), offer: null };
+
+  const userId = isId(ctx.userId) ? String(ctx.userId) : null;
+  let priorOrders = 0;
+  let userUses = 0;
+  if (userId && requiresFirstOrder(offer)) {
+    priorOrders = await prisma.foodOrder.count({ where: { userId, ...USED_ORDER_WHERE } });
+  }
+  if (userId && Number(offer.perUserLimit) > 0) {
+    userUses = await prisma.foodOrder.count({
+      where: { userId, couponId: offer.id, ...USED_ORDER_WHERE },
+    });
+  }
+
+  return { ...evaluateCoupon(offer, { ...ctx, priorOrders, userUses }), offer };
+}
+
 export async function calculateOrderPricing(userId, dto, options = {}) {
   const at = options.at instanceof Date ? options.at : new Date();
   const restaurant =
@@ -426,7 +468,8 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
     await resolveDeliveryAddress(userId, dto),
   );
 
-  const resolvedItems = await resolveOrderCartItems(dto.restaurantId, dto.items);
+  // Menu lines and food campaign dishes (campaignCart.js), priced server-side.
+  const resolvedItems = await resolveCartWithCampaigns(dto.restaurantId, dto.items, at);
   const items = resolvedItems.map((item) => ({
     ...item,
     price: Number(item.price) || 0,
@@ -438,18 +481,41 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
       0,
     ),
   );
+  // Platform-funded; part of `discount`. Coupons and the other offers are
+  // worked out on what is left after it.
+  const campaignDiscount = cartCampaignDiscount(items);
+  const offerSubtotal = round2(subtotal - campaignDiscount);
 
   // Zone comes from the restaurant, matching how an order records its zone
   // (order.service.js falls back to restaurant.zoneId), so the quote a
   // customer sees and the price they are charged resolve the same fee row.
-  const pricingZoneId = dto?.zoneId || restaurant?.zoneId || null;
+  // A restaurant with no zone falls back to the default zone, as createOrder does.
+  const pricingZoneId = await resolveOrderZoneId(dto?.zoneId, restaurant);
   const feeSettings = await loadActiveFeeSettings(pricingZoneId);
 
-  const packagingFee = 0;
-  const platformFee = Number(feeSettings.platformFee || 0);
+  // Business Settings: delivery or takeaway, and a tip for the rider. Neither
+  // sent = a home delivery with no tip, exactly as before they existed.
+  const [orderRules, customerRules, riderRules, infoRules] = await Promise.all([
+    getBusinessSettings('business_order'),
+    getBusinessSettings('business_customer'),
+    getBusinessSettings('business_deliveryman'),
+    getBusinessSettings('business_info'),
+  ]);
 
-  let distanceKm = await getDeliveryDistanceKm(restaurant, deliveryAddress);
-  const straightLineKm = calculateDistanceKm(restaurant, deliveryAddress);
+  // Extra packaging (the restaurant's, when the admin allows it) and the
+  // admin's flat additional charge. Both 0 while their switches are off.
+  // The additional charge is part of platformFee, as the Quick Mode
+  // surcharge is, so every split and report already counts it.
+  const packagingFee = extraPackagingFee(orderRules, restaurant, dto.extraPackaging);
+  const additional = additionalChargeFor(infoRules);
+  const platformFee = round2(Number(feeSettings.platformFee || 0) + additional.amount);
+  const orderType = resolveOrderType(dto.orderType, { orderRules, restaurant });
+  const isTakeaway = orderType === 'takeaway';
+  const riderTip = cleanRiderTip(dto.riderTip ?? dto.tip, { tipsEnabled: riderRules.tipsEnabled, orderType });
+
+  // A takeaway is collected at the restaurant: no trip, so no distance and no fee.
+  let distanceKm = isTakeaway ? null : await getDeliveryDistanceKm(restaurant, deliveryAddress);
+  const straightLineKm = isTakeaway ? null : calculateDistanceKm(restaurant, deliveryAddress);
 
   // Nothing stopped a customer ordering from a restaurant on the other side of
   // the country — one live order ran 999 km from a Punjab kitchen to an Indore
@@ -468,98 +534,81 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
     );
   }
 
-  const deliveryFeeResult = resolveUserDeliveryFee(feeSettings, { subtotal, distanceKm });
-  const deliveryFee = round2(deliveryFeeResult.deliveryFee);
+  const deliveryFeeResult = isTakeaway
+    ? { deliveryFee: 0, distanceKm: null, source: 'takeaway', breakdown: null }
+    : resolveUserDeliveryFee(feeSettings, { subtotal, distanceKm });
+  const originalDeliveryFee = round2(deliveryFeeResult.deliveryFee);
   distanceKm = deliveryFeeResult.distanceKm ?? distanceKm;
 
-  let discount = 0;
-  let appliedCoupon = null;
+  const deliveryFeeGstRate = resolveDeliveryFeeGstRate(feeSettings);
+  const originalDeliveryFeeGst = computeDeliveryFeeGst(originalDeliveryFee, deliveryFeeGstRate);
+
   const codeRaw = dto.couponCode
     ? String(dto.couponCode).trim().toUpperCase()
     : "";
+  const coupon = codeRaw
+    ? await applyCouponCode(codeRaw, {
+        userId,
+        restaurantId: dto.restaurantId,
+        zoneId: pricingZoneId,
+        subtotal: offerSubtotal,
+        deliveryFee: originalDeliveryFee,
+        deliveryFeeGst: originalDeliveryFeeGst,
+        // A scheduled order is checked against the time it is for.
+        now: at > new Date() ? at : new Date(),
+      })
+    : null;
 
-  if (codeRaw) {
-    const now = new Date();
-    const offer = await prisma.foodOffer.findUnique({ where: { couponCode: codeRaw } });
-    if (offer) {
-      const offerEnd = offer.endDate ? new Date(offer.endDate) : null;
-      if (offerEnd && offerEnd.getHours() === 0 && offerEnd.getMinutes() === 0) {
-        offerEnd.setHours(23, 59, 59, 999);
-      }
-      const endOk = !offerEnd || now <= offerEnd;
-      const startOk = !offer.startDate || now >= new Date(offer.startDate);
-      const statusOk = offer.status === "active" && offer.showInCart !== false;
-      const selectedRestaurantIds = Array.isArray(offer.restaurantIds) && offer.restaurantIds.length > 0
-        ? offer.restaurantIds
-        : [offer.restaurantId].filter(Boolean);
-      const scopeOk =
-        offer.restaurantScope !== "selected" ||
-        selectedRestaurantIds.some((id) => String(id) === String(dto.restaurantId || ""));
-      const minOk = subtotal >= (Number(offer.minOrderValue) || 0);
-      let usageOk = true;
-      if (
-        Number(offer.usageLimit) > 0 &&
-        Number(offer.usedCount || 0) >= Number(offer.usageLimit)
-      ) {
-        usageOk = false;
-      }
+  const couponDiscount = coupon?.ok ? coupon.discount : 0;
+  // A free-delivery coupon waives the delivery fee and the GST charged on it.
+  // The rider's pay is worked out from the distance bands, not from this fee,
+  // so it is unchanged; the platform absorbs the waived amount.
+  const deliveryFeeWaived = coupon?.ok ? coupon.deliveryFeeWaived : 0;
 
-      let perUserOk = true;
-      if (isId(userId) && Number(offer.perUserLimit) > 0) {
-        const usage = await prisma.foodOfferUsage.findUnique({
-          where: { offerId_userId: { offerId: offer.id, userId: String(userId) } },
-        });
-        if (usage && Number(usage.count) >= Number(offer.perUserLimit)) {
-          perUserOk = false;
-        }
-      }
-
-      // A coupon issued to named customers is not usable by anyone else, even
-      // if they somehow learn the code -- which is the whole point of issuing
-      // one. An anonymous cart fails this too: without a user there is nobody
-      // to match against the list.
-      let audienceOk = true;
-      if (offer.customerScope === 'specific') {
-        const allowList = Array.isArray(offer.customerIds) ? offer.customerIds.map(String) : [];
-        audienceOk = isId(userId) && allowList.includes(String(userId));
-      }
-
-      let firstOrderOk = true;
-      // Both flags mean the same thing — the customer must have no prior orders —
-      // so the count is fetched once instead of twice.
-      if (isId(userId) && (offer.customerScope === 'first_time' || offer.isFirstOrderOnly === true)) {
-        const priorOrders = await prisma.foodOrder.count({ where: { userId: String(userId) } });
-        firstOrderOk = priorOrders === 0;
-      }
-
-      const allowed =
-        statusOk &&
-        startOk &&
-        endOk &&
-        scopeOk &&
-        minOk &&
-        usageOk &&
-        perUserOk &&
-        audienceOk &&
-        firstOrderOk;
-
-      if (allowed) {
-        if (offer.discountType === "percentage") {
-          const raw = subtotal * (Number(offer.discountValue) / 100);
-          const capped = Number(offer.maxDiscount)
-            ? Math.min(raw, Number(offer.maxDiscount))
-            : raw;
-          discount = Math.max(0, Math.min(subtotal, Math.floor(capped)));
-        } else {
-          discount = Math.max(
-            0,
-            Math.min(subtotal, Math.floor(Number(offer.discountValue) || 0)),
-          );
-        }
-        appliedCoupon = { code: codeRaw, discount };
-      }
-    }
+  // Business Settings: free delivery over an item total, and a discount on a
+  // new customer's first order. Both are the platform's cost, like the coupon
+  // waiver above; neither stacks with a coupon doing the same thing.
+  const freeDeliveryWaived = freeDeliveryOverWaiver(orderRules.freeDelivery, {
+    subtotal: offerSubtotal,
+    deliveryFee: originalDeliveryFee,
+    deliveryFeeGst: originalDeliveryFeeGst,
+    couponWaived: deliveryFeeWaived,
+  });
+  let firstOrderDiscount = 0;
+  const ncRule = customerRules.newCustomerDiscount;
+  if (ncRule.enabled && isId(userId) && !(couponDiscount > 0)) {
+    const [priorOrders, user] = await Promise.all([
+      prisma.foodOrder.count({ where: { userId: String(userId), ...USED_ORDER_WHERE } }),
+      prisma.foodUser.findUnique({ where: { id: String(userId) }, select: { createdAt: true } }),
+    ]);
+    firstOrderDiscount = newCustomerDiscount(ncRule, {
+      subtotal: offerSubtotal,
+      priorOrders,
+      accountCreatedAt: user?.createdAt,
+      couponDiscount,
+    });
   }
+  // `discount` is everything taken off the items: the coupon's and the
+  // new-customer discount's (they never both apply), and the campaigns'.
+  const discount = round2(Math.min(subtotal, campaignDiscount + couponDiscount + firstOrderDiscount));
+
+  const feeWaived = deliveryFeeWaived > 0 || freeDeliveryWaived > 0;
+  const deliveryFee = feeWaived ? 0 : originalDeliveryFee;
+  const deliveryFeeGst = feeWaived ? 0 : originalDeliveryFeeGst;
+
+  const appliedCoupon = coupon?.ok
+    ? {
+        code: codeRaw,
+        discount: couponDiscount,
+        couponId: coupon.offer.id,
+        title: coupon.offer.title || "",
+        couponType: coupon.couponType,
+        freeDelivery: coupon.couponType === "free_delivery",
+        deliveryFeeWaived,
+        // What the customer saves in total, whichever way the coupon works.
+        savings: round2(couponDiscount + deliveryFeeWaived),
+      }
+    : null;
 
   // GST is charged on the post-discount item value (discount is already clamped to <= subtotal).
   const gstRate = Number(feeSettings.gstRate || 0);
@@ -568,24 +617,30 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
       ? Math.round(Math.max(0, subtotal - discount) * (gstRate / 100))
       : 0;
 
-  const deliveryFeeGstRate = resolveDeliveryFeeGstRate(feeSettings);
-  const deliveryFeeGst = computeDeliveryFeeGst(deliveryFee, deliveryFeeGstRate);
-
+  // The tip is added after the discount: no coupon or waiver ever reduces it.
   const total = round2(
     Math.max(
       0,
       subtotal + packagingFee + deliveryFee + deliveryFeeGst + platformFee + tax - discount,
-    ),
+    ) + riderTip,
   );
 
   const basePricing = {
     subtotal,
     tax,
     packagingFee,
+    /** packagingFee is the restaurant's extra packaging charge; whether the customer may opt out. */
+    extraPackaging: extraPackagingOffer(orderRules, restaurant, packagingFee),
     deliveryFee,
     deliveryFeeGst,
     platformFee,
+    /** Part of platformFee: the admin's flat charge, shown as its own line named additionalChargeName. */
+    additionalCharge: additional.amount,
+    additionalChargeName: additional.name,
     discount,
+    /** Tip for the rider, part of `total`; all of it is the rider's. */
+    riderTip,
+    orderType,
     total,
     // The rates behind `tax` and `deliveryFeeGst`, so the apps can label the
     // bill rows ("GST (5%)") instead of showing a bare rupee figure.
@@ -594,6 +649,20 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
     currency: "INR",
     couponCode: appliedCoupon?.code || codeRaw || null,
     appliedCoupon,
+    // Why a code that was sent did not apply, worded for the customer. Null
+    // when no code was sent or it applied.
+    couponError: coupon && !coupon.ok ? coupon.message : null,
+    couponErrorReason: coupon && !coupon.ok ? coupon.reason : null,
+    couponId: appliedCoupon?.couponId || null,
+    deliveryFeeWaived,
+    /** Delivery fee + GST waived because the item total reached "free delivery over". */
+    freeDeliveryWaived,
+    freeDeliveryOver: orderRules.freeDelivery.enabled ? orderRules.freeDelivery.minSubtotal : null,
+    /** Part of `discount`: the first-order discount for new customers. */
+    newCustomerDiscount: firstOrderDiscount,
+    /** Part of `discount`: what food campaign dishes took off (platform-funded). */
+    campaignDiscount,
+    originalDeliveryFee,
     distanceKm: Number.isFinite(distanceKm) ? Number(distanceKm.toFixed(2)) : null,
     roadDistanceKm: Number.isFinite(distanceKm) ? Number(distanceKm.toFixed(2)) : null,
     straightLineDistanceKm: Number.isFinite(straightLineKm)
@@ -604,7 +673,8 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
 
   const pricing = applyDeliveryModePricing(
     basePricing,
-    dto.deliveryMode,
+    // Quick Mode is a faster rider; a takeaway has none.
+    isTakeaway ? 'basic' : dto.deliveryMode,
     Number(feeSettings.quickDeliveryFee) || 0,
   );
 
@@ -615,7 +685,8 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
       if (!resolved) return null;
 
       const previousPrice = Number(rawItem?.price);
-      const nextPrice = Number(resolved.price);
+      // A campaign dish is shown at its campaign price.
+      const nextPrice = Number(resolved.campaignPrice ?? resolved.price);
       if (!Number.isFinite(previousPrice) || previousPrice === nextPrice) return null;
 
       return {
@@ -630,12 +701,18 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
   return {
     items,
     priceChanges,
+    // Which of cash / online the order's zone accepts, so checkout can hide
+    // the methods createOrder would refuse.
+    paymentOptions: await getZonePaymentOptions(pricingZoneId),
     pricing: {
       ...pricing,
       deliveryFeeBreakdown: {
         source: deliveryFeeResult.source,
         distanceKm: Number.isFinite(distanceKm) ? Number(distanceKm.toFixed(2)) : null,
         deliveryFee,
+        originalDeliveryFee,
+        deliveryFeeWaived,
+        freeDeliveryWaived,
         message: Number.isFinite(distanceKm)
           ? `Distance: ${Number(distanceKm).toFixed(1)} km`
           : null,

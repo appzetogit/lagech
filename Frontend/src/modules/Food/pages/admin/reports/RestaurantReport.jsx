@@ -1,527 +1,270 @@
-﻿import { useState, useMemo, useEffect } from "react"
-import { Search, Download, ChevronDown, Filter, Briefcase, RefreshCw, Settings, ArrowUpDown, FileText, FileSpreadsheet, Code, Loader2, Star, Calendar } from "@food/components/admin/theme/icons"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
-import { exportReportsToCSV, exportReportsToExcel, exportReportsToPDF, exportReportsToJSON } from "@food/components/admin/reports/reportsExportUtils"
-import { adminAPI } from "@food/api"
+import { useEffect, useState } from "react"
+import { Store, Loader2, Search } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
-const debugLog = (...args) => {}
-const debugWarn = (...args) => {}
-const debugError = (...args) => {}
+import { adminOrderReportsAPI, saveDownload } from "@food/api/adminOrderReports"
+import { money, PRESETS, rangeFor, useFilterLists, ExportMenu, Pager, blobErrorMessage } from "./OrderMoneyReport"
 
+/**
+ * Restaurant-wise report, as the old panel's Store-wise report: a Summary tab
+ * (orders and completion / ongoing / cancellation rates), a Sales tab (the
+ * money on delivered orders, the same restaurant net as payouts) and an Order
+ * tab (orders by status and payment method). All aggregated on the server.
+ */
+
+const pct = (v) => `${Number(v || 0).toFixed(2)}%`
+const int = (v) => Number(v || 0).toLocaleString("en-IN")
+
+/** [key, label, format, hint] */
+const TABS = {
+  summary: {
+    label: "Summary Report",
+    columns: [
+      ["totalOrders", "Total order", int, "Orders placed in the period (abandoned checkouts excluded)"],
+      ["deliveredOrders", "Total delivered order", int],
+      ["totalAmount", "Total amount", money, "What customers paid on delivered orders"],
+      ["completionRate", "Completion rate", pct, "Delivered ÷ total"],
+      ["ongoingRate", "Ongoing rate", pct, "Not yet delivered or cancelled ÷ total"],
+      ["cancellationRate", "Cancelation rate", pct, "Cancelled ÷ total"],
+      ["refundRequests", "Refund request", int, "Orders with a refund pending, processed or failed"],
+    ],
+  },
+  sales: {
+    label: "Sales Report",
+    columns: [
+      ["deliveredOrders", "Delivered orders", int],
+      ["totalItemAmount", "Total item amount", money, "Food subtotal"],
+      ["extraPackagingAmount", "Packaging", money],
+      ["couponDiscount", "Coupon discount", money],
+      ["adminDiscount", "Admin discount", money, "Platform-funded share"],
+      ["storeDiscount", "Restaurant discount", money, "Restaurant-funded share"],
+      ["vatTax", "Vat/tax", money, "GST on the food"],
+      ["orderAmount", "Order amount", money, "What customers paid"],
+      ["adminCommission", "Admin commission", money],
+      ["storeNetIncome", "Restaurant net income", money, "Owed to the restaurant — same figure as payouts and the earning report"],
+    ],
+  },
+  order: {
+    label: "Order Report",
+    columns: [
+      ["totalOrders", "Total orders", int],
+      ["pendingOrders", "Pending", int],
+      ["processingOrders", "Processing", int, "Accepted, preparing or ready"],
+      ["onTheWayOrders", "On the way", int],
+      ["deliveredOrders", "Delivered", int],
+      ["cancelledOrders", "Cancelled", int],
+      ["refundedOrders", "Refunded", int],
+      ["cashOrders", "Cash", int],
+      ["onlineOrders", "Online", int],
+      ["walletOrders", "Wallet", int],
+      ["offlineOrders", "Offline", int],
+      ["totalAmount", "Total amount", money, "All orders, any status"],
+      ["deliveredAmount", "Delivered amount", money],
+    ],
+  },
+}
+
+const CARDS = {
+  summary: (t) => [
+    ["Restaurants", int(t.restaurants), `${int(t.restaurantsWithSales)} with deliveries`],
+    ["Total orders", int(t.totalOrders)],
+    ["Delivered orders", int(t.deliveredOrders), `Completion ${pct(t.completionRate)}`],
+    ["Total amount", money(t.totalAmount), "Delivered orders"],
+    ["Ongoing", pct(t.ongoingRate), `${int(t.ongoingOrders)} orders`],
+    ["Cancelled", pct(t.cancellationRate), `${int(t.cancelledOrders)} orders · ${int(t.refundRequests)} refund requests`],
+  ],
+  sales: (t) => [
+    ["Delivered orders", int(t.deliveredOrders)],
+    ["Total item amount", money(t.totalItemAmount)],
+    ["Order amount", money(t.orderAmount)],
+    ["Admin commission", money(t.adminCommission)],
+    ["Discount given", money(t.couponDiscount), `Admin ${money(t.adminDiscount)} · Restaurant ${money(t.storeDiscount)}`],
+    ["Restaurant net income", money(t.storeNetIncome)],
+  ],
+  order: (t) => [
+    ["Total orders", int(t.totalOrders), money(t.totalAmount)],
+    ["Delivered", int(t.deliveredOrders), money(t.deliveredAmount)],
+    ["In progress", int(t.pendingOrders + t.processingOrders + t.onTheWayOrders)],
+    ["Cancelled", int(t.cancelledOrders), `${int(t.refundedOrders)} refunded`],
+    ["Cash / Online", `${int(t.cashOrders)} / ${int(t.onlineOrders)}`],
+    ["Wallet / Offline", `${int(t.walletOrders)} / ${int(t.offlineOrders)}`],
+  ],
+}
+
+const th = "px-3 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-700 whitespace-nowrap"
+const td = "px-3 py-2.5 text-sm text-slate-700 whitespace-nowrap"
+const input = "rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white"
+const labelCls = "block text-[11px] font-semibold uppercase tracking-wide text-slate-500"
 
 export default function RestaurantReport() {
-  const [searchQuery, setSearchQuery] = useState("")
-  const [restaurants, setRestaurants] = useState([])
+  const { zones } = useFilterLists()
+  const [tab, setTab] = useState("summary")
+  const [range, setRange] = useState(rangeFor(29))
+  const [zoneId, setZoneId] = useState("")
+  const [searchInput, setSearchInput] = useState("")
+  const [search, setSearch] = useState("")
+  const [page, setPage] = useState(1)
+  const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [filters, setFilters] = useState({
-    zone: "All Zones",
-    all: "All",
-    type: "All types",
-    time: "All Time",
-    fromDate: "",
-    toDate: "",
-  })
-  const [zones, setZones] = useState([])
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [exporting, setExporting] = useState(false)
 
-  // Fetch zones for filter dropdown
+  const params = { tab, from: range.from, to: range.to, zoneId: zoneId || undefined, search: search || undefined }
+
   useEffect(() => {
-    const fetchZones = async () => {
-      try {
-        const response = await adminAPI.getZones({ limit: 1000 })
-        if (response?.data?.success && response.data.data?.zones) {
-          setZones(response.data.data.zones)
-        }
-      } catch (error) {
-        debugError("Error fetching zones:", error)
-      }
+    let alive = true
+    setLoading(true)
+    adminOrderReportsAPI
+      .getRestaurantWiseReport({ ...params, page, limit: 25 })
+      .then((res) => alive && setData(res?.data?.data || null))
+      .catch((err) => alive && toast.error(err?.response?.data?.message || "Failed to load the restaurant report"))
+      .finally(() => alive && setLoading(false))
+    return () => {
+      alive = false
     }
-    fetchZones()
-  }, [])
+  }, [tab, range.from, range.to, zoneId, search, page])
 
-  // Fetch restaurant report data
-  useEffect(() => {
-    const fetchRestaurantReport = async () => {
-      try {
-        setLoading(true)
-        
-        const params = {
-          zone: filters.zone !== "All Zones" ? filters.zone : undefined,
-          all: filters.all !== "All" ? filters.all : undefined,
-          type: filters.type !== "All types" ? filters.type : undefined,
-          time: filters.time !== "All Time" && filters.time !== "Custom Range" ? filters.time : undefined,
-          fromDate: filters.time === "Custom Range" && filters.fromDate
-            ? new Date(`${filters.fromDate}T00:00:00`).toISOString()
-            : undefined,
-          toDate: filters.time === "Custom Range" && filters.toDate
-            ? new Date(`${filters.toDate}T23:59:59`).toISOString()
-            : undefined,
-          search: searchQuery || undefined
-        }
-
-        const response = await adminAPI.getRestaurantReport(params)
-
-        if (response?.data?.success && response.data.data) {
-          setRestaurants(response.data.data.restaurants || [])
-        } else {
-          setRestaurants([])
-          if (response?.data?.message) {
-            toast.error(response.data.message)
-          }
-        }
-      } catch (error) {
-        debugError("Error fetching restaurant report:", error)
-        toast.error("Failed to fetch restaurant report")
-        setRestaurants([])
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    fetchRestaurantReport()
-  }, [filters, searchQuery])
-
-  const filteredRestaurants = useMemo(() => {
-    return restaurants // Backend already filters, so just return restaurants
-  }, [restaurants])
-
-  const totalRestaurants = filteredRestaurants.length
-
-  const handleReset = () => {
-    setFilters({
-      zone: "All Zones",
-      all: "All",
-      type: "All types",
-      time: "All Time",
-      fromDate: "",
-      toDate: "",
-    })
-    setSearchQuery("")
+  const reset = (fn) => (value) => {
+    fn(value)
+    setPage(1)
   }
 
-  const handleExport = (format) => {
-    if (filteredRestaurants.length === 0) {
-      alert("No data to export")
-      return
-    }
-    const headers = [
-      { key: "sl", label: "SL" },
-      { key: "restaurantName", label: "Restaurant Name" },
-      { key: "totalFood", label: "Total Food" },
-      { key: "totalOrder", label: "Total Order" },
-      { key: "totalOrderAmount", label: "Total Order Amount" },
-      { key: "totalDiscountGiven", label: "Total Discount Given" },
-      { key: "totalAdminCommission", label: "Total Admin Commission" },
-      { key: "totalVATTAX", label: "Total VAT/TAX" },
-      { key: "averageRatings", label: "Average Ratings" },
-    ]
-    switch (format) {
-      case "csv": exportReportsToCSV(filteredRestaurants, headers, "restaurant_report"); break
-      case "excel": exportReportsToExcel(filteredRestaurants, headers, "restaurant_report"); break
-      case "pdf": exportReportsToPDF(filteredRestaurants, headers, "restaurant_report", "Restaurant Report"); break
-      case "json": exportReportsToJSON(filteredRestaurants, "restaurant_report"); break
+  const runExport = async (format) => {
+    try {
+      setExporting(true)
+      const res = await adminOrderReportsAPI.exportRestaurantWiseReport({ ...params, format })
+      saveDownload(res, `restaurant-wise-${tab}.${format}`)
+    } catch (err) {
+      toast.error(await blobErrorMessage(err, "Export failed"))
+    } finally {
+      setExporting(false)
     }
   }
 
-  const handleFilterApply = () => {
-    // Filters are already applied via useMemo
-  }
-
-  const activeFiltersCount = (filters.zone !== "All Zones" ? 1 : 0) + (filters.all !== "All" ? 1 : 0) + (filters.type !== "All types" ? 1 : 0) + (filters.time !== "All Time" ? 1 : 0)
-
-  const renderStars = (rating, reviews) => {
-    if (!rating || rating === 0) {
-      return <span className="text-sm text-slate-400">No ratings</span>
-    }
-    // Convert 1-10 rating to 1-5 scale if needed
-    const normalizedRating = rating > 5 ? rating / 2 : rating
-    const fullStars = Math.floor(normalizedRating)
-    const hasHalfStar = (normalizedRating % 1) >= 0.5
-    const emptyStars = 5 - fullStars - (hasHalfStar ? 1 : 0)
-    return (
-      <span className="flex items-center gap-1">
-        <span className="text-yellow-500 font-bold">{fullStars > 0 ? "★".repeat(fullStars) : ''}{hasHalfStar ? "★" : ''}{emptyStars > 0 ? "☆".repeat(emptyStars) : ''}</span>
-        <span className="text-sm text-slate-500">({reviews || 0})</span>
-      </span>
-    )
-  }
-
-  if (loading) {
-    return (
-      <div className="p-4 lg:p-6 bg-slate-50 min-h-screen flex items-center justify-center">
-        <div className="flex flex-col items-center gap-4">
-          <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
-          <p className="text-gray-600">Loading restaurant report...</p>
-        </div>
-      </div>
-    )
-  }
+  // A response for the previous tab can still be on screen while the new one loads.
+  const current = data?.tab === tab ? data : null
+  const rows = current?.restaurants || []
+  const columns = TABS[tab].columns
 
   return (
     <div className="p-4 lg:p-6 bg-slate-50 min-h-screen">
-      <div className="max-w-7xl mx-auto">
-        {/* Page Header */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
+      <div className="max-w-[1600px] mx-auto space-y-5">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-slate-700 flex items-center justify-center">
-              <Briefcase className="w-5 h-5 text-white" />
+            <Store className="w-5 h-5 text-teal-700" />
+            <h1 className="text-2xl font-bold text-slate-900">Restaurant Wise Report</h1>
+          </div>
+          <p className="text-sm text-slate-600 mt-1 max-w-4xl">
+            Per restaurant, for orders placed in the period. Money is counted on delivered orders only; the restaurant net income is the same figure the payouts and the Restaurant Earning report use.
+          </p>
+          <div className="mt-4 flex flex-wrap items-end gap-3">
+            <label className="space-y-1">
+              <span className={labelCls}>From</span>
+              <input type="date" className={input} value={range.from} onChange={(e) => reset(setRange)({ ...range, from: e.target.value })} />
+            </label>
+            <label className="space-y-1">
+              <span className={labelCls}>To</span>
+              <input type="date" className={input} value={range.to} onChange={(e) => reset(setRange)({ ...range, to: e.target.value })} />
+            </label>
+            <div className="flex flex-wrap gap-1.5">
+              {PRESETS.map(([label, preset]) => (
+                <button key={label} type="button" onClick={() => reset(setRange)(rangeFor(preset))} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100">
+                  {label}
+                </button>
+              ))}
             </div>
-            <h1 className="text-2xl font-bold text-slate-900">Restaurant Report</h1>
+            <label className="space-y-1">
+              <span className={labelCls}>Zone</span>
+              <select className={input} value={zoneId} onChange={(e) => reset(setZoneId)(e.target.value)}>
+                <option value="">All zones</option>
+                {zones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
+              </select>
+            </label>
           </div>
         </div>
 
-        {/* Search Data Section */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
-          <h3 className="text-sm font-semibold text-slate-700 mb-4">Search Data</h3>
-          <div className="flex flex-col lg:flex-row lg:items-end gap-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 flex-1">
-              <div className="relative">
-                <label className="block text-sm font-semibold text-slate-700 mb-2">
-                  Zone
-                </label>
-                <select
-                  value={filters.zone}
-                  onChange={(e) => setFilters(prev => ({ ...prev, zone: e.target.value }))}
-                  className="w-full px-4 py-2.5 pr-8 text-sm rounded-lg border border-slate-300 bg-white text-slate-700 appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="All Zones">All Zones</option>
-                  {zones.map(zone => (
-                    <option key={zone._id} value={zone.zoneName}>{zone.zoneName}</option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-2 bottom-2.5 w-4 h-4 text-slate-500 pointer-events-none" />
-              </div>
-
-              <div className="relative">
-                <label className="block text-sm font-semibold text-slate-700 mb-2">
-                  All
-                </label>
-                <select
-                  value={filters.all}
-                  onChange={(e) => setFilters(prev => ({ ...prev, all: e.target.value }))}
-                  className="w-full px-4 py-2.5 pr-8 text-sm rounded-lg border border-slate-300 bg-white text-slate-700 appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="All">All</option>
-                  <option value="Active">Active</option>
-                  <option value="Inactive">Inactive</option>
-                </select>
-                <ChevronDown className="absolute right-2 bottom-2.5 w-4 h-4 text-slate-500 pointer-events-none" />
-              </div>
-
-              <div className="relative">
-                <label className="block text-sm font-semibold text-slate-700 mb-2">
-                  Type
-                </label>
-                <select
-                  value={filters.type}
-                  onChange={(e) => setFilters(prev => ({ ...prev, type: e.target.value }))}
-                  className="w-full px-4 py-2.5 pr-8 text-sm rounded-lg border border-slate-300 bg-white text-slate-700 appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="All types">All types</option>
-                  <option value="Commission">Commission</option>
-                  <option value="Subscription">Subscription</option>
-                </select>
-                <ChevronDown className="absolute right-2 bottom-2.5 w-4 h-4 text-slate-500 pointer-events-none" />
-              </div>
-
-              <div className="relative">
-                <label className="block text-sm font-semibold text-slate-700 mb-2">
-                  Time
-                </label>
-                <select
-                  value={filters.time}
-                  onChange={(e) => setFilters(prev => ({
-                    ...prev,
-                    time: e.target.value,
-                    ...(e.target.value !== "Custom Range" ? { fromDate: "", toDate: "" } : {}),
-                  }))}
-                  className="w-full px-4 py-2.5 pr-8 text-sm rounded-lg border border-slate-300 bg-white text-slate-700 appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="All Time">All Time</option>
-                  <option value="Today">Today</option>
-                  <option value="This Week">This Week</option>
-                  <option value="This Month">This Month</option>
-                  <option value="This Year">This Year</option>
-                  <option value="Custom Range">Custom Range</option>
-                </select>
-                <ChevronDown className="absolute right-2 bottom-2.5 w-4 h-4 text-slate-500 pointer-events-none" />
-              </div>
-            </div>
-
-            {filters.time === "Custom Range" && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full lg:w-auto">
-                <div className="relative">
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">
-                    From Date
-                  </label>
-                  <div className="relative">
-                    <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                    <input
-                      type="date"
-                      value={filters.fromDate}
-                      onChange={(e) => setFilters(prev => ({ ...prev, fromDate: e.target.value }))}
-                      className="w-full pl-10 pr-4 py-2.5 text-sm rounded-lg border border-slate-300 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                </div>
-                <div className="relative">
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">
-                    To Date
-                  </label>
-                  <div className="relative">
-                    <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                    <input
-                      type="date"
-                      value={filters.toDate}
-                      onChange={(e) => setFilters(prev => ({ ...prev, toDate: e.target.value }))}
-                      className="w-full pl-10 pr-4 py-2.5 text-sm rounded-lg border border-slate-300 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <div className="flex items-end gap-3">
-              <button
-                onClick={handleReset}
-                className="px-6 py-2.5 text-sm font-medium rounded-lg bg-slate-600 text-white hover:bg-slate-700 transition-all flex items-center gap-2"
-              >
-                <RefreshCw className="w-4 h-4" />
-                Reset
-              </button>
-              <button 
-                onClick={handleFilterApply}
-                className={`px-6 py-2.5 text-sm font-medium rounded-lg bg-blue-500 text-white hover:bg-blue-600 transition-all flex items-center gap-2 relative ${
-                  activeFiltersCount > 0 ? "ring-2 ring-blue-300" : ""
-                }`}
-              >
-                <Filter className="w-4 h-4" />
-                Filter
-                {activeFiltersCount > 0 && (
-                  <span className="absolute -top-1 -right-1 w-5 h-5 bg-emerald-500 text-white rounded-full text-[10px] flex items-center justify-center font-bold">
-                    {activeFiltersCount}
-                  </span>
-                )}
-              </button>
-            </div>
-          </div>
+        <div className="flex flex-wrap gap-1 rounded-lg bg-white border border-slate-200 p-1 w-fit">
+          {Object.entries(TABS).map(([key, t]) => (
+            <button key={key} type="button" onClick={() => reset(setTab)(key)} className={`rounded-md px-4 py-2 text-sm font-medium ${tab === key ? "bg-teal-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}>
+              {t.label}
+            </button>
+          ))}
         </div>
 
-        {/* Restaurant Report Table Section */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-            <h2 className="text-xl font-bold text-slate-900">Restaurant Report Table {totalRestaurants}</h2>
-
-            <div className="flex items-center gap-3">
-              <div className="relative flex-1 sm:flex-initial min-w-[250px]">
-                <input
-                  type="text"
-                  placeholder="Ex: search restaurant nam"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-4 pr-10 py-2.5 w-full text-sm rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
-                <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+        {current?.totals && (
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+            {CARDS[tab](current.totals).map(([label, value, sub]) => (
+              <div key={label} className="rounded-xl border border-slate-200 bg-white p-4">
+                <p className="text-xs font-medium text-slate-600">{label}</p>
+                <p className="mt-1 text-xl font-bold text-slate-900">{value}</p>
+                {sub && <p className="mt-0.5 text-xs text-slate-500">{sub}</p>}
               </div>
+            ))}
+          </div>
+        )}
 
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button className="px-4 py-2.5 text-sm font-medium rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-2 transition-all">
-                    <Download className="w-4 h-4" />
-                    <span className="text-black font-bold">Export</span>
-                    <ChevronDown className="w-3 h-3" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56 bg-white border border-slate-200 rounded-lg shadow-lg z-50 animate-in fade-in-0 zoom-in-95 duration-200 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95">
-                  <DropdownMenuLabel>Export Format</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => handleExport("csv")} className="cursor-pointer">
-                    <FileText className="w-4 h-4 mr-2" />
-                    Export as CSV
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleExport("excel")} className="cursor-pointer">
-                    <FileSpreadsheet className="w-4 h-4 mr-2" />
-                    Export as Excel
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleExport("pdf")} className="cursor-pointer">
-                    <FileText className="w-4 h-4 mr-2" />
-                    Export as PDF
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleExport("json")} className="cursor-pointer">
-                    <Code className="w-4 h-4 mr-2" />
-                    Export as JSON
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <button 
-                onClick={() => setIsSettingsOpen(true)}
-                className="p-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 transition-all"
-              >
-                <Settings className="w-5 h-5" />
-              </button>
-            </div>
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+          <div className="flex flex-wrap items-center gap-3 mb-4">
+            <h2 className="text-base font-semibold text-slate-900">{TABS[tab].label}</h2>
+            <form
+              className="relative ml-auto"
+              onSubmit={(e) => {
+                e.preventDefault()
+                reset(setSearch)(searchInput.trim())
+              }}
+            >
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input className={`${input} pl-9 w-60`} placeholder="Search restaurant" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
+            </form>
+            <ExportMenu onExport={runExport} exporting={exporting} disabled={!current?.pagination?.total} />
           </div>
 
-          {/* Table */}
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-slate-50 border-b border-slate-200">
-                <tr>
-                  <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
-                    <div className="flex items-center gap-1">
-                      <span>SL</span>
-                      <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                    </div>
-                  </th>
-                  <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
-                    <div className="flex items-center gap-1">
-                      <span>Restaurant Name</span>
-                      <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                    </div>
-                  </th>
-                  <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
-                    <div className="flex items-center gap-1">
-                      <span>Total Food</span>
-                      <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                    </div>
-                  </th>
-                  <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
-                    <div className="flex items-center gap-1">
-                      <span>Total Order</span>
-                      <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                    </div>
-                  </th>
-                  <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
-                    <div className="flex items-center gap-1">
-                      <span>Total Order Amount</span>
-                      <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                    </div>
-                  </th>
-                  <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
-                    <div className="flex items-center gap-1">
-                      <span>Total Discount Given</span>
-                      <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                    </div>
-                  </th>
-                  <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
-                    <div className="flex items-center gap-1">
-                      <span>Total Admin Commission</span>
-                      <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                    </div>
-                  </th>
-                  <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
-                    <div className="flex items-center gap-1">
-                      <span>Total VAT/TAX</span>
-                      <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                    </div>
-                  </th>
-                  <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
-                    <div className="flex items-center gap-1">
-                      <span>Average Ratings</span>
-                      <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                    </div>
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-slate-100">
-                {filteredRestaurants.length === 0 ? (
+          {loading && !current ? (
+            <div className="py-16 text-center"><Loader2 className="w-7 h-7 animate-spin text-teal-600 mx-auto" /></div>
+          ) : !rows.length ? (
+            <p className="py-16 text-center text-sm text-slate-500">
+              {tab === "sales" ? "No restaurant delivered an order in this period." : "No restaurants match these filters."}
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
-                    <td colSpan={9} className="px-6 py-20 text-center">
-                      <div className="flex flex-col items-center justify-center">
-                        <p className="text-lg font-semibold text-slate-700 mb-1">No Data Found</p>
-                        <p className="text-sm text-slate-500">No restaurants match your search</p>
-                      </div>
-                    </td>
+                    <th className={`${th} text-left`}>Sl</th>
+                    <th className={`${th} text-left`}>Restaurant</th>
+                    {columns.map(([key, label, , hint]) => (
+                      <th key={key} className={`${th} text-right`} title={hint}>{label}</th>
+                    ))}
                   </tr>
-                ) : (
-                  filteredRestaurants.map((restaurant) => (
-                    <tr key={restaurant.sl} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="text-sm font-medium text-slate-700">{restaurant.sl}</span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full overflow-hidden bg-slate-100 flex items-center justify-center flex-shrink-0">
-                            {restaurant.icon ? (
-                              <img
-                                src={restaurant.icon}
-                                alt={restaurant.restaurantName}
-                                className="w-full h-full object-cover"
-                                onError={(e) => {
-                                  e.target.src = "https://via.placeholder.com/32"
-                                }}
-                              />
-                            ) : (
-                              <div className="w-full h-full bg-slate-300 flex items-center justify-center text-xs text-slate-600 font-semibold">
-                                {restaurant.restaurantName.charAt(0).toUpperCase()}
-                              </div>
-                            )}
-                          </div>
-                          <span className="text-sm font-medium text-slate-900">{restaurant.restaurantName}</span>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {rows.map((row) => (
+                    <tr key={row.restaurantId} className="hover:bg-slate-50">
+                      <td className={td}>{row.sl}</td>
+                      <td className={`${td} font-medium text-slate-900`}>
+                        <div className="flex items-center gap-2">
+                          {row.image ? <img src={row.image} alt="" className="w-8 h-8 rounded-full object-cover" /> : null}
+                          {row.restaurant}
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="text-sm text-slate-700">{restaurant.totalFood}</span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="text-sm text-slate-700">{restaurant.totalOrder}</span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="text-sm font-medium text-slate-900">{restaurant.totalOrderAmount}</span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="text-sm text-slate-700">{restaurant.totalDiscountGiven}</span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`text-sm font-medium ${
-                          restaurant.totalAdminCommission.startsWith('Rs.-') || restaurant.totalAdminCommission.startsWith('-Rs.')
-                            ? 'text-red-600'
-                            : 'text-slate-900'
-                        }`}>
-                          {restaurant.totalAdminCommission}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="text-sm text-slate-700">{restaurant.totalVATTAX}</span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="text-sm text-slate-700">{renderStars(restaurant.averageRatings, restaurant.reviews)}</span>
-                      </td>
+                      {columns.map(([key, , fmt]) => (
+                        <td key={key} className={`${td} text-right`}>{fmt(row[key])}</td>
+                      ))}
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                  ))}
+                </tbody>
+                <tfoot className="border-t-2 border-slate-300 bg-slate-50">
+                  <tr>
+                    <td className={`${td} font-bold`} colSpan={2}>Total (all pages)</td>
+                    {columns.map(([key, , fmt]) => (
+                      <td key={key} className={`${td} text-right font-bold text-slate-900`}>{fmt(current.totals?.[key])}</td>
+                    ))}
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+          <Pager page={page} pages={current?.pagination?.pages || 1} total={current?.pagination?.total || 0} onPage={setPage} />
         </div>
       </div>
-
-      {/* Settings Dialog */}
-      <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
-        <DialogContent className="max-w-md bg-white p-0 opacity-0 data-[state=open]:opacity-100 data-[state=closed]:opacity-0 transition-opacity duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 data-[state=open]:scale-100 data-[state=closed]:scale-100">
-          <DialogHeader className="px-6 pt-6 pb-4">
-            <DialogTitle className="flex items-center gap-2">
-              <Settings className="w-5 h-5" />
-              Report Settings
-            </DialogTitle>
-          </DialogHeader>
-          <div className="px-6 pb-6">
-            <p className="text-sm text-slate-700">
-              Restaurant report settings and preferences will be available here.
-            </p>
-          </div>
-          <div className="px-6 pb-6 flex items-center justify-end">
-            <button
-              onClick={() => setIsSettingsOpen(false)}
-              className="px-4 py-2 text-sm font-medium rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 transition-all shadow-md"
-            >
-              Close
-            </button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }
-

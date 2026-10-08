@@ -2,8 +2,18 @@ import { useEffect, useState } from "react"
 import { FolderTree, Loader2, Pencil, Plus, Trash2, X } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminCatalogExtrasAPI, errorMessage } from "@food/api/adminCatalogExtras"
+import ExportMenu from "@food/components/admin/ExportMenu"
 
 const EMPTY = { name: "", sortOrder: 0, isActive: true }
+
+const EXPORT_COLUMNS = [
+  { label: "Sl", value: (_c, index) => index + 1 },
+  { label: "Id", value: (c) => c.id },
+  { label: "Name", value: (c) => c.name },
+  { label: "Add-ons", value: (c) => Number(c.addonCount || 0) },
+  { label: "Order", value: (c) => Number(c.sortOrder || 0) },
+  { label: "Status", value: (c) => (c.isActive ? "Active" : "Inactive") },
+]
 
 /** Addons -> Addon Category: admin groupings for the add-on list. */
 export default function AddonCategories() {
@@ -84,12 +94,16 @@ export default function AddonCategories() {
   return (
     <div className="p-4 lg:p-6 bg-slate-50 min-h-screen">
       <div className="max-w-5xl mx-auto space-y-6">
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-          <div className="flex items-center gap-3">
-            <FolderTree className="w-5 h-5 text-blue-600" />
-            <h1 className="text-2xl font-bold text-slate-900">Addon Category</h1>
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-3">
+              <FolderTree className="w-5 h-5 text-blue-600" />
+              <h1 className="text-2xl font-bold text-slate-900">Addon Category</h1>
+            </div>
+            <p className="text-sm text-slate-600 mt-1">Group add-ons (for example drinks or extra toppings) so the add-on list can be filtered by group.</p>
           </div>
-          <p className="text-sm text-slate-600 mt-1">Group add-ons (for example drinks or extra toppings) so the add-on list can be filtered by group.</p>
+          {/* The endpoint is unpaged, so `categories` is the whole list. */}
+          <ExportMenu filename="addon_categories" sheetName="Addon Categories" columns={EXPORT_COLUMNS} getRows={() => categories} disabled={loading} />
         </div>
 
         <form onSubmit={save} className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 grid gap-4 sm:grid-cols-[1fr_120px_auto_auto] items-end">

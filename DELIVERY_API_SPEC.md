@@ -41,6 +41,10 @@ Same as the user app.
 ## 2. Registration & profile
 
 ### `POST /food/delivery/register` — no auth, `multipart/form-data`
+When Business Settings turn deliveryman self registration off (`GET /food/public/business-settings`
+→ `rider.selfRegistration: false`) this returns **403** "Delivery partner sign-up is closed right now.
+Please contact Lagech to join as a delivery partner." — hide the sign-up button. Riders an admin adds
+are unaffected.
 
 File fields: `profilePhoto`, `aadharPhoto`, `panPhoto`, `drivingLicensePhoto`, `upiQrCode` (max 1 each).
 
@@ -146,9 +150,18 @@ Location freshness drives the offer radius (20 km cap), so keep pinging this whi
 ### `GET /food/delivery/orders/available`
 Query: `page`, `limit` (default 20, max 100).
 
-Behaviour depends on state:
-- **Partner has an active accepted delivery** → returns only that order.
-- **Partner is idle** → returns unassigned orders in `confirmed` / `preparing` / `ready_for_pickup`, filtered to within 20 km of the partner's last known GPS, excluding any order they were previously deassigned from.
+Behaviour depends on state. A rider may hold up to **`maxAssignedOrders`** accepted deliveries at once
+(admin: Business Settings → Deliveryman, default **2**; published at
+`GET /v1/food/public/business-settings` → `rider.maxAssignedOrders`). With the limit at 1 this is
+exactly the old single-order behaviour.
+- **Partner holds as many deliveries as the limit** → returns only their own accepted deliveries.
+- **Partner holds fewer** → returns their own accepted deliveries **and** new offers: unassigned orders in `confirmed` / `preparing` / `ready_for_pickup`, filtered to within 20 km of the partner's last known GPS, excluding any order they were previously deassigned from.
+- Never listed or dispatched: **takeaway** orders (`orderType: "takeaway"`, the customer collects them) and **scheduled** orders before their `releaseAt` (about 40 minutes before the slot). Accepting either → 400 ("This is a takeaway order…" / "This scheduled order is not open for delivery yet.").
+
+**Tips.** With Business Settings → Deliveryman → tips on, a customer may tip up to ₹500. The tip is
+**included** in `riderEarning` / `earnings` (and `riderShare`, wallet, payouts) and shown on its own as
+`riderTip` on orders, offers (`new_order_available` payload, push `data.riderTip`, body "(incl. Rs.X tip)"),
+the current trip and history. 100% of it is the rider's.
 
 → `data` is the paginated envelope:
 ```json
@@ -200,6 +213,26 @@ Watch out: `note` on a delivery-facing order is the **delivery instruction**, no
 
 ### `GET /food/delivery/orders/current`
 → `data: { "activeOrder": <order|null> }`
+
+Still one order (the most recently updated of the rider's active deliveries), so an app built for one
+order keeps working. **For more than one delivery at a time the app needs:** the full list of its
+active deliveries — use `GET /orders/available` (the rider's own accepted orders come first, marked by
+`dispatch.status: "accepted"` and their own partner id), or the per-order `GET /orders/:orderId`;
+to keep offering new orders while on a trip (the accept screen must not assume the rider is idle);
+and to run the trip lifecycle per order id (it already is). The socket resync (`activeOrder`) and the
+emergency reassignment request (which picks "the current" accepted pre-pickup order itself) are still
+single-order; with two deliveries held, send emergency requests only for the order on screen once the
+endpoint takes an `orderId`.
+
+Accepting when already at the limit returns 400: with a limit of 1 the old text
+"You already have an active delivery. Complete it before accepting another order.", otherwise
+"You already have N active deliveries, the most you can hold at once. …". Dispatch stops offering
+orders to a rider at the limit.
+
+`rider.canCancelOrder` (Business Settings, default off) is published for the app. Releasing an accepted
+order before pickup with `PATCH /orders/:orderId/reject` works as before whatever it says; show a
+"Cancel" button on accepted orders only when it is on. `rider.showEarning` says whether to show
+`riderEarning` on offers.
 
 ### `GET /food/delivery/orders/:orderId`
 → `data: { order }`. 403 if not assigned to this partner.
@@ -260,26 +293,72 @@ legitimately returns a 2-point polyline. That's correct, not a bug.
 
 ## 5. Payment collection at the door
 
+An unpaid `cash` / `razorpay_qr` order is collected one of two ways: the rider takes cash, or the
+customer scans a **Razorpay QR** on the rider's phone and pays the platform directly. The rider's own
+UPI QR is no longer used — money paid to a rider's personal UPI never reached the platform's books.
+
+**Amount to collect.** Every order sent to the rider carries `amountToCollect`: what to take at
+the door for an unpaid `cash` / `razorpay_qr` order, 0 otherwise. Show this, not `pricing.total`:
+a customer who paid part with their wallet (`payment.isPartial: true`, `payment.walletAmount`)
+owes only the rest (total − wallet part). The QR is raised for exactly this amount.
+
+**Flow.**
+1. At the door, offer **Collect cash** and **Customer pays by QR**.
+2. Cash: `POST …/collect/cash`, then complete the delivery as before (`PATCH …/complete`).
+3. QR: `POST …/collect/qr` → show `imageUrl` full screen with the amount and a countdown to
+   `expiresAt`. When `imageUrl` is null (`kind: "link"`), draw a QR from `shortUrl` (or show the link
+   to copy/share).
+4. Watch for payment: listen for the `payment_received` socket event **and** poll
+   `GET …/payment-status` every ~3 s (the server asks Razorpay itself if the webhook is late).
+5. On `paid: true` show "Paid ✓ ₹X received" and continue to `PATCH …/complete`.
+6. "Switch to cash" at any point → `POST …/collect/cash` (closes the QR). When `qr.status` is
+   `expired`, offer "Create new QR" (`POST …/collect/qr` again).
+
+`PATCH …/complete` (and `PATCH …/status` with `delivered`) on a `razorpay_qr` order that is not paid
+→ 400 `QR payment not verified yet. …` — switch to cash or wait for the payment.
+
 ### `POST /food/delivery/orders/:orderId/collect/qr`
-Body (optional, falls back to the order's customer): `{ "name": "…", "email": "…", "phone": "…" }`
+Body (optional, used only for the payment-link fallback): `{ "name": "…", "email": "…", "phone": "…" }`
 
 →
 ```json
 {
-  "shortUrl": "https://rzp.io/i/xxxx",
-  "imageUrl": "https://rzp.io/i/xxxx",
+  "kind": "qr",
+  "qrId": "qr_XXXXXXXX",
+  "paymentLinkId": null,
+  "imageUrl": "https://rzp.io/i/…png",
+  "shortUrl": null,
   "amount": 546,
-  "expiresAt": "2026-07-24T19:30:00.000Z"
+  "expiresAt": "2026-10-07T19:30:00.000Z",
+  "status": "created",
+  "reused": false
 }
 ```
 
-Errors: `Order already paid`, `No amount due` (due < ₹1), `QR payment not configured` (Razorpay keys missing), `Not your order`.
+- A single-use, fixed-amount UPI QR (Razorpay QR Codes), valid ~15 minutes.
+- Calling it again while that QR is still open (same amount, more than a minute left) returns the
+  same QR with `reused: true` — no duplicate QRs. An expired QR is closed and a new one raised.
+- If QR Codes is not enabled on the Razorpay account the server raises a payment link instead:
+  `kind: "link"`, `paymentLinkId`, `shortUrl`, `imageUrl: null` (~20 minutes).
+
+Errors (400 unless noted): `Order already paid`, `This order is not paid at delivery, so there is
+nothing to collect` (prepaid order), `Order is cancelled`, `Order is already delivered`,
+`No amount due` (due < ₹1), `QR payment not configured` (Razorpay keys missing), 403 `Not your order`.
 
 ### `GET /food/delivery/orders/:orderId/payment-status`
-Polls and syncs the Razorpay link status server-side. Poll this after showing the QR.
+Safe to poll every 3 s. While a QR is open and unpaid the server also checks Razorpay itself (at most
+once per 5 s per order), so a missing webhook does not leave the rider stuck.
 ```json
 {
-  "payment": { "method": "razorpay_qr", "status": "paid", "amountDue": 546, "qr": { … }, "refund": { … } },
+  "paid": true,
+  "method": "razorpay_qr",
+  "status": "paid",
+  "amount": 546,
+  "paidByQr": true,
+  "collectCash": false,
+  "qr": { "kind": "qr", "qrId": "qr_…", "imageUrl": "…", "shortUrl": null, "amount": 546,
+          "expiresAt": "…", "status": "paid" },
+  "payment": { "method": "razorpay_qr", "status": "paid", "amountDue": 546, "qr": { … } },
   "latestPaymentSnapshot": { … },
   "riderEarning": 42,
   "platformProfit": 18,
@@ -287,11 +366,24 @@ Polls and syncs the Razorpay link status server-side. Poll this after showing th
   "transactionStatus": "captured"
 }
 ```
+`qr.status`: `created` (open), `expired` (offer "Create new QR"), `paid`. `qr` is null for a cash order.
 
 ### `POST /food/delivery/orders/:orderId/collect/cash`
-Falls back from QR to physical cash. → `data: { "success": true }`
+Switches to cash: closes any open QR / payment link at Razorpay first, then the order is `cash` /
+`cod_pending`. → `data: { "success": true, "method": "cash", "amount": 546 }`
+
+- 400 `Order is already paid by QR. Do not collect cash.` when the customer already paid the QR.
+- If a QR payment still lands after the switch (the customer scanned just before it closed), it is
+  recorded as a QR payment and the rider gets `payment_received` with `collectCash: false` and
+  "Do NOT collect cash".
+- Any second payment for an order that is already paid (e.g. cash taken and delivered, then the old
+  QR paid) is refunded to the customer automatically.
 
 Rejected unless the order's payment method is `cash` or `razorpay_qr` and it is not already paid — online-prepaid orders cannot be switched.
+
+**Money.** A QR-paid order is `paymentMethod: "razorpay_qr"`: the money is in the platform's
+Razorpay account, so it is **not** cash in hand — it does not count toward the cash limit, deposits
+or the rider cash report. Rider earning and restaurant settlement are the same as for cash.
 
 ---
 
@@ -387,7 +479,7 @@ Query: `period` = `today` | `week` (default) | `month` | `all`, `date` (anchor, 
   "summary": {
     "totalEarnings": 5100, "totalOrders": 122,
     "totalHours": 0, "totalMinutes": 0,
-    "orderEarning": 5100, "incentive": 0, "otherEarnings": 0
+    "orderEarning": 5100, "tips": 150, "incentive": 0, "otherEarnings": 0
   },
   "period": "week",
   "date": "2026-07-24T…",
@@ -395,6 +487,9 @@ Query: `period` = `today` | `week` (default) | `month` | `all`, `date` (anchor, 
 }
 ```
 `totalHours` / `totalMinutes` / `incentive` are not computed yet — always 0. Don't surface them.
+`tips` is the part of `totalEarnings` that came from customer tips. Elsewhere: `GET /wallet` →
+`totalTips` (part of `totalEarned`) and each `payment` transaction's `tip`; `trip-history` trips carry
+`tipAmount`; `pocket-details` payment rows carry `tip` and `summary.totalTips`.
 
 ### `GET /food/delivery/trip-history`
 Query: `period` = `daily` (default) | `weekly` | `monthly`, `date`, `status` = `Completed` | `Cancelled` | `Pending` | `ALL TRIPS`, `limit` (default 50, max 1000).
@@ -539,6 +634,8 @@ Errors to handle: `Emergency reassignment is available only for an accepted orde
 
 Same as the user app: `POST /fcm-tokens/mobile/save`, `DELETE /fcm-tokens/remove`, or pass `fcmToken` + `platform: "mobile"` at OTP verify.
 
+Chat message push: `data = { type: "chat_message", conversationId, orderId }` — `orderId` is the order's database id (not `FOD-…`), `""` when the chat has no order.
+
 Inbox: `GET /food/notifications/inbox`, `PATCH /food/notifications/:id/read`, `DELETE /food/notifications/:id`, `DELETE /food/notifications/inbox/all`.
 
 The admin can switch some push events off (Notification Channels): order status, cancellations, refunds, rider progress, chat and wallet messages. New-order offers to riders are never switched off.
@@ -561,7 +658,13 @@ Handshake with the access token (`auth.token`, `Authorization` header, or `?toke
 | `join-delivery` | `deliveryPartnerId` | explicit re-join; ack `delivery-room-joined`. Rejected if the id isn't yours or your role isn't DELIVERY_PARTNER |
 | `join-tracking` | `orderId` | ack `tracking-room-joined` |
 | `leave-tracking` | `orderId` | |
-| location ping | `{ orderId, lat, lng, userId, restaurantId }` | broadcast to the tracking room as `location-update` |
+| `update-location` | `{ orderId, lat, lng, heading?, speed?, accuracy?, userId?, restaurantId?, status? }` | broadcast to the tracking room as `location-update` (at most one per order every 2 s). Send every ~10 s per active order |
+
+**`update-location` details.** `orderId` is the order's database id (the same id the customer joins
+`tracking:<orderId>` with and that `active_orders/{orderId}` in RTDB uses). `heading` is degrees 0–360;
+**omit it (or send `null`) when the device has no bearing** — don't send `0` for "unknown" (on Android,
+only send it when the fix has a bearing). A ping without a heading keeps the order's last known heading,
+so the customer's bike icon no longer snaps to north. Negative values (iOS `-1`) count as missing.
 
 **Listen:**
 | Event | Meaning |
@@ -571,6 +674,7 @@ Handshake with the access token (`auth.token`, `Authorization` header, or `?toke
 | `order_deassigned` | the order was taken off you |
 | `order_ready` | restaurant marked ready for pickup |
 | `order_status_update` | any status change |
+| `payment_received` | the customer paid the door QR: `{ orderId, orderCode, method: "razorpay_qr", amount, paymentId, paid: true, collectCash: false, message }`. `orderId` is the database id. Show "Paid ✓ ₹amount received" and move to complete; never take cash after this |
 
 Poll `/orders/available` as a fallback — the modal must not depend on the socket alone.
 
@@ -583,3 +687,28 @@ Poll `/orders/available` as a fallback — the modal must not depend on the sock
 3. Deposit-verify uses **snake_case** Razorpay keys; the user app's order-verify uses camelCase. Easy to get wrong.
 4. `note` on a delivery order = delivery instruction. `cookingNote` = kitchen note.
 5. Drop OTP is customer-held and never in your responses — only the verify call.
+
+## Several deliveries at once — `GET /v1/food/delivery/orders/current`
+
+A rider may hold up to the admin's limit (Business Settings → Deliveryman → Maximum assigned order limit; default 2, read live — never hard-code it). The response carries:
+
+```json
+{ "activeOrder": { "...": "the most recently updated delivery, as before" },
+  "activeOrders": [ { "...": "every delivery the rider holds, newest first" } ],
+  "orderLimit": 2,
+  "canAcceptMore": false }
+```
+
+- Show a switcher when `activeOrders` has more than one; every status action already takes the order id.
+- Show new offers only while `canAcceptMore` is true (the server refuses an accept beyond the limit anyway, with a message to show).
+- Older apps that read only `activeOrder` keep working.
+
+## Cancelling an accepted delivery — `PATCH /v1/food/delivery/orders/:orderId/reject`
+
+Body (optional): `{ "reason": "Bike broke down" }` (max 300 characters).
+
+- Declining an **offer** (not yet accepted) always works, as before.
+- Cancelling an order the rider has **accepted** works only while the admin allows it (Business Settings → Deliveryman → "Deliveryman can cancel order"; published to the app as `business.deliveryman.canCancelOrder`, off by default). When off the server answers `400` "Cancelling an accepted order is turned off. Please contact support if you cannot deliver it." Show the Cancel button only when the flag is true.
+- Never after pickup (`400`, use the emergency reassignment request instead).
+- On success the order goes back to dispatch for another rider; the reason is recorded in the order's history.
+

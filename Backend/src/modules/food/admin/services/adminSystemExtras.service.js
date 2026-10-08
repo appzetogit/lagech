@@ -2,16 +2,23 @@ import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError, NotFoundError } from '../../../../core/auth/errors.js';
 import { invalidateChannelSettings, NOTIFICATION_EVENTS } from '../../../../core/notifications/notificationChannels.js';
+import { invalidatePushMessages, PUSH_MESSAGE_CATALOG } from '../../../../core/notifications/pushMessages.js';
 import {
     SETTINGS_AREAS,
     META_PAGES,
     APPS,
     PLATFORMS,
     LOGIN_OPTIONS,
+    ANALYTICS_TOOLS,
     cleanSettings,
     readStoredSettings,
     cleanUrl,
 } from './systemSettings.defaults.js';
+import { BUSINESS_AREA_CATALOG } from './businessSettings.defaults.js';
+import { invalidateBusinessSettings, getBusinessSettings, getMaintenanceState, isSubscriptionModelOn } from '../../shared/businessSettings.js';
+import { additionalChargeFor } from '../../orders/services/businessRules.js';
+import { TIP_PRESETS, MAX_RIDER_TIP } from '../../orders/services/orderModes.js';
+import { FEATURE_KEYS, isFeatureEnabled, updateFeatureSetting } from './featureSettings.service.js';
 
 /**
  * System settings stored one JSON document per area (page meta data, app
@@ -33,6 +40,13 @@ const AREA_CATALOG = {
     },
     landing_page: {},
     website: {},
+    push_messages: {
+        messages: PUSH_MESSAGE_CATALOG,
+        events: NOTIFICATION_EVENTS.map(({ key, label }) => ({ key, label })),
+    },
+    offline_payment: { fieldTypes: ['text', 'number', 'email'] },
+    analytics_scripts: { tools: ANALYTICS_TOOLS.map(({ key, label, idLabel, example }) => ({ key, label, idLabel, example })) },
+    ...BUSINESS_AREA_CATALOG,
 };
 
 const assertArea = (area) => {
@@ -47,18 +61,39 @@ async function readArea(area) {
 export async function getSystemSettings(area) {
     assertArea(area);
     const { value, updatedAt } = await readArea(area);
+    // The subscription switch is the Restaurant Subscription feature flag.
+    if (area === 'business_info') value.subscriptionModel = await isFeatureEnabled(FEATURE_KEYS.RESTAURANT_SUBSCRIPTION, true);
     return { area, value, updatedAt, catalog: AREA_CATALOG[area] };
+}
+
+/**
+ * Business info's two business models. The subscription switch writes the
+ * Restaurant Subscription feature flag (only when it is sent: a body without
+ * it leaves the flag as it is), and at least one model must stay on.
+ */
+async function applyBusinessModels(value, input = {}) {
+    const sent = input && typeof input === 'object' && input.subscriptionModel !== undefined;
+    const subscriptionModel = sent ? value.subscriptionModel : await isFeatureEnabled(FEATURE_KEYS.RESTAURANT_SUBSCRIPTION, true);
+    if (!value.commissionModel && !subscriptionModel) {
+        throw new ValidationError('Keep at least one of the commission or subscription business model on');
+    }
+    if (sent) await updateFeatureSetting(FEATURE_KEYS.RESTAURANT_SUBSCRIPTION, { isEnabled: subscriptionModel });
+    value.subscriptionModel = subscriptionModel;
 }
 
 export async function saveSystemSettings(area, body = {}, adminId = null) {
     assertArea(area);
-    const value = cleanSettings(area, body.value ?? body);
+    const input = body.value ?? body;
+    const value = cleanSettings(area, input);
+    if (area === 'business_info') await applyBusinessModels(value, input);
     const row = await prisma.foodSystemSetting.upsert({
         where: { key: area },
         create: { key: area, value, updatedBy: adminId ? String(adminId) : null },
         update: { value, updatedBy: adminId ? String(adminId) : null },
     });
     if (area === 'notification_channels') invalidateChannelSettings();
+    if (area === 'push_messages') invalidatePushMessages();
+    if (area.startsWith('business_') || area === 'website') invalidateBusinessSettings(area);
     return { area, value, updatedAt: row.updatedAt, catalog: AREA_CATALOG[area] };
 }
 
@@ -135,8 +170,45 @@ export async function getPublicSocialMedia() {
  * An app older than minVersion must update; older than latestVersion may.
  */
 export async function getPublicAppSettings() {
-    const [apps, login] = await Promise.all([readArea('app_settings'), readArea('login_setup')]);
-    return { apps: apps.value, login: login.value, updatedAt: apps.updatedAt };
+    const [apps, login, analytics, business] = await Promise.all([
+        readArea('app_settings'),
+        readArea('login_setup'),
+        getPublicAnalytics(),
+        getPublicBusinessSettings(),
+    ]);
+    return { apps: apps.value, login: login.value, analytics, business, updatedAt: apps.updatedAt };
+}
+
+/**
+ * The tracking ids switched on, for the customer website to load the standard
+ * Google Analytics / Tag Manager / Meta Pixel snippets. Off or blank tools are
+ * left out.
+ */
+export async function getPublicAnalytics() {
+    const { value } = await readArea('analytics_scripts');
+    return Object.fromEntries(
+        ANALYTICS_TOOLS.filter((tool) => value[tool.key]?.enabled && value[tool.key]?.id).map((tool) => [tool.key, value[tool.key].id]),
+    );
+}
+
+/** Offline payment as the admin set it up (orders read it at checkout). */
+export async function getOfflinePaymentSettings() {
+    return (await readArea('offline_payment')).value;
+}
+
+/**
+ * What checkout offers: nothing when offline payment is switched off,
+ * otherwise each active method with what to pay to and what to fill in.
+ */
+export async function getPublicOfflinePaymentMethods() {
+    const settings = await getOfflinePaymentSettings();
+    if (!settings.enabled) return { enabled: false, methods: [] };
+    return {
+        enabled: true,
+        methods: settings.methods
+            .filter((method) => method.isActive)
+            .map(({ id, name, paymentInfo, fields }) => ({ id, name, paymentInfo, fields })),
+    };
 }
 
 /** SEO title, description and image per public page. */
@@ -170,4 +242,88 @@ export async function getPublicLanding() {
         website: website.value,
         updatedAt: landing.updatedAt,
     };
+}
+
+/**
+ * The Business Settings the apps act on (payment options, order types,
+ * maintenance, rider limits, ...), for GET /food/public/app-settings
+ * (`business`) and GET /food/public/business-settings. Admin-only values
+ * such as commission rates are left out.
+ */
+export async function getPublicBusinessSettings() {
+    const [info, order, payment, customer, deliveryman, vendor, refund, offline, maintenance] = await Promise.all([
+        getBusinessSettings('business_info'),
+        getBusinessSettings('business_order'),
+        getBusinessSettings('business_payment'),
+        getBusinessSettings('business_customer'),
+        getBusinessSettings('business_deliveryman'),
+        getBusinessSettings('business_vendor'),
+        getBusinessSettings('business_refund'),
+        getOfflinePaymentSettings(),
+        getMaintenanceState(),
+    ]);
+    const subscriptionModel = await isSubscriptionModelOn();
+    const additional = additionalChargeFor(info);
+    const nc = customer.newCustomerDiscount;
+    return {
+        maintenance,
+        currency: { code: info.currency, decimals: info.currencyDecimals },
+        payment: {
+            cod: payment.cod,
+            digital: payment.digital,
+            offline: Boolean(offline.enabled && offline.methods.some((method) => method.isActive)),
+            wallet: customer.walletEnabled,
+            partialPayment: payment.partialPayment && customer.walletEnabled,
+            partialPaymentMethod: payment.partialPaymentMethod,
+        },
+        order: {
+            homeDelivery: order.homeDelivery,
+            takeaway: order.takeaway,
+            scheduledOrder: order.scheduledOrder,
+            scheduleSlotMinutes: order.scheduleSlotMinutes,
+            freeDeliveryOver: order.freeDelivery.enabled ? order.freeDelivery.minSubtotal : null,
+            /** Restaurants may add an extra packaging charge (per restaurant: order-options). */
+            extraPackagingCharge: order.extraPackagingCharge,
+            /** 'restaurant' (default): the restaurant accepts each order. 'deliveryman': orders arrive confirmed. */
+            confirmedBy: order.orderConfirmedBy,
+            /** The flat charge every order carries (part of platformFee), or null. */
+            additionalCharge: additional.amount > 0 ? additional : null,
+        },
+        /** Business models: restaurant apps hide subscription plans when subscriptionModel is false. */
+        business: { commissionModel: info.commissionModel, subscriptionModel },
+        customer: {
+            wallet: customer.walletEnabled,
+            addFund: customer.walletEnabled && customer.addFundEnabled,
+            vegNonVegToggle: customer.vegNonVegToggle,
+            guestCheckout: customer.guestCheckout,
+            newCustomerDiscount: nc.enabled
+                ? { type: nc.type, value: nc.value, maxDiscount: nc.maxDiscount || null, minOrderAmount: nc.minOrderAmount, validityDays: nc.validityDays }
+                : null,
+        },
+        rider: {
+            maxAssignedOrders: deliveryman.maxAssignedOrders,
+            canCancelOrder: deliveryman.riderCanCancelOrder,
+            showEarning: deliveryman.showEarningToRider,
+            pictureUpload: deliveryman.riderPictureUpload,
+            selfRegistration: deliveryman.riderSelfRegistration,
+            tipsEnabled: deliveryman.tipsEnabled,
+        },
+        /** Rider tips at checkout: one-tap amounts and the cap, when on. */
+        tips: deliveryman.tipsEnabled
+            ? { enabled: true, presets: TIP_PRESETS, max: MAX_RIDER_TIP }
+            : { enabled: false, presets: [], max: 0 },
+        restaurant: {
+            canCancelOrder: vendor.restaurantCanCancelOrder,
+            canReplyToReviews: vendor.canReplyToReviews,
+            dishApprovalRequired: vendor.dishApprovalRequired,
+            selfRegistration: vendor.restaurantSelfRegistration,
+        },
+        refund: { requestEnabled: refund.refundRequestEnabled, requestWindowHours: refund.requestWindowHours },
+    };
+}
+
+/** Active reasons of a reason-list area, for the customer app. */
+export async function getPublicReasons(area) {
+    const value = await getBusinessSettings(area);
+    return { reasons: value.reasons.filter((reason) => reason.isActive).map(({ id, text }) => ({ id, text })) };
 }

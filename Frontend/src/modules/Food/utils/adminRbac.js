@@ -92,6 +92,7 @@ const PATH_PREFIX_TO_SECTION = [
   { prefix: "/admin/food/referral-settings", section: "referral_rewards" },
   { prefix: "/admin/food/customers", section: "customer_management" },
   { prefix: "/admin/food/support-tickets", section: "customer_management" },
+  { prefix: "/admin/food/order-issue-reports", section: "customer_management" },
   { prefix: "/admin/food/user-overview", section: "customer_management" },
   { prefix: "/admin/food/wallet", section: "customer_management" },
   { prefix: "/admin/food/loyalty-point", section: "customer_management" },
@@ -127,6 +128,8 @@ const PATH_PREFIX_TO_SECTION = [
   { prefix: "/admin/food/react-site", section: "system_settings" },
   { prefix: "/admin/food/page-meta-data", section: "system_settings" },
   { prefix: "/admin/food/gallery", section: "system_settings" },
+  // Firebase notification, offline payment, analytics script.
+  { prefix: "/admin/food/3rd-party-configurations", section: "system_settings" },
   { prefix: "/admin/food/hero-banner-management", section: "banner_management" },
   { prefix: "/admin/food/promotional-banner", section: "banner_management" },
   { prefix: "/admin/food/feature-settings", section: "system_settings" },

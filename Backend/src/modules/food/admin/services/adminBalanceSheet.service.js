@@ -165,16 +165,19 @@ export async function getRiderBalances(query = {}) {
                 bankAccountHolderName: true, upiId: true,
             },
         }),
-        // Cash the rider took at the door, in this period.
+        // Cash the rider took at the door, in this period. Only cash: a
+        // customer who paid the door QR paid the platform's Razorpay account
+        // (paymentMethod 'razorpay_qr'), so the rider never held that money.
         prisma.foodTransaction.groupBy({
             by: ['deliveryPartnerId'],
             where: {
                 ...periodWhere(start, end),
                 isRiderSettled: false,
                 deliveryPartnerId: { in: partnerIds },
-                paymentMethod: { in: ['cash', 'razorpay_qr'] },
+                paymentMethod: 'cash',
             },
-            _sum: { totalCustomerPaid: true },
+            // Less a partial payment's wallet part, which the rider never held.
+            _sum: { totalCustomerPaid: true, walletAmount: true },
         }),
         // Cash they have already handed back.
         prisma.foodDeliveryCashDeposit.groupBy({
@@ -194,7 +197,10 @@ export async function getRiderBalances(query = {}) {
     ]);
 
     const byId = new Map(partners.map((p) => [p.id, p]));
-    const cashById = new Map(cashCollected.map((c) => [c.deliveryPartnerId, num(c._sum.totalCustomerPaid)]));
+    const cashById = new Map(cashCollected.map((c) => [
+        c.deliveryPartnerId,
+        Math.round(((Number(c._sum.totalCustomerPaid) || 0) - (Number(c._sum.walletAmount) || 0)) * 100) / 100,
+    ]));
     const depositById = new Map((cashDeposited || []).map((d) => [d.deliveryPartnerId, num(d._sum.amount)]));
     const bonusById = new Map(bonuses.map((b) => [b.deliveryPartnerId, num(b._sum.amount)]));
 

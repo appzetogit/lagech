@@ -5,6 +5,8 @@ import { adminAPI, uploadAPI } from "@food/api"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@food/components/ui/dialog"
 import { adminCatalogExtrasAPI, errorMessage } from "@food/api/adminCatalogExtras"
+import ExportMenu from "@food/components/admin/ExportMenu"
+import { exportMoney, fetchAllPages } from "@food/utils/listExport"
 
 const debugError = (...args) => {}
 
@@ -31,6 +33,16 @@ const getAddonImage = (addon) =>
   addon?.published?.image ||
   addon?.published?.images?.[0] ||
   "https://via.placeholder.com/40"
+
+const EXPORT_COLUMNS = [
+  { label: "Sl", value: (_addon, index) => index + 1 },
+  { label: "Id", value: (addon) => formatAddonId(addon.id || addon._id) },
+  { label: "Name", value: (addon) => getAddonTitle(addon) },
+  { label: "Price", value: (addon) => exportMoney(addon?.draft?.price ?? addon?.price ?? 0) },
+  { label: "Store", value: (addon) => addon?.restaurant?.name || "" },
+  { label: "Category", value: (addon) => addon?.category?.name || "" },
+  { label: "Status", value: (addon) => (addon?.isAvailable !== false ? "Available" : "Unavailable") },
+]
 
 export default function AddonsList() {
   const [searchQuery, setSearchQuery] = useState("")
@@ -119,6 +131,29 @@ export default function AddonsList() {
   }, [addons])
 
   const countLabel = filteredAddons.length
+
+  // Every page of the same request the list makes (approved, search, category),
+  // not just the first 200 rows on screen; newest first like the table.
+  const getExportRows = async () => {
+    const rows = await fetchAllPages(
+      ({ page, limit }) =>
+        adminAPI.getRestaurantAddons({
+          approvalStatus: "approved",
+          search: searchQuery?.trim() ? searchQuery.trim() : undefined,
+          categoryId: categoryFilter || undefined,
+          limit,
+          page,
+        }),
+      (res) => {
+        const payload = res?.data?.data || res?.data || {}
+        return { rows: Array.isArray(payload.addons) ? payload.addons : [], total: payload.total }
+      },
+      { pageSize: 200 },
+    )
+    return rows
+      .filter((addon) => String(addon.approvalStatus || "").toLowerCase() === "approved")
+      .sort((a, b) => getItemCreatedMs(b) - getItemCreatedMs(a))
+  }
 
   const handleViewDetails = (addon) => {
     setSelectedAddon(addon)
@@ -232,7 +267,9 @@ export default function AddonsList() {
             <div className="text-sm text-slate-500 mt-1">Manage add-ons submitted by restaurants.</div>
           </div>
 
-          <div className="flex items-center gap-2" />
+          <div className="flex items-center gap-2">
+            <ExportMenu filename="addons" sheetName="Addons" columns={EXPORT_COLUMNS} getRows={getExportRows} disabled={loading} />
+          </div>
         </div>
 
         <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">

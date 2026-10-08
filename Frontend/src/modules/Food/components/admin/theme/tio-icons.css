@@ -1,6 +1,17 @@
 /* TIO icon font, the icon set of the previous (6amMart) admin panel. */
+/* Only the ~300 icons the panel uses (26 KB woff2 instead of 333 KB), so phones
+   on mobile data get the icons quickly. The full font is the second family:
+   the browser downloads it only if an icon is missing from the subset. */
 @font-face {
   font-family: 'The-Icon-of';
+  src: url('/admin-theme/fonts/tio-subset.woff2') format('woff2'),
+    url('/admin-theme/fonts/tio-subset.woff') format('woff');
+  font-weight: normal;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: 'The-Icon-of Full';
   src: url('/admin-theme/fonts/The-Icon-of.woff') format('woff'),
     url('/admin-theme/fonts/The-Icon-of.ttf') format('truetype');
   font-weight: normal;
@@ -10,7 +21,7 @@
 
 [class^="tio-"], [class*=" tio-"] {
   /* use !important to prevent issues with browser extensions that change fonts */
-  font-family: 'The-Icon-of' !important;
+  font-family: 'The-Icon-of', 'The-Icon-of Full' !important;
   font-size: 1.125em;
   speak: none;
   font-style: normal;

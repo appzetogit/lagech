@@ -302,6 +302,7 @@ export const adminSidebarMenu = [
         icon: "MessageSquare",
         badge: "userSupportTickets",
       },
+      { type: "link", label: "Order Issue Reports", path: "/admin/food/order-issue-reports", icon: "AlertTriangle" },
       { type: "link", label: "Contact Messages", path: "/admin/food/contact-messages", icon: "Mail" },
       {
         type: "link",
@@ -316,8 +317,17 @@ export const adminSidebarMenu = [
     type: "section",
     label: "EMPLOYEE HANDLE",
     items: [
-      // Roles are edited per employee, from this list.
-      { type: "link", label: "Employees", path: "/admin/food/employees", icon: "UserCog", requires: "adminAccess" },
+      // Access is edited per employee, from the list.
+      {
+        type: "expandable",
+        label: "Employees",
+        icon: "UserCog",
+        requires: "adminAccess",
+        subItems: [
+          { label: "Add new", path: "/admin/food/employees/add" },
+          { label: "List", path: "/admin/food/employees" },
+        ],
+      },
       { type: "link", label: "Employee Roles", path: "/admin/food/employees/roles", icon: "Lock", requires: "adminAccess" },
     ],
   },
@@ -381,7 +391,7 @@ export const adminSidebarMenu = [
     type: "section",
     label: "BUSINESS SETTINGS",
     items: [
-      { type: "link", label: "Business Setup", path: "/admin/food/business-setup", icon: "Settings" },
+      { type: "link", label: "Business Settings", path: "/admin/food/business-setup", icon: "Settings" },
       {
         type: "link",
         label: "Feature Settings",
@@ -411,6 +421,20 @@ export const adminSidebarMenu = [
       { type: "link", label: "Website", path: "/admin/food/react-site", icon: "Globe" },
       { type: "link", label: "Page Meta Data", path: "/admin/food/page-meta-data", icon: "Globe" },
       { type: "link", label: "Gallery", path: "/admin/food/gallery", icon: "Image" },
+      // As on the old panel. AI Setup and the Join Us page setup are left out:
+      // no feature here uses an AI key, and the signup forms have no custom
+      // fields to configure.
+      {
+        type: "expandable",
+        label: "3rd Party & Configurations",
+        icon: "Settings",
+        subItems: [
+          { label: "3rd Party", path: "/admin/food/3rd-party-configurations/third-party" },
+          { label: "Firebase Notification", path: "/admin/food/3rd-party-configurations/firebase" },
+          { label: "Offline Payment Setup", path: "/admin/food/3rd-party-configurations/offline-payment" },
+          { label: "Analytics Script", path: "/admin/food/3rd-party-configurations/analytics" },
+        ],
+      },
     ],
   },
   {
@@ -435,3 +459,71 @@ export const adminSidebarMenu = [
     ],
   },
 ];
+
+/**
+ * The old panel split its menu into areas, picked from the top bar (Users,
+ * Transactions & Reports, Settings); the sidebar shows only the active area.
+ * Sections are assigned here by heading so the menu above stays one list.
+ */
+export const ADMIN_AREAS = [
+  { key: "food", label: "Food" },
+  { key: "users", label: "Users", icon: "user-outlined" },
+  { key: "transactions", label: "Transactions & Reports", icon: "receipt-outlined" },
+  { key: "settings", label: "Settings", icon: "settings-outlined" },
+]
+
+const AREA_BY_SECTION = {
+  "DELIVERYMAN SECTION": "users",
+  "CUSTOMER SECTION": "users",
+  "EMPLOYEE HANDLE": "users",
+  "TRANSACTION MANAGEMENT": "transactions",
+  "REPORT AND ANALYTICS": "transactions",
+  "BUSINESS SETTINGS": "settings",
+  "SYSTEM SETTINGS": "settings",
+  "PAGES & SOCIAL MEDIA": "settings",
+}
+
+/** Which area a top-level menu entry belongs to (links and unlisted sections: food). */
+export const areaOfEntry = (entry) =>
+  (entry?.type === "section" && AREA_BY_SECTION[entry.label]) || "food"
+
+const pathsOf = (entry) => {
+  if (entry?.path) return [entry.path]
+  const items = entry?.items || entry?.subItems || []
+  return items.flatMap(pathsOf)
+}
+
+/**
+ * The area whose menu holds the page at `pathname` (longest matching path
+ * wins, so /admin/food/delivery-partners/... is not taken by /admin/food).
+ */
+export const areaForPath = (pathname, menu = adminSidebarMenu) => {
+  const current = String(pathname || "").replace(/\/+$/, "")
+  let best = { area: "food", length: 0 }
+  for (const entry of menu) {
+    if (!entry) continue
+    const area = areaOfEntry(entry)
+    for (const path of pathsOf(entry)) {
+      const p = String(path).split("?")[0].replace(/\/+$/, "")
+      if (!p) continue
+      const matches = current === p || current.startsWith(`${p}/`)
+      if (matches && p.length > best.length) best = { area, length: p.length }
+    }
+  }
+  return best.area
+}
+
+/** First page of an area the admin can see, for the top-bar links. */
+export const firstPathOfArea = (area, menu = adminSidebarMenu) => {
+  for (const entry of menu) {
+    if (entry && areaOfEntry(entry) === area) {
+      const [first] = pathsOf(entry)
+      if (first) return first
+    }
+  }
+  return null
+}
+
+/** The visible entries of one area (sections or links), for the Settings dropdown. */
+export const entriesOfArea = (area, menu = adminSidebarMenu) =>
+  menu.filter((entry) => entry && areaOfEntry(entry) === area)

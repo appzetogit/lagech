@@ -225,3 +225,34 @@ test('an order for a dish that is not on the menu is refused', async () => {
     await assert.rejects(() => createOrder(userId, { ...cartOf(1), items: [] }));
     await assert.rejects(() => createOrder(userId, { ...cartOf(1), restaurantId: 'not-an-id' }));
 });
+
+test('a placed order emails the customer once, only if they have an email address', async () => {
+    const { setEmailTransportForTests, flushEmails } = await import('../../../../core/notifications/transactionalEmail.js');
+    const { emailOrderPlaced } = await import('../../../../core/notifications/emailEvents.js');
+    // createOrder's hook loads the email module with import(), so give it a
+    // moment to queue before waiting for the queue to drain.
+    const settle = async () => { await new Promise((r) => setTimeout(r, 50)); await flushEmails(); };
+    const sent = [];
+    setEmailTransportForTests({ sendMail: async (m) => { sent.push(m); } });
+    const ids = [];
+    try {
+        const silent = await createOrder(userId, cartOf(1));
+        ids.push(silent.order._id || silent.order.id);
+        await settle();
+        assert.equal(sent.length, 0, 'no email address, no email');
+
+        await prisma.foodUser.update({ where: { id: userId }, data: { email: `${tag.toLowerCase()}@example.com` } });
+        const { order } = await createOrder(userId, cartOf(2));
+        const id = order._id || order.id;
+        ids.push(id);
+        emailOrderPlaced(id); // payment verification / the webhook calling it again
+        await settle();
+        assert.equal(sent.length, 1);
+        assert.equal(sent[0].to, `${tag.toLowerCase()}@example.com`);
+        assert.equal(sent[0].subject, `Order #${order.orderId} confirmed`);
+    } finally {
+        setEmailTransportForTests(null);
+        await prisma.foodEmailSendLog.deleteMany({ where: { eventKey: { in: ids.map((id) => `order_placed:${id}`) } } });
+        await prisma.foodUser.update({ where: { id: userId }, data: { email: null } });
+    }
+});

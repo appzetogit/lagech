@@ -112,6 +112,23 @@ export async function updateRestaurantById(id, body = {}) {
         data.pureVegRestaurant = parseBooleanLike(body.pureVegRestaurant, 'pureVegRestaurant');
     }
 
+    if (body.takeawayEnabled !== undefined) {
+        data.takeawayEnabled = parseBooleanLike(body.takeawayEnabled, 'takeawayEnabled');
+    }
+    // The restaurant's extra packaging charge (Business Settings > Order).
+    if (body.extraPackagingEnabled !== undefined) {
+        data.extraPackagingEnabled = parseBooleanLike(body.extraPackagingEnabled, 'extraPackagingEnabled');
+    }
+    if (body.extraPackagingRequired !== undefined) {
+        data.extraPackagingRequired = parseBooleanLike(body.extraPackagingRequired, 'extraPackagingRequired');
+    }
+    if (body.extraPackagingAmount !== undefined) {
+        const amount = Number(body.extraPackagingAmount);
+        if (!Number.isFinite(amount) || amount < 0 || amount > 500) {
+            throw new ValidationError('Packaging charge must be between 0 and 500');
+        }
+        data.extraPackagingAmount = Math.round(amount * 100) / 100;
+    }
     if (body.isAcceptingOrders !== undefined) {
         data.isAcceptingOrders = parseBooleanLike(body.isAcceptingOrders, 'isAcceptingOrders');
         // Going back online clears a manual force-offline.

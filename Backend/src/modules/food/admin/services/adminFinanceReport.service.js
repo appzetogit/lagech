@@ -158,7 +158,7 @@ export async function getTransactionReport(query = {}) {
         // which returns 0 when the fee really was zero, and the missing amount
         // when the totals do not add up without one.
         const platformFee = num(tx.platformFee)
-            || Math.max(0, total - subtotal - packagingFee - deliveryFee - tax + discount);
+            || Math.max(0, total - subtotal - packagingFee - deliveryFee - tax + discount - num(tx.riderTip));
 
         return {
             id: tx.id,

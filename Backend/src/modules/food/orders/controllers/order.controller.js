@@ -1,6 +1,9 @@
+import { randomBytes } from 'node:crypto';
 import { sendResponse } from '../../../../utils/response.js';
 import * as orderService from '../services/order.service.js';
 import * as foodOrderPaymentService from '../services/foodOrderPayment.service.js';
+import * as orderInvoiceService from '../services/orderInvoice.service.js';
+import { emailOrderPlaced } from '../../../../core/notifications/emailEvents.js';
 import {
     validateCalculateOrderDto,
     validateCreateOrderDto,
@@ -40,6 +43,8 @@ export async function verifyPaymentController(req, res, next) {
         const userId = req.user?.userId;
         const dto = validateVerifyPaymentDto(req.body);
         const result = await orderService.verifyPayment(userId, dto);
+        // Online orders are emailed once paid; the key makes a repeat a no-op.
+        emailOrderPlaced(result?.order?._id || result?.order?.id || dto.orderId);
         return sendResponse(res, 200, 'Payment verified', result);
     } catch (err) {
         next(err);
@@ -230,7 +235,9 @@ export async function rejectOrderDeliveryController(req, res, next) {
     try {
         const deliveryPartnerId = req.user?.userId;
         const orderId = req.params.orderId;
-        const order = await orderService.rejectOrderDelivery(orderId, deliveryPartnerId);
+        const order = await orderService.rejectOrderDelivery(orderId, deliveryPartnerId, {
+            reason: typeof req.body?.reason === 'string' ? req.body.reason : '',
+        });
         return sendResponse(res, 200, 'Order rejected', { order });
     } catch (err) {
         next(err);
@@ -309,8 +316,18 @@ export async function updateOrderStatusDeliveryController(req, res, next) {
 export async function getCurrentTripDeliveryController(req, res, next) {
     try {
         const deliveryPartnerId = req.user?.userId;
-        const order = await orderService.getCurrentTripDelivery(deliveryPartnerId);
-        return sendResponse(res, 200, 'Current trip retrieved', { activeOrder: order });
+        const [order, active] = await Promise.all([
+            orderService.getCurrentTripDelivery(deliveryPartnerId),
+            orderService.listActiveDeliveries(deliveryPartnerId),
+        ]);
+        // activeOrder: the most recent one, as before. activeOrders: all of
+        // them, for riders holding more than one (admin's limit, default 2).
+        return sendResponse(res, 200, 'Current trip retrieved', {
+            activeOrder: order,
+            activeOrders: active.orders,
+            orderLimit: active.orderLimit,
+            canAcceptMore: active.canAcceptMore,
+        });
     } catch (err) {
         next(err);
     }
@@ -461,6 +478,24 @@ export async function markOrderDeliveredAdminController(req, res, next) {
     }
 }
 
+export async function verifyOfflinePaymentAdminController(req, res, next) {
+    try {
+        const order = await orderService.verifyOfflinePaymentAdmin(req.params.orderId, req.user?.userId, req.body?.note);
+        return sendResponse(res, 200, 'Offline payment verified', { order });
+    } catch (err) {
+        next(err);
+    }
+}
+
+export async function rejectOfflinePaymentAdminController(req, res, next) {
+    try {
+        const order = await orderService.rejectOfflinePaymentAdmin(req.params.orderId, req.user?.userId, req.body?.reason ?? req.body?.note);
+        return sendResponse(res, 200, 'Offline payment rejected', { order });
+    } catch (err) {
+        next(err);
+    }
+}
+
 export async function processRefundAdminController(req, res, next) {
     try {
         const adminId = req.user?.userId;
@@ -495,6 +530,65 @@ export async function getOrderRouteUserController(req, res, next) {
             req.query || {}
         );
         return sendResponse(res, 200, 'Route fetched', result);
+    } catch (err) {
+        next(err);
+    }
+}
+
+/** POST /food/restaurant/orders/:orderId/handover { code } -- a takeaway handed to the customer. */
+export async function handoverTakeawayRestaurantController(req, res, next) {
+    try {
+        const restaurantId = req.user?.userId;
+        const order = await orderService.handoverTakeawayRestaurant(req.params.orderId, restaurantId, req.body?.code ?? req.body?.otp);
+        return sendResponse(res, 200, 'Order handed over', { order });
+    } catch (err) {
+        next(err);
+    }
+}
+
+// ─── Invoice / bill (one shared builder for all three copies) ───────────────
+
+/**
+ * JSON by default; `?format=html` returns the printable page (80 mm thermal,
+ * `&size=a4` for A4, `&print=1` opens the print dialog on load).
+ */
+async function sendOrderInvoice(req, res, options) {
+    const invoice = await orderInvoiceService.getOrderInvoice(req.params.orderId, options);
+    const format = String(req.query.format || 'json').toLowerCase();
+    if (format === 'html') {
+        const size = String(req.query.size || 'thermal').toLowerCase() === 'a4' ? 'a4' : 'thermal';
+        const autoPrint = ['1', 'true', 'yes'].includes(String(req.query.print || '').toLowerCase());
+        const nonce = randomBytes(16).toString('base64');
+        res.setHeader('Content-Security-Policy', orderInvoiceService.invoiceCsp(nonce));
+        res.setHeader('Cache-Control', 'private, no-store');
+        res.type('html');
+        return res.status(200).send(orderInvoiceService.renderInvoiceHtml(invoice, { size, autoPrint, nonce }));
+    }
+    return sendResponse(res, 200, 'Invoice retrieved', { invoice });
+}
+
+/** GET /food/admin/orders/:orderId/invoice */
+export async function getOrderInvoiceAdminController(req, res, next) {
+    try {
+        return await sendOrderInvoice(req, res, { copy: 'admin' });
+    } catch (err) {
+        next(err);
+    }
+}
+
+/** GET /food/restaurant/orders/:orderId/invoice -- own orders; carries the restaurant's earning. */
+export async function getOrderInvoiceRestaurantController(req, res, next) {
+    try {
+        return await sendOrderInvoice(req, res, { copy: 'restaurant', restaurantId: req.user?.userId });
+    } catch (err) {
+        next(err);
+    }
+}
+
+/** GET /food/user/orders/:orderId/invoice (also /food/orders/:orderId/invoice) -- own orders. */
+export async function getOrderInvoiceUserController(req, res, next) {
+    try {
+        return await sendOrderInvoice(req, res, { copy: 'customer', userId: req.user?.userId });
     } catch (err) {
         next(err);
     }

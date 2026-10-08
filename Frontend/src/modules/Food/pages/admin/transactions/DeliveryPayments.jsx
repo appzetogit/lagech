@@ -3,6 +3,8 @@ import { Loader2, Plus, Search, Send, X } from "@food/components/admin/theme/ico
 import { toast } from "sonner"
 import { adminRiderExtrasAPI } from "@food/api/adminRiderExtras"
 import { formatCurrency, formatDate } from "./DeliveryDisbursements"
+import ExportMenu from "@food/components/admin/ExportMenu"
+import { exportDate, exportMoney, fetchAllPages } from "@food/utils/listExport"
 
 export const PAYMENT_METHODS = [
   ["cash", "Cash"],
@@ -16,6 +18,18 @@ const SOURCES = {
   admin_payment: "Recorded here",
   balance_sheet: "Balance sheet",
 }
+
+const EXPORT_COLUMNS = [
+  { label: "Sl", value: (p, i) => i + 1 },
+  { label: "Date", value: (p) => exportDate(p.createdAt) },
+  { label: "Delivery man", value: (p) => p.deliveryName || "" },
+  { label: "Phone", value: (p) => p.deliveryPhone || "" },
+  { label: "Amount", value: (p) => exportMoney(p.amount) },
+  { label: "Paid by", value: (p) => methodLabel(p.method) },
+  { label: "Reference", value: (p) => p.reference || "" },
+  { label: "Note", value: (p) => p.note || "" },
+  { label: "Recorded from", value: (p) => SOURCES[p.source] || p.source || "" },
+]
 
 const input =
   "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -183,18 +197,18 @@ export default function DeliveryPayments() {
     return () => clearTimeout(timer)
   }, [search])
 
+  const filterParams = () => ({
+    search: filters.search.trim() || undefined,
+    method: filters.method !== "all" ? filters.method : undefined,
+    source: filters.source || undefined,
+    from: filters.from || undefined,
+    to: filters.to || undefined,
+  })
+
   const load = async () => {
     try {
       setLoading(true)
-      const res = await adminRiderExtrasAPI.getPayments({
-        page,
-        limit: 20,
-        search: filters.search.trim() || undefined,
-        method: filters.method !== "all" ? filters.method : undefined,
-        source: filters.source || undefined,
-        from: filters.from || undefined,
-        to: filters.to || undefined,
-      })
+      const res = await adminRiderExtrasAPI.getPayments({ page, limit: 20, ...filterParams() })
       const data = res?.data?.data || {}
       setPayments(data.payments || [])
       setTotalAmount(data.totalAmount || 0)
@@ -210,6 +224,16 @@ export default function DeliveryPayments() {
   useEffect(() => {
     load()
   }, [page, filters])
+
+  // Every payment matching the filters, not just this page.
+  const exportAll = () =>
+    fetchAllPages(
+      ({ page: p, limit }) => adminRiderExtrasAPI.getPayments({ page: p, limit, ...filterParams() }),
+      (res) => {
+        const d = res?.data?.data || {}
+        return { rows: d.payments || [], total: d.pagination?.total, pages: d.pagination?.pages }
+      },
+    )
 
   const setFilter = (key, value) => {
     setFilters((f) => ({ ...f, [key]: value }))
@@ -269,6 +293,7 @@ export default function DeliveryPayments() {
               <p className="text-xs text-slate-500">{pagination.total} payment(s)</p>
               <p className="text-lg font-bold text-slate-900">{formatCurrency(totalAmount)}</p>
             </div>
+            <ExportMenu filename="deliveryman-payments" sheetName="Delivery Man Payments" columns={EXPORT_COLUMNS} getRows={exportAll} />
           </div>
 
           {loading ? (

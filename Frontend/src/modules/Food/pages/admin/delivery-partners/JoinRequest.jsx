@@ -4,6 +4,22 @@ import { adminAPI } from "@food/api"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
 import { zoneLabel } from "@food/utils/entityLabels"
+import ExportMenu from "@food/components/admin/ExportMenu"
+import { fetchAllPages } from "@food/utils/listExport"
+
+const statusLabel = (status) =>
+  ["blocked", "denied", "rejected"].includes(String(status || "").toLowerCase()) ? "Rejected" : status || ""
+
+const EXPORT_COLUMNS = [
+  { label: "Sl", value: (_, i) => i + 1 },
+  { label: "Name", value: (r) => r.name },
+  { label: "Email", value: (r) => r.email },
+  { label: "Phone", value: (r) => r.phone },
+  { label: "Zone", value: (r) => zoneLabel(r.zone) },
+  { label: "Vehicle type", value: (r) => r.vehicleType },
+  { label: "Status", value: (r) => statusLabel(r.status) },
+  { label: "Rejection reason", value: (r) => r.rejectionReason || "" },
+]
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -205,13 +221,18 @@ export default function JoinRequest() {
     utils.exportJoinRequestsToPDF(filteredRequests)
   }
 
-  const handleExportExcel = async () => {
-    if (filteredRequests.length === 0) {
-      toast.error("No data to export")
-      return
-    }
-    const utils = await loadJoinRequestExportUtils()
-    utils.exportJoinRequestsToExcel(filteredRequests)
+  // Every request in this tab matching the search and filters, across all pages.
+  const getExportRows = async () => {
+    const params = { status: activeTab === "pending" ? "pending" : "denied" }
+    if (debouncedSearch.trim()) params.search = debouncedSearch.trim()
+    if (filters.zone) params.zone = filters.zone
+    if (filters.vehicleType) params.vehicleType = filters.vehicleType.toLowerCase()
+    const all = await fetchAllPages(
+      ({ page, limit }) => adminAPI.getDeliveryPartnerJoinRequests({ ...params, page, limit }),
+      (res) => ({ rows: res?.data?.data?.requests || [] }),
+      { pageSize: 1000 },
+    )
+    return filters.jobType ? all.filter((request) => request.jobType === filters.jobType) : all
   }
 
   const handleResetFilters = () => {
@@ -301,14 +322,11 @@ export default function JoinRequest() {
                 <FileText className="w-4 h-4" />
                 <span className="text-black font-bold">PDF</span>
               </button>
-              <button
-                onClick={handleExportExcel}
-                className="px-4 py-2.5 text-sm font-medium rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-2 transition-all"
-                title="Export as Excel"
-              >
-                <FileSpreadsheet className="w-4 h-4" />
-                <span className="text-black font-bold">Excel</span>
-              </button>
+              <ExportMenu
+                filename={activeTab === "pending" ? "deliveryman_join_requests_pending" : "deliveryman_join_requests_denied"}
+                columns={EXPORT_COLUMNS}
+                getRows={getExportRows}
+              />
             </div>
           </div>
 
