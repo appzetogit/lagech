@@ -453,4 +453,9 @@ export const getIO = () => {
     return io;
 };
 
+/** Tests only: stand in a fake server to capture what is emitted. */
+export const setIOForTests = (fake) => {
+    io = fake;
+};
+
 export const rooms = roomNames;
