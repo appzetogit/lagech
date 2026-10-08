@@ -554,7 +554,17 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
 
   const filteredMenuData = useMemo(() => {
     if (!searchQuery.trim()) {
-      if (!areaNavVisible) return menuData
+      if (!areaNavVisible) {
+        // On phones Business Settings sits right under Dashboard, so it is
+        // reachable without scrolling through the whole menu.
+        const isBusiness = (entry) => entry?.type === "section" && entry.label === "BUSINESS SETTINGS"
+        const business = menuData.filter(isBusiness)
+        if (!business.length) return menuData
+        const rest = menuData.filter((entry) => !isBusiness(entry))
+        const firstSection = rest.findIndex((entry) => entry?.type === "section")
+        const at = firstSection === -1 ? rest.length : firstSection
+        return [...rest.slice(0, at), ...business, ...rest.slice(at)]
+      }
       return menuData.filter((entry) => entry && areaOfEntry(entry) === activeArea)
     }
 
