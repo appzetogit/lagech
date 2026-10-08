@@ -1,5 +1,7 @@
+import { assertSelfRegistrationOpen, getBusinessSettings, getPrioritySort } from '../../shared/businessSettings.js';
 import { logger } from '../../../../utils/logger.js';
 import { prisma } from '../../../../config/prisma.js';
+import { invalidateCache } from '../../../../middleware/cache.js';
 import { isId } from '../../../../utils/helpers.js';
 import { uploadImageBuffer } from '../../../../services/cloudinary.service.js';
 import { normalizeMediaUrlForStorage } from '../../../../services/storage.service.js';
@@ -11,6 +13,8 @@ import {
 } from '../../shared/restaurantQuery.util.js';
 import { fromRestaurantLocation, toRestaurant } from '../restaurant.mapper.js';
 import { attachOutletTimingsToRestaurants } from './outletTimings.service.js';
+import { detachRestaurantHistory } from './restaurantDeletion.helpers.js';
+import { USED_ORDER_WHERE } from '../../orders/services/couponRules.js';
 import { getRestaurantOperationalStatus } from '../helpers/restaurantAvailability.helper.js';
 import {
     calculateDistanceKm,
@@ -18,6 +22,7 @@ import {
 } from '../../shared/geo.utils.js';
 import { getRestaurantSubscriptionSettings } from '../../admin/services/admin.service.js';
 import { GST_RATE } from './subscriptionPlan.service.js';
+import { emailNewRestaurantRegistration } from '../../../../core/notifications/emailEvents.js';
 import {
     createRazorpayOrder,
     getRazorpayKeyId,
@@ -202,7 +207,12 @@ const formatRestaurantOfferSummary = (offer) => {
     const minOrderValue = Number(offer.minOrderValue) || 0;
 
     let summary = '';
-    if (discountType === 'flat-price') {
+    if (offer.couponType === 'free_delivery') {
+        summary = 'Free delivery';
+    } else if (discountType === 'flat_price' || discountType === 'flat-price') {
+        // Prisma hands back the enum name (flat_price); 'flat-price' is its
+        // database value. Only the second was checked, so every flat coupon
+        // was summarised as a percentage.
         summary = `Flat ₹${discountValue} OFF`;
     } else {
         summary = `${discountValue}% OFF`;
@@ -256,12 +266,15 @@ const attachPublicOffersToRestaurants = async (restaurants = []) => {
             id: true, couponCode: true, discountType: true, discountValue: true,
             minOrderValue: true, maxDiscount: true,
             restaurantScope: true, restaurantId: true, restaurantIds: true,
+            couponType: true, zoneIds: true, title: true,
         },
         orderBy: { createdAt: 'desc' },
     });
 
     const globalOfferSummaries = [];
     const selectedOfferMap = new Map();
+    /** zone_wise coupons, shown only on restaurants in one of their zones. */
+    const zoneOffers = [];
 
     for (const offer of offers) {
         const summary = formatRestaurantOfferSummary(offer);
@@ -278,8 +291,14 @@ const attachPublicOffersToRestaurants = async (restaurants = []) => {
             minOrderValue: Number(offer.minOrderValue) || 0,
             maxDiscount: Number.isFinite(Number(offer.maxDiscount)) ? Number(offer.maxDiscount) : null,
             restaurantScope: offer.restaurantScope,
+            couponType: offer.couponType,
+            title: offer.title || '',
         };
 
+        if (offer.restaurantScope === 'all' && offer.couponType === 'zone_wise') {
+            zoneOffers.push({ payload, zones: new Set((offer.zoneIds || []).map(String)) });
+            continue;
+        }
         if (offer.restaurantScope === 'all') {
             globalOfferSummaries.push(payload);
             continue;
@@ -299,8 +318,10 @@ const attachPublicOffersToRestaurants = async (restaurants = []) => {
 
     return restaurants.map((restaurant) => {
         const restaurantId = idOf(restaurant);
+        const zoneId = String(restaurant?.zoneId || '');
         const combinedOffers = [
             ...globalOfferSummaries,
+            ...zoneOffers.filter((z) => zoneId && z.zones.has(zoneId)).map((z) => z.payload),
             ...(selectedOfferMap.get(restaurantId) || []),
         ];
         // A restaurant can be named both directly and by an all-restaurants
@@ -404,6 +425,13 @@ const toRestaurantProfile = (doc) => {
             diningType: String(doc.diningSettings?.diningType || 'family-dining').trim() || 'family-dining'
         },
         isAcceptingOrders: doc.isAcceptingOrders !== false,
+        takeawayEnabled: doc.takeawayEnabled !== false,
+        /** The restaurant's extra packaging charge (charged only while Business Settings allow it). */
+        extraPackaging: {
+            enabled: doc.extraPackagingEnabled === true,
+            amount: Number(doc.extraPackagingAmount) || 0,
+            required: doc.extraPackagingRequired === true,
+        },
         outsideHoursOverride: doc.outsideHoursOverride === true,
         subscriptionPlan: doc.subscriptionPlan || '',
         subscriptionAmount: Number.isFinite(Number(doc.subscriptionAmount)) ? Number(doc.subscriptionAmount) : 0,
@@ -456,7 +484,8 @@ const PROFILE_SELECT = {
     accountHolderName: true, accountNumber: true, accountType: true,
     addressLine1: true, addressLine2: true, area: true, city: true,
     closingTime: true, coverImages: true, createdAt: true, cuisines: true,
-    diningEnabled: true, diningMaxGuests: true, diningType: true,
+    diningEnabled: true, diningMaxGuests: true, diningType: true, takeawayEnabled: true,
+    extraPackagingEnabled: true, extraPackagingAmount: true, extraPackagingRequired: true,
     estimatedDeliveryTime: true, estimatedDeliveryTimeMinutes: true,
     formattedAddress: true, fssaiExpiry: true, fssaiImage: true, fssaiNumber: true,
     gstAddress: true, gstImage: true, gstLegalName: true, gstNumber: true,
@@ -747,6 +776,9 @@ export const registerRestaurant = async (payload, files) => {
         menuImages: preUploadedMenuImages
     } = payload;
 
+    // Business Settings > Vendor "self registration" off: only an admin adds restaurants.
+    await assertSelfRegistrationOpen('restaurant');
+
     if (!ownerPhone) {
         throw new ValidationError('Owner phone is required to register a restaurant');
     }
@@ -1011,6 +1043,7 @@ export const registerRestaurant = async (payload, files) => {
         } catch (e) {
             logger.error('Failed to notify admins of new restaurant registration:', e);
         }
+        emailNewRestaurantRegistration(restaurant.id);
 
         return toRestaurant(restaurant);
     } catch (err) {
@@ -1072,6 +1105,69 @@ export const updateRestaurantAcceptingOrders = async (restaurantId, isAcceptingO
     const profile = toRestaurantProfile(toRestaurant(doc));
     if (!profile) return null;
     return enrichRestaurantProfileWithAvailability(profile, doc);
+};
+
+/** The restaurant's own takeaway switch (PATCH /food/restaurant/takeaway-settings). */
+export const updateRestaurantTakeaway = async (restaurantId, enabled) => {
+    if (!isId(restaurantId)) throw new ValidationError('Invalid restaurant id');
+    if (typeof enabled !== 'boolean' && !['true', 'false'].includes(String(enabled))) {
+        throw new ValidationError('takeawayEnabled must be true or false');
+    }
+    const { count } = await prisma.foodRestaurant.updateMany({
+        where: { id: String(restaurantId) },
+        data: { takeawayEnabled: enabled === true || String(enabled) === 'true' },
+    });
+    if (!count) return null;
+    const doc = await prisma.foodRestaurant.findUnique({ where: { id: String(restaurantId) }, select: PROFILE_SELECT });
+    return toRestaurantProfile(toRestaurant(doc));
+};
+
+/** Most a restaurant may charge for extra packaging on one order. */
+export const MAX_EXTRA_PACKAGING = 500;
+
+/**
+ * The restaurant's own extra packaging charge (PATCH
+ * /food/restaurant/packaging-settings { enabled, amount, required }). Only
+ * offered while Business Settings > Order has "extra packaging charge" on;
+ * fields not sent keep their value.
+ */
+export const updateRestaurantPackaging = async (restaurantId, body = {}) => {
+    if (!isId(restaurantId)) throw new ValidationError('Invalid restaurant id');
+    const { extraPackagingCharge } = await getBusinessSettings('business_order');
+    if (!extraPackagingCharge) throw new ValidationError('Extra packaging charges are not allowed right now.');
+
+    const bool = (value, label) => {
+        if (typeof value === 'boolean') return value;
+        if (['true', 'false'].includes(String(value))) return String(value) === 'true';
+        throw new ValidationError(`${label} must be true or false`);
+    };
+    const data = {};
+    const enabled = body.enabled ?? body.extraPackagingEnabled;
+    const amount = body.amount ?? body.extraPackagingAmount;
+    const required = body.required ?? body.extraPackagingRequired;
+    if (enabled !== undefined) data.extraPackagingEnabled = bool(enabled, 'enabled');
+    if (required !== undefined) data.extraPackagingRequired = bool(required, 'required');
+    if (amount !== undefined) {
+        const n = Number(amount);
+        if (!Number.isFinite(n) || n < 0 || n > MAX_EXTRA_PACKAGING) {
+            throw new ValidationError(`Packaging charge must be between 0 and ${MAX_EXTRA_PACKAGING}`);
+        }
+        data.extraPackagingAmount = Math.round(n * 100) / 100;
+    }
+    if (!Object.keys(data).length) throw new ValidationError('Nothing to update');
+
+    const current = await prisma.foodRestaurant.findUnique({
+        where: { id: String(restaurantId) },
+        select: { extraPackagingAmount: true },
+    });
+    if (!current) return null;
+    const finalAmount = data.extraPackagingAmount ?? Number(current.extraPackagingAmount);
+    if (data.extraPackagingEnabled === true && !(finalAmount > 0)) {
+        throw new ValidationError('Enter the packaging charge before switching it on');
+    }
+    await prisma.foodRestaurant.update({ where: { id: String(restaurantId) }, data });
+    const doc = await prisma.foodRestaurant.findUnique({ where: { id: String(restaurantId) }, select: PROFILE_SELECT });
+    return toRestaurantProfile(toRestaurant(doc));
 };
 
 export const updateCurrentRestaurantDiningSettings = async (restaurantId, body = {}) => {
@@ -1473,7 +1569,8 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
         'accountType',
         'upiId',
         'upiQrImage',
-        'profileImage',
+        // profileImage (the logo) is deliberately absent: a logo change goes
+        // live at once and never takes the restaurant back to `pending`.
         'coverImages',
         'menuImages'
     ]);
@@ -1536,6 +1633,12 @@ const mergeImageUrls = (existing = [], added = [], cap = 20) => {
     return urls.slice(0, cap);
 };
 
+/**
+ * The restaurant's logo. Applied at once: no admin review, and the status and
+ * isAcceptingOrders are left exactly as they were (an approved restaurant stays
+ * approved and keeps taking orders). The public list/detail caches are dropped
+ * after the write, so customers see the new logo on their next load.
+ */
 export const uploadRestaurantProfileImage = async (restaurantId, file) => {
     if (!isId(restaurantId)) throw new ValidationError('Invalid restaurant id');
     if (!file?.buffer) throw new ValidationError('Image file is required');
@@ -1543,22 +1646,32 @@ export const uploadRestaurantProfileImage = async (restaurantId, file) => {
 
     const current = await prisma.foodRestaurant.findUnique({
         where: { id },
-        select: { restaurantName: true, status: true },
+        select: { id: true },
     });
     if (!current) throw new ValidationError('Restaurant not found');
 
     const url = await uploadImageBuffer(file.buffer, 'food/restaurants/profile');
     await prisma.foodRestaurant.update({
         where: { id },
-        data: { profileImage: url, ...BACK_TO_REVIEW },
+        data: { profileImage: url },
     });
 
-    // Only tell the admins if this actually re-opened a settled decision.
-    if (current.status !== 'pending') {
-        void notifyAdminsAboutRestaurantProfileReview(id, current.restaurantName || '');
-    }
+    await dropPublicRestaurantCaches();
 
     return { profileImage: { url } };
+};
+
+/** Customer-facing caches that carry a restaurant's card or detail. */
+const dropPublicRestaurantCaches = async () => {
+    try {
+        await Promise.all([
+            invalidateCache('restaurants:*'),
+            invalidateCache('restaurant_detail:*'),
+            invalidateCache('search_unified:*'),
+        ]);
+    } catch (err) {
+        logger.warn(`Restaurant cache invalidation failed: ${err?.message || err}`);
+    }
 };
 
 export const uploadRestaurantMenuImage = async (file) => {
@@ -1646,8 +1759,8 @@ const PUBLIC_CARD_SELECT = {
     estimatedDeliveryTime: true, estimatedDeliveryTimeMinutes: true,
     offer: true, featuredDish: true, featuredPrice: true,
     rating: true, totalRatings: true, isAcceptingOrders: true, status: true,
-    pureVegRestaurant: true, createdAt: true,
-    isRecommended: true, recommendedSortOrder: true, displayPosition: true,
+    pureVegRestaurant: true, createdAt: true, zoneId: true,
+    isRecommended: true, recommendedSortOrder: true, displayPosition: true, isFeatured: true,
     openingTime: true, closingTime: true, openDays: true,
     latitude: true, longitude: true, formattedAddress: true,
     addressLine1: true, addressLine2: true, state: true, pincode: true, landmark: true,
@@ -1765,6 +1878,8 @@ export const listApprovedRestaurants = async (query = {}) => {
     // The admin's hand-picked list (Recommended Restaurants), in the admin's order.
     const recommendedOnly = query.recommended === 'true';
     if (recommendedOnly) AND.push({ isRecommended: true });
+    // The admin's Featured toggle (restaurant list).
+    if (query.featured === 'true') AND.push({ isFeatured: true });
     if (query.trusted === 'true') AND.push({ totalRatings: { gte: 100 } });
 
     if (query.search && String(query.search).trim()) {
@@ -1795,7 +1910,10 @@ export const listApprovedRestaurants = async (query = {}) => {
     const lng = toFiniteNumber(query.lng);
     // radiusKm is preferred; maxDistance is the legacy frontend param.
     const radiusKm = toFiniteNumber(query.radiusKm) ?? toFiniteNumber(query.maxDistance);
-    const sortBy = parseSortBy(query.sortBy);
+    // No sort asked for: the admin's choice for this section (Business
+    // Settings > Priority setup), else the default order below.
+    const sortBy = parseSortBy(query.sortBy)
+        || parseSortBy(await getPrioritySort(recommendedOnly ? 'recommended' : 'allRestaurants'));
 
     // Geo is used only when actually asked for, so a restaurant with no
     // coordinates yet is not silently dropped from the default listing.
@@ -1870,6 +1988,7 @@ export const listApprovedRestaurants = async (query = {}) => {
             'price-low': [{ featuredPrice: 'asc' }, { createdAt: 'desc' }],
             'price-high': [{ featuredPrice: 'desc' }, { createdAt: 'desc' }],
             deliveryTime: [{ estimatedDeliveryTimeMinutes: 'asc' }, { createdAt: 'desc' }],
+            newest: [{ createdAt: 'desc' }],
         }[sortBy] || (recommendedOnly
             ? [{ recommendedSortOrder: 'asc' }, { createdAt: 'desc' }]
             : [{ displayPosition: { sort: 'asc', nulls: 'last' } }, { createdAt: 'desc' }]);
@@ -1946,14 +2065,36 @@ export const listPublicOffers = async (query = {}) => {
         filter.AND.push({ customerScope: { not: 'specific' } });
     }
 
-    // A returning customer does not see first-order-only coupons.
+    // A returning customer does not see first-order-only coupons. "Returning"
+    // is the same test checkout applies: an order that was placed and not
+    // cancelled or left unpaid (USED_ORDER_WHERE).
     if (isId(userId)) {
-        const orderCount = await prisma.foodOrder.count({ where: { userId: String(userId) } });
+        const orderCount = await prisma.foodOrder.count({ where: { userId: String(userId), ...USED_ORDER_WHERE } });
         if (orderCount > 0) {
             // The enum's Prisma name is first_time; 'first-time' is its @map.
-            filter.AND.push({ customerScope: { not: 'first_time' }, isFirstOrderOnly: false });
+            filter.AND.push({
+                customerScope: { not: 'first_time' },
+                isFirstOrderOnly: false,
+                couponType: { not: 'first_order' },
+            });
         }
     }
+
+    // Zone-wise coupons only where the zone is known and matches: the
+    // restaurant's zone when one is named, else the zone the app sent.
+    let zoneForCoupons = isId(query.zoneId) ? String(query.zoneId) : null;
+    if (isId(restaurantId)) {
+        const r = await prisma.foodRestaurant.findUnique({
+            where: { id: String(restaurantId) },
+            select: { zoneId: true },
+        });
+        zoneForCoupons = r?.zoneId || zoneForCoupons;
+    }
+    filter.AND.push(
+        zoneForCoupons
+            ? { OR: [{ couponType: { not: 'zone_wise' } }, { zoneIds: { has: zoneForCoupons } }] }
+            : { couponType: { not: 'zone_wise' } },
+    );
 
     if (subtotal !== undefined && subtotal !== null && subtotal !== '' && !isNaN(Number(subtotal))) {
         const numericSubtotal = Number(subtotal);
@@ -2009,13 +2150,22 @@ export const listPublicOffers = async (query = {}) => {
 
         const discountValue = Number(o.discountValue) || 0;
         const title =
-            o.discountType === 'percentage' ? `${discountValue}% OFF` : `Flat ₹${discountValue} OFF`;
+            o.couponType === 'free_delivery'
+                ? 'Free Delivery'
+                : o.discountType === 'percentage' ? `${discountValue}% OFF` : `Flat ₹${discountValue} OFF`;
 
         return {
             id: o.id,
             offerId: o.id,
             couponCode: o.couponCode,
             title,
+            // The name the admin gave the coupon ("Diwali offer"); `title`
+            // stays the discount headline the app already shows.
+            couponTitle: o.title || '',
+            couponType: o.couponType,
+            freeDelivery: o.couponType === 'free_delivery',
+            zoneIds: o.zoneIds || [],
+            startDate: o.startDate || null,
             discountType: o.discountType,
             discountValue,
             maxDiscount: o.maxDiscount === null ? null : Number(o.maxDiscount),
@@ -2037,13 +2187,17 @@ export const listPublicOffers = async (query = {}) => {
         };
     });
 
-    // Drop coupons this user has already used up.
-    if (isId(userId)) {
-        const usages = await prisma.foodOfferUsage.findMany({
-            where: { userId: String(userId) },
-            select: { offerId: true, count: true },
+    // Drop coupons this user has already used up. Uses are counted from their
+    // orders, the same way checkout counts them, so a cancelled order does not
+    // hide a coupon they can still use.
+    const limited = allOffers.filter((o) => Number(o.perUserLimit || 0) > 0).map((o) => o.id);
+    if (isId(userId) && limited.length) {
+        const usages = await prisma.foodOrder.groupBy({
+            by: ['couponId'],
+            where: { userId: String(userId), couponId: { in: limited }, ...USED_ORDER_WHERE },
+            _count: { _all: true },
         });
-        const usageMap = new Map(usages.map((u) => [u.offerId, Number(u.count || 0)]));
+        const usageMap = new Map(usages.map((u) => [u.couponId, Number(u._count._all || 0)]));
 
         allOffers = allOffers.filter((o) => {
             const perUserLimit = Number(o.perUserLimit || 0);
@@ -2072,6 +2226,9 @@ export async function createRestaurantOffer(restaurantId, body) {
                 discountType: body.discountType,
                 discountValue: body.discountValue,
                 customerScope: body.customerScope || 'all',
+                // A restaurant's own coupon is, in the old system's terms,
+                // store wise: it only applies at that restaurant.
+                couponType: 'store_wise',
                 restaurantScope: 'selected',
                 restaurantId: String(restaurantId),
                 minOrderValue: body.minOrderValue ?? 0,
@@ -2162,8 +2319,12 @@ export async function updateRestaurantOfferStatus(restaurantId, offerId, status)
  * destroyed: a restaurant that has ever traded cannot be erased.
  *
  * What the restaurant genuinely owns — its dishes, addons, timings, banners —
- * goes with it, most of it through ON DELETE CASCADE.
+ * goes with it, most of it through ON DELETE CASCADE. Its support tickets and
+ * feedback are kept for the admin, detached (restaurantDeletion.helpers.js).
  */
+export const RESTAURANT_HAS_HISTORY_MESSAGE =
+    'Restaurants with order history cannot be deleted. Please contact support.';
+
 export const deleteCurrentRestaurantAccount = async (restaurantId) => {
     if (!isId(restaurantId)) throw new ValidationError('Invalid restaurant id');
     const id = String(restaurantId);
@@ -2178,9 +2339,8 @@ export const deleteCurrentRestaurantAccount = async (restaurantId) => {
     ]);
 
     if (orders || transactions || invoices) {
-        throw new ValidationError(
-            'This restaurant has order or billing history and cannot be deleted. Contact support to close the account instead.',
-        );
+        // ValidationError -> HTTP 400.
+        throw new ValidationError(RESTAURANT_HAS_HISTORY_MESSAGE);
     }
 
     await prisma.$transaction(async (tx) => {
@@ -2192,9 +2352,8 @@ export const deleteCurrentRestaurantAccount = async (restaurantId) => {
             data: { createdByRestaurantId: null },
         });
         await tx.foodOffer.deleteMany({ where: { restaurantId: id } });
-        await tx.foodSupportTicket.deleteMany({ where: { restaurantId: id } });
-        await tx.foodRestaurantSupportTicket.deleteMany({ where: { restaurantId: id } });
-        await tx.feedbackExperience.deleteMany({ where: { restaurantId: id } });
+        // Support tickets and feedback stay for the admin, detached.
+        await detachRestaurantHistory(tx, restaurant);
         await tx.foodRestaurantWithdrawal.deleteMany({ where: { restaurantId: id } });
         await tx.foodSubscriptionTransaction.deleteMany({ where: { restaurantId: id } });
         await tx.foodRestaurantSubscriptionHistory.deleteMany({ where: { restaurantId: id } });
@@ -2203,6 +2362,8 @@ export const deleteCurrentRestaurantAccount = async (restaurantId) => {
         // all cascade from this.
         await tx.foodRestaurant.delete({ where: { id } });
     });
+
+    await dropPublicRestaurantCaches();
 
     return { success: true };
 };

@@ -3,7 +3,9 @@ import {
     createBroadcastNotification,
     getBroadcastNotifications,
     deleteBroadcastNotification,
-    getLapsedCustomers
+    getLapsedCustomers,
+    resendBroadcastNotification,
+    setBroadcastNotificationStatus
 } from '../services/notificationBroadcast.service.js';
 
 export const createBroadcastNotificationController = async (req, res) => {
@@ -56,5 +58,25 @@ export const getLapsedCustomersController = async (req, res) => {
         return sendResponse(res, 200, 'Lapsed customers fetched', data);
     } catch (error) {
         return sendError(res, error.statusCode || 500, error.message || 'Failed to fetch lapsed customers');
+    }
+};
+
+/** POST /notifications/broadcast/:id/resend -- same message, same recorded audience. */
+export const resendBroadcastNotificationController = async (req, res) => {
+    try {
+        const data = await resendBroadcastNotification(req.params?.id);
+        return sendResponse(res, 200, 'Notification resent', data);
+    } catch (error) {
+        return sendError(res, error.statusCode || 500, error.message || 'Failed to resend notification');
+    }
+};
+
+/** PATCH /notifications/broadcast/:id/status { isActive } */
+export const setBroadcastNotificationStatusController = async (req, res) => {
+    try {
+        const data = await setBroadcastNotificationStatus(req.params?.id, req.body?.isActive);
+        return sendResponse(res, 200, 'Notification status updated', data);
+    } catch (error) {
+        return sendError(res, error.statusCode || 500, error.message || 'Failed to update notification status');
     }
 };

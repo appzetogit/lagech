@@ -17,6 +17,8 @@ export default function EmailTemplate() {
   const [values, setValues] = useState({})
   const [preview, setPreview] = useState(null)
   const [busy, setBusy] = useState("")
+  const [settings, setSettings] = useState(null)
+  const [recipientsText, setRecipientsText] = useState("")
   const bodyRef = useRef(null)
 
   const selected = templates.find((t) => t.key === selectedKey)
@@ -27,6 +29,9 @@ export default function EmailTemplate() {
       const res = await adminSystemExtrasAPI.getEmailTemplates()
       const list = res?.data?.data?.templates || []
       setTemplates(list)
+      const loadedSettings = res?.data?.data?.settings || null
+      setSettings(loadedSettings)
+      setRecipientsText((loadedSettings?.adminRecipients || []).join("\n"))
       const key = keepKey || list[0]?.key || ""
       setSelectedKey(key)
       const current = list.find((t) => t.key === key)
@@ -88,6 +93,39 @@ export default function EmailTemplate() {
     }
   }
 
+  const toggleSending = async (template, enabled) => {
+    try {
+      setBusy("sending")
+      const res = await adminSystemExtrasAPI.saveEmailSettings({ switches: { [template.key]: enabled } })
+      const saved = res?.data?.data
+      if (saved) setSettings(saved)
+      setTemplates((list) => list.map((t) => (t.key === template.key ? { ...t, sendEnabled: enabled } : t)))
+      toast.success(enabled ? "This email will be sent" : "This email will not be sent")
+    } catch (err) {
+      toast.error(errorMessage(err, "Failed to save"))
+    } finally {
+      setBusy("")
+    }
+  }
+
+  const saveRecipients = async () => {
+    try {
+      setBusy("recipients")
+      const adminRecipients = recipientsText.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean)
+      const res = await adminSystemExtrasAPI.saveEmailSettings({ adminRecipients })
+      const saved = res?.data?.data
+      if (saved) {
+        setSettings(saved)
+        setRecipientsText((saved.adminRecipients || []).join("\n"))
+      }
+      toast.success("Admin addresses saved")
+    } catch (err) {
+      toast.error(errorMessage(err, "Failed to save"))
+    } finally {
+      setBusy("")
+    }
+  }
+
   const reset = async () => {
     if (!window.confirm("Go back to the built-in wording for this email?")) return
     try {
@@ -111,6 +149,24 @@ export default function EmailTemplate() {
         <Card><p className="py-10 text-center text-sm text-slate-500">This system sends no emails yet.</p></Card>
       ) : (
         <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
+          <div className="space-y-6">
+          <Card title="Admin notifications" description="Where emails to the admin go (new registrations). One address per line.">
+            <textarea
+              className={`${inputClass} text-xs`}
+              rows={3}
+              value={recipientsText}
+              placeholder={settings?.businessEmail || "admin@example.com"}
+              onChange={(e) => setRecipientsText(e.target.value)}
+            />
+            <p className="mt-1 text-[11px] text-slate-500">
+              {settings?.adminRecipients?.length
+                ? "Admin emails go to these addresses."
+                : `Empty: admin emails go to the Business Info email${settings?.businessEmail ? ` (${settings.businessEmail})` : ""}.`}
+            </p>
+            <div className="mt-2 flex justify-end">
+              <SaveButton saving={busy === "recipients"} onClick={saveRecipients} disabled={Boolean(busy) && busy !== "recipients"} />
+            </div>
+          </Card>
           <Card className="h-fit">
             <ul className="space-y-1">
               {templates.map((t) => (
@@ -121,17 +177,35 @@ export default function EmailTemplate() {
                     className={`w-full rounded-lg px-3 py-2 text-left text-sm ${t.key === selectedKey ? "bg-blue-50 text-blue-800 font-semibold" : "text-slate-700 hover:bg-slate-50"}`}
                   >
                     {t.name}
-                    <span className="block text-[11px] font-normal text-slate-500">{t.isCustomized ? (t.isActive ? "Custom wording" : "Custom wording, switched off") : "Built-in wording"}</span>
+                    <span className="block text-[11px] font-normal text-slate-500">
+                      {t.sendEnabled === false ? "Not sent · " : ""}
+                      {t.isCustomized ? (t.isActive ? "Custom wording" : "Custom wording, switched off") : "Built-in wording"}
+                    </span>
                   </button>
                 </li>
               ))}
             </ul>
           </Card>
+          </div>
 
           {selected && form && (
             <div className="space-y-6">
               <Card title={selected.name} description={selected.description}>
                 <div className="space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                    <p className="text-xs text-slate-600">
+                      Goes to: {(selected.audience || []).map((a) => (a === "rider" ? "delivery partner" : a)).join(", ") || "-"}
+                      {(selected.audience || []).includes("customer") && " (only customers with an email address)"}
+                    </p>
+                    {selected.canDisable ? (
+                      <label className="flex items-center gap-2 text-sm text-slate-700">
+                        <Switch checked={selected.sendEnabled !== false} disabled={Boolean(busy)} onChange={(v) => toggleSending(selected, v)} label="Send this email" />
+                        Send this email
+                      </label>
+                    ) : (
+                      <span className="text-xs text-slate-500">Always sent</span>
+                    )}
+                  </div>
                   <Field label="Subject">
                     <input className={inputClass} maxLength={200} value={form.subject} onChange={(e) => setForm((f) => ({ ...f, subject: e.target.value }))} />
                   </Field>

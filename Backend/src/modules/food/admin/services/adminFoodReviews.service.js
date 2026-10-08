@@ -67,6 +67,9 @@ const serialize = (row, imageByItem) => ({
     orderNumber: row.order?.order_id || row.order?.orderId || '',
     restaurantId: row.order?.restaurantId || '',
     restaurantName: row.order?.restaurant?.restaurantName || '',
+    /** The restaurant's reply to the review on that order (the old panel's "Store reply"). */
+    storeReply: row.order?.restaurantReply || '',
+    storeRepliedAt: row.order?.restaurantRepliedAt || null,
 });
 
 export async function listFoodReviews(query = {}) {
@@ -87,6 +90,8 @@ export async function listFoodReviews(query = {}) {
                         orderId: true,
                         restaurantId: true,
                         customerName: true,
+                        restaurantReply: true,
+                        restaurantRepliedAt: true,
                         user: { select: { name: true } },
                         restaurant: { select: { restaurantName: true } },
                     },

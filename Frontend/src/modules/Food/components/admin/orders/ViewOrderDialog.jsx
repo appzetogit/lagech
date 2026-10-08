@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Eye, MapPin, Package, User, Phone, Mail, Calendar, Clock, Truck, CreditCard, X, Receipt, CheckCircle2, History, Banknote } from "@food/components/admin/theme/icons"
+import { Eye, MapPin, Package, User, Phone, Mail, Calendar, Clock, Truck, CreditCard, X, Receipt, CheckCircle2, History, Banknote, Printer } from "@food/components/admin/theme/icons"
 import {
   Dialog,
   DialogContent,
@@ -13,6 +13,9 @@ import { formatDeliveryFeeBreakdownSubtext, getDeliveryFeeTotal, resolveDelivery
 import { getCartCompareItemTotal, getLineCompareUnitPrice } from "@food/utils/foodVariants"
 import { DualMoney } from "@food/components/user/FoodPriceDisplay"
 import { restaurantLabel } from "@food/utils/entityLabels"
+import OfflinePaymentPanel from "./OfflinePaymentPanel"
+import { toast } from "sonner"
+import { printOrderInvoice } from "@food/utils/printInvoice"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -50,11 +53,27 @@ const formatDialogMoney = (value) => {
   return `${num < 0 ? "-" : ""}₹${Math.abs(num).toFixed(2)}`
 }
 
-export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
+export default function ViewOrderDialog({ isOpen, onOpenChange, order, onOrderChanged }) {
   // Full order detail (statusHistory + transaction split) fetched on open;
   // the `order` prop only carries the mapped list-row fields.
   const [detail, setDetail] = useState(null)
+  const [reloadKey, setReloadKey] = useState(0)
   const detailOrderId = order?._id || order?.orderMongoId || order?.id || null
+  const [invoiceSize, setInvoiceSize] = useState("thermal")
+  const [printing, setPrinting] = useState(false)
+
+  const handlePrintInvoice = async () => {
+    if (!detailOrderId || printing) return
+    setPrinting(true)
+    try {
+      await printOrderInvoice((params) => adminAPI.getOrderInvoice(detailOrderId, params), { size: invoiceSize })
+    } catch (err) {
+      debugError("Failed to print invoice:", err)
+      toast.error("Could not load the invoice")
+    } finally {
+      setPrinting(false)
+    }
+  }
 
   useEffect(() => {
     let active = true
@@ -75,7 +94,7 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
     return () => {
       active = false
     }
-  }, [isOpen, detailOrderId])
+  }, [isOpen, detailOrderId, reloadKey])
 
   if (!order) return null
 
@@ -182,6 +201,28 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
           <DialogDescription>
             View complete information about this order
           </DialogDescription>
+          {detailOrderId && !order.subscriptionId ? (
+            <div className="flex flex-wrap items-center gap-2 pt-2">
+              <select
+                value={invoiceSize}
+                onChange={(e) => setInvoiceSize(e.target.value)}
+                className="h-9 rounded-md border border-slate-300 bg-white px-2 text-sm text-slate-700"
+                aria-label="Invoice paper size"
+              >
+                <option value="thermal">Thermal (80 mm)</option>
+                <option value="a4">A4</option>
+              </select>
+              <button
+                type="button"
+                onClick={handlePrintInvoice}
+                disabled={printing}
+                className="inline-flex h-9 items-center gap-2 rounded-md bg-orange-600 px-3 text-sm font-medium text-white hover:bg-orange-700 disabled:opacity-60"
+              >
+                <Printer className="w-4 h-4" />
+                {printing ? "Preparing…" : "Print invoice"}
+              </button>
+            </div>
+          ) : null}
         </DialogHeader>
         <div className="px-6 py-6 space-y-6">
           {/* Basic Order Information */}
@@ -293,8 +334,31 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
                   <p className="text-sm font-medium text-slate-900">{order.deliveryType}</p>
                 </div>
               )}
+              {order.isScheduled && order.scheduledAt && (
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                    <Clock className="w-4 h-4" />
+                    Scheduled For
+                  </p>
+                  <p className="text-sm font-medium text-slate-900">
+                    {new Date(order.scheduledAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "numeric", minute: "2-digit", hour12: true })}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
+
+          {(detail?.offlinePayment || order.offlinePayment) && (
+            <OfflinePaymentPanel
+              orderId={detailOrderId}
+              offlinePayment={detail?.offlinePayment || order.offlinePayment}
+              awaiting={String(detail?.orderStatus || "").toLowerCase() === "pending_payment"}
+              onChanged={() => {
+                setReloadKey((k) => k + 1)
+                onOrderChanged?.()
+              }}
+            />
+          )}
 
           {/* Customer Information */}
           <div className="border-t border-slate-200 pt-4">
@@ -524,9 +588,15 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
                     {deliveryFeeBase > 0 ? (
                       formatDialogMoney(getDeliveryFeeTotal(deliveryFeeBase, deliveryFeeGst))
                     ) : (
-                      <span className="text-emerald-600">Free delivery</span>
+                      <span className="text-emerald-600">{order.orderType === "takeaway" ? "Takeaway" : "Free delivery"}</span>
                     )}
                   </span>
+                </div>
+              )}
+              {Number(order.riderTip ?? orderPricing.riderTip ?? 0) > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-600">Rider tip <span className="text-[11px] text-slate-400">(all to the rider)</span></span>
+                  <span className="font-medium text-slate-900">{formatDialogMoney(Number(order.riderTip ?? orderPricing.riderTip))}</span>
                 </div>
               )}
               {quickDeliveryFee > 0 && (

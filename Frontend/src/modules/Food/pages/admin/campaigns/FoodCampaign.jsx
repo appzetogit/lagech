@@ -3,7 +3,22 @@ import { Layers, Loader2, Pencil, Plus, Trash2, X } from "@food/components/admin
 import { toast } from "sonner"
 import { adminAPI } from "@food/api"
 import { adminCatalogExtrasAPI, errorMessage, loadRestaurantOptions } from "@food/api/adminCatalogExtras"
+import ExportMenu from "@food/components/admin/ExportMenu"
+import { exportDate, exportMoney } from "@food/utils/listExport"
 import { ImageUpload, STATE_BADGE, STATE_LABEL, STATE_TABS, formatWhen, fromLocalInput, toLocalInput } from "./campaignShared"
+
+const EXPORT_COLUMNS = [
+  { label: "Sl", value: (_c, index) => index + 1 },
+  { label: "Title", value: (c) => c.title },
+  { label: "Restaurant", value: (c) => c.restaurantName },
+  { label: "Food Type", value: (c) => c.foodType },
+  { label: "Price", value: (c) => exportMoney(c.price) },
+  { label: "Discount", value: (c) => (Number(c.discount) > 0 ? (c.discountType === "percent" ? `${c.discount}%` : exportMoney(c.discount)) : "") },
+  { label: "Final Price", value: (c) => exportMoney(c.finalPrice) },
+  { label: "Starts", value: (c) => exportDate(c.startsAt) },
+  { label: "Ends", value: (c) => exportDate(c.endsAt) },
+  { label: "Status", value: (c) => STATE_LABEL[c.state] || c.state },
+]
 
 const finalPrice = (price, type, discount) => {
   const p = Number(price) || 0
@@ -184,9 +199,13 @@ export default function FoodCampaign() {
             </div>
             <p className="text-sm text-slate-600 mt-1">A special dish from one restaurant with its own price and discount, shown to customers between its start and end.</p>
           </div>
-          <button type="button" onClick={() => setEditing({})} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white">
-            <Plus className="w-4 h-4" /> New food campaign
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* The list endpoint is unpaged, so data.campaigns is every campaign for the chosen tab and restaurant. */}
+            <ExportMenu filename="food_campaigns" sheetName="Food Campaigns" columns={EXPORT_COLUMNS} getRows={() => data.campaigns} disabled={loading} className="py-2" />
+            <button type="button" onClick={() => setEditing({})} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white">
+              <Plus className="w-4 h-4" /> New food campaign
+            </button>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">

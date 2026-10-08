@@ -89,6 +89,8 @@ export const buildStallFilters = (now = new Date(), windows = expiryWindows()) =
             note: 'We could not find a delivery partner for this order, so it expired automatically.',
             where: {
                 orderStatus: { in: AWAITING_RIDER },
+                // A takeaway never has a rider to find.
+                orderType: { not: 'takeaway' },
                 // Never had a rider accept. Once one has, the trip is somebody's
                 // job and a timer should not take it away from them.
                 dispatchAcceptedAt: null,
@@ -116,6 +118,10 @@ export const buildDeadHuntFilter = (now = new Date(), windows = expiryWindows(),
     return {
         orderStatus: { in: AWAITING_RIDER },
         dispatchStatus: 'unassigned',
+        // No hunt for a takeaway, nor for a scheduled order before its release
+        // time (releaseScheduledOrders starts that one).
+        orderType: { not: 'takeaway' },
+        AND: [{ OR: [{ releaseAt: null }, { releaseAt: { lte: now } }] }],
         // No rider holds this trip, by either half of the record.
         dispatchAcceptedAt: null,
         dispatchDeliveryPartnerId: null,

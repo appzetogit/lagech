@@ -3,9 +3,24 @@ import { Eye, EyeOff, Loader2, Search, Star } from "@food/components/admin/theme
 import { toast } from "sonner"
 import { adminAPI } from "@food/api"
 import { adminCatalogExtrasAPI, errorMessage, loadRestaurantOptions } from "@food/api/adminCatalogExtras"
+import ExportMenu from "@food/components/admin/ExportMenu"
+import { exportDate, fetchAllPages } from "@food/utils/listExport"
 
 const PAGE_SIZE = 25
 const EMPTY = { restaurantId: "", rating: "", from: "", to: "", visibility: "", search: "" }
+
+const EXPORT_COLUMNS = [
+  { label: "Sl", value: (_r, index) => index + 1 },
+  { label: "Dish", value: (r) => r.dishName },
+  { label: "Rating", value: (r) => Number(r.rating) || 0 },
+  { label: "Comment", value: (r) => r.comment },
+  { label: "Customer", value: (r) => r.customerName },
+  { label: "Order", value: (r) => r.orderNumber },
+  { label: "Restaurant", value: (r) => r.restaurantName },
+  { label: "Store reply", value: (r) => r.storeReply || "" },
+  { label: "Date", value: (r) => exportDate(r.ratedAt) },
+  { label: "Status", value: (r) => (r.isHidden ? "Hidden" : "Shown") },
+]
 
 const Stars = ({ value }) => (
   <span className="inline-flex items-center gap-0.5" aria-label={`${value} out of 5`}>
@@ -72,6 +87,19 @@ export default function FoodReviews() {
     }
   }
 
+  // Every page with the filters the list is using (the API caps a page at 100).
+  const getExportRows = () => {
+    const active = Object.fromEntries(Object.entries(filters).filter(([, v]) => v))
+    return fetchAllPages(
+      ({ page: p, limit }) => adminCatalogExtrasAPI.getFoodReviews({ ...active, page: p, limit }),
+      (res) => {
+        const payload = res?.data?.data || {}
+        return { rows: payload.reviews || [], total: payload.pagination?.total, pages: payload.pagination?.pages }
+      },
+      { pageSize: 100 },
+    )
+  }
+
   const input = "rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white"
   const { reviews = [], summary, pagination } = data
 
@@ -124,6 +152,7 @@ export default function FoodReviews() {
               Clear
             </button>
           )}
+          <ExportMenu filename="food_reviews" sheetName="Food Reviews" columns={EXPORT_COLUMNS} getRows={getExportRows} disabled={loading} className="py-2" />
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto">
@@ -139,6 +168,7 @@ export default function FoodReviews() {
                   <th className="px-4 py-3 font-semibold">Review</th>
                   <th className="px-4 py-3 font-semibold">Customer</th>
                   <th className="px-4 py-3 font-semibold">Restaurant</th>
+                  <th className="px-4 py-3 font-semibold">Store reply</th>
                   <th className="px-4 py-3 font-semibold">Date</th>
                   <th className="px-4 py-3 font-semibold text-right">Shown to customers</th>
                 </tr>
@@ -165,6 +195,16 @@ export default function FoodReviews() {
                       {r.orderNumber && <p className="text-xs text-slate-400">{r.orderNumber}</p>}
                     </td>
                     <td className="px-4 py-3 text-slate-700">{r.restaurantName}</td>
+                    <td className="px-4 py-3 max-w-xs">
+                      {r.storeReply ? (
+                        <>
+                          <p className="text-slate-700 whitespace-pre-line break-words">{r.storeReply}</p>
+                          {r.storeRepliedAt && <p className="text-xs text-slate-400">{when(r.storeRepliedAt)}</p>}
+                        </>
+                      ) : (
+                        <p className="text-xs text-slate-400">No reply</p>
+                      )}
+                    </td>
                     <td className="px-4 py-3 whitespace-nowrap text-slate-600">{when(r.ratedAt)}</td>
                     <td className="px-4 py-3 text-right">
                       <button

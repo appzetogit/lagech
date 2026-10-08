@@ -25,6 +25,27 @@ import {
   assertRestaurantOpenForOrdering,
 } from './order-pricing.service.js';
 import { normalizeDeliveryAddress } from '../../shared/geo.utils.js';
+import { resolveOrderZoneId, assertZoneAllowsPayment } from '../../shared/zonePayment.js';
+import { getOfflinePaymentSettings } from '../../admin/services/adminSystemExtras.service.js';
+import { buildOfflinePaymentRecord, decideOfflinePayment, OFFLINE_STATUS } from './offlinePayment.util.js';
+import { paymentMethodRefusal, isScheduledFor, percentageRiderEarning } from './businessRules.js';
+import {
+  resolveOrderType,
+  takeawayPaymentRefusal,
+  assertSchedulable,
+  releaseAtFor,
+  isHeldForSchedule,
+} from './orderModes.js';
+import { getBusinessSettings, getMaintenanceState } from '../../shared/businessSettings.js';
+import { getBalance } from '../../../../core/payments/transaction.service.js';
+import {
+  planPartialPayment,
+  debitPartialWallet,
+  returnPartialWallet,
+  refundPartialPayment,
+  isPartialPayment,
+  remainderAmount,
+} from './partialPayment.service.js';
 import * as dispatchService from './order-dispatch.service.js';
 import * as deliveryService from './order-delivery.service.js';
 import * as paymentService from './order-payment.service.js';
@@ -42,6 +63,7 @@ import {
   canExposeOrderToRestaurant,
   isStatusAdvance,
   STATUS_PRIORITY,
+  generateFourDigitDeliveryOtp,
 } from './order.helpers.js';
 
 const ORDER_ACCEPTANCE_WINDOW_SECONDS = 240;
@@ -99,14 +121,22 @@ async function getOrderAcceptanceWindowSeconds() {
   }
 }
 
+// Offline payment waits too: in pending_payment until the admin verifies it.
 function isAwaitingOnlinePaymentMethod(paymentMethod) {
   const method = String(paymentMethod || "").toLowerCase();
-  return method === "razorpay" || method === "card";
+  return method === "razorpay" || method === "card" || method === "offline";
 }
 
 function buildAcceptanceDeadline(date = new Date(), windowSeconds = ORDER_ACCEPTANCE_WINDOW_SECONDS) {
   const seconds = Number(windowSeconds);
   return new Date(date.getTime() + (Number.isFinite(seconds) && seconds > 0 ? seconds : ORDER_ACCEPTANCE_WINDOW_SECONDS) * 1000);
+}
+
+/** Until the acceptance check runs: the window, from the release time for a scheduled order. */
+function acceptanceDelayMs(order, windowSeconds) {
+  const deadline = order?.acceptanceDeadlineAt ? new Date(order.acceptanceDeadlineAt).getTime() : NaN;
+  if (Number.isFinite(deadline)) return Math.max(1000, deadline - Date.now() + 1000);
+  return windowSeconds * 1000;
 }
 
 // ----- Order deletion -----
@@ -119,20 +149,42 @@ function buildAcceptanceDeadline(date = new Date(), windowSeconds = ORDER_ACCEPT
  * than deleted — money records must survive the order they refer to, or a
  * deleted order silently erases its own wallet history.
  */
+const purgeSteps = (db, id) => [
+  db.foodSupportTicket.updateMany({ where: { orderId: id }, data: { orderId: null } }),
+  db.transaction.updateMany({ where: { orderId: id }, data: { orderId: null } }),
+  db.foodChatMessage.updateMany({ where: { orderId: id }, data: { orderId: null } }),
+  db.foodChatConversation.updateMany({ where: { orderId: id }, data: { orderId: null } }),
+  db.deliveryOrderEmergencyRequest.deleteMany({ where: { orderId: id } }),
+  db.refund.deleteMany({ where: { orderId: id } }),
+  db.payment.deleteMany({ where: { orderId: id } }),
+  db.foodTransaction.deleteMany({ where: { orderId: id } }),
+  // items, itemRatings, statusHistory and dispatchOffers cascade.
+  db.foodOrder.delete({ where: { id } }),
+];
+
 async function purgeOrder(orderId) {
+  await prisma.$transaction(purgeSteps(prisma, String(orderId)));
+}
+
+/**
+ * Delete an order whose online payment never completed, giving back the
+ * wallet part of a partial payment in the same transaction. The row is locked
+ * and re-checked first, so a payment confirmed at this moment wins and the
+ * wallet is never returned for an order that goes on to be paid.
+ */
+async function purgeUnpaidOrder(orderId) {
   const id = String(orderId);
-  await prisma.$transaction([
-    prisma.foodSupportTicket.updateMany({ where: { orderId: id }, data: { orderId: null } }),
-    prisma.transaction.updateMany({ where: { orderId: id }, data: { orderId: null } }),
-    prisma.foodChatMessage.updateMany({ where: { orderId: id }, data: { orderId: null } }),
-    prisma.foodChatConversation.updateMany({ where: { orderId: id }, data: { orderId: null } }),
-    prisma.deliveryOrderEmergencyRequest.deleteMany({ where: { orderId: id } }),
-    prisma.refund.deleteMany({ where: { orderId: id } }),
-    prisma.payment.deleteMany({ where: { orderId: id } }),
-    prisma.foodTransaction.deleteMany({ where: { orderId: id } }),
-    // items, itemRatings, statusHistory and dispatchOffers cascade.
-    prisma.foodOrder.delete({ where: { id } }),
-  ]);
+  return prisma.$transaction(async (tx) => {
+    const [row] = await tx.$queryRaw`
+      SELECT id, "userId", "orderStatus"::text AS "orderStatus", "paymentStatus"::text AS "paymentStatus",
+             "paymentMethod"::text AS "paymentMethod", "walletAmount", order_id
+        FROM food_orders WHERE id = ${id} FOR UPDATE`;
+    if (!row || row.orderStatus !== "pending_payment") return false;
+    if (row.paymentStatus === "paid" || row.paymentStatus === "refunded") return false;
+    await returnPartialWallet(row, { reason: "payment not completed", client: tx });
+    for (const step of purgeSteps(tx, id)) await step;
+    return true;
+  });
 }
 
 async function deletePendingPaymentOrder(orderLike) {
@@ -143,16 +195,16 @@ async function deletePendingPaymentOrder(orderLike) {
   const payStatus = String(orderLike.paymentStatus || "").toLowerCase();
   if (payStatus === "paid" || payStatus === "refunded") return false;
 
-  await purgeOrder(id);
-  return true;
+  return purgeUnpaidOrder(id);
 }
 
 let lastExpiredCleanupAt = 0;
 const EXPIRE_CLEANUP_INTERVAL_MS = 60_000;
 
-async function expireStalePendingPaymentOrders() {
+// Exported for tests (`force` skips the once-a-minute throttle).
+export async function expireStalePendingPaymentOrders({ force = false } = {}) {
   const now = Date.now();
-  if (now - lastExpiredCleanupAt < EXPIRE_CLEANUP_INTERVAL_MS) return;
+  if (!force && now - lastExpiredCleanupAt < EXPIRE_CLEANUP_INTERVAL_MS) return;
   lastExpiredCleanupAt = now;
 
   const cutoff = new Date(Date.now() - PENDING_PAYMENT_TTL_MS);
@@ -164,6 +216,9 @@ async function expireStalePendingPaymentOrders() {
       // and is not an OrderPaymentStatus — Mongo matched nothing, Postgres
       // rejects the query, and this runs on every customer's order list.
       paymentStatus: { in: ["created", "pending_qr", "failed"] },
+      // An offline payment waits for the admin, however long that takes; the
+      // customer may already have sent the money.
+      paymentMethod: { not: "offline" },
       createdAt: { lte: cutoff },
     },
     select: { id: true, orderStatus: true, paymentStatus: true },
@@ -212,6 +267,15 @@ async function applyCancellationRefund(order, { cancelledBy = 'system', refundAm
   const none = (extra) => ({ attempted: false, processed: false, paymentPatch: {}, ...extra });
 
   if (!order?.payment) return none({ reason: 'missing_payment' });
+
+  // Wallet + online/cash: the wallet part back to the wallet, the online part
+  // through Razorpay (partialPayment.service.js).
+  if (isPartialPayment(order)) {
+    return refundPartialPayment(order, {
+      refundAmount,
+      reason: buildCancellationRefundDescription(order, cancelledBy),
+    });
+  }
 
   const paymentMethod = String(order.paymentMethod || 'cash').toLowerCase();
   const paymentStatus = String(order.paymentStatus || 'cod_pending').toLowerCase();
@@ -357,6 +421,59 @@ export async function expireUnacceptedOrderById(orderMongoId) {
   return expireUnacceptedOrders({ id: String(orderMongoId) });
 }
 
+/**
+ * Business Settings > Order, "who confirms the order" = deliveryman (the old
+ * panel's order_confirmation_model): a delivery order is confirmed the moment
+ * it is placed (or its payment is confirmed), with no acceptance window for
+ * the restaurant to miss, and the rider hunt starts at once -- a scheduled one
+ * at its release time, which tryAutoAssign enforces itself. The restaurant is
+ * still told (the new-order alert) and still moves it to preparing and ready.
+ *
+ * A takeaway has no rider, so the restaurant still confirms it. With the
+ * setting on 'restaurant' (the default) this does nothing.
+ *
+ * The status guard is in the WHERE clause, so it cannot overtake a
+ * restaurant that already acted or a cancellation.
+ *
+ * @returns {Promise<object|null>} the confirmed order, or null when untouched.
+ */
+export async function autoConfirmForDeliverymanModel(orderId) {
+  const id = String(orderId || "");
+  if (!isId(id)) return null;
+  const { orderConfirmedBy } = await getBusinessSettings('business_order');
+  if (orderConfirmedBy !== 'deliveryman') return null;
+
+  const { count } = await prisma.foodOrder.updateMany({
+    where: { id, orderStatus: "created", orderType: { not: "takeaway" } },
+    data: { orderStatus: "confirmed", acceptanceDeadlineAt: null },
+  });
+  if (!count) return null;
+
+  await pushStatusHistory(id, {
+    byRole: "SYSTEM",
+    from: "created",
+    to: "confirmed",
+    note: "Confirmed automatically: delivery partners confirm orders (Business Settings)",
+  });
+  const updated = toOrder(await prisma.foodOrder.findUnique({ where: { id }, include: orderInclude }));
+
+  try {
+    const io = getIO();
+    if (io) {
+      const payload = { orderMongoId: id, orderId: id, orderStatus: "confirmed" };
+      io.to(rooms.user(updated.userId)).emit("order_status_update", payload);
+      io.to(rooms.restaurant(updated.restaurantId)).emit("order_status_update", payload);
+    }
+  } catch (err) {
+    logger.warn(`autoConfirmForDeliverymanModel socket emit failed: ${err?.message || err}`);
+  }
+
+  void dispatchService.tryAutoAssign(id).catch((err) => {
+    logger.warn(`Auto-assign after automatic confirmation failed for ${id}: ${err?.message || err}`);
+  });
+  return updated;
+}
+
 // ----- Settings -----
 export async function getDispatchSettings() {
   return dispatchService.getDispatchSettings();
@@ -381,12 +498,18 @@ async function incrementCouponUsageForOrder(order, userId) {
     ? String(order.couponCode).trim().toUpperCase()
     : "";
   if (!couponCode) return;
-  // A stored code with no applied discount means the coupon was rejected at
-  // pricing time — don't consume the user's/offer's usage allowance for it.
-  if (!(Number(order?.discount) > 0)) return;
+  // couponId is only set when the coupon actually applied; a stored code
+  // without it was rejected at pricing time. Orders from before couponId
+  // existed fall back to "it had a discount".
+  const applied = order?.couponId
+    ? true
+    : Number(order?.discount) > 0;
+  if (!applied) return;
 
   try {
-    const offer = await prisma.foodOffer.findUnique({ where: { couponCode } });
+    const offer = order?.couponId
+      ? await prisma.foodOffer.findUnique({ where: { id: String(order.couponId) } })
+      : await prisma.foodOffer.findUnique({ where: { couponCode } });
     if (!offer) return;
 
     // Conditional increment so concurrent orders cannot push usedCount past usageLimit.
@@ -430,14 +553,22 @@ function buildOrderDisplayId(entropyDigits = 4) {
   return `FOD-${timestamp}${random}`;
 }
 
-async function createOrderRow(data) {
+/**
+ * @param {Function} [inTransaction] (tx, row) => Promise, run in the same
+ *        database transaction as the insert (the partial-payment wallet debit):
+ *        if it throws, no order exists.
+ */
+async function createOrderRow(data, inTransaction = null) {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     // Widen the random part on later attempts rather than retrying the same odds.
     const displayId = buildOrderDisplayId(attempt < 3 ? 4 : 8);
+    const args = { data: { ...data, order_id: displayId, orderId: displayId }, include: orderInclude };
     try {
-      return await prisma.foodOrder.create({
-        data: { ...data, order_id: displayId, orderId: displayId },
-        include: orderInclude,
+      if (!inTransaction) return await prisma.foodOrder.create(args);
+      return await prisma.$transaction(async (tx) => {
+        const row = await tx.foodOrder.create(args);
+        await inTransaction(tx, row);
+        return row;
       });
     } catch (err) {
       // P2002 here can only be the display id — nothing else in `data` is unique.
@@ -450,6 +581,19 @@ async function createOrderRow(data) {
 
 export async function createOrder(userId, dto) {
   try {
+    // The website's maintenance switch pauses customer ordering everywhere.
+    const maintenance = await getMaintenanceState();
+    if (maintenance.maintenanceMode) {
+      throw new ValidationError(
+        maintenance.maintenanceMessage || 'Lagech is under maintenance and is not taking orders right now. Please try again later.',
+      );
+    }
+    const [orderRules, paymentRules, customerRules] = await Promise.all([
+      getBusinessSettings('business_order'),
+      getBusinessSettings('business_payment'),
+      getBusinessSettings('business_customer'),
+    ]);
+
     const restaurantId = requireId(dto.restaurantId, 'Restaurant ID');
     const restaurant = await loadRestaurantForOrdering(restaurantId);
 
@@ -457,12 +601,43 @@ export async function createOrder(userId, dto) {
     if (dto.scheduledAt && Number.isNaN(orderAt.getTime())) {
       throw new ValidationError('Invalid scheduled time');
     }
+    // Business Settings > Order: scheduled orders off refuses a time ahead of
+    // now (a few minutes of clock skew still counts as "now").
+    if (isScheduledFor(dto.scheduledAt) && !orderRules.scheduledOrder) {
+      throw new ValidationError('Scheduled orders are not available. Please order for now.');
+    }
+    // On: the time must be one the slot list could have offered (lead time,
+    // today or tomorrow, restaurant open then). The order is placed and paid
+    // now and released to the restaurant and riders shortly before it.
+    const releaseAt = releaseAtFor(dto.scheduledAt);
+    if (releaseAt) assertSchedulable(dto.scheduledAt, { restaurant });
     assertRestaurantOpenForOrdering(restaurant, orderAt);
+
+    // Delivery (default) or takeaway (Business Settings > Order and the
+    // restaurant's own switch).
+    const orderType = resolveOrderType(dto.orderType, { orderRules, restaurant });
+    const isTakeaway = orderType === "takeaway";
 
     const settings = await getDispatchSettings();
     const dispatchMode = settings.dispatchMode;
 
-    const deliveryAddress = normalizeDeliveryAddress({
+    // A takeaway needs no address; one not sent is recorded as the restaurant's.
+    const pickupAddress = isTakeaway && !dto.address?.street
+      ? {
+          label: "Other",
+          street: [restaurant.addressLine1, restaurant.area].filter(Boolean).join(", ") || "Takeaway",
+          additionalDetails: "Takeaway - collect at the restaurant",
+          city: restaurant.city || "-",
+          state: restaurant.state || "-",
+          zipCode: restaurant.pincode || "",
+        }
+      : null;
+    const deliveryAddress = normalizeDeliveryAddress(pickupAddress ? {
+      ...pickupAddress,
+      name: dto.customerName || "",
+      fullName: dto.customerName || "",
+      phone: dto.customerPhone || "",
+    } : {
       label: dto.address?.label || "Home",
       name: dto.address?.name || dto.address?.fullName || dto.customerName || "",
       fullName: dto.address?.fullName || dto.address?.name || dto.customerName || "",
@@ -479,23 +654,68 @@ export async function createOrder(userId, dto) {
     // COD was hard-disabled here. It is back on by default and kept behind a switch
     // so it can be turned off again without a deploy — everything downstream already
     // supports it.
-    if (paymentMethod === "cash" && String(process.env.COD_ENABLED || "true") !== "true") {
-      throw new ValidationError("Cash on Delivery is no longer available. Please pay online.");
+    // Business Settings > Payment (COD, digital) and Customer (wallet); the
+    // COD_ENABLED deploy switch still wins for cash.
+    const paymentRefusal = paymentMethodRefusal(paymentMethod, {
+      payment: paymentRules,
+      customer: customerRules,
+      codEnvEnabled: String(process.env.COD_ENABLED || "true") === "true",
+    });
+    if (paymentRefusal) throw new ValidationError(paymentRefusal);
+    // A takeaway is paid before pickup: nobody collects cash at a door.
+    if (isTakeaway) {
+      const refusal = takeawayPaymentRefusal(paymentMethod);
+      if (refusal) throw new ValidationError(refusal);
     }
     const isCash = paymentMethod === "cash";
     const isWallet = paymentMethod === "wallet";
+    // Checked before anything is priced or written: the method must be one
+    // the admin offers, with its required fields filled in.
+    const offlinePayment =
+      paymentMethod === "offline"
+        ? buildOfflinePaymentRecord(await getOfflinePaymentSettings(), dto.offlinePayment)
+        : null;
+
+    // The zone the order is stamped with (sent zone, else the restaurant's, else
+    // the default zone), and that zone's Cash On Delivery / Digital Payment
+    // switches -- checked before anything is priced or written.
+    const orderZoneId = await resolveOrderZoneId(
+      dto.zoneId ? requireId(dto.zoneId, 'Zone ID') : null,
+      restaurant,
+    );
+    await assertZoneAllowsPayment(orderZoneId, paymentMethod);
 
     const pricingResult = await calculateOrderPricing(
       userId,
       {
         restaurantId,
+        zoneId: orderZoneId,
         items: dto.items || [],
         deliveryAddress,
         couponCode: dto.pricing?.couponCode || undefined,
         deliveryMode: dto.deliveryMode || "basic",
+        orderType,
+        riderTip: dto.riderTip,
+        extraPackaging: dto.extraPackaging,
       },
       { at: orderAt, restaurant, skipAvailabilityCheck: true },
     );
+
+    // The customer was shown a saving at checkout and the coupon no longer
+    // gives it (it expired, hit its limit, the cart changed...). Placing the
+    // order anyway would charge more than they agreed to, so stop and say why.
+    // A client that echoes a code which never applied (discount 0 in the
+    // pricing it sends back) is unaffected, as before.
+    // The new-customer and campaign discounts are part of `discount` but are not the coupon's.
+    const promisedSaving =
+      Math.max(0, (Number(dto.pricing?.discount) || 0) - (Number(dto.pricing?.newCustomerDiscount) || 0) -
+        (Number(dto.pricing?.campaignDiscount) || 0)) +
+      (Number(dto.pricing?.deliveryFeeWaived) || 0);
+    if (dto.pricing?.couponCode && promisedSaving > 0 && !pricingResult.pricing?.appliedCoupon) {
+      throw new ValidationError(
+        `${pricingResult.pricing?.couponError || "This coupon can no longer be applied"}. Please review your cart and try again.`,
+      );
+    }
 
     const resolvedItems = pricingResult.items || [];
     const normalizedPricing = {
@@ -506,6 +726,8 @@ export async function createOrder(userId, dto) {
       deliveryFeeGst: Number(pricingResult.pricing?.deliveryFeeGst) || 0,
       platformFee: Number(pricingResult.pricing?.platformFee) || 0,
       quickDeliveryFee: Number(pricingResult.pricing?.quickDeliveryFee) || 0,
+      additionalCharge: Number(pricingResult.pricing?.additionalCharge) || 0,
+      additionalChargeName: String(pricingResult.pricing?.additionalChargeName || "").slice(0, 60),
       deliveryMode:
         pricingResult.pricing?.deliveryMode === "quick" || dto.deliveryMode === "quick"
           ? "quick"
@@ -514,6 +736,12 @@ export async function createOrder(userId, dto) {
       couponCode: pricingResult.pricing?.couponCode
         ? String(pricingResult.pricing.couponCode).trim().toUpperCase()
         : null,
+      couponId: pricingResult.pricing?.couponId || null,
+      couponDeliveryWaiver: Number(pricingResult.pricing?.deliveryFeeWaived) || 0,
+      freeDeliveryWaiver: Number(pricingResult.pricing?.freeDeliveryWaived) || 0,
+      newCustomerDiscount: Number(pricingResult.pricing?.newCustomerDiscount) || 0,
+      riderTip: Number(pricingResult.pricing?.riderTip) || 0,
+      campaignDiscount: Number(pricingResult.pricing?.campaignDiscount) || 0,
       total: Number(pricingResult.pricing?.total) || 0,
       currency: String(pricingResult.pricing?.currency || "INR"),
       distanceKm: Number.isFinite(Number(pricingResult.pricing?.distanceKm))
@@ -529,10 +757,26 @@ export async function createOrder(userId, dto) {
     }
     normalizedPricing.total = Math.round(normalizedPricing.total * 100) / 100;
 
+    // ── Partial payment: wallet + razorpay/cash (partialPayment.service.js) ──
+    // The wallet part is debited in the same transaction as the insert below;
+    // paymentMethod pays the rest, and amountDue is that rest.
+    const partialPlan =
+      dto.useWallet === true && !isWallet
+        ? planPartialPayment({
+            method: paymentMethod,
+            total: normalizedPricing.total,
+            balance: (await getBalance('user', requireId(userId, 'User ID'))).balance,
+            walletAmount: dto.walletAmount,
+            payment: paymentRules,
+            customer: customerRules,
+          })
+        : null;
+    const partialWalletAmount = partialPlan?.walletAmount || 0;
+
     const payment = {
       method: paymentMethod,
       status: isCash ? "cod_pending" : isWallet ? "paid" : "created",
-      amountDue: normalizedPricing.total || 0,
+      amountDue: partialPlan ? partialPlan.remainder : normalizedPricing.total || 0,
       razorpay: {},
       qr: {},
     };
@@ -540,7 +784,9 @@ export async function createOrder(userId, dto) {
     // Reuse the pricing distance (already road-preferred) — do not call Directions again.
     let distanceKm = Number.isFinite(Number(normalizedPricing.distanceKm))
       ? Number(normalizedPricing.distanceKm)
-      : await getDeliveryDistanceKm(restaurant, deliveryAddress);
+      : isTakeaway
+        ? null
+        : await getDeliveryDistanceKm(restaurant, deliveryAddress);
     distanceKm = Number.isFinite(distanceKm) ? Number(distanceKm.toFixed(2)) : null;
     if (Number.isFinite(distanceKm)) {
       normalizedPricing.distanceKm = distanceKm;
@@ -548,9 +794,21 @@ export async function createOrder(userId, dto) {
     }
 
     // Same zone the order is about to be stamped with, a few lines below.
-    const orderZoneId = dto.zoneId || restaurant.zoneId || null;
     const feeSettings = await loadActiveFeeSettings(orderZoneId);
-    const riderEarning = calculateRiderEarning(feeSettings, distanceKm) || 0;
+    // Business Settings > Business info: riders are paid by the distance bands
+    // (default) or a share of the delivery fee. Computed only here and stored
+    // on the order; every earning, payout and profit figure reads it back.
+    const businessInfo = await getBusinessSettings('business_info');
+    // A takeaway has no rider. A tip is the rider's on top of the trip pay, so
+    // riderEarning (what every earning, payout and ledger figure reads)
+    // includes it; riderTip records which part it was.
+    const riderTip = isTakeaway ? 0 : normalizedPricing.riderTip;
+    const tripPay = isTakeaway
+      ? 0
+      : businessInfo.riderPayMode === 'percentage'
+        ? percentageRiderEarning(pricingResult.pricing?.originalDeliveryFee, businessInfo.deliveryChargeCommissionPercent)
+        : calculateRiderEarning(feeSettings, distanceKm) || 0;
+    const riderEarning = Math.round(((Number(tripPay) || 0) + riderTip) * 100) / 100;
 
     let restaurantCommission = 0;
     try {
@@ -570,7 +828,9 @@ export async function createOrder(userId, dto) {
       (Number.isFinite(normalizedPricing.deliveryFee) ? normalizedPricing.deliveryFee : 0) +
       (Number.isFinite(normalizedPricing.deliveryFeeGst) ? normalizedPricing.deliveryFeeGst : 0) +
       (Number.isFinite(normalizedPricing.platformFee) ? normalizedPricing.platformFee : 0) +
-      restaurantCommission -
+      restaurantCommission +
+      // The tip is collected for the rider and paid straight on: in and out.
+      riderTip -
       riderEarning;
 
     const isAwaitingOnlinePayment = isAwaitingOnlinePaymentMethod(paymentMethod);
@@ -581,13 +841,21 @@ export async function createOrder(userId, dto) {
       ...fromOrder({ pricing: normalizedPricing, payment, deliveryAddress }),
       userId: requireId(userId, 'User ID'),
       restaurantId,
-      zoneId: dto.zoneId ? requireId(dto.zoneId, 'Zone ID') : restaurant.zoneId || null,
+      zoneId: orderZoneId,
       customerName: String(dto.customerName || deliveryAddress.fullName || ""),
       customerPhone: String(dto.customerPhone || deliveryAddress.phone || ""),
       orderStatus: initialStatus,
       acceptanceWindowSeconds,
+      // A scheduled order's acceptance window opens when it is released to the
+      // restaurant, so the timer cannot cancel it hours early.
       acceptanceDeadlineAt:
-        initialStatus === "created" ? buildAcceptanceDeadline(new Date(), acceptanceWindowSeconds) : null,
+        initialStatus === "created" ? buildAcceptanceDeadline(releaseAt || new Date(), acceptanceWindowSeconds) : null,
+      releaseAt,
+      orderType,
+      riderTip,
+      // The takeaway pickup code: shown to the customer, checked by the
+      // restaurant at handover (never sent to the restaurant).
+      ...(isTakeaway ? { deliveryOtp: generateFourDigitDeliveryOtp(), dropOtpRequired: true } : {}),
       dispatchStatus: "unassigned",
       note: String(dto.note || ""),
       deliveryInstructions: String(dto.deliveryInstructions || ""),
@@ -596,6 +864,8 @@ export async function createOrder(userId, dto) {
       scheduledAt: dto.scheduledAt ? new Date(dto.scheduledAt) : null,
       riderEarning: Number(riderEarning) || 0,
       platformProfit: Number(platformProfit) || 0,
+      ...(offlinePayment ? { offlinePayment } : {}),
+      ...(partialPlan ? { walletAmount: partialWalletAmount } : {}),
       items: {
         create: resolvedItems.map((item) => ({
           itemId: String(item.itemId),
@@ -610,6 +880,7 @@ export async function createOrder(userId, dto) {
           image: item.image || '',
           notes: item.notes || '',
           addons: item.addons || [],
+          itemCampaignId: item.itemCampaignId || null,
         })),
       },
       statusHistory: {
@@ -618,18 +889,31 @@ export async function createOrder(userId, dto) {
           byRole: "SYSTEM",
           from: "",
           to: initialStatus,
-          note: initialStatus === "pending_payment" ? "Order created, awaiting payment" : "Order placed",
+          note:
+            initialStatus !== "pending_payment"
+              ? "Order placed"
+              : offlinePayment
+                ? `Order created, awaiting verification of the ${offlinePayment.methodName} payment`
+                : "Order created, awaiting payment",
         }],
       },
-    });
+    }, partialPlan
+      ? (tx, row) => debitPartialWallet(tx, {
+          orderId: row.id,
+          displayId: row.order_id,
+          userId,
+          amount: partialWalletAmount,
+        })
+      : null);
 
     let order = toOrder(created);
     let razorpayPayload = null;
 
     if (paymentMethod === "razorpay" && isRazorpayConfigured()) {
-      const amountPaise = Math.round((normalizedPricing.total || 0) * 100);
+      // A partial payment charges only the rest online.
+      const amountPaise = Math.round((partialPlan ? partialPlan.remainder : normalizedPricing.total || 0) * 100);
       if (amountPaise < 100) {
-        await purgeOrder(order.id);
+        await purgeUnpaidOrder(order.id);
         throw new ValidationError("Amount too low for online payment");
       }
       try {
@@ -648,7 +932,9 @@ export async function createOrder(userId, dto) {
         }));
       } catch (err) {
         // Mongo threw before saving, so no order existed on gateway failure.
-        await purgeOrder(order.id).catch(() => {});
+        // purgeUnpaidOrder also returns a partial payment's wallet part; if it
+        // fails, the pending_payment cleanup does it later.
+        await purgeUnpaidOrder(order.id).catch(() => {});
         logger.error(`Razorpay order creation failed: ${err.message}`);
         throw new ValidationError(err?.message || "Payment gateway error");
       }
@@ -658,7 +944,7 @@ export async function createOrder(userId, dto) {
       void addOrderJob(
         { action: "ORDER_ACCEPTANCE_TIMEOUT_CHECK", orderMongoId: order.id, orderId: order.id },
         {
-          delay: acceptanceWindowSeconds * 1000,
+          delay: acceptanceDelayMs(order, acceptanceWindowSeconds),
           removeOnComplete: true,
           removeOnFail: true,
           jobId: `order-accept-timeout-${order.id}`,
@@ -696,6 +982,14 @@ export async function createOrder(userId, dto) {
       } catch (err) {
         logger.error(`[CRITICAL] Initial transaction failed for order ${order.id}: ${err.message}`);
       }
+      // Delivery partners confirm orders (Business Settings > Order): no
+      // restaurant acceptance, straight to dispatch.
+      try {
+        const confirmed = await autoConfirmForDeliverymanModel(order.id);
+        if (confirmed) order = { ...confirmed, platformProfit: order.platformProfit };
+      } catch (err) {
+        logger.warn(`Automatic confirmation failed for order ${order.id}: ${err?.message || err}`);
+      }
     }
 
     try {
@@ -704,7 +998,7 @@ export async function createOrder(userId, dto) {
       if (!isAwaitingOnlinePayment) {
         await notifyOwnersSafely([{ ownerType: "USER", ownerId: userId }], {
           title: "Order Confirmed! 🍔",
-          body: `Your order #${order.order_id || order.id} from ${restaurant.restaurantName || "the restaurant"} has been placed successfully.`,
+          body: `Your order #${order.order_id || order.id} from ${restaurant.restaurantName || "the restaurant"} has been placed successfully.${releaseAt ? " It is scheduled for later; we will start on it shortly before then." : ""}`,
           image: "https://i.ibb.co/5GzXz7r/Switcheats-Brand-Image.png",
           data: {
             type: "order_created",
@@ -714,7 +1008,9 @@ export async function createOrder(userId, dto) {
           },
         });
 
-        await notifyRestaurantNewOrder(order);
+        // A scheduled order rings the restaurant at its release time
+        // (releaseScheduledOrders), not now.
+        if (!isHeldForSchedule(order)) await notifyRestaurantNewOrder(order);
       }
     } catch (err) {
       logger.warn(`Notifications failed for order ${order.id}: ${err.message}`);
@@ -724,7 +1020,10 @@ export async function createOrder(userId, dto) {
       await incrementCouponUsageForOrder(order, userId);
     }
 
-    return { order: normalizeOrderForClient(order), razorpay: razorpayPayload };
+    void import("../../../../core/notifications/emailEvents.js").then((m) => m.emailOrderPlaced(order.id)).catch(() => {});
+    const placed = normalizeOrderForClient(order);
+    if (isTakeaway) placed.pickupCode = String(order.deliveryOtp || "");
+    return { order: placed, razorpay: razorpayPayload };
   } catch (err) {
     logger.error(`Order placement error: ${err.message}`, { stack: err.stack, userId, dto });
     if (err instanceof ValidationError || err instanceof ForbiddenError || err instanceof NotFoundError) {
@@ -772,7 +1071,8 @@ export async function verifyPayment(userId, dto) {
     throw new ValidationError("Payment verification failed. Please retry in a moment.");
   }
 
-  const expectedPaise = Math.round((Number(order.total) || 0) * 100);
+  // A partial payment's gateway part is the total less the wallet part.
+  const expectedPaise = Math.round(remainderAmount(order) * 100);
   const paidPaise = Number(rzPayment?.amount);
   const rzStatus = String(rzPayment?.status || "").toLowerCase();
   if (
@@ -791,6 +1091,11 @@ export async function verifyPayment(userId, dto) {
     logger.error(
       `Payment amount mismatch for order ${order.id}: paid ${paidPaise} paise, expected ${expectedPaise} paise, rz order ${rzPayment?.order_id}, status ${rzStatus}`,
     );
+    await notifyOwnersSafely([{ ownerType: "USER", ownerId: String(userId) }], {
+      title: "Payment failed",
+      body: `We could not confirm the payment for order #${order.order_id || order.id}. If money was taken, it will be returned to you.`,
+      data: { type: "payment_failed", orderId: order.id, orderMongoId: order.id },
+    });
     throw new ValidationError("Payment verification failed");
   }
 
@@ -833,7 +1138,10 @@ export async function verifyPayment(userId, dto) {
  */
 export async function finalizeOrderPayment(orderId, { source = "SYSTEM", userId = null } = {}) {
   const acceptanceWindowSeconds = await getOrderAcceptanceWindowSeconds();
-  const acceptanceDeadlineAt = buildAcceptanceDeadline(new Date(), acceptanceWindowSeconds);
+  const pending = await prisma.foodOrder.findUnique({ where: { id: orderId }, select: { releaseAt: true } });
+  // A scheduled order's window opens at its release time, not at payment.
+  const releaseAt = isHeldForSchedule(pending) ? new Date(pending.releaseAt) : new Date();
+  const acceptanceDeadlineAt = buildAcceptanceDeadline(releaseAt, acceptanceWindowSeconds);
 
   const { count } = await prisma.foodOrder.updateMany({
     where: { id: orderId, orderStatus: 'pending_payment' },
@@ -848,13 +1156,18 @@ export async function finalizeOrderPayment(orderId, { source = "SYSTEM", userId 
     byId: userId,
     from: "pending_payment",
     to: "created",
-    note: source === "USER" ? "Payment verified, order confirmed" : "Payment confirmed via webhook",
+    note:
+      source === "USER"
+        ? "Payment verified, order confirmed"
+        : source === "ADMIN"
+          ? "Offline payment verified by admin"
+          : "Payment confirmed via webhook",
   });
 
   void addOrderJob(
     { action: "ORDER_ACCEPTANCE_TIMEOUT_CHECK", orderMongoId: orderId, orderId },
     {
-      delay: acceptanceWindowSeconds * 1000,
+      delay: acceptanceDelayMs(updated, acceptanceWindowSeconds),
       removeOnComplete: true,
       removeOnFail: true,
       jobId: `order-accept-timeout-${orderId}`,
@@ -886,10 +1199,20 @@ export async function finalizeOrderPayment(orderId, { source = "SYSTEM", userId 
     recordedById: userId ? String(userId) : undefined,
   });
 
-  // Now that payment is confirmed, tell the restaurant about the new order.
-  await notifyRestaurantNewOrder(updated);
+  // Delivery partners confirm orders (Business Settings > Order).
+  let current = updated;
+  try {
+    const confirmed = await autoConfirmForDeliverymanModel(orderId);
+    if (confirmed) current = { ...confirmed, platformProfit: updated.platformProfit };
+  } catch (err) {
+    logger.warn(`Automatic confirmation failed for order ${orderId}: ${err?.message || err}`);
+  }
 
-  return updated;
+  // Now that payment is confirmed, tell the restaurant about the new order --
+  // a scheduled one at its release time instead (releaseScheduledOrders).
+  if (!isHeldForSchedule(current)) await notifyRestaurantNewOrder(current);
+
+  return current;
 }
 
 export async function abandonOnlinePaymentOrder(userId, orderId) {
@@ -906,11 +1229,108 @@ export async function abandonOnlinePaymentOrder(userId, orderId) {
   if (String(order.orderStatus || "").toLowerCase() !== "pending_payment") {
     throw new ValidationError("Order is not awaiting payment");
   }
+  // The customer may already have sent the money; only the admin can settle it.
+  if (String(order.paymentMethod || "").toLowerCase() === "offline") {
+    throw new ValidationError("An offline payment is being verified. Please contact support to cancel this order.");
+  }
 
   const deleted = await deletePendingPaymentOrder(order);
   if (!deleted) throw new ValidationError("Could not abandon payment");
 
   return { deleted: true, orderId: order.id };
+}
+
+// ----- Offline payment (admin) -----
+
+async function loadOfflineOrderAwaitingCheck(orderId) {
+  const identity = buildOrderIdentityFilter(orderId);
+  if (!identity) throw new ValidationError("Order id required");
+  const row = await prisma.foodOrder.findFirst({
+    where: identity,
+    include: { ...orderInclude, restaurant: { select: { restaurantName: true } } },
+  });
+  if (!row) throw new NotFoundError("Order not found");
+  if (row.paymentMethod !== "offline") throw new ValidationError("This order was not paid offline");
+  if (row.orderStatus !== "pending_payment" || row.paymentStatus === "paid") {
+    throw new ValidationError("This payment has already been verified or rejected");
+  }
+  return row;
+}
+
+/**
+ * The admin found the customer's offline payment: the order is paid and goes
+ * to the restaurant exactly like a confirmed online payment
+ * (finalizeOrderPayment: acceptance timer, ledger, coupon use, new-order push).
+ */
+export async function verifyOfflinePaymentAdmin(orderId, adminId, note = "") {
+  const row = await loadOfflineOrderAwaitingCheck(orderId);
+  const record = decideOfflinePayment(row.offlinePayment, OFFLINE_STATUS.VERIFIED, { adminId, note });
+
+  // Conditional, like the online claim: two admins clicking at once verify once.
+  const { count } = await prisma.foodOrder.updateMany({
+    where: { id: row.id, orderStatus: "pending_payment", paymentMethod: "offline", paymentStatus: { not: "paid" } },
+    data: { paymentStatus: "paid", offlinePayment: record },
+  });
+  if (!count) throw new ValidationError("This payment has already been verified or rejected");
+
+  const finalized = await finalizeOrderPayment(row.id, { source: "ADMIN", userId: adminId ? String(adminId) : null });
+  const updated =
+    finalized ?? toOrder(await prisma.foodOrder.findFirst({ where: { id: row.id }, include: orderInclude }));
+
+  await notifyOwnersSafely([{ ownerType: "USER", ownerId: row.userId }], {
+    title: "Payment verified",
+    body: `Your payment for order #${row.order_id || row.id} was received. ${row.restaurant?.restaurantName || "The restaurant"} has your order now.`,
+    data: { type: "order_created", orderId: row.id, orderMongoId: row.id, link: `/food/user/orders/${row.id}` },
+  });
+
+  return normalizeOrderForClient(updated);
+}
+
+/**
+ * The admin could not find the payment: payment failed, order cancelled, the
+ * customer told why. Nothing was charged through the app, so nothing is
+ * refunded; the restaurant never saw the order, so it is not told.
+ */
+export async function rejectOfflinePaymentAdmin(orderId, adminId, reason = "") {
+  const row = await loadOfflineOrderAwaitingCheck(orderId);
+  const record = decideOfflinePayment(row.offlinePayment, OFFLINE_STATUS.REJECTED, { adminId, note: reason });
+
+  const { count } = await prisma.foodOrder.updateMany({
+    where: { id: row.id, orderStatus: "pending_payment", paymentMethod: "offline", paymentStatus: { not: "paid" } },
+    data: { paymentStatus: "failed", orderStatus: "cancelled_by_admin", offlinePayment: record },
+  });
+  if (!count) throw new ValidationError("This payment has already been verified or rejected");
+
+  await pushStatusHistory(row.id, {
+    byRole: "ADMIN",
+    byId: adminId ? String(adminId) : null,
+    from: "pending_payment",
+    to: "cancelled_by_admin",
+    note: `Offline payment rejected: ${record.adminNote}`,
+  });
+
+  await notifyOwnersSafely([{ ownerType: "USER", ownerId: row.userId }], {
+    title: "Payment not verified",
+    body: `We could not verify your payment for order #${row.order_id || row.id}: ${record.adminNote}`,
+    data: { type: "payment_failed", orderId: row.id, orderMongoId: row.id, link: `/food/user/orders/${row.id}` },
+  });
+
+  try {
+    const io = getIO();
+    if (io) {
+      io.to(rooms.user(row.userId)).emit("order_status_update", {
+        orderMongoId: row.id,
+        orderId: row.id,
+        orderStatus: "cancelled_by_admin",
+        message: `Payment not verified: ${record.adminNote}`,
+      });
+    }
+  } catch (err) {
+    logger.warn(`Offline payment rejection socket emit failed: ${err?.message || err}`);
+  }
+
+  const updated = toOrder(await prisma.foodOrder.findFirst({ where: { id: row.id }, include: orderInclude }));
+  return normalizeOrderForClient(updated);
 }
 
 // ----- Auto-assign -----
@@ -928,7 +1348,12 @@ export async function listOrdersUser(userId, query) {
   await expireUnacceptedOrders();
 
   const { page, limit, skip } = buildPaginationOptions(query);
-  const where = { userId: String(userId), orderStatus: { not: 'pending_payment' } };
+  // Orders still waiting on an online payment are hidden; an offline payment
+  // waiting for the admin's check is shown, so the customer can follow it.
+  const where = {
+    userId: String(userId),
+    OR: [{ orderStatus: { not: 'pending_payment' } }, { paymentMethod: 'offline' }],
+  };
 
   const [rows, total] = await Promise.all([
     prisma.foodOrder.findMany({
@@ -942,7 +1367,12 @@ export async function listOrdersUser(userId, query) {
   ]);
 
   return buildPaginatedResult({
-    docs: toOrders(rows).map((order) => normalizeOrderForClient(order)),
+    docs: toOrders(rows).map((order) => {
+      const out = normalizeOrderForClient(order);
+      // The customer shows this at the counter to collect a takeaway.
+      if (order.orderType === "takeaway" && !order.dropOtpVerified && order.deliveryOtp) out.pickupCode = order.deliveryOtp;
+      return out;
+    }),
     total,
     page,
     limit,
@@ -1014,7 +1444,7 @@ function buildRestaurantFinanceViewSync(order, tx = null) {
   };
 }
 
-async function buildRestaurantFinanceView(order) {
+export async function buildRestaurantFinanceView(order) {
   try {
     const tx = await foodTransactionService.getTransactionByOrder(order.id);
     return buildRestaurantFinanceViewSync(order, tx);
@@ -1076,6 +1506,8 @@ export async function getOrderById(
       dropOtp: { required: Boolean(drop.required), verified: Boolean(drop.verified) },
     };
     if (!drop.verified && secret) out.handoverOtp = secret;
+    // A takeaway's code is shown from the start: the customer shows it at the counter.
+    if (order.orderType === "takeaway" && !drop.verified && secret) out.pickupCode = secret;
 
     // deliveryState.currentLocation comes from the order's own rider position,
     // which is only written once the rider emits an update FOR THIS ORDER — so
@@ -1653,6 +2085,10 @@ export async function listOrdersRestaurant(restaurantId, query) {
 
   const normalizedOrders = toOrders(rows).map((order) => {
     const out = normalizeOrderForClient(order);
+    // What the customer typed to prove an offline payment is for the admin only.
+    delete out.offlinePayment;
+    // The handover code (a takeaway's pickup code) is the customer's to show.
+    delete out.deliveryOtp;
     const tx = txByOrderId.get(order.id);
     out.finance = buildRestaurantFinanceViewSync(
       order,
@@ -1687,6 +2123,10 @@ export async function listOrdersRestaurant(restaurantId, query) {
       pages: paginated.meta.totalPages,
     },
   };
+}
+
+async function restaurantMayCancelAccepted() {
+  return (await getBusinessSettings('business_vendor')).restaurantCanCancelOrder;
 }
 
 export async function updateOrderStatusRestaurant(orderId, restaurantId, orderStatus, note = "") {
@@ -1726,6 +2166,17 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
     throw new ValidationError(
       `Current order status '${from}' is further ahead than '${orderStatus}'. Order cannot be moved backwards.`,
     );
+  }
+  // A takeaway is handed over only against the customer's pickup code
+  // (handoverTakeawayRestaurant); it never has a rider stage.
+  if (order.orderType === "takeaway" && ["picked_up", "delivered"].includes(targetStatus)) {
+    throw new ValidationError("Verify the customer's pickup code to hand over a takeaway order.");
+  }
+  // Business Settings > Vendor, "restaurant can cancel order": when off, a
+  // restaurant can still reject a new order it has not accepted, but not
+  // cancel one it already accepted -- that goes through the admin.
+  if (targetStatus === "cancelled_by_restaurant" && from !== "created" && !(await restaurantMayCancelAccepted())) {
+    throw new ValidationError("You cannot cancel an order you have already accepted. Please contact Lagech support to cancel it.");
   }
 
   const normalizedPaymentMethod = String(order.paymentMethod || "cash").toLowerCase();
@@ -1781,7 +2232,9 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
     body = "Your food is currently being prepared by the restaurant.";
   } else if (orderStatus === "ready_for_pickup") {
     title = "Food is ready! 🛍️";
-    body = "Your order is ready and waiting to be picked up.";
+    body = updated.orderType === "takeaway"
+      ? "Your takeaway order is ready. Show your pickup code at the restaurant to collect it."
+      : "Your order is ready and waiting to be picked up.";
   } else if (String(orderStatus).includes("cancel")) {
     const isOnlinePaid =
       updated.paymentMethod === "razorpay" &&
@@ -1821,6 +2274,8 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
     const isCancellation = status.includes("cancel");
     // ready_for_pickup and preparing are kitchen states the customer cannot act on.
     const CUSTOMER_RELEVANT = ["confirmed", "picked_up", "delivered"];
+    // ...except for a takeaway, where "ready" is the customer's cue to come.
+    if (updated.orderType === "takeaway") CUSTOMER_RELEVANT.push("ready_for_pickup");
     const notifyList = [];
 
     if (isCancellation || CUSTOMER_RELEVANT.includes(status)) {
@@ -1879,7 +2334,10 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
       // On accept (confirmed or preparing) -> request delivery partners.
       if (
         (String(orderStatus) === "preparing" || String(orderStatus) === "confirmed") &&
-        String(from) !== "preparing" && String(from) !== "confirmed"
+        String(from) !== "preparing" && String(from) !== "confirmed" &&
+        // No rider for a takeaway. A scheduled order accepted early is held by
+        // tryAutoAssign itself until its release time.
+        updated.orderType !== "takeaway"
       ) {
         // Dispatch runs in the background, not inside the request: tryAutoAssign does
         // a geo query, a Directions call and an FCM batch. Awaiting all of that made
@@ -1949,12 +2407,115 @@ export async function resendDeliveryNotificationRestaurant(orderId, restaurantId
   return dispatchService.resendDeliveryNotificationRestaurant(orderId, restaurantId);
 }
 
+/**
+ * The restaurant hands a takeaway order to the customer: POST
+ * /food/restaurant/orders/:orderId/handover { code }. The code is the one the
+ * customer's app shows (deliveryOtp, set when the order was placed); a wrong
+ * code changes nothing. The order is then delivered, exactly as a delivered
+ * delivery order -- earned by the restaurant, commission as usual, no rider.
+ */
+export async function handoverTakeawayRestaurant(orderId, restaurantId, code) {
+  const identity = buildOrderIdentityFilter(orderId);
+  if (!identity) throw new ValidationError("Order id required");
+  const row = await prisma.foodOrder.findFirst({
+    where: { ...identity, restaurantId: String(restaurantId) },
+    include: orderInclude,
+  });
+  if (!row) throw new NotFoundError("Order not found");
+  if (row.orderType !== "takeaway") throw new ValidationError("Only a takeaway order is handed over at the restaurant.");
+  const from = String(row.orderStatus || "");
+  if (from === "delivered") throw new ValidationError("This order has already been handed over.");
+  if (!["confirmed", "preparing", "ready_for_pickup"].includes(from)) {
+    throw new ValidationError(
+      from === "created" ? "Accept the order before handing it over." : `This order cannot be handed over (${from.replace(/_/g, " ")}).`,
+    );
+  }
+  const expected = String(row.deliveryOtp || "").trim();
+  if (!expected || String(code ?? "").trim() !== expected) {
+    throw new ValidationError("That pickup code does not match. Ask the customer for the code shown in their app.");
+  }
+
+  const now = new Date();
+  // Guarded on the status, so a cancellation in the same moment wins.
+  const { count } = await prisma.foodOrder.updateMany({
+    where: { id: row.id, orderStatus: from },
+    data: {
+      orderStatus: "delivered",
+      deliveryPhase: "delivered",
+      deliveryStatus: "delivered",
+      deliveredAt: now,
+      dropOtpVerified: true,
+      deliveryOtp: "",
+      acceptanceDeadlineAt: null,
+    },
+  });
+  if (!count) throw new ValidationError("The order changed meanwhile. Please refresh and try again.");
+
+  await pushStatusHistory(row.id, {
+    byRole: "RESTAURANT",
+    byId: restaurantId,
+    from,
+    to: "delivered",
+    note: "Takeaway handed over to the customer (pickup code verified)",
+  });
+
+  try {
+    await foodTransactionService.updateTransactionStatus(row.id, "payment_snapshot_sync", {
+      status: "captured",
+      recordedByRole: "RESTAURANT",
+      recordedById: restaurantId,
+      note: "Takeaway handed over to the customer",
+    });
+  } catch (err) {
+    logger.warn(`handoverTakeawayRestaurant transaction sync failed: ${err?.message || err}`);
+  }
+
+  const updated = toOrder(await prisma.foodOrder.findUnique({ where: { id: row.id }, include: orderInclude }));
+  const label = updated.order_id || updated.id;
+  try {
+    const io = getIO();
+    if (io) {
+      const payload = {
+        orderMongoId: updated.id,
+        orderId: updated.id,
+        orderStatus: "delivered",
+        title: "Order collected 🎉",
+        message: `Takeaway order #${label} has been handed over.`,
+      };
+      io.to(rooms.user(updated.userId)).emit("order_status_update", payload);
+      io.to(rooms.restaurant(updated.restaurantId)).emit("order_status_update", payload);
+    }
+  } catch (err) {
+    logger.warn(`handoverTakeawayRestaurant socket emit failed: ${err?.message || err}`);
+  }
+  void notifyOwnersSafely([{ ownerType: "USER", ownerId: updated.userId }], {
+    title: "Order collected 🎉",
+    body: `Enjoy your meal! Takeaway order #${label} has been handed over to you.`,
+    data: { type: "order_status_update", orderId: updated.id, orderMongoId: updated.id, orderStatus: "delivered" },
+  });
+  enqueueOrderEvent("delivery_completed", {
+    orderMongoId: updated.id,
+    orderId: updated.id,
+    payMethod: String(updated.paymentMethod || ""),
+    paymentStatus: updated.paymentStatus,
+    source: "takeaway_handover",
+  });
+
+  const out = sanitizeOrderForExternal(updated);
+  out.finance = await buildRestaurantFinanceView(updated);
+  return out;
+}
+
 export async function resendDeliveryNotificationAdmin(orderId) {
   return dispatchService.resendDeliveryNotificationAdmin(orderId);
 }
 
 export async function getCurrentTripDelivery(deliveryPartnerId) {
   return deliveryService.getCurrentTripDelivery(deliveryPartnerId);
+}
+
+export async function listActiveDeliveries(deliveryPartnerId) {
+  return deliveryService.listActiveDeliveries(deliveryPartnerId);
 }
 
 // ----- Delivery: available, accept, reject, status -----
@@ -1974,8 +2535,8 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
   return deliveryService.acceptOrderDelivery(orderId, deliveryPartnerId);
 }
 
-export async function rejectOrderDelivery(orderId, deliveryPartnerId) {
-  return deliveryService.rejectOrderDelivery(orderId, deliveryPartnerId);
+export async function rejectOrderDelivery(orderId, deliveryPartnerId, options = {}) {
+  return deliveryService.rejectOrderDelivery(orderId, deliveryPartnerId, options);
 }
 
 export async function confirmReachedPickupDelivery(orderId, deliveryPartnerId) {
@@ -2082,13 +2643,11 @@ function applyAdminAmountFilter(AND, minAmountRaw, maxAmountRaw) {
   if (Object.keys(total).length > 0) AND.push({ total });
 }
 
-export async function listOrdersAdmin(query) {
-  await expireStalePendingPaymentOrders();
-
-  const page = Math.max(parseInt(query.page, 10) || 1, 1);
-  const limit = Math.min(Math.max(parseInt(query.limit, 10) || 50, 1), 2000);
-  const skip = (page - 1) * limit;
-
+/**
+ * The admin order list's filters as a Prisma where, shared by the paged list
+ * and the export so a download always matches what the list shows.
+ */
+export function buildAdminOrdersWhere(query = {}) {
   const where = {};
   const AND = [];
 
@@ -2104,7 +2663,9 @@ export async function listOrdersAdmin(query) {
     typeof query.paymentStatus === "string" ? query.paymentStatus.trim() : "";
 
   if (!rawStatus || rawStatus === "all") {
-    where.orderStatus = { not: "pending_payment" };
+    // Unpaid online checkouts are noise; offline payments awaiting the
+    // admin's check are work, so they stay in the list.
+    AND.push({ OR: [{ orderStatus: { not: "pending_payment" } }, { paymentMethod: "offline" }] });
   }
 
   if (rawStatus && rawStatus !== "all") {
@@ -2144,10 +2705,20 @@ export async function listOrdersAdmin(query) {
       case "refunded":
         where.paymentStatus = "refunded";
         break;
-      case "offline-payments":
-        where.paymentMethod = "cash";
-        where.orderStatus = { in: ["created", "confirmed", "delivered"] };
+      case "offline-payments": {
+        // Every offline-payment order: awaiting verification, verified, rejected.
+        where.paymentMethod = "offline";
+        // The page's sub-tabs. Verify sets paymentStatus paid, Deny sets it
+        // failed; pending is what Verify/Deny can still act on.
+        const offlineStatus = typeof query.offlineStatus === "string" ? query.offlineStatus.trim().toLowerCase() : "";
+        if (offlineStatus === "verified") where.paymentStatus = "paid";
+        else if (offlineStatus === "denied") where.paymentStatus = "failed";
+        else if (offlineStatus === "pending") {
+          where.orderStatus = "pending_payment";
+          where.paymentStatus = { notIn: ["paid", "failed", "refunded"] };
+        }
         break;
+      }
       case "scheduled":
         // Placed for later: the delivery time is still ahead, and the order
         // is neither finished nor waiting on payment.
@@ -2189,12 +2760,24 @@ export async function listOrdersAdmin(query) {
   applyAdminAmountFilter(AND, query.minAmount, query.maxAmount);
   if (AND.length) where.AND = AND;
 
+  // Scheduled orders read soonest-due first; everything else newest first.
+  const orderBy = rawStatus === "scheduled" ? [{ scheduledAt: 'asc' }, { createdAt: 'desc' }] : { createdAt: 'desc' };
+  return { where, orderBy };
+}
+
+export async function listOrdersAdmin(query) {
+  await expireStalePendingPaymentOrders();
+
+  const page = Math.max(parseInt(query.page, 10) || 1, 1);
+  const limit = Math.min(Math.max(parseInt(query.limit, 10) || 50, 1), 2000);
+  const skip = (page - 1) * limit;
+  const { where, orderBy } = buildAdminOrdersWhere(query);
+
   const [rows, total] = await Promise.all([
     prisma.foodOrder.findMany({
       where,
       include: withRelations(RESTAURANT_ADMIN, PARTNER_CARD),
-      // Scheduled orders read soonest-due first; everything else newest first.
-      orderBy: rawStatus === "scheduled" ? [{ scheduledAt: 'asc' }, { createdAt: 'desc' }] : { createdAt: 'desc' },
+      orderBy,
       skip,
       take: limit,
     }),
@@ -2211,6 +2794,15 @@ export async function listOrdersAdmin(query) {
 }
 
 export async function assignDeliveryPartnerAdmin(orderId, deliveryPartnerId, adminId) {
+  {
+    const identity = buildOrderIdentityFilter(orderId);
+    const kind = identity
+      ? await prisma.foodOrder.findFirst({ where: identity, select: { orderType: true } })
+      : null;
+    if (kind?.orderType === "takeaway") {
+      throw new ValidationError("A takeaway order is collected by the customer; it has no delivery partner.");
+    }
+  }
   const row = await prisma.foodOrder.findUnique({
     where: { id: String(orderId) },
     include: orderInclude,
@@ -2264,7 +2856,22 @@ export async function deleteOrderAdmin(orderId, adminId) {
   if (!row) throw new NotFoundError("Order not found");
   const order = toOrder(row);
 
-  await purgeOrder(order.id);
+  if (row.orderStatus === "pending_payment") {
+    // Never paid: the same path as an abandoned checkout, which gives back
+    // the wallet part of a partial payment (and refuses if it was just paid).
+    const purged = await purgeUnpaidOrder(order.id);
+    if (!purged) throw new ValidationError("This order was just paid. Refresh and refund it instead of deleting it.");
+  } else {
+    // Deleting would silently keep the customer's wallet money: money taken
+    // from the wallet must be refunded (or the order cancelled) first.
+    const walletUsed = Number(row.walletAmount || 0) > 0 || String(row.paymentMethod || "") === "wallet";
+    const refunded = String(row.refundStatus || "") === "processed" || String(row.paymentStatus || "") === "refunded";
+    // A wallet + cash order is still cod_pending, but its wallet part was taken.
+    if (walletUsed && !refunded) {
+      throw new ValidationError("The customer paid part of this order from their wallet. Cancel or refund it before deleting, so the money goes back.");
+    }
+    await purgeOrder(order.id);
+  }
 
   // Remove the realtime tracking node if present.
   try {
@@ -2318,6 +2925,11 @@ export async function updateOrderStatusAdmin(orderId, orderStatus, note = "", ad
     throw new ValidationError(
       `Cannot change order status from '${order.orderStatus}' to '${orderStatus}'`,
     );
+  }
+  // An unpaid order only moves on through its payment (or an offline payment's
+  // Verify); accepting it here would hand the restaurant an order nobody paid for.
+  if (order.orderStatus === "pending_payment" && !String(orderStatus).includes("cancel")) {
+    throw new ValidationError("This order is still waiting for its payment");
   }
 
   const from = order.orderStatus;
@@ -2535,14 +3147,20 @@ export async function markOrderDeliveredAdmin(orderId, adminId, note = "") {
   return normalizeOrderForClient(updated);
 }
 
-export async function processRefundAdmin(orderId, amount, adminId) {
+/**
+ * `options.notify === false` leaves telling the customer to the caller (the
+ * refund-request approval sends its own message about the request).
+ */
+export async function processRefundAdmin(orderId, amount, adminId, options = {}) {
   const identity = buildOrderIdentityFilter(orderId);
   const row = await prisma.foodOrder.findFirst({ where: identity, include: orderInclude });
   if (!row) throw new NotFoundError("Order not found");
   const order = toOrder(row);
 
   const currentPaymentStatus = String(order.paymentStatus || "").toLowerCase();
-  if (currentPaymentStatus === "refunded") {
+  // A cancelled wallet + cash order is refunded (its wallet part) while its
+  // payment status stays cod_pending, so the refund status counts too.
+  if (currentPaymentStatus === "refunded" || (isPartialPayment(order) && order.refundStatus === "processed")) {
     throw new ValidationError("Order is already refunded");
   }
 
@@ -2573,11 +3191,16 @@ export async function processRefundAdmin(orderId, amount, adminId) {
     logger.warn(`Admin refund transaction sync failed: ${err?.message || err}`);
   }
 
+  // Points the order earned go back with the money. Idempotent, never throws.
+  await import('../../user/services/loyaltyPoint.service.js')
+    .then(({ reverseOrderLoyaltyPoints }) => reverseOrderLoyaltyPoints(order.id))
+    .catch((err) => logger.warn(`Refund loyalty reversal failed: ${err?.message || err}`));
+
   const updated = toOrder(
     await prisma.foodOrder.findUnique({ where: { id: order.id }, include: orderInclude }),
   );
 
-  if (updated.userId) {
+  if (updated.userId && options.notify !== false) {
     await notifyOwnersSafely([{ ownerType: "USER", ownerId: updated.userId }], {
       title: "Refund Processed! 💸",
       body: `Your refund of ₹${refundAmount} for Order #${updated.order_id || updated.id} has been processed successfully.`,

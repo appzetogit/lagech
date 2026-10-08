@@ -6,6 +6,7 @@ import { config } from '../../config/env.js';
 import { logger } from '../../utils/logger.js';
 import { isMobilePlatform, normalizePlatform } from '../../utils/platform.js';
 import { isPushAllowed } from './notificationChannels.js';
+import { applyPushMessage } from './pushMessages.js';
 import { recordPushInInbox } from './notification.service.js';
 
 const FIREBASE_MESSAGING_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging';
@@ -580,8 +581,14 @@ export const sendNotificationToOwner = async ({ ownerType, ownerId, payload, pla
     if (!(await isPushAllowed(payload, ownerType))) {
         return { successCount: 0, failureCount: 0, results: [], skipped: 'channel_off' };
     }
+    // The admin's own wording for this message (Firebase notification page),
+    // or nothing at all when the admin switched it off there.
+    const custom = await applyPushMessage(payload, ownerType);
+    if (custom.skip) {
+        return { successCount: 0, failureCount: 0, results: [], skipped: 'message_off' };
+    }
     // Clone payload to avoid side-effects across batched sends.
-    const enrichedPayload = { ...payload };
+    const enrichedPayload = { ...custom.payload };
     // Notification history in the apps, whether or not a phone is registered.
     await recordPushInInbox({ ownerType, ownerId, payload: enrichedPayload });
 

@@ -56,7 +56,8 @@ export async function getCashInHandMap(partnerIds = []) {
         prisma.foodOrder.groupBy({
             by: ['dispatchDeliveryPartnerId'],
             where: { dispatchDeliveryPartnerId: { in: ids }, orderStatus: 'delivered', paymentMethod: 'cash' },
-            _sum: { total: true },
+            // A partial payment's wallet part never passed through the rider.
+            _sum: { total: true, walletAmount: true },
         }),
         prisma.foodDeliveryCashDeposit.groupBy({
             by: ['deliveryPartnerId'],
@@ -66,7 +67,10 @@ export async function getCashInHandMap(partnerIds = []) {
     ]);
 
     for (const row of collected) {
-        result.set(String(row.dispatchDeliveryPartnerId), Number(row._sum.total) || 0);
+        result.set(
+            String(row.dispatchDeliveryPartnerId),
+            (Number(row._sum.total) || 0) - (Number(row._sum.walletAmount) || 0),
+        );
     }
     for (const row of deposited) {
         const id = String(row.deliveryPartnerId);
@@ -114,7 +118,10 @@ export function orderCollectsCash(order) {
     return method === 'cash' || method === 'razorpay_qr';
 }
 
-const orderAmount = (order) => Number(order?.pricing?.total ?? order?.total) || 0;
+/** What the rider collects: the total, less a partial payment's wallet part. */
+const orderAmount = (order) =>
+    (Number(order?.pricing?.total ?? order?.total) || 0) -
+    (Number(order?.payment?.walletAmount ?? order?.walletAmount) || 0);
 
 /**
  * Why a rider in this position may not take this order, or null if they may.

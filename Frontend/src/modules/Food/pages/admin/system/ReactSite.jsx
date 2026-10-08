@@ -28,7 +28,7 @@ export default function ReactSite() {
               </Field>
               <label className="flex items-center gap-2 text-sm text-slate-700">
                 <Switch checked={value.maintenanceMode} onChange={(v) => set("maintenanceMode", v)} label="Maintenance notice" />
-                Show a maintenance notice on the website
+                Maintenance mode: show this notice on the website and pause customer ordering (also on Business Settings)
               </label>
               <Field label="Maintenance message">
                 <textarea className={inputClass} rows={3} maxLength={500} value={value.maintenanceMessage} onChange={(e) => set("maintenanceMessage", e.target.value)} />

@@ -5,6 +5,7 @@ import { ValidationError } from '../../../../core/auth/errors.js';
 import { logger } from '../../../../utils/logger.js';
 import { getWalletSummaries } from './restaurantFinance.service.js';
 import { getPayoutSnapshots } from '../../admin/services/withdrawalMethods.service.js';
+import { emailWithdrawalDecision } from '../../../../core/notifications/emailEvents.js';
 
 /**
  * Automatic restaurant payouts, run the way the previous system ran them.
@@ -381,12 +382,13 @@ export async function decidePayouts(batchId, { ids = [], status, transactionId, 
     const wanted = [...new Set((Array.isArray(ids) ? ids : []).map(String))].filter(isId);
     if (!wanted.length) throw new ValidationError('Select at least one payout');
 
+    const decidedAt = new Date();
     const result = await prisma.$transaction(async (tx) => {
         const { count } = await tx.foodRestaurantWithdrawal.updateMany({
             where: { id: { in: wanted }, batchId: String(batchId), status: 'pending' },
             data: {
                 status,
-                processedAt: new Date(),
+                processedAt: decidedAt,
                 ...(transactionId ? { transactionId: String(transactionId).trim().slice(0, 120) } : {}),
                 ...(adminNote ? { adminNote: String(adminNote).trim().slice(0, 500) } : {}),
             },
@@ -394,6 +396,8 @@ export async function decidePayouts(batchId, { ids = [], status, transactionId, 
         await syncBatchStatus(String(batchId), tx);
         return count;
     });
+    // Keyed per withdrawal: a line already emailed is not emailed again.
+    if (result) emailWithdrawalDecision('restaurant', wanted, { processedAt: decidedAt });
 
     return { updated: result, notPending: wanted.length - result };
 }

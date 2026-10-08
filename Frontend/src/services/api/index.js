@@ -901,6 +901,13 @@ export const adminAPI = {
     apiClient.get(`/food/admin/orders/${String(orderId)}`, {
       contextModule: "admin",
     }),
+  /** Invoice data (JSON) or, with { format: "html", size: "thermal" | "a4" }, the printable page as text. */
+  getOrderInvoice: (orderId, params = {}) =>
+    apiClient.get(`/food/admin/orders/${encodeURIComponent(String(orderId))}/invoice`, {
+      contextModule: "admin",
+      params,
+      ...(params.format === "html" ? { responseType: "text" } : {}),
+    }),
   acceptOrder: (orderId) =>
     apiClient.patch(`/food/admin/orders/${String(orderId)}/accept`, {}, {
       contextModule: "admin",
@@ -929,6 +936,24 @@ export const adminAPI = {
     ),
   processRefund: (orderId, data) =>
     apiClient.post(`/food/admin/orders/${String(orderId)}/refund`, data ?? {}, {
+      contextModule: "admin",
+    }),
+  // Customer refund requests (query: status, restaurantId, from, to, search, page, limit).
+  getRefundRequests: (params = {}) =>
+    apiClient.get("/food/admin/orders/refund-requests", { params, contextModule: "admin" }),
+  getRefundRequest: (id) =>
+    apiClient.get(`/food/admin/orders/refund-requests/${String(id)}`, { contextModule: "admin" }),
+  approveRefundRequest: (id, body = {}) =>
+    apiClient.patch(`/food/admin/orders/refund-requests/${String(id)}/approve`, body, { contextModule: "admin" }),
+  rejectRefundRequest: (id, body = {}) =>
+    apiClient.patch(`/food/admin/orders/refund-requests/${String(id)}/reject`, body, { contextModule: "admin" }),
+  // Offline payments: confirm the money arrived, or reject with a reason.
+  verifyOfflinePayment: (orderId, note = "") =>
+    apiClient.patch(`/food/admin/orders/${String(orderId)}/offline-payment/verify`, { note }, {
+      contextModule: "admin",
+    }),
+  rejectOfflinePayment: (orderId, reason) =>
+    apiClient.patch(`/food/admin/orders/${String(orderId)}/offline-payment/reject`, { reason }, {
       contextModule: "admin",
     }),
   deleteOrder: (orderId) =>
@@ -1026,6 +1051,18 @@ export const adminAPI = {
     apiClient.post("/food/admin/offers", body ?? {}, {
       contextModule: "admin",
     }),
+  getAdminOffer: (offerId) =>
+    apiClient.get(`/food/admin/offers/${String(offerId)}`, { contextModule: "admin" }),
+  updateAdminOffer: (offerId, body) =>
+    apiClient.put(`/food/admin/offers/${String(offerId)}`, body ?? {}, {
+      contextModule: "admin",
+    }),
+  setAdminOfferStatus: (offerId, status) =>
+    apiClient.patch(
+      `/food/admin/offers/${String(offerId)}/status`,
+      { status },
+      { contextModule: "admin" },
+    ),
   updateAdminOfferCartVisibility: (offerId, itemId, showInCart) =>
     apiClient.patch(
       `/food/admin/offers/${String(offerId)}/cart-visibility`,
@@ -1636,6 +1673,13 @@ export const restaurantAPI = {
   getOrderById: (orderId) =>
     apiClient.get(`/food/restaurant/orders/${String(orderId)}`, {
       contextModule: "restaurant",
+    }),
+  /** The bill (restaurant copy, with its earning): JSON, or { format: "html" } for the printable page. */
+  getOrderInvoice: (orderId, params = {}) =>
+    apiClient.get(`/food/restaurant/orders/${encodeURIComponent(String(orderId))}/invoice`, {
+      contextModule: "restaurant",
+      params,
+      ...(params.format === "html" ? { responseType: "text" } : {}),
     }),
   updateMenu: (body) =>
     apiClient.patch("/food/restaurant/menu", body ?? {}, {
@@ -2845,6 +2889,13 @@ export const uploadAPI = {
 };
 /** Order API (user app – Bearer USER token). Minimal calls: single create/verify, list/details cached by caller. */
 export const orderAPI = {
+  /** Customer copy of the invoice: JSON, or { format: "html" } for the printable page. */
+  getOrderInvoice: (orderId, params = {}) =>
+    apiClient.get(`/food/user/orders/${encodeURIComponent(String(orderId))}/invoice`, {
+      contextModule: "user",
+      params,
+      ...(params.format === "html" ? { responseType: "text" } : {}),
+    }),
   calculateOrder: (payload) =>
     apiClient.post("/food/orders/calculate", payload ?? {}, {
       contextModule: "user",

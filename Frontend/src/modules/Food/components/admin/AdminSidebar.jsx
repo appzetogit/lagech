@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react"
 import { tioIconFor } from "./theme/tioIcons"
-import { Link, useLocation } from "react-router-dom"
+import { Link, useLocation, useNavigate } from "react-router-dom"
 import {
   Search,
   FileText,
@@ -59,7 +59,7 @@ import {
 } from "lucide-react"
 import { cn } from "@food/utils/utils"
 import { Input } from "@food/components/ui/input"
-import { adminSidebarMenu } from "@food/utils/adminSidebarMenu"
+import { adminSidebarMenu, areaForPath, areaOfEntry } from "@food/utils/adminSidebarMenu"
 import { adminAPI } from "@food/api"
 import { getCachedSettings, loadBusinessSettings } from "@food/utils/businessSettings"
 import { canAccessFeatureSettings, canAccessSuperPowers } from "@food/utils/adminPermissions"
@@ -150,6 +150,7 @@ const SIDEBAR_LABEL_BY_PATH = buildLabelDictionary(adminSidebarMenu)
 
 export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange }) {
   const location = useLocation()
+  const navigate = useNavigate()
   const navRef = useRef(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [badges, setBadges] = useState({})
@@ -513,9 +514,48 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
 
 
   // Filter menu items based on search query
+  // The top bar picks an area (Food / Users / Transactions & Reports /
+  // Settings); the sidebar shows that area only, as the old panel did. The
+  // area follows the open page, so a direct link lands in the right one.
+  const activeArea = useMemo(() => areaForPath(location.pathname), [location.pathname])
+
+  // The top-bar area links (Users, Transactions & Reports, Settings) only fit
+  // from the xl breakpoint up. Below it they are hidden, so the sidebar shows
+  // every area — otherwise Settings and the rest could not be reached on a phone.
+  const [areaNavVisible, setAreaNavVisible] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia ? window.matchMedia("(min-width: 1280px)").matches : true
+  )
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return undefined
+    const mq = window.matchMedia("(min-width: 1280px)")
+    const onChange = (e) => setAreaNavVisible(e.matches)
+    setAreaNavVisible(mq.matches)
+    mq.addEventListener ? mq.addEventListener("change", onChange) : mq.addListener(onChange)
+    return () => (mq.removeEventListener ? mq.removeEventListener("change", onChange) : mq.removeListener(onChange))
+  }, [])
+
+  useEffect(() => {
+    const onSelect = (event) => {
+      const area = event?.detail?.area
+      if (!area) return
+      const visiblePaths = menuData
+        .filter((entry) => entry && areaOfEntry(entry) === area)
+        .flatMap((entry) => (entry.path ? [entry] : entry.items || []))
+        .flatMap((item) => (item.path ? [item.path] : (item.subItems || []).map((sub) => sub.path)))
+        .filter(Boolean)
+      // The old panel opened Users on its overview page.
+      const preferred = { users: "/admin/food/user-overview" }[area]
+      const target = visiblePaths.includes(preferred) ? preferred : visiblePaths[0]
+      if (target) navigate(target)
+    }
+    window.addEventListener("admin-area-select", onSelect)
+    return () => window.removeEventListener("admin-area-select", onSelect)
+  }, [menuData, navigate])
+
   const filteredMenuData = useMemo(() => {
     if (!searchQuery.trim()) {
-      return menuData
+      if (!areaNavVisible) return menuData
+      return menuData.filter((entry) => entry && areaOfEntry(entry) === activeArea)
     }
 
     const query = searchQuery.toLowerCase().trim()
@@ -560,7 +600,7 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
     })
 
     return filtered
-  }, [menuData, searchQuery])
+  }, [menuData, searchQuery, activeArea, areaNavVisible])
 
   // Auto-expand sections with matches when searching
   useEffect(() => {

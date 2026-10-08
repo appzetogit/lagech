@@ -60,6 +60,12 @@ export default function OrdersTopbar({
                 </div>
                 <span>Excel</span>
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onExport("csv")} className="cursor-pointer">
+                <div className="w-6 h-6 rounded-md bg-blue-50 flex items-center justify-center mr-3">
+                  <FileText className="w-4 h-4 text-blue-600" />
+                </div>
+                <span>.Csv</span>
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => onExport("pdf")} className="cursor-pointer">
                 <div className="w-6 h-6 rounded-md bg-red-50 flex items-center justify-center mr-3">
                   <FileText className="w-4 h-4 text-red-600" />

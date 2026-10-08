@@ -50,11 +50,11 @@ export default function BulkImport({ entity }) {
   const [result, setResult] = useState(null)
   const inputRef = useRef(null)
 
-  const template = async (format) => {
+  const template = async (format, withData = false) => {
     try {
-      setBusy(`template-${format}`)
-      const res = await adminCatalogExtrasAPI.downloadBulkTemplate(entity, format)
-      saveBlobResponse(res, `${entity}_template.${format}`)
+      setBusy(`template-${withData ? "data-" : ""}${format}`)
+      const res = await adminCatalogExtrasAPI.downloadBulkTemplate(entity, format, withData)
+      saveBlobResponse(res, `${entity}_template${withData ? "_with_data" : ""}.${format}`)
     } catch (err) {
       toast.error(await blobErrorMessage(err, "Could not download the template"))
     } finally {
@@ -119,6 +119,20 @@ export default function BulkImport({ entity }) {
               </button>
               <button type="button" onClick={() => template("csv")} disabled={Boolean(busy)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-60">
                 {busy === "template-csv" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} CSV
+              </button>
+            </div>
+            <p className="mt-4 text-xs font-semibold text-slate-700">Template with existing data</p>
+            <p className="mt-0.5 text-xs text-slate-500">
+              {entity === "restaurants"
+                ? "Every current restaurant in the import columns, for reference: the import only adds restaurants, so a row already saved is rejected as a duplicate."
+                : `Every current record with its Id: edit the rows and upload them to update those ${copy.what}.`}
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button type="button" onClick={() => template("xlsx", true)} disabled={Boolean(busy)} className="inline-flex items-center gap-1.5 rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 disabled:opacity-60">
+                {busy === "template-data-xlsx" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} Excel
+              </button>
+              <button type="button" onClick={() => template("csv", true)} disabled={Boolean(busy)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-60">
+                {busy === "template-data-csv" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} CSV
               </button>
             </div>
           </div>

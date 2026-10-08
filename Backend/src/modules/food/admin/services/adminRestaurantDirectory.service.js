@@ -25,6 +25,8 @@ const RESTAURANT_ROW = {
     billingMode: true,
     // The restaurant's place in the customer app's list, set from this page.
     displayPosition: true,
+    // The list's Featured toggle.
+    isFeatured: true,
 };
 
 const ZONE_SUMMARY = { select: { id: true, name: true, zoneName: true } };

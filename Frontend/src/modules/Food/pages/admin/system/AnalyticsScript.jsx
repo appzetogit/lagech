@@ -1,152 +1,56 @@
-import { useState } from "react"
-import { Lightbulb, ChevronDown } from "@food/components/admin/theme/icons"
-const debugLog = (...args) => {}
-const debugWarn = (...args) => {}
-const debugError = (...args) => {}
+import { BarChart3 } from "@food/components/admin/theme/icons"
+import { PageFrame, Card, Field, Switch, SaveButton, Loading, inputClass, setIn, formatDateTime, useSettingsArea } from "./SettingsUi"
 
-
-const marketingTools = [
-  {
-    id: 1,
-    name: "Google Analytics",
-    description: "To know more click How it works."
-  },
-  {
-    id: 2,
-    name: "Google Tag Manager",
-    description: "To know more click How it works."
-  },
-  {
-    id: 3,
-    name: "LinkedIn Insight Tag",
-    description: "To know more click How it works."
-  },
-  {
-    id: 4,
-    name: "Meta Pixel",
-    description: "To know more click How it works."
-  },
-  {
-    id: 5,
-    name: "Pinterest Pixel",
-    description: "To know more click How it works."
-  },
-  {
-    id: 6,
-    name: "Snapchat Pixel",
-    description: "To know more click How it works."
-  },
-  {
-    id: 7,
-    name: "TikTok Pixel",
-    description: "To know more click How it works."
-  },
-  {
-    id: 8,
-    name: "X (Twitter) Pixel",
-    description: "To know more click How it works."
-  }
-]
-
-function ToggleSwitch({ enabled, onToggle }) {
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      className={`inline-flex items-center w-11 h-6 rounded-full border transition-all ${
-        enabled
-          ? "bg-blue-600 border-blue-600 justify-end"
-          : "bg-slate-200 border-slate-300 justify-start"
-      }`}
-    >
-      <span className="h-5 w-5 rounded-full bg-white shadow-sm" />
-    </button>
-  )
-}
-
+/**
+ * Tracking ids for the customer website (Google Analytics, Google Tag
+ * Manager, Meta Pixel). Only the id is stored; the website adds the standard
+ * snippet for each tool that is switched on. The apps can read the same ids
+ * from the public app settings.
+ */
 export default function AnalyticsScript() {
-  const [toolStates, setToolStates] = useState(
-    marketingTools.reduce((acc, tool) => {
-      acc[tool.id] = false
-      return acc
-    }, {})
-  )
-
-  const handleToggle = (id) => {
-    setToolStates(prev => ({
-      ...prev,
-      [id]: !prev[id]
-    }))
-  }
-
-  const handleView = (id) => {
-    debugLog("View tool:", id)
-  }
-
-  const handleHowItWorks = (e) => {
-    e.preventDefault()
-    debugLog("How it works clicked")
-  }
+  const { value, setValue, catalog, updatedAt, loading, saving, save } = useSettingsArea("analytics_scripts")
+  const tools = catalog.tools || []
 
   return (
-    <div className="p-2 lg:p-3 bg-slate-50 min-h-screen">
-      <div className="w-full mx-auto max-w-6xl">
-        {/* Page Title */}
-        <div className="mb-3">
-          <h1 className="text-lg font-bold text-slate-900">Marketing Tool</h1>
-        </div>
-
-        {/* Info Banner */}
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 flex items-start gap-3">
-          <Lightbulb className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
-          <p className="text-xs text-slate-700">
-            In this page you can add credentials to show your analytics on the platform make sure fill with proper data other wise you can not see the analytics properly
-          </p>
-        </div>
-
-        {/* Marketing Tools Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-          {marketingTools.map((tool) => (
-            <div
-              key={tool.id}
-              className="bg-white rounded-lg shadow-sm border border-slate-200 p-4"
-            >
-              <div className="mb-3">
-                <h3 className="text-sm font-semibold text-slate-900 mb-2">
-                  {tool.name}
-                </h3>
-                <p className="text-xs text-slate-600">
-                  {tool.description.split("How it works")[0]}
-                  <a
-                    href="#"
-                    onClick={handleHowItWorks}
-                    className="text-blue-600 hover:underline"
-                  >
-                    How it works
-                  </a>
-                  .
-                </p>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <button
-                  type="button"
-                  onClick={() => handleView(tool.id)}
-                  className="flex items-center gap-1 text-xs text-slate-700 hover:text-slate-900"
-                >
-                  <span>View</span>
-                  <ChevronDown className="w-3 h-3" />
-                </button>
-                <ToggleSwitch
-                  enabled={toolStates[tool.id]}
-                  onToggle={() => handleToggle(tool.id)}
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
+    <PageFrame
+      icon={BarChart3}
+      title="Analytics Script"
+      description="Add your tracking ids. The customer website loads each tool that is switched on; the admin, restaurant and rider panels are never tracked."
+      actions={<SaveButton saving={saving} onClick={() => save()} disabled={loading} />}
+    >
+      {loading || !value ? (
+        <Card><Loading /></Card>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {tools.map((tool) => {
+              const entry = value?.[tool.key] || {}
+              return (
+                <Card key={tool.key}>
+                  <div className="flex items-center justify-between gap-3">
+                    <h2 className="text-sm font-semibold text-slate-900">{tool.label}</h2>
+                    <Switch
+                      checked={Boolean(entry.enabled)}
+                      onChange={(v) => setValue((cur) => setIn(cur, [tool.key, "enabled"], v))}
+                      label={`${tool.label} on`}
+                    />
+                  </div>
+                  <Field label={tool.idLabel} hint={`Looks like ${tool.example}`} className="mt-3">
+                    <input
+                      className={inputClass}
+                      placeholder={tool.example}
+                      maxLength={40}
+                      value={entry.id || ""}
+                      onChange={(e) => setValue((cur) => setIn(cur, [tool.key, "id"], e.target.value.trim()))}
+                    />
+                  </Field>
+                </Card>
+              )
+            })}
+          </div>
+          {updatedAt && <p className="text-xs text-slate-500">Last saved {formatDateTime(updatedAt)}.</p>}
+        </>
+      )}
+    </PageFrame>
   )
 }
-

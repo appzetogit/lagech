@@ -11,7 +11,8 @@ import {
 } from './systemSettings.defaults.js';
 
 test('every area cleans an empty document to its defaults', () => {
-    for (const area of ['page_meta', 'app_settings', 'login_setup', 'notification_channels', 'landing_page', 'website']) {
+    for (const area of ['page_meta', 'app_settings', 'login_setup', 'notification_channels', 'landing_page', 'website',
+        'push_messages', 'offline_payment', 'analytics_scripts']) {
         assert.ok(cleanSettings(area, {}), area);
     }
     assert.deepEqual(Object.keys(cleanSettings('page_meta', {}).pages), META_PAGES.map((p) => p.key));
@@ -69,4 +70,81 @@ test('landing page drops empty list items and unknown keys, caps lengths', () =>
 test('a stored document that no longer passes reads as the defaults', () => {
     const read = readStoredSettings('website', { siteUrl: 'not a url', maintenanceMode: true });
     assert.deepEqual(read, { siteUrl: '', maintenanceMode: false, maintenanceMessage: '' });
+});
+
+test('offline payment methods keep their id, need payment details and customer fields', () => {
+    const clean = cleanSettings('offline_payment', {
+        enabled: 'true',
+        methods: [
+            {
+                id: '0123456789abcdef',
+                name: ' Bank transfer ',
+                paymentInfo: [{ label: 'Account number', value: '0012345' }, { label: '', value: '' }],
+                fields: [{ label: 'Transaction id', required: true }],
+                extra: 'dropped',
+            },
+            { id: 'not-an-id', name: 'UPI', isActive: false, paymentInfo: [{ label: 'UPI id', value: 'shop@upi' }], fields: [{ label: 'UTR', type: 'number' }] },
+        ],
+    });
+    assert.equal(clean.enabled, true);
+    assert.equal(clean.methods[0].id, '0123456789abcdef');
+    assert.equal(clean.methods[0].name, 'Bank transfer');
+    assert.equal(clean.methods[0].isActive, true);
+    assert.deepEqual(clean.methods[0].paymentInfo, [{ label: 'Account number', value: '0012345' }]);
+    assert.deepEqual(clean.methods[0].fields.map((f) => [f.key, f.required]), [['transaction_id', true]]);
+    assert.equal(clean.methods[0].extra, undefined);
+    // A missing or malformed id gets a fresh one.
+    assert.match(clean.methods[1].id, /^[a-f0-9]{16}$/);
+    assert.equal(clean.methods[1].isActive, false);
+
+    assert.deepEqual(cleanSettings('offline_payment', {}), { enabled: false, methods: [] });
+    assert.throws(() => cleanSettings('offline_payment', { methods: [{ name: '', paymentInfo: [], fields: [] }] }), /needs a name/);
+    assert.throws(
+        () => cleanSettings('offline_payment', { methods: [{ name: 'Bank', paymentInfo: [], fields: [{ label: 'Txn' }] }] }),
+        /add the details the customer pays to/,
+    );
+    assert.throws(
+        () => cleanSettings('offline_payment', { methods: [{ name: 'Bank', paymentInfo: [{ label: 'A', value: '1' }], fields: [] }] }),
+        /"Bank": Add at least one field/,
+    );
+    assert.throws(
+        () => cleanSettings('offline_payment', { methods: [{ name: 'Bank', paymentInfo: [{ label: 'A', value: '' }], fields: [{ label: 'Txn' }] }] }),
+        /needs a title and a value/,
+    );
+});
+
+test('analytics stores only well-formed ids, and cannot be switched on blank', () => {
+    const clean = cleanSettings('analytics_scripts', {
+        googleAnalytics: { enabled: true, id: 'g-abc1234' },
+        googleTagManager: { enabled: false, id: '' },
+        metaPixel: { enabled: 'true', id: '123456789012345' },
+        other: { enabled: true, id: 'x' },
+    });
+    assert.deepEqual(clean, {
+        googleAnalytics: { enabled: true, id: 'G-ABC1234' },
+        googleTagManager: { enabled: false, id: '' },
+        metaPixel: { enabled: true, id: '123456789012345' },
+    });
+    // Script text is not an id.
+    assert.throws(() => cleanSettings('analytics_scripts', { googleAnalytics: { id: '<script>alert(1)</script>' } }), /should look like G-/);
+    assert.throws(() => cleanSettings('analytics_scripts', { metaPixel: { id: '12ab' } }), /Meta Pixel/);
+    assert.throws(() => cleanSettings('analytics_scripts', { googleTagManager: { enabled: true } }), /before switching it on/);
+});
+
+test('push messages: every message present, switches only where this page owns them', () => {
+    const clean = cleanSettings('push_messages', {
+        messages: {
+            customer_order_placed: { enabled: false, title: ' Hi ', body: 'Order {orderId}' },
+            // Switched on Notification Channels, so the switch here is ignored.
+            customer_order_confirmed: { enabled: false, title: 'Confirmed' },
+            // The delivery offer is never switchable.
+            rider_new_order: { enabled: false },
+            bogus: { title: 'x' },
+        },
+    });
+    assert.deepEqual(clean.messages.customer_order_placed, { enabled: false, title: 'Hi', body: 'Order {orderId}' });
+    assert.deepEqual(clean.messages.customer_order_confirmed, { enabled: true, title: 'Confirmed', body: '' });
+    assert.equal(clean.messages.rider_new_order.enabled, true);
+    assert.equal(clean.messages.bogus, undefined);
+    assert.equal(clean.messages.customer_payment_failed.enabled, true);
 });

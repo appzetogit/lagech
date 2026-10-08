@@ -36,6 +36,13 @@ const errorHandler = (err, req, res, next) => {
         logger.error(`[${requestId}] ${err.stack}`);
     }
 
+    // An unexpected failure (a database or code error) is logged in full above,
+    // but its text — SQL, table names, constraint names — never reaches the app.
+    // Errors we raise on purpose carry a 4xx status and keep their message.
+    if (statusCode >= 500 && config.nodeEnv !== 'development') {
+        message = `Something went wrong. Please try again. (ref ${requestId})`;
+    }
+
     res.status(statusCode).json({
         success: false,
         // `message` matches sendError() and every success response, so clients reading

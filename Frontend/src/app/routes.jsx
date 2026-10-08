@@ -2,6 +2,7 @@ import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-
 import { Suspense, lazy, useEffect, useState } from 'react'
 import { AppShellSkeleton } from '@food/components/ui/loading-skeletons'
 import LandingPage from './LandingPage'
+import AnalyticsScripts from './AnalyticsScripts'
 import { isFeatureEnabled, loadCorePublicAppConfig } from '@food/services/publicAppConfig'
 
 const NATIVE_LAST_ROUTE_KEY = 'native_last_route'
@@ -89,6 +90,9 @@ const AppRoutes = () => {
   }, [location.pathname, location.search])
 
   return (
+    <>
+    {/* Analytics tools the admin switched on; customer pages only. */}
+    <AnalyticsScripts />
     <Routes>
       {/* Root → Master Landing Page */}
       <Route path="/" element={<RootEntryRoute />} />
@@ -125,6 +129,7 @@ const AppRoutes = () => {
       {/* Fallback 404 */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </>
   )
 }
 

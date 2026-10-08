@@ -31,6 +31,10 @@ Verified against `Backend/src/modules/food/restaurant/` and `Backend/src/modules
 ## 2. Onboarding (no auth)
 
 ### `POST /food/restaurant/register` — `multipart/form-data`
+When Business Settings turn restaurant self registration off (`GET /food/public/business-settings` →
+`restaurant.selfRegistration: false`) this and `POST /food/restaurant/onboarding-fee/order` return
+**403** "Restaurant sign-up is closed right now. Please contact Lagech to list your restaurant." —
+hide the sign-up button. Restaurants an admin adds are unaffected.
 
 File fields: `profileImage` (1), `panImage` (1), `gstImage` (1), `fssaiImage` (1), `menuImages` (up to 10), **`coverImage` (1)**, **`galleryImages` (up to 10)**.
 
@@ -126,9 +130,22 @@ Body also takes `folder`. → `data` = upload result (URL). Use this to pre-uplo
 | PATCH | `/food/restaurant/profile` | partial restaurant fields | `{ restaurant }` |
 | PATCH | `/food/restaurant/availability` | `{ "isAcceptingOrders": true }` | `{ restaurant }` |
 | PATCH | `/food/restaurant/dining-settings` | `{ "isEnabled": true, "maxGuests": 6, "diningType": "family-dining" }` | `{ restaurant }` |
-| DELETE | *(none — deletion is `deleteCurrentRestaurantAccount`, not routed publicly)* | | |
+| DELETE | `/food/restaurant/me` | — | `{ "success": true }` |
 
 `maxGuests` is clamped to ≥ 1 (default 6); `isEnabled` accepts booleans or `"true"/"1"/"yes"` strings.
+
+**Delete account — `DELETE /v1/food/restaurant/me`** (Bearer, restaurant token). This is the only
+delete route; `/food/auth/restaurant/account` and `/food/auth/account` do not exist (404). Same naming
+family as the customer (`DELETE /food/user/profile`) and rider (`DELETE /food/delivery/profile/account`).
+- 200 → `{ "success": true, "message": "Restaurant account deleted successfully", "data": { "success": true } }`. Log the user out.
+- 400 → `{ "success": false, "message": "Restaurants with order history cannot be deleted. Please contact support." }`
+  when the restaurant has any order, transaction or subscription invoice. Show `message` as is.
+- Dishes, add-ons, timings, offers and banners go with the account. Support tickets and feedback are
+  kept for Lagech's records (detached from the deleted account).
+
+**Profile edits that need approval.** Changing name, owner/contact details, PAN/GST/FSSAI, bank/UPI, or
+cover/menu photos puts the restaurant back to `status: "pending"`. The **logo (`profileImage`) does not**:
+it applies at once and never changes `status` or `isAcceptingOrders`.
 
 ### Image uploads (all Bearer, all multipart)
 
@@ -140,6 +157,12 @@ Body also takes `folder`. → `data` = upload result (URL). Use this to pre-uplo
 | POST | `/food/restaurant/profile/menu-images` | `files` | 20 |
 
 → `data` = upload result with the stored URL(s).
+
+**Logo — `POST /food/restaurant/profile/profile-image`** (multipart field `file`) →
+`data: { "profileImage": { "url": "…" } }`. Saved directly, no admin approval: an approved restaurant stays
+`approved` and `isAcceptingOrders` is unchanged. `GET /food/restaurant/current` returns the new
+`profileImage.url` immediately, and the customer listing/detail caches are cleared on upload.
+(`cover-images` / `menu-images` still go back to review.)
 
 ---
 
@@ -281,6 +304,8 @@ Bulk menu update. → `{ menu }`
 `nutrition` and `allergens` are free text, shown to customers on the dish. Each entry is trimmed and kept as typed (case included); repeats are dropped (ignoring case); at most 30 entries of 60 characters. Send `[]` to clear. Changing them does not send the dish back for approval.
 → 201, `{ food }` with **`approvalStatus: "pending"`**. New items are invisible to customers until an admin approves; admins get a push at creation. Surface the pending badge or partners will think the item is live.
 
+This is while dish approval is on (admin: Business Settings → Vendor, on by default; published as `restaurant.dishApprovalRequired` in `GET /v1/food/public/business-settings`). With it off, new dishes come back `approved` and are live at once, and edits no longer send a dish back for approval.
+
 ### `PATCH /food/restaurant/foods/:id`
 Partial update of the same fields. → `{ food }`, 404 if not yours.
 
@@ -345,15 +370,94 @@ Only orders that are actually payable are returned: payment method `cash`/`walle
 
 ### `GET /food/restaurant/orders/:orderId` → `{ order }`
 
+### `GET /food/restaurant/orders/:orderId/invoice` -- the bill ("Print bill")
+The restaurant copy of the order invoice, for the restaurant's **own** orders only (anyone else's is 404).
+Same builder and numbers as the customer and admin copies; laid out like the old panel's thermal receipt:
+restaurant name / address / phone, "Cash receipt", Order id, date ("14/Sep/2026 01:27:pm"), Contact name /
+Phone / Address ("Takeaway" for takeaway), Desc / Qty / Price (size and add-ons under the item), Subtotal,
+Discount, Coupon discount, [Campaign discount, New customer discount, GST, Extra packaging -- when not zero],
+Delivery charge, [GST on delivery, Platform fee, Quick delivery], Delivery man tips, Additional charge,
+**Total**, "Payment: <method> · <Paid/Unpaid>", then "Your earning": Item total, [Extra packaging],
+Commission, [Discount you fund], **You'll receive**. Footer "THANK YOU" + business line.
+
+- Default: JSON `{ invoice }`. `invoice.lines` are signed amounts whose `inTotal` lines sum to `invoice.total`;
+  `display` replaces the amount text ("Free delivery", "Takeaway"); `info` lines (Items price, Addon cost)
+  break the Subtotal down. `invoice.restaurantEarning = { lines: [{ key, label, amount, sign }], netPayout, isSettled }`.
+- `?format=html` → printable HTML page, 80 mm thermal by default (`@page size: 80mm auto`), `&size=a4` for A4,
+  `&print=1` to open the print dialog on load. Self-contained (inline CSS; only the business logo is external).
+- **App "Print bill":** open `{HOST}/api/v1/food/restaurant/orders/<id>/invoice?format=html` in a WebView with
+  `Authorization: Bearer <accessToken>` and print it (Android print service / a Bluetooth thermal printer
+  driver that accepts HTML), or draw the receipt from the JSON for ESC/POS printers.
+
 ### `PATCH /food/restaurant/orders/:orderId/status`
 ```json
 { "orderStatus": "preparing", "note": "optional" }
 ```
 Allowed values: `confirmed`, `preparing`, `ready_for_pickup`, `picked_up`, `delivered`, `cancelled_by_restaurant`. In practice the restaurant drives `confirmed` → `preparing` → `ready_for_pickup`; the rider owns the rest.
+
+`cancelled_by_restaurant` on an order still `created` (rejecting a new order) always works. Cancelling an order the restaurant already accepted needs Business Settings → Vendor → "restaurant can cancel order" (off by default; published as `restaurant.canCancelOrder`); otherwise it returns 400 "You cannot cancel an order you have already accepted. Please contact Lagech support to cancel it." Hide the cancel button on accepted orders when it is off.
 → `{ order }`
 
 ### `POST /food/restaurant/orders/:orderId/resend-notification`
 Re-pings delivery partners for an order that hasn't been picked up.
+
+### Scheduled orders
+With Business Settings → Order → scheduled orders on, a customer may order for a slot today or
+tomorrow. Such an order has `isScheduled: true`, `scheduledAt` (the slot) and `releaseAt` (about
+40 minutes before it). It is paid at placement and listed straight away with status `created`, but:
+- it does **not** ring: no `new_order` socket event or push until `releaseAt`; then it rings like a
+  new order (push `data.scheduledAt` set, `data.orderType`);
+- `acceptanceDeadlineAt` = `releaseAt` + the acceptance window, so it is never auto-cancelled early;
+- it may be accepted early (`confirmed` / `preparing`); no rider is dispatched before `releaseAt`.
+
+Show it as "Scheduled for <scheduledAt>" and do not play the new-order alarm for an order whose
+`releaseAt` is still in the future.
+
+### Takeaway orders
+`orderType: "takeaway"` (otherwise `"delivery"`): the customer collects it, so there is no rider and
+no delivery fee; commission applies as usual. Flow: accept (`confirmed`/`preparing`) →
+`ready_for_pickup` (the customer is pushed) → hand over:
+
+### `POST /food/restaurant/orders/:orderId/handover`
+```json
+{ "code": "4821" }
+```
+`code` is the 4-digit pickup code the customer's app shows (never sent to the restaurant). Allowed
+from `confirmed`, `preparing` or `ready_for_pickup`. Right code → the order is `delivered`
+(`deliveredAt` set) → `{ order }`. Wrong code → 400 "That pickup code does not match…", nothing
+changes. Setting `picked_up` / `delivered` through `/status` on a takeaway → 400 "Verify the
+customer's pickup code to hand over a takeaway order." `resend-notification` does nothing for it.
+
+### `PATCH /food/restaurant/takeaway-settings`
+```json
+{ "takeawayEnabled": false }
+```
+The restaurant's own takeaway switch (default on; only matters while Business Settings have takeaway
+on). → `{ restaurant }` with `takeawayEnabled`. Also on `GET /food/restaurant/current`.
+
+### `PATCH /food/restaurant/packaging-settings`
+```json
+{ "enabled": true, "amount": 15, "required": false }
+```
+The restaurant's extra packaging charge, offered only while Business Settings > Order has "extra
+packaging charge" on (`GET /food/public/business-settings` → `order.extraPackagingCharge`); otherwise
+400 "Extra packaging charges are not allowed right now." `amount` 0–500 (rupees); switching it on
+needs an amount. `required: true` adds it to every order; `false` charges it only when the customer
+asks for it at checkout. Fields not sent keep their value. → `{ restaurant }` with
+`extraPackaging: { enabled, amount, required }` (also on `GET /food/restaurant/current`). The charge is
+the restaurant's: it is the order's `pricing.packagingFee`, added to the restaurant's share, with no
+commission on it. Show a "Packaging charge" setting only while `order.extraPackagingCharge` is true.
+
+### Who confirms orders (Business Settings > Order)
+`GET /food/public/business-settings` → `order.confirmedBy`:
+- `"restaurant"` (default): as above — a new order arrives `created`, the restaurant accepts
+  (`confirmed`/`preparing`) within the acceptance time or it is cancelled.
+- `"deliveryman"`: a **delivery** order arrives already `confirmed` (no acceptance timer, riders are
+  looked for at once; the `new_order` socket event and push still come). Show it with "Start
+  preparing" rather than Accept / Reject, then move it to `preparing` and `ready_for_pickup` as usual.
+  Rejecting it is cancelling an accepted order, so it needs "restaurant can cancel order" on
+  (`restaurant.canCancelOrder`), otherwise the admin cancels it. A **takeaway** order is still
+  `created` and accepted by the restaurant as usual.
 
 ### Order object
 
@@ -374,6 +478,7 @@ Same canonical shape as the user app, with `userId` populated. Key fields for th
     "deliveryFee": 35, "deliveryFeeGst": 6, "platformFee": 5, "quickDeliveryFee": 0,
     "deliveryMode": "basic", "restaurantCommission": 78,
     "discount": 50, "couponCode": "SAVE50",
+    "campaignDiscount": 0,
     "total": 546, "currency": "INR",
     "distanceKm": 3.1, "roadDistanceKm": 3.9, "roadDurationMins": 14
   },
@@ -415,7 +520,9 @@ Same canonical shape as the user app, with `userId` populated. Key fields for th
 }
 ```
 
-**Acceptance deadline is real.** `acceptanceDeadlineAt` (default 240s from placement) auto-expires unaccepted orders on the next list read. Run a countdown on the incoming-order card.
+**Acceptance deadline is real.** `acceptanceDeadlineAt` (default 240s from placement; from `releaseAt` for a scheduled order) auto-expires unaccepted orders on the next list read. Run a countdown on the incoming-order card.
+
+New fields on the order: `orderType` (`delivery` | `takeaway`), `isScheduled`, `releaseAt`, `scheduledAt`, `pricing.riderTip` (the customer's tip; it is in `pricing.total` but all of it goes to the rider — never part of `finance.netPayout`).
 
 Full status enum on the order document: `pending_payment`, `created`, `confirmed`, `preparing`, `ready_for_pickup`, `reached_pickup`, `picked_up`, `reached_drop`, `delivered`, `cancelled_by_user`, `cancelled_by_restaurant`, `cancelled_by_admin`.
 
@@ -487,6 +594,12 @@ The chosen method is copied onto each new withdrawal request (`bankDetails.payou
 ---
 
 ## 8. Subscription (calendar-month postpaid)
+
+Business Settings > Business info "subscription business model" is the same switch as the
+Restaurant Subscription feature flag: when off, `featureEnabled` / `features.restaurantSubscriptionEnabled`
+are false, no month is billed, and restaurants set to a subscription pay commission per order. The
+public `GET /food/public/business-settings` carries it as `business.subscriptionModel` — hide the
+subscription screens while it is false.
 
 ### `GET /food/restaurant/subscription/overview`
 ```json
@@ -581,7 +694,46 @@ Query passes through to the admin complaint service (pagination + filters). → 
 ```
 → 201, `{ ticket }`. Invalid `category` / `priority` → 400. Note: `priority` here has no `urgent` — that's the delivery app's enum.
 
-### `GET /food/restaurant/support/tickets` → `{ tickets: [...] }` (+ pagination)
+### `GET /food/restaurant/support/tickets` → `{ tickets: [...], total, page, limit }`
+
+Query: `page`, `limit` (≤ 100), `status` (`open | in-progress | resolved`), `search`.
+```jsonc
+{
+  "id": "…", "restaurantId": "…", "restaurantName": "…",
+  "category": "technical", "issueType": "App crash", "subject": "…", "description": "…", "orderRef": "",
+  "priority": "high",
+  "status": "open",              // open | in_progress | resolved  (note the underscore in responses)
+  "adminResponse": "",           // the admin's reply; "" until answered
+  "respondedAt": null,           // ISO time of the admin's last reply; null until answered
+  "createdAt": "…", "updatedAt": "…"
+}
+```
+When the admin replies, the restaurant also gets a push `{ type: "SUPPORT_RESPONSE", ticketId, source: "restaurant" }`.
+
+**Food campaign dishes on an order.** A line with `itemCampaignId` set is a food campaign dish the admin
+created for this restaurant (`itemId` is then the campaign id, not a menu item). Its `price` is the
+campaign's full price; what the campaign took off is in `pricing.campaignDiscount` (part of `discount`).
+The platform funds that discount: the restaurant is paid, and charged commission, on the full price.
+
+### Reviews and replies
+`GET /food/restaurant/reviews?page=1&limit=20&withComments=true` → the restaurant's customer reviews,
+newest first, in the same shape as the public list (`summary`, `reviews`, `pagination`) plus `canReply`:
+```json
+{ "summary": { "rating": 4.3, "totalRatings": 42, "totalReviews": 16, "breakdown": { "5": 30, "4": 4, "3": 4, "2": 0, "1": 4 } },
+  "reviews": [ { "id": "<order id>", "userName": "Neha V.", "rating": 4, "comment": "Tasty but late",
+                 "ratedAt": "…", "dishName": "Dal makhani", "dishImage": "…",
+                 "reply": { "text": "Sorry about the wait!", "repliedAt": "…" } } ],
+  "pagination": { "page": 1, "limit": 20, "total": 16, "pages": 1 },
+  "canReply": true }
+```
+`reply` is `null` when the restaurant has not replied. `canReply` is the admin's Business Settings switch
+("restaurant can reply to reviews"); show a Reply / Edit reply button only when it is `true`.
+
+`PUT /food/restaurant/reviews/:id/reply` `{ "reply": "Sorry about the wait!" }` (`:id` is the review's
+`id`) → `{ id, reply: { text, repliedAt } }`. Sending it again edits the reply; `""` removes it
+(`reply: null`). Up to 1000 characters. Refused with 403 `"Replying to reviews is switched off by the
+admin"` while the switch is off, 404 `"Review not found"` for an order that is not this restaurant's or has
+no review. The reply is public: customers see it under the review.
 
 ### `POST /food/restaurant/feedback-experience`
 Dashboard NPS/feedback submission.
@@ -623,6 +775,11 @@ Same as the other apps: `POST /fcm-tokens/mobile/save`, `DELETE /fcm-tokens/remo
 
 Inbox: `GET /food/notifications/inbox`, `PATCH /food/notifications/:id/read`, `DELETE /food/notifications/:id`, `DELETE /food/notifications/inbox/all`.
 
+**Chat message push** (all three apps): `data = { "type": "chat_message", "conversationId": "…", "orderId": "<order database id>" }`.
+`orderId` is the order's database `id` (24 hex), never the display number (`FOD-…`), and `""` for a chat with
+no order (admin support). All data values are strings. Admin-edited push texts change `title`/`body` only,
+never these data fields.
+
 ---
 
 ## 12. Realtime
@@ -640,7 +797,7 @@ Handshake with the access token. On connect the server auto-joins `restaurant:<r
 |---|---|
 | `new_order` | a paid order landed — ring the alarm, start the acceptance countdown |
 | `order_status_update` | status changed by anyone |
-| `location-update` | rider position for an order you're tracking |
+| `location-update` | rider position for an order you're tracking: `{ orderId, lat, lng, heading, headingFromDevice, speed, accuracy, timestamp, … }` — `heading` is the last known one when the rider's ping had none |
 
 The order alarm must not depend on the socket alone — poll `/orders` with a short interval as a fallback, and reconcile against `acceptanceDeadlineAt`.
 
@@ -655,3 +812,27 @@ The order alarm must not depend on the socket alone — poll `/orders` with a sh
 5. Register is FormData: arrays are comma-joined strings and lat/lng are strings. Everything after registration is normal JSON.
 6. Location edits go to `pendingLocation` for admin review, not straight to `location`.
 7. `GET /withdrawals` returns a bare array; most other list endpoints return `{ data, meta }` or a named key. Don't assume one shape.
+
+## New-order push: already-confirmed orders
+
+The `new_order` push (data-only, Android tag `order_<id>`, channel `new_order_channel`) now also carries:
+
+| Field | Values |
+|---|---|
+| `orderStatus` | the order's status when the alert was sent, e.g. `created`, `confirmed` |
+| `needsAcceptance` | `"true"` or `"false"` |
+
+When Business Settings → Order → "Who confirms the order" is the delivery partner, delivery orders reach the restaurant already `confirmed`: `needsAcceptance` is `"false"` and the body reads "Order #… is confirmed. Please start preparing." Show a plain notification (open the order on tap) without Accept/Reject and without the looping alarm. Missing field (older server) = treat as `"true"`.
+
+## Showing the restaurant's earning, not the customer's bill
+
+Every order the restaurant app receives carries a `finance` block — on the order list, the order details, status updates, and now also on the `new_order` socket payload:
+
+```json
+"finance": { "itemTotal": 180, "packagingFee": 0, "commission": 27, "restaurantDiscountShare": 0,
+             "discount": 0, "taxAmount": 0, "totalCustomerPaid": 260, "netPayout": 153,
+             "isSettled": false, "settledAt": null }
+```
+
+Show the restaurant **item total, packaging, commission (−), its share of discounts (−) and `netPayout` ("You'll receive")** — not the customer's delivery fee, platform fee, tip or grand total (those are not the restaurant's money). The `new_order` push data also carries `restaurantEarning` (= netPayout), `itemTotal` and `commission`, and its body reads "You earn: ₹…" instead of the customer total.
+

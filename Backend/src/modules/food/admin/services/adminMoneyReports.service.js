@@ -57,30 +57,159 @@ export function foldDisbursementLines(groups = [], names = new Map()) {
     return [...rows.values()].sort((a, b) => b.total - a.total);
 }
 
-const emptyDisbursementTotals = () => ({ batches: 0, restaurants: 0, payouts: 0, total: 0, paid: 0, pending: 0, cancelled: 0 });
+/** Rider payout line status -> what the rider tab calls it (Delivery Man Disbursement says "failed"). */
+export const RIDER_DISBURSEMENT_STATUS = { pending: 'pending', approved: 'paid', rejected: 'failed' };
+
+/** 'pending' | 'paid' | 'failed' (or the restaurant tab's 'cancelled') -> the stored status, or null for all. */
+export function riderLineStatusFilter(value) {
+    const wanted = String(value || '').trim().toLowerCase();
+    if (wanted === 'cancelled') return 'rejected';
+    return Object.entries(RIDER_DISBURSEMENT_STATUS).find(([, label]) => label === wanted)?.[0] || null;
+}
 
 /**
- * What the daily payout runs disbursed to restaurants in a period: totals by
- * status, one row per restaurant, and each run. Riders are not paid by payout
- * runs in this system, so asking for them says so rather than showing zeros.
+ * Sum payout lines grouped by status ({ status, amount, count }) into the
+ * report totals. Pure. `cancelled` repeats `failed` so a page written for the
+ * restaurant tab still reads the right figure.
+ */
+export function foldRiderDisbursementTotals(groups = []) {
+    const totals = { payouts: 0, total: 0, paid: 0, pending: 0, failed: 0 };
+    for (const group of groups) {
+        const amount = num(group.amount);
+        totals.payouts += Number(group.count) || 0;
+        totals.total = num(totals.total + amount);
+        const bucket = RIDER_DISBURSEMENT_STATUS[group.status];
+        if (bucket) totals[bucket] = num(totals[bucket] + amount);
+    }
+    return { ...totals, cancelled: totals.failed };
+}
+
+/**
+ * The Delivery men tab: every rider payout line made by a Delivery Man
+ * Disbursement (food_delivery_withdrawals with source 'disbursement') in the
+ * period -- the old panel's columns: id, delivery man, created at, amount,
+ * payment method, status, and a link to its disbursement. Filters: period
+ * (line created), status, rider (deliveryPartnerId) and a name/phone search.
+ * A rider's own withdrawal requests and recorded payments are not
+ * disbursements and are left out, as in the old panel.
+ */
+export async function getRiderDisbursementReport(query = {}) {
+    const { start, end } = parsePeriod(query);
+    const { page, limit } = pageOf(query);
+    const status = riderLineStatusFilter(query.status);
+    const riderId = query.deliveryPartnerId || query.riderId;
+    const search = String(query.search || '').trim();
+
+    const where = {
+        source: 'disbursement',
+        createdAt: { gte: start, lte: end },
+        ...(isId(riderId) ? { deliveryPartnerId: String(riderId) } : {}),
+        ...(status ? { status } : {}),
+        ...(search
+            ? {
+                deliveryPartner: {
+                    OR: [
+                        { name: { contains: search, mode: 'insensitive' } },
+                        { phone: { contains: search } },
+                    ],
+                },
+            }
+            : {}),
+    };
+
+    const [lines, grouped, riderGroups, total] = await Promise.all([
+        prisma.foodDeliveryWithdrawal.findMany({
+            where,
+            orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+            skip: (page - 1) * limit,
+            take: limit,
+            include: {
+                deliveryPartner: { select: { id: true, name: true, phone: true, email: true } },
+                batch: { select: { id: true, number: true } },
+            },
+        }),
+        prisma.foodDeliveryWithdrawal.groupBy({
+            by: ['status'],
+            where,
+            _sum: { amount: true },
+            _count: { _all: true },
+        }),
+        prisma.foodDeliveryWithdrawal.groupBy({ by: ['deliveryPartnerId'], where }),
+        prisma.foodDeliveryWithdrawal.count({ where }),
+    ]);
+
+    const batchIds = [...new Set(lines.map((l) => l.batchId).filter(Boolean))];
+    const batches = batchIds.length
+        ? await prisma.foodDeliveryPayoutBatch.findMany({ where: { id: { in: batchIds } }, orderBy: { createdAt: 'desc' } })
+        : [];
+    const batchLines = batchIds.length
+        ? await prisma.foodDeliveryWithdrawal.groupBy({
+            by: ['batchId', 'status'],
+            where: { batchId: { in: batchIds } },
+            _sum: { amount: true },
+        })
+        : [];
+    const byBatch = new Map();
+    for (const line of batchLines) {
+        const entry = byBatch.get(line.batchId) || { paid: 0, pending: 0, failed: 0 };
+        const bucket = RIDER_DISBURSEMENT_STATUS[line.status];
+        if (bucket) entry[bucket] = num(entry[bucket] + num(line._sum.amount));
+        byBatch.set(line.batchId, entry);
+    }
+
+    const folded = foldRiderDisbursementTotals(
+        grouped.map((g) => ({ status: g.status, amount: g._sum.amount, count: g._count._all })),
+    );
+
+    return {
+        entityType: 'rider',
+        supported: true,
+        period: { from: start, to: end },
+        totals: { ...folded, riders: riderGroups.length, batches: batches.length },
+        rows: lines.map((line) => ({
+            id: line.id,
+            batchId: line.batchId,
+            batchTitle: line.batch ? `Disbursement #${line.batch.number}` : '',
+            deliveryPartnerId: line.deliveryPartnerId,
+            deliveryName: line.deliveryPartner?.name || 'Deleted delivery man',
+            deliveryPhone: line.deliveryPartner?.phone || '',
+            deliveryEmail: line.deliveryPartner?.email || '',
+            createdAt: line.createdAt,
+            amount: num(line.amount),
+            paymentMethod: line.paymentMethod,
+            status: RIDER_DISBURSEMENT_STATUS[line.status] || line.status,
+            reference: line.transactionId || '',
+            note: line.adminNote || line.rejectionReason || '',
+            processedAt: line.processedAt,
+        })),
+        batches: batches.map((b) => {
+            const parts = byBatch.get(b.id) || { paid: 0, pending: 0, failed: 0 };
+            return {
+                id: b.id,
+                title: `Disbursement #${b.number}`,
+                riderCount: b.riderCount,
+                totalAmount: num(b.totalAmount),
+                ...parts,
+                cancelled: parts.failed,
+                createdAt: b.createdAt,
+            };
+        }),
+        pagination: { total, page, limit, pages: Math.ceil(total / limit) || 1 },
+    };
+}
+
+/**
+ * What the payout runs disbursed in a period. Restaurants: totals by status,
+ * one row per restaurant, and each daily run. Riders (entityType 'rider'):
+ * one row per payout line of the Delivery Man Disbursements, see
+ * getRiderDisbursementReport.
  */
 export async function getDisbursementReport(query = {}) {
     const { start, end } = parsePeriod(query);
     const period = { from: start, to: end };
     const { page, limit } = pageOf(query);
 
-    if (query.entityType === 'rider') {
-        return {
-            entityType: 'rider',
-            supported: false,
-            message: 'Riders are paid through their withdrawal requests; there are no rider payout runs yet.',
-            period,
-            totals: emptyDisbursementTotals(),
-            rows: [],
-            batches: [],
-            pagination: { total: 0, page, limit, pages: 1 },
-        };
-    }
+    if (query.entityType === 'rider') return getRiderDisbursementReport(query);
 
     const status = Object.entries(DISBURSEMENT_STATUS).find(([, label]) => label === query.status)?.[0];
     const where = {

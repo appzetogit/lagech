@@ -1,1028 +1,700 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from "react"
-import { Check, ChevronDown, Search, X } from "@food/components/admin/theme/icons"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { toast } from "sonner"
+import {
+  Download,
+  FileSpreadsheet,
+  FileText,
+  Gift,
+  Loader2,
+  Pencil,
+  RefreshCw,
+  Search,
+  Trash2,
+  X,
+} from "@food/components/admin/theme/icons"
 import { adminAPI } from "@food/api"
-const debugLog = (...args) => {}
-const debugWarn = (...args) => {}
-const debugError = (...args) => {}
-
-function StyledSelect({ value, options, onChange, ariaLabel }) {
-  const [isOpen, setIsOpen] = useState(false)
-  const rootRef = useRef(null)
-  const selectedOption = options.find((option) => option.value === value) || options[0]
-
-  useEffect(() => {
-    const handleOutsideClick = (event) => {
-      if (rootRef.current && !rootRef.current.contains(event.target)) {
-        setIsOpen(false)
-      }
-    }
-    const handleKeyDown = (event) => {
-      if (event.key === "Escape") setIsOpen(false)
-    }
-    document.addEventListener("mousedown", handleOutsideClick)
-    document.addEventListener("keydown", handleKeyDown)
-    return () => {
-      document.removeEventListener("mousedown", handleOutsideClick)
-      document.removeEventListener("keydown", handleKeyDown)
-    }
-  }, [])
-
-  return (
-    <div ref={rootRef} className="relative">
-      <button
-        type="button"
-        onClick={() => setIsOpen((open) => !open)}
-        aria-label={ariaLabel}
-        aria-haspopup="listbox"
-        aria-expanded={isOpen}
-        className={`flex min-h-11 w-full items-center justify-between rounded-xl border bg-white px-3.5 py-2.5 text-left text-sm font-medium text-slate-700 shadow-sm outline-none transition hover:border-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 ${
-          isOpen ? "border-blue-500 ring-4 ring-blue-100" : "border-slate-200"
-        }`}
-      >
-        <span>{selectedOption?.label}</span>
-        <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${isOpen ? "rotate-180" : ""}`} />
-      </button>
-
-      {isOpen && (
-        <div
-          role="listbox"
-          className="absolute z-40 mt-2 w-full overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-[0_16px_40px_rgba(15,23,42,0.16)]"
-        >
-          {options.map((option) => {
-            const selected = option.value === value
-            return (
-              <button
-                key={option.value}
-                type="button"
-                role="option"
-                aria-selected={selected}
-                onClick={() => {
-                  onChange(option.value)
-                  setIsOpen(false)
-                }}
-                className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm font-medium transition ${
-                  selected
-                    ? "bg-blue-50 text-blue-700"
-                    : "text-slate-700 hover:bg-slate-50 hover:text-slate-950"
-                }`}
-              >
-                <span>{option.label}</span>
-                {selected && <Check className="h-4 w-4 text-blue-600" />}
-              </button>
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
-}
+import { loadRestaurantOptions } from "@food/api/adminCatalogExtras"
+import { Card, Field, PageFrame, Switch, errorMessage, inputClass } from "./system/SettingsUi"
 
 /**
- * Multi-select over a list of { _id, name }.
+ * Promotions -> Coupons, laid out like the old panel's (6amMart) page: the
+ * "Add New Coupon" form on top and the coupon list below it. Editing loads a
+ * coupon back into the same form.
  *
- * Was restaurant-only; customer-specific coupons need the same control
- * over customers, and two copies of a dropdown with click-outside
- * handling and a search box is two places for it to drift.
+ * Checkout rules for each type live in the backend (couponRules.js); this page
+ * only collects the fields.
  */
-function EntityMultiSelect({ options, value, onChange, error, noun = "restaurant" }) {
-  const [isOpen, setIsOpen] = useState(false)
+
+const COUPON_TYPES = [
+  { value: "store_wise", label: "Store wise" },
+  { value: "zone_wise", label: "Zone wise" },
+  { value: "free_delivery", label: "Free delivery" },
+  { value: "first_order", label: "First order" },
+  { value: "default", label: "Default" },
+]
+const TYPE_LABEL = Object.fromEntries(COUPON_TYPES.map((t) => [t.value, t.label]))
+
+/** A date as the 'YYYY-MM-DD' calendar day in India. */
+const istDay = (value) => {
+  if (!value) return ""
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return ""
+  return new Date(d.getTime() + 330 * 60000).toISOString().slice(0, 10)
+}
+const todayIst = () => istDay(new Date())
+const showDay = (value) => {
+  const day = istDay(value)
+  if (!day) return "-"
+  const [y, m, d] = day.split("-")
+  return new Date(Number(y), Number(m) - 1, Number(d)).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+}
+const rupees = (n) => `₹${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`
+
+const generateCode = () => {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+  const bytes = new Uint8Array(10)
+  window.crypto.getRandomValues(bytes)
+  return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join("")
+}
+
+const emptyForm = () => ({
+  title: "",
+  couponType: "default",
+  restaurantId: "",
+  zoneIds: [],
+  allCustomers: true,
+  customers: [],
+  couponCode: "",
+  perUserLimit: "",
+  startDate: todayIst(),
+  endDate: "",
+  discountType: "amount",
+  discountValue: "",
+  maxDiscount: "",
+  minOrderValue: "",
+  restaurantBearPercentage: "0",
+})
+
+const formFromCoupon = (c) => ({
+  title: c.title || "",
+  couponType: c.couponType || "default",
+  restaurantId: c.restaurantIds?.[0] || "",
+  zoneIds: c.zoneIds || [],
+  allCustomers: c.customerScope !== "specific",
+  customers: (c.customers || []).map((u) => ({ id: u.id, name: u.name || "", phone: u.phone || "" })),
+  couponCode: c.couponCode || "",
+  perUserLimit: c.perUserLimit ? String(c.perUserLimit) : "",
+  startDate: istDay(c.startDate),
+  endDate: istDay(c.endDate),
+  discountType: c.discountType === "percentage" ? "percent" : "amount",
+  discountValue: c.couponType === "free_delivery" ? "" : String(c.discountValue ?? ""),
+  maxDiscount: c.maxDiscount ? String(c.maxDiscount) : "",
+  minOrderValue: c.minOrderValue ? String(c.minOrderValue) : "",
+  restaurantBearPercentage: String(c.restaurantBearPercentage ?? 0),
+})
+
+const discountText = (c) => {
+  if (c.couponType === "free_delivery") return "Free delivery"
+  return c.discountType === "percentage" ? `${c.discountValue}%` : rupees(c.discountValue)
+}
+
+/* ── export ─────────────────────────────────────────────────────────────── */
+
+const EXPORT_HEADERS = ["Sl", "Title", "Code", "Type", "Total Uses", "Min Purchase", "Max Discount", "Discount", "Discount Type", "Start Date", "Expire Date", "Status"]
+const exportRows = (coupons) =>
+  coupons.map((c, i) => [
+    i + 1,
+    c.title || "",
+    c.couponCode,
+    TYPE_LABEL[c.couponType] || c.couponType,
+    c.totalUses,
+    c.minOrderValue,
+    c.discountType === "percentage" && c.maxDiscount ? c.maxDiscount : "",
+    c.couponType === "free_delivery" ? "" : c.discountValue,
+    c.couponType === "free_delivery" ? "Free delivery" : c.discountType === "percentage" ? "Percent" : "Amount",
+    istDay(c.startDate),
+    istDay(c.endDate),
+    c.isExpired ? "Expired" : c.isActive ? "Active" : "Inactive",
+  ])
+
+const download = (blob, name) => {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = name
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
+const exportCsv = (coupons) => {
+  const cell = (v) => {
+    const s = String(v ?? "")
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+  }
+  const lines = [EXPORT_HEADERS, ...exportRows(coupons)].map((r) => r.map(cell).join(","))
+  // BOM so Excel reads ₹ and emoji in titles correctly.
+  download(new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8" }), `coupons_${todayIst()}.csv`)
+}
+
+const exportExcel = (coupons) => {
+  const esc = (v) => String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  const html = `<html><head><meta charset="utf-8"></head><body><table border="1"><thead><tr>${EXPORT_HEADERS.map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead><tbody>${exportRows(coupons)
+    .map((r) => `<tr>${r.map((v) => `<td>${esc(v)}</td>`).join("")}</tr>`)
+    .join("")}</tbody></table></body></html>`
+  download(new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8" }), `coupons_${todayIst()}.xls`)
+}
+
+/* ── customer picker ────────────────────────────────────────────────────── */
+
+function CustomerPicker({ all, selected, onChange }) {
   const [query, setQuery] = useState("")
+  const [results, setResults] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [open, setOpen] = useState(false)
   const rootRef = useRef(null)
-  const selectedIds = Array.isArray(value) ? value : []
-  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds])
-  const selectedOptions = useMemo(
-    () => options.filter((option) => selectedSet.has(String(option._id))),
-    [options, selectedSet],
-  )
-  const filteredOptions = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase()
-    if (!normalizedQuery) return options
-    return options.filter((option) =>
-      String(option.name || "").toLowerCase().includes(normalizedQuery),
-    )
-  }, [query, options])
 
   useEffect(() => {
-    const handleOutsideClick = (event) => {
-      if (rootRef.current && !rootRef.current.contains(event.target)) {
-        setIsOpen(false)
-      }
+    const close = (e) => {
+      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false)
     }
-    document.addEventListener("mousedown", handleOutsideClick)
-    return () => document.removeEventListener("mousedown", handleOutsideClick)
+    document.addEventListener("mousedown", close)
+    return () => document.removeEventListener("mousedown", close)
   }, [])
 
-  const toggleOption = (optionId) => {
-    const id = String(optionId)
-    onChange(selectedSet.has(id)
-      ? selectedIds.filter((selectedId) => selectedId !== id)
-      : [...selectedIds, id])
-  }
+  useEffect(() => {
+    if (!open) return undefined
+    let cancelled = false
+    const t = setTimeout(async () => {
+      try {
+        setLoading(true)
+        const res = await adminAPI.getCustomers({ search: query.trim() || undefined, limit: 20, page: 1 })
+        const list = res?.data?.data?.customers || []
+        if (!cancelled) {
+          setResults(
+            list
+              .map((c) => ({ id: String(c.id || c._id || ""), name: c.name || "", phone: c.phone || "" }))
+              .filter((c) => c.id),
+          )
+        }
+      } catch {
+        if (!cancelled) setResults([])
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }, 250)
+    return () => {
+      cancelled = true
+      clearTimeout(t)
+    }
+  }, [query, open])
+
+  const chosen = new Set(selected.map((c) => c.id))
+  const label = (c) => [c.name, c.phone].filter(Boolean).join(" · ") || "Unnamed customer"
 
   return (
     <div ref={rootRef} className="relative">
-      <button
-        type="button"
-        onClick={() => setIsOpen((open) => !open)}
-        aria-expanded={isOpen}
-        className={`flex min-h-11 w-full items-center justify-between rounded-xl border bg-white px-3.5 py-2.5 text-left text-sm shadow-sm outline-none transition ${
-          error ? "border-red-500" : "border-slate-200 hover:border-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
-        }`}
+      <div
+        className={`${inputClass} flex min-h-[38px] flex-wrap items-center gap-1.5 cursor-text`}
+        onClick={() => setOpen(true)}
       >
-        <span className={selectedIds.length ? "font-medium text-slate-700" : "text-slate-400"}>
-          {selectedIds.length
-            ? `${selectedIds.length} ${noun}${selectedIds.length === 1 ? "" : "s"} selected`
-            : `Choose ${noun}s`}
-        </span>
-        <ChevronDown className={`h-4 w-4 text-slate-400 transition ${isOpen ? "rotate-180" : ""}`} />
-      </button>
-
-      {isOpen && (
-        <div className="absolute z-30 mt-2 w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
-          <div className="border-b border-slate-100 p-2.5">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input
-                type="text"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder={`Search ${noun}s...`}
-                className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                autoFocus
-              />
-            </div>
-          </div>
-          <div className="max-h-64 overflow-y-auto p-1.5">
-            {filteredOptions.length > 0 ? filteredOptions.map((option) => {
-              const id = String(option._id)
-              const selected = selectedSet.has(id)
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => toggleOption(id)}
-                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition ${
-                    selected ? "bg-blue-50 text-blue-700" : "text-slate-700 hover:bg-slate-50"
-                  }`}
-                >
-                  <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ${
-                    selected ? "border-blue-600 bg-blue-600 text-white" : "border-slate-300 bg-white"
-                  }`}>
-                    {selected && <Check className="h-3.5 w-3.5" />}
-                  </span>
-                  <span className="truncate font-medium">{option.name || `Unnamed ${noun}`}</span>
-                </button>
-              )
-            }) : (
-              <p className="px-3 py-6 text-center text-sm text-slate-500">{`No ${noun}s found`}</p>
-            )}
-          </div>
-        </div>
-      )}
-
-      {selectedOptions.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-2">
-          {selectedOptions.map((restaurant) => {
-            const id = String(restaurant._id)
-            return (
-              <span key={id} className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700">
-                {restaurant.name}
-                <button
-                  type="button"
-                  onClick={() => toggleOption(id)}
-                  aria-label={`Remove ${restaurant.name}`}
-                  className="rounded-full p-0.5 hover:bg-blue-100"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </span>
-            )
-          })}
+        {all ? (
+          <span className="inline-flex items-center gap-1 rounded bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
+            All customers
+          </span>
+        ) : (
+          selected.map((c) => (
+            <span key={c.id} className="inline-flex items-center gap-1 rounded bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
+              {label(c)}
+              <button
+                type="button"
+                aria-label={`Remove ${label(c)}`}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onChange({ all: false, selected: selected.filter((x) => x.id !== c.id) })
+                }}
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </span>
+          ))
+        )}
+        <input
+          className="min-w-[8rem] flex-1 border-0 p-0 text-sm outline-none focus:ring-0"
+          placeholder={all || selected.length ? "" : "Search by name or phone"}
+          value={query}
+          onFocus={() => setOpen(true)}
+          onChange={(e) => setQuery(e.target.value)}
+          aria-label="Search customers"
+        />
+      </div>
+      {open && (
+        <div className="absolute z-30 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+          <button
+            type="button"
+            onClick={() => {
+              onChange({ all: true, selected: [] })
+              setOpen(false)
+            }}
+            className={`flex w-full items-center rounded px-3 py-2 text-left text-sm ${all ? "bg-blue-50 text-blue-700" : "hover:bg-slate-50"}`}
+          >
+            All customers
+          </button>
+          {loading ? (
+            <div className="px-3 py-2 text-xs text-slate-500">Searching...</div>
+          ) : results.length === 0 ? (
+            <div className="px-3 py-2 text-xs text-slate-500">No customers found</div>
+          ) : (
+            results.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => {
+                  const next = chosen.has(c.id) ? selected.filter((x) => x.id !== c.id) : [...selected, c]
+                  onChange({ all: next.length === 0, selected: next })
+                }}
+                className={`flex w-full items-center justify-between rounded px-3 py-2 text-left text-sm ${chosen.has(c.id) && !all ? "bg-blue-50 text-blue-700" : "hover:bg-slate-50"}`}
+              >
+                <span>{label(c)}</span>
+                {chosen.has(c.id) && !all && <span className="text-xs">Selected</span>}
+              </button>
+            ))
+          )}
         </div>
       )}
     </div>
   )
 }
 
-export default function Coupons() {
-  const [searchQuery, setSearchQuery] = useState("")
-  const [offers, setOffers] = useState([])
-  const [restaurants, setRestaurants] = useState([])
-  const [customerOptions, setCustomerOptions] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [isAddOpen, setIsAddOpen] = useState(false)
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [submitError, setSubmitError] = useState("")
-  const [submitSuccess, setSubmitSuccess] = useState("")
-  const [updatingCartVisibility, setUpdatingCartVisibility] = useState({})
-  const [deletingOffer, setDeletingOffer] = useState({})
-  const [errors, setErrors] = useState({})
-  const [formData, setFormData] = useState({
-    couponCode: "",
-    discountType: "percentage",
-    discountValue: "",
-    customerScope: "all",
-    customerIds: [],
-    restaurantScope: "all",
-    restaurantIds: [],
-    endDate: "",
-    startDate: "",
-    minOrderValue: "",
-    maxDiscount: "",
-    usageLimit: "",
-    perUserLimit: "",
-    isFirstOrderOnly: false,
-    adminBearPercentage: "100",
-    restaurantBearPercentage: "0",
-  })
+/* ── page ───────────────────────────────────────────────────────────────── */
 
-  const fetchOffers = useCallback(async () => {
+export default function Coupons() {
+  const [form, setForm] = useState(emptyForm)
+  const [editingId, setEditingId] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [coupons, setCoupons] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState("")
+  const [appliedSearch, setAppliedSearch] = useState("")
+  const [restaurants, setRestaurants] = useState([])
+  const [zones, setZones] = useState([])
+  const [busyId, setBusyId] = useState("")
+  const [exportOpen, setExportOpen] = useState(false)
+  const formRef = useRef(null)
+  const exportRef = useRef(null)
+
+  const set = (key, value) => setForm((f) => ({ ...f, [key]: value }))
+
+  const load = useCallback(async () => {
     try {
       setLoading(true)
-      setError(null)
-      const response = await adminAPI.getAllOffers({})
-
-      if (response?.data?.success) {
-        setOffers(response.data.data.offers || [])
-      } else {
-        setError("Failed to fetch offers")
-      }
+      const res = await adminAPI.getAllOffers(appliedSearch ? { search: appliedSearch } : {})
+      setCoupons(res?.data?.data?.offers || [])
     } catch (err) {
-      debugError("Error fetching offers:", err)
-      setError(err?.response?.data?.message || "Failed to fetch offers")
+      toast.error(errorMessage(err, "Failed to load coupons"))
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [appliedSearch])
 
   useEffect(() => {
-    fetchOffers()
-  }, [fetchOffers])
+    load()
+  }, [load])
 
   useEffect(() => {
-    const fetchRestaurants = async () => {
-      try {
-        const response = await adminAPI.getRestaurants({ page: 1, limit: 200 })
-        if (response?.data?.success) {
-          const list = response?.data?.data?.restaurants || []
-          // Backend returns `restaurantName`; normalize to `name` for this dropdown without affecting other pages.
-          const normalized = Array.isArray(list)
-            ? list.map((r) => ({
-              ...r,
-              name: r?.name || r?.restaurantName || "",
-            }))
-            : []
-          setRestaurants(normalized)
-        }
-      } catch (err) {
-        debugError("Error fetching restaurants:", err)
-      }
-    }
-
-    fetchRestaurants()
-  }, [])
-
-  // Customers for the specific-customer picker. Loaded once alongside the
-  // restaurants rather than when the scope is chosen, so the list is ready the
-  // moment it is needed.
-  useEffect(() => {
-    const fetchCustomers = async () => {
-      try {
-        const response = await adminAPI.getCustomers({ page: 1, limit: 500 })
-        const payload = response?.data?.data ?? {}
-        const list = payload.customers || payload.users || payload.items || payload.data || []
-        setCustomerOptions(
-          (Array.isArray(list) ? list : []).map((c) => ({
-            ...c,
-            _id: String(c?._id || c?.id || ""),
-            // Phone is what makes two customers with the same name tellable
-            // apart, and plenty have no name at all.
-            name: [c?.name, c?.phone].filter(Boolean).join(" · ") || "Unnamed customer",
-          })).filter((c) => c._id),
-        )
-      } catch (err) {
-        debugError("Error fetching customers:", err)
-      }
-    }
-
-    fetchCustomers()
-  }, [])
-
-  const todayYMD = () => {
-    const d = new Date()
-    const m = String(d.getMonth() + 1).padStart(2, "0")
-    const day = String(d.getDate()).padStart(2, "0")
-    return `${d.getFullYear()}-${m}-${day}`
-  }
-
-  const validateForm = (draft) => {
-    const e = {}
-    const f = draft || formData
-    const pct = f.discountType === "percentage"
-    const value = Number(f.discountValue)
-    if (!String(f.couponCode || "").trim()) e.couponCode = "Coupon code is required"
-    if (!Number.isFinite(value) || value <= 0) e.discountValue = "Discount must be greater than 0"
-    if (pct && (f.maxDiscount === "" || f.maxDiscount === null || f.maxDiscount === undefined)) {
-      e.maxDiscount = "Max discount is required for percentage coupons"
-    }
-    if (f.minOrderValue !== "" && Number(f.minOrderValue) < 0) e.minOrderValue = "Min order cannot be negative"
-    if (f.usageLimit !== "" && Number(f.usageLimit) < 1) e.usageLimit = "Usage limit must be at least 1"
-    if (f.perUserLimit !== "" && Number(f.perUserLimit) < 1) e.perUserLimit = "Per user limit must be at least 1"
-    const adminBear = Number(f.adminBearPercentage)
-    const restaurantBear = Number(f.restaurantBearPercentage)
-    if (!Number.isFinite(adminBear) || adminBear < 0 || adminBear > 100) e.adminBearPercentage = "Enter 0 to 100"
-    if (!Number.isFinite(restaurantBear) || restaurantBear < 0 || restaurantBear > 100) e.restaurantBearPercentage = "Enter 0 to 100"
-    if (Number.isFinite(adminBear) && Number.isFinite(restaurantBear) && Math.round((adminBear + restaurantBear) * 100) / 100 !== 100) {
-      e.adminBearPercentage = "Both shares must total 100%"
-      e.restaurantBearPercentage = "Both shares must total 100%"
-    }
-    if (f.restaurantScope === "selected" && (!Array.isArray(f.restaurantIds) || f.restaurantIds.length === 0)) {
-      e.restaurantIds = "Select at least one restaurant"
-    }
-    // A specific-customer coupon with nobody chosen is a code that can
-    // never be redeemed and nothing on screen would explain why.
-    if (f.customerScope === "specific" && (!Array.isArray(f.customerIds) || f.customerIds.length === 0)) {
-      e.customerIds = "Choose at least one customer"
-    }
-    const start = f.startDate ? new Date(`${f.startDate}T00:00:00`) : null
-    const end = f.endDate ? new Date(`${f.endDate}T00:00:00`) : null
-    const now = new Date()
-    if (end && end < new Date(now.getFullYear(), now.getMonth(), now.getDate())) {
-      e.endDate = "End date cannot be in the past"
-    }
-    if (start && end && start > end) {
-      e.startDate = "Start date must be before end date"
-      e.endDate = "End date must be after start date"
-    }
-    setErrors(e)
-    return { valid: Object.keys(e).length === 0, e }
-  }
-
-  const handleFormChange = (field, rawValue) => {
-    let value = rawValue
-    if (field === "couponCode") {
-      value = String(value || "").toUpperCase()
-    }
-    if (field === "discountType") {
-      // When switching to flat-price, clear and disable maxDiscount
-      if (value === "flat-price") {
-        setFormData((prev) => {
-          const next = { ...prev, discountType: value, maxDiscount: "" }
-          validateForm(next)
-          return next
-        })
-        if (submitError) setSubmitError("")
-        if (submitSuccess) setSubmitSuccess("")
-        return
-      }
-    }
-    if (field === "restaurantScope" && value === "all") {
-      setFormData((prev) => {
-        const next = { ...prev, restaurantScope: value, restaurantIds: [] }
-        validateForm(next)
-        return next
+    loadRestaurantOptions(adminAPI)
+      .then((list) => setRestaurants(list.filter((r) => !r.status || r.status === "approved")))
+      .catch(() => setRestaurants([]))
+    adminAPI
+      .getZones({ limit: 1000 })
+      .then((res) => {
+        const list = res?.data?.data?.zones || res?.data?.data || []
+        setZones((Array.isArray(list) ? list : []).map((z) => ({ id: String(z.id || z._id), name: z.name || z.zoneName || "" })))
       })
-      if (submitError) setSubmitError("")
-      if (submitSuccess) setSubmitSuccess("")
-      return
+      .catch(() => setZones([]))
+  }, [])
+
+  useEffect(() => {
+    const close = (e) => {
+      if (exportRef.current && !exportRef.current.contains(e.target)) setExportOpen(false)
     }
-    if (field === "adminBearPercentage" || field === "restaurantBearPercentage") {
-      const numeric = Number(value)
-      const next = { ...formData, [field]: value }
-      if (Number.isFinite(numeric) && numeric >= 0 && numeric <= 100) {
-        const counterpart = String(Math.round((100 - numeric) * 100) / 100)
-        if (field === "adminBearPercentage") next.restaurantBearPercentage = counterpart
-        if (field === "restaurantBearPercentage") next.adminBearPercentage = counterpart
-      }
-      setFormData(next)
-      validateForm(next)
-      if (submitError) setSubmitError("")
-      if (submitSuccess) setSubmitSuccess("")
-      return
-    }
-    const next = { ...formData, [field]: value }
-    // Date constraints
-    if (field === "startDate" && next.endDate) {
-      // Ensure startDate <= endDate
-      const s = next.startDate ? new Date(`${next.startDate}T00:00:00`) : null
-      const e = new Date(`${next.endDate}T00:00:00`)
-      if (s && s > e) {
-        // keep but will show error
-      }
-    }
-    if (field === "endDate" && next.startDate) {
-      const s = new Date(`${next.startDate}T00:00:00`)
-      const e = next.endDate ? new Date(`${next.endDate}T00:00:00`) : null
-      if (e && e < s) {
-        // keep but will show error
-      }
-    }
-    setFormData(next)
-    validateForm(next)
-    if (submitError) {
-      setSubmitError("")
-    }
-    if (submitSuccess) {
-      setSubmitSuccess("")
+    document.addEventListener("mousedown", close)
+    return () => document.removeEventListener("mousedown", close)
+  }, [])
+
+  const freeDelivery = form.couponType === "free_delivery"
+  const percent = form.discountType === "percent"
+
+  const reset = () => {
+    setForm(emptyForm())
+    setEditingId(null)
+  }
+
+  const startEdit = async (coupon) => {
+    try {
+      setBusyId(coupon.id)
+      const res = await adminAPI.getAdminOffer(coupon.id)
+      const full = res?.data?.data?.offer || coupon
+      setForm(formFromCoupon(full))
+      setEditingId(coupon.id)
+      formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+    } catch (err) {
+      toast.error(errorMessage(err, "Could not load the coupon"))
+    } finally {
+      setBusyId("")
     }
   }
 
-  const resetForm = () => {
-    setFormData({
-      couponCode: "",
-      discountType: "percentage",
-      discountValue: "",
-      customerScope: "all",
-      customerIds: [],
-      restaurantScope: "all",
-      restaurantIds: [],
-      endDate: "",
-      startDate: "",
-      minOrderValue: "",
-      maxDiscount: "",
-      usageLimit: "",
-      perUserLimit: "",
-      isFirstOrderOnly: false,
-      adminBearPercentage: "100",
-      restaurantBearPercentage: "0",
-    })
-  }
-
-  const handleCreateCoupon = async (e) => {
+  const submit = async (e) => {
     e.preventDefault()
-    setSubmitError("")
-    setSubmitSuccess("")
-    const { valid } = validateForm()
-    if (!valid) {
-      setSubmitError("Please fix the highlighted errors")
-      return
-    }
+    if (form.couponType === "store_wise" && !form.restaurantId) return toast.error("Select a restaurant")
+    if (form.couponType === "zone_wise" && form.zoneIds.length === 0) return toast.error("Select at least one zone")
+    if (!form.allCustomers && form.customers.length === 0) return toast.error("Select customers, or choose all customers")
+    if (!form.startDate || !form.endDate) return toast.error("Start date and expire date are required")
+    if (form.endDate < form.startDate) return toast.error("Expire date must be on or after the start date")
 
-    if (!formData.couponCode.trim()) {
-      setSubmitError("Coupon code is required")
-      return
+    const body = {
+      title: form.title.trim(),
+      couponType: form.couponType,
+      restaurantId: form.couponType === "store_wise" ? form.restaurantId : undefined,
+      zoneIds: form.couponType === "zone_wise" ? form.zoneIds : [],
+      customerScope: form.allCustomers ? "all" : "specific",
+      customerIds: form.allCustomers ? [] : form.customers.map((c) => c.id),
+      couponCode: form.couponCode.trim(),
+      perUserLimit: form.perUserLimit === "" ? undefined : form.perUserLimit,
+      startDate: form.startDate,
+      endDate: form.endDate,
+      discountType: freeDelivery ? undefined : form.discountType,
+      discountValue: freeDelivery ? undefined : form.discountValue,
+      maxDiscount: !freeDelivery && percent && form.maxDiscount !== "" ? form.maxDiscount : undefined,
+      minOrderValue: form.minOrderValue === "" ? 0 : form.minOrderValue,
     }
-
-    const parsedDiscountValue = Number(formData.discountValue)
-    if (!Number.isFinite(parsedDiscountValue) || parsedDiscountValue <= 0) {
-      setSubmitError("Discount value must be greater than 0")
-      return
-    }
-
-    if (formData.customerScope === "specific" && formData.customerIds.length === 0) {
-      setSubmitError("Please choose at least one customer")
-      return
-    }
-    if (formData.restaurantScope === "selected" && formData.restaurantIds.length === 0) {
-      setSubmitError("Please select at least one restaurant")
-      return
+    if (form.couponType === "store_wise") {
+      const share = Number(form.restaurantBearPercentage) || 0
+      body.restaurantBearPercentage = share
+      body.adminBearPercentage = 100 - share
+    } else if (!editingId) {
+      body.adminBearPercentage = 100
+      body.restaurantBearPercentage = 0
     }
 
     try {
-      setIsSubmitting(true)
-      const payload = {
-        couponCode: formData.couponCode.trim(),
-        discountType: formData.discountType,
-        discountValue: parsedDiscountValue,
-        customerScope: formData.customerScope,
-        restaurantScope: formData.restaurantScope,
-        restaurantIds: formData.restaurantScope === "selected" ? formData.restaurantIds : undefined,
-        customerIds: formData.customerScope === "specific" ? formData.customerIds : undefined,
-        endDate: formData.endDate || undefined,
-        startDate: formData.startDate || undefined,
-        minOrderValue: formData.minOrderValue !== "" ? Number(formData.minOrderValue) : undefined,
-        maxDiscount: formData.discountType === "percentage" && formData.maxDiscount !== "" ? Number(formData.maxDiscount) : undefined,
-        usageLimit: formData.usageLimit !== "" ? Number(formData.usageLimit) : undefined,
-        perUserLimit: formData.perUserLimit !== "" ? Number(formData.perUserLimit) : undefined,
-        isFirstOrderOnly: Boolean(formData.isFirstOrderOnly),
-        adminBearPercentage: Number(formData.adminBearPercentage),
-        restaurantBearPercentage: Number(formData.restaurantBearPercentage),
+      setSaving(true)
+      if (editingId) {
+        await adminAPI.updateAdminOffer(editingId, body)
+        toast.success("Coupon updated")
+      } else {
+        await adminAPI.createAdminOffer(body)
+        toast.success("Coupon added")
       }
-      await adminAPI.createAdminOffer(payload)
-
-      setSubmitSuccess("Coupon created successfully")
-      resetForm()
-      await fetchOffers()
+      reset()
+      load()
     } catch (err) {
-      debugError("Error creating coupon:", err)
-      setSubmitError(err?.response?.data?.message || "Failed to create coupon")
+      toast.error(errorMessage(err, "Could not save the coupon"))
     } finally {
-      setIsSubmitting(false)
+      setSaving(false)
     }
   }
 
-  const handleToggleShowInCart = async (offerId, itemId, currentValue) => {
-    const key = `${offerId}-${itemId}`
+  const toggleStatus = async (coupon) => {
+    const next = coupon.isActive ? "inactive" : "active"
     try {
-      setUpdatingCartVisibility((prev) => ({ ...prev, [key]: true }))
-      const nextValue = !currentValue
-      await adminAPI.updateAdminOfferCartVisibility(offerId, itemId, nextValue)
-      setOffers((prev) =>
-        prev.map((offer) =>
-          offer.offerId === offerId && offer.dishId === itemId
-            ? { ...offer, showInCart: nextValue }
-            : offer,
-        ),
-      )
+      setBusyId(coupon.id)
+      await adminAPI.setAdminOfferStatus(coupon.id, next)
+      setCoupons((list) => list.map((c) => (c.id === coupon.id ? { ...c, isActive: next === "active" } : c)))
+      toast.success(next === "active" ? "Coupon switched on" : "Coupon switched off")
     } catch (err) {
-      debugError("Error updating cart visibility:", err)
+      toast.error(errorMessage(err, "Could not change the status"))
     } finally {
-      setUpdatingCartVisibility((prev) => ({ ...prev, [key]: false }))
+      setBusyId("")
     }
   }
 
-  const handleDeleteOffer = async (offerId) => {
-    if (!offerId) return
-    if (deletingOffer[offerId]) return
+  const remove = async (coupon) => {
+    if (!window.confirm(`Delete coupon ${coupon.couponCode}? This cannot be undone.`)) return
     try {
-      setDeletingOffer((prev) => ({ ...prev, [offerId]: true }))
-      await adminAPI.deleteAdminOffer(offerId)
-      setOffers((prev) => prev.filter((o) => o.offerId !== offerId))
+      setBusyId(coupon.id)
+      await adminAPI.deleteAdminOffer(coupon.id)
+      if (editingId === coupon.id) reset()
+      setCoupons((list) => list.filter((c) => c.id !== coupon.id))
+      toast.success("Coupon deleted")
     } catch (err) {
-      debugError("Error deleting offer:", err)
+      toast.error(errorMessage(err, "Could not delete the coupon"))
     } finally {
-      setDeletingOffer((prev) => ({ ...prev, [offerId]: false }))
+      setBusyId("")
     }
   }
 
-  // Filter offers based on search query
-  const filteredOffers = useMemo(() => {
-    if (!searchQuery.trim()) {
-      return offers
-    }
-    
-    const query = searchQuery.toLowerCase().trim()
-    return offers.filter(offer =>
-      offer.restaurantName?.toLowerCase().includes(query) ||
-      offer.dishName?.toLowerCase().includes(query) ||
-      offer.couponCode?.toLowerCase().includes(query)
-    )
-  }, [offers, searchQuery])
+  const zoneChoices = useMemo(() => zones.filter((z) => z.id), [zones])
 
   return (
-    <div className="p-4 lg:p-6 bg-slate-50 min-h-screen">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between mb-4">
-            <h1 className="text-2xl font-bold text-slate-900">Restaurant Offers & Coupons</h1>
-            <button
-              type="button"
-              onClick={() => {
-                setIsAddOpen((prev) => !prev)
-                setSubmitError("")
-                setSubmitSuccess("")
-              }}
-              className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 transition-colors"
-            >
-              {isAddOpen ? "Close" : "Add Coupon"}
-            </button>
-          </div>
+    <PageFrame
+      icon={Gift}
+      title="Coupons"
+      description="Discount codes customers enter at checkout. A coupon works between its start and expire dates while it is switched on."
+    >
+      <div ref={formRef}>
+        <Card title={editingId ? "Edit Coupon" : "Add New Coupon"}>
+          <form onSubmit={submit} className="space-y-5">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+              <Field label="Title">
+                <input className={inputClass} maxLength={191} value={form.title} onChange={(e) => set("title", e.target.value)} placeholder="New coupon" required />
+              </Field>
+              <Field label="Coupon type">
+                <select
+                  className={inputClass}
+                  value={form.couponType}
+                  onChange={(e) => setForm((f) => ({ ...f, couponType: e.target.value }))}
+                >
+                  {COUPON_TYPES.map((t) => (
+                    <option key={t.value} value={t.value}>{t.label}</option>
+                  ))}
+                </select>
+              </Field>
 
-          {isAddOpen && (
-            <form
-              onSubmit={handleCreateCoupon}
-              className="border border-slate-200 rounded-xl p-4 mb-5 bg-slate-50"
-            >
-              <h3 className="text-base font-semibold text-slate-900 mb-3">Create Coupon</h3>
+              {form.couponType === "store_wise" && (
+                <Field label="Restaurant">
+                  <select className={inputClass} value={form.restaurantId} onChange={(e) => set("restaurantId", e.target.value)} required>
+                    <option value="">Select restaurant</option>
+                    {restaurants.map((r) => (
+                      <option key={r.id} value={r.id}>{r.name}</option>
+                    ))}
+                  </select>
+                </Field>
+              )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Coupon Code</label>
-                  <input
-                    type="text"
-                    value={formData.couponCode}
-                    onChange={(e) => handleFormChange("couponCode", e.target.value)}
-                    placeholder="e.g. NEWUSER50"
-                    className="w-full px-3 py-2.5 text-sm rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Discount Type</label>
-                  <StyledSelect
-                    value={formData.discountType}
-                    onChange={(value) => handleFormChange("discountType", value)}
-                    ariaLabel="Discount type"
-                    options={[
-                      { value: "percentage", label: "Percentage" },
-                      { value: "flat-price", label: "Flat Amount" },
-                    ]}
-                  />
-                </div>
-
-                <div title={formData.discountType === "flat-price" ? "Max discount is not applicable for flat coupons" : ""}>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">
-                    {formData.discountType === "percentage" ? "Discount (%)" : "Discount Amount"}
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    step="0.01"
-                    value={formData.discountValue}
-                    onChange={(e) => handleFormChange("discountValue", e.target.value)}
-                    placeholder={formData.discountType === "percentage" ? "e.g. 20" : "e.g. 100"}
-                    className={`w-full px-3 py-2.5 text-sm rounded-lg border ${errors.discountValue ? "border-red-500" : "border-slate-300"} bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}
-                  />
-                  {errors.discountValue && <p className="mt-1 text-xs text-red-600">{errors.discountValue}</p>}
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Customer Scope</label>
-                  <StyledSelect
-                    value={formData.customerScope}
-                    onChange={(value) => handleFormChange("customerScope", value)}
-                    ariaLabel="Customer scope"
-                    options={[
-                      { value: "all", label: "All Users" },
-                      { value: "first-time", label: "First-time Users" },
-                      { value: "specific", label: "Specific Customers" },
-                    ]}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Restaurant Scope</label>
-                  <StyledSelect
-                    value={formData.restaurantScope}
-                    onChange={(value) => handleFormChange("restaurantScope", value)}
-                    ariaLabel="Restaurant scope"
-                    options={[
-                      { value: "all", label: "All Restaurants" },
-                      { value: "selected", label: "Selected Restaurants" },
-                    ]}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Expiry Date (Optional)</label>
-                  <input
-                    type="date"
-                    value={formData.endDate}
-                    onChange={(e) => handleFormChange("endDate", e.target.value)}
-                  min={formData.startDate || todayYMD()}
-                  className={`w-full px-3 py-2.5 text-sm rounded-lg border ${errors.endDate ? "border-red-500" : "border-slate-300"} bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}
-                  />
-                {errors.endDate && <p className="mt-1 text-xs text-red-600">{errors.endDate}</p>}
-                </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Start Date (Optional)</label>
-                <input
-                  type="date"
-                  value={formData.startDate}
-                  onChange={(e) => handleFormChange("startDate", e.target.value)}
-                  min={todayYMD()}
-                  className={`w-full px-3 py-2.5 text-sm rounded-lg border ${errors.startDate ? "border-red-500" : "border-slate-300"} bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}
-                />
-                {errors.startDate && <p className="mt-1 text-xs text-red-600">{errors.startDate}</p>}
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Min Order Value (₹)</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={formData.minOrderValue}
-                  onChange={(e) => handleFormChange("minOrderValue", e.target.value)}
-                  placeholder="e.g. 199"
-                  className={`w-full px-3 py-2.5 text-sm rounded-lg border ${errors.minOrderValue ? "border-red-500" : "border-slate-300"} bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}
-                />
-                {errors.minOrderValue && <p className="mt-1 text-xs text-red-600">{errors.minOrderValue}</p>}
-              </div>
-
-                <div title={formData.discountType === "flat-price" ? "Max discount is not applicable for flat coupons" : ""}>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Max Discount (₹, optional)</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                    value={formData.maxDiscount}
-                    onChange={(e) => handleFormChange("maxDiscount", e.target.value)}
-                  placeholder="e.g. 100"
-                    disabled={formData.discountType === "flat-price"}
-                    className={`w-full px-3 py-2.5 text-sm rounded-lg border ${errors.maxDiscount ? "border-red-500" : "border-slate-300"} bg-white disabled:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}
-                />
-                  {formData.discountType === "percentage" && errors.maxDiscount && <p className="mt-1 text-xs text-red-600">{errors.maxDiscount}</p>}
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Admin Bear (%)</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  step="0.01"
-                  value={formData.adminBearPercentage}
-                  onChange={(e) => handleFormChange("adminBearPercentage", e.target.value)}
-                  placeholder="e.g. 70"
-                  className={`w-full px-3 py-2.5 text-sm rounded-lg border ${errors.adminBearPercentage ? "border-red-500" : "border-slate-300"} bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}
-                />
-                {errors.adminBearPercentage && <p className="mt-1 text-xs text-red-600">{errors.adminBearPercentage}</p>}
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Restaurant Bear (%)</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  step="0.01"
-                  value={formData.restaurantBearPercentage}
-                  onChange={(e) => handleFormChange("restaurantBearPercentage", e.target.value)}
-                  placeholder="e.g. 30"
-                  className={`w-full px-3 py-2.5 text-sm rounded-lg border ${errors.restaurantBearPercentage ? "border-red-500" : "border-slate-300"} bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}
-                />
-                {errors.restaurantBearPercentage && <p className="mt-1 text-xs text-red-600">{errors.restaurantBearPercentage}</p>}
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Usage Limit (global)</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={formData.usageLimit}
-                  onChange={(e) => handleFormChange("usageLimit", e.target.value)}
-                  placeholder="e.g. 1000"
-                  className={`w-full px-3 py-2.5 text-sm rounded-lg border ${errors.usageLimit ? "border-red-500" : "border-slate-300"} bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}
-                />
-                {errors.usageLimit && <p className="mt-1 text-xs text-red-600">{errors.usageLimit}</p>}
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Per User Limit</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={formData.perUserLimit}
-                  onChange={(e) => handleFormChange("perUserLimit", e.target.value)}
-                  placeholder="e.g. 1"
-                  className={`w-full px-3 py-2.5 text-sm rounded-lg border ${errors.perUserLimit ? "border-red-500" : "border-slate-300"} bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}
-                />
-                {errors.perUserLimit && <p className="mt-1 text-xs text-red-600">{errors.perUserLimit}</p>}
-              </div>
-
-              <div className="flex items-center gap-2">
-                <input
-                  id="isFirstOrderOnly"
-                  type="checkbox"
-                  checked={formData.isFirstOrderOnly}
-                  onChange={(e) => handleFormChange("isFirstOrderOnly", e.target.checked)}
-                  className="h-4 w-4"
-                />
-                <label htmlFor="isFirstOrderOnly" className="text-sm text-slate-700">First order only</label>
-              </div>
-
-                {formData.restaurantScope === "selected" && (
-                  <div className="md:col-span-2 lg:col-span-3">
-                    <label className="block text-xs font-semibold text-slate-600 mb-1">Select Restaurants</label>
-                    <EntityMultiSelect
-                      options={restaurants}
-                      noun="restaurant"
-                      value={formData.restaurantIds}
-                      onChange={(restaurantIds) => handleFormChange("restaurantIds", restaurantIds)}
-                      error={errors.restaurantIds}
-                    />
-                    {errors.restaurantIds && <p className="mt-1 text-xs text-red-600">{errors.restaurantIds}</p>}
+              {form.couponType === "zone_wise" && (
+                <div className="space-y-1">
+                  <span className="block text-xs font-semibold text-slate-600">Zone</span>
+                  <div className="max-h-32 overflow-y-auto rounded-lg border border-slate-300 bg-white px-3 py-2">
+                    {zoneChoices.length === 0 ? (
+                      <p className="text-xs text-slate-500">No zones found</p>
+                    ) : (
+                      zoneChoices.map((z) => (
+                        <label key={z.id} className="flex items-center gap-2 py-0.5 text-sm text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={form.zoneIds.includes(z.id)}
+                            onChange={(e) =>
+                              set("zoneIds", e.target.checked ? [...form.zoneIds, z.id] : form.zoneIds.filter((id) => id !== z.id))
+                            }
+                          />
+                          {z.name}
+                        </label>
+                      ))
+                    )}
                   </div>
-                )}
-
-                {formData.customerScope === "specific" && (
-                  <div className="md:col-span-2 lg:col-span-3">
-                    <label className="block text-xs font-semibold text-slate-600 mb-1">
-                      Select Customers
-                    </label>
-                    <EntityMultiSelect
-                      options={customerOptions}
-                      noun="customer"
-                      value={formData.customerIds}
-                      onChange={(customerIds) => handleFormChange("customerIds", customerIds)}
-                      error={errors.customerIds}
-                    />
-                    <p className="mt-1 text-xs text-slate-500">
-                      Only these customers can use the code, and it is the only coupon list they
-                      see it on. Anyone else entering it is refused.
-                    </p>
-                    {errors.customerIds && <p className="mt-1 text-xs text-red-600">{errors.customerIds}</p>}
-                  </div>
-                )}
-              </div>
-
-              {(submitError || submitSuccess) && (
-                <div className={`mt-3 text-sm font-medium ${submitError ? "text-red-600" : "text-green-600"}`}>
-                  {submitError || submitSuccess}
                 </div>
               )}
 
-              <div className="mt-4">
-                <button
-                  type="submit"
-                  disabled={isSubmitting || Object.keys(errors).length > 0}
-                  className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
-                >
-                  {isSubmitting ? "Creating..." : "Create Coupon"}
-                </button>
+              <div className="space-y-1">
+                <span className="block text-xs font-semibold text-slate-600">Select customer</span>
+                <CustomerPicker
+                  all={form.allCustomers}
+                  selected={form.customers}
+                  onChange={({ all, selected }) => setForm((f) => ({ ...f, allCustomers: all, customers: selected }))}
+                />
               </div>
-            </form>
-          )}
 
-          {/* Search Bar */}
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Search by restaurant name, dish name, or coupon code..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 text-sm rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-        </div>
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="block text-xs font-semibold text-slate-600">Code</span>
+                  <button type="button" onClick={() => set("couponCode", generateCode())} className="text-xs font-semibold text-blue-600 hover:underline">
+                    Generate Code
+                  </button>
+                </div>
+                <input
+                  className={inputClass}
+                  maxLength={64}
+                  value={form.couponCode}
+                  onChange={(e) => set("couponCode", e.target.value.toUpperCase())}
+                  placeholder="e.g. SAVE50"
+                  aria-label="Code"
+                  required
+                />
+              </div>
 
-        {/* Offers List */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-bold text-slate-900">
-              Offers List
-            </h2>
-            <span className="px-3 py-1 rounded-full text-sm font-semibold bg-slate-100 text-slate-700">
-              {filteredOffers.length} {filteredOffers.length === 1 ? 'offer' : 'offers'}
-            </span>
-          </div>
+              <Field label="Limit for same user" hint="Leave empty for no limit">
+                <input type="number" min="1" step="1" className={inputClass} value={form.perUserLimit} onChange={(e) => set("perUserLimit", e.target.value)} placeholder="e.g. 1" />
+              </Field>
+              <Field label="Start date">
+                <input type="date" className={inputClass} value={form.startDate} onChange={(e) => set("startDate", e.target.value)} required />
+              </Field>
+              <Field label="Expire date">
+                <input type="date" className={inputClass} min={form.startDate || undefined} value={form.endDate} onChange={(e) => set("endDate", e.target.value)} required />
+              </Field>
 
-          {loading ? (
-            <div className="text-center py-20">
-              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-              <p className="text-sm text-slate-500 mt-4">Loading offers...</p>
+              {!freeDelivery && (
+                <>
+                  <Field label="Discount type">
+                    <select className={inputClass} value={form.discountType} onChange={(e) => setForm((f) => ({ ...f, discountType: e.target.value, maxDiscount: e.target.value === "percent" ? f.maxDiscount : "" }))}>
+                      <option value="amount">Amount (₹)</option>
+                      <option value="percent">Percent (%)</option>
+                    </select>
+                  </Field>
+                  <Field label={percent ? "Discount (%)" : "Discount (₹)"}>
+                    <input
+                      type="number"
+                      min="0.01"
+                      max={percent ? 100 : undefined}
+                      step="0.01"
+                      className={inputClass}
+                      value={form.discountValue}
+                      onChange={(e) => set("discountValue", e.target.value)}
+                      required
+                    />
+                  </Field>
+                  <Field label="Max discount (₹)" hint={percent ? "Leave empty for no cap" : "Only for a percent discount"}>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      className={`${inputClass} disabled:bg-slate-100`}
+                      value={form.maxDiscount}
+                      onChange={(e) => set("maxDiscount", e.target.value)}
+                      disabled={!percent}
+                    />
+                  </Field>
+                </>
+              )}
+
+              <Field label="Min purchase (₹)" hint="On the item subtotal">
+                <input type="number" min="0" step="0.01" className={inputClass} value={form.minOrderValue} onChange={(e) => set("minOrderValue", e.target.value)} placeholder="0" />
+              </Field>
+
+              {form.couponType === "store_wise" && !freeDelivery && (
+                <Field label="Restaurant pays (%)" hint="Share of the discount taken from the restaurant; the platform pays the rest">
+                  <input type="number" min="0" max="100" step="1" className={inputClass} value={form.restaurantBearPercentage} onChange={(e) => set("restaurantBearPercentage", e.target.value)} />
+                </Field>
+              )}
             </div>
-          ) : error ? (
-            <div className="text-center py-20">
-              <p className="text-lg font-semibold text-red-600 mb-1">Error</p>
-              <p className="text-sm text-slate-500">{error}</p>
-            </div>
-          ) : filteredOffers.length === 0 ? (
-            <div className="text-center py-20">
-              <p className="text-lg font-semibold text-slate-700 mb-1">No Offers Found</p>
-              <p className="text-sm text-slate-500">
-                {searchQuery ? "No offers match your search criteria" : "No offers have been created yet"}
+
+            {freeDelivery && (
+              <p className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700">
+                Free delivery takes the delivery fee and the GST on it off the order. Item GST and the platform fee are still charged, and the rider is paid as usual.
               </p>
+            )}
+
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={reset} className="rounded-lg border border-slate-300 px-5 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                {editingId ? "Cancel" : "Reset"}
+              </button>
+              <button type="submit" disabled={saving} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60">
+                {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+                {editingId ? "Update" : "Submit"}
+              </button>
             </div>
+          </form>
+        </Card>
+      </div>
+
+      <Card>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <h2 className="text-base font-semibold text-slate-900">Coupon List</h2>
+            <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-700">{coupons.length}</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                setAppliedSearch(search.trim())
+              }}
+              className="flex items-center rounded-lg border border-slate-300 bg-white"
+            >
+              <input
+                className="w-56 rounded-l-lg px-3 py-2 text-sm outline-none"
+                placeholder="Search by title or code"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                aria-label="Search coupons"
+              />
+              <button type="submit" className="px-3 text-slate-500 hover:text-blue-600" aria-label="Search">
+                <Search className="w-4 h-4" />
+              </button>
+            </form>
+            <button type="button" onClick={load} className="rounded-lg border border-slate-300 p-2 text-slate-600 hover:bg-slate-50" title="Refresh" aria-label="Refresh">
+              <RefreshCw className="w-4 h-4" />
+            </button>
+            <div ref={exportRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setExportOpen((o) => !o)}
+                disabled={!coupons.length}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                <Download className="w-4 h-4" /> Export
+              </button>
+              {exportOpen && (
+                <div className="absolute right-0 z-20 mt-1 w-40 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+                  <button type="button" onClick={() => { exportExcel(coupons); setExportOpen(false) }} className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm hover:bg-slate-50">
+                    <FileSpreadsheet className="w-4 h-4" /> Excel
+                  </button>
+                  <button type="button" onClick={() => { exportCsv(coupons); setExportOpen(false) }} className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm hover:bg-slate-50">
+                    <FileText className="w-4 h-4" /> CSV
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 overflow-x-auto">
+          {loading ? (
+            <div className="py-16 text-center"><Loader2 className="mx-auto w-6 h-6 animate-spin text-slate-400" /></div>
+          ) : !coupons.length ? (
+            <p className="py-16 text-center text-sm text-slate-500">{appliedSearch ? "No coupons match your search." : "No coupons yet."}</p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-slate-50 border-b border-slate-200">
-                  <tr>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">SI</th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Restaurant</th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Dish</th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Coupon Code</th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Customer Scope</th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Discount</th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Bear Split</th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Price</th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Min Order</th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Usage</th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Status</th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Show In Cart</th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Valid Until</th>
-                    <th className="px-6 py-4 text-left text-xs font-bold text-slate-700 uppercase tracking-wider whitespace-nowrap">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-slate-100">
-                  {filteredOffers.map((offer) => (
-                    <tr key={`${offer.offerId}-${offer.dishId}`} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="text-sm font-medium text-slate-700">{offer.sl}</span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="text-sm font-medium text-slate-900">
-                          {offer.restaurantScope === "all" || offer.restaurantName === "All Restaurants" ? "All Restaurants" : offer.restaurantName}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700">
-                          {offer.dishName}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="text-sm font-mono font-semibold text-blue-600 bg-blue-50 px-2 py-1 rounded whitespace-nowrap">
-                          {offer.couponCode}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                          offer.customerGroup === "new"
-                            ? "bg-purple-100 text-purple-700"
-                            : "bg-slate-100 text-slate-700"
-                        }`}>
-                          {offer.customerGroup === "new" ? "First-time Users" : "All Users"}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="text-sm text-slate-700 whitespace-nowrap">
-                          {offer.discountType === 'flat-price'
-                            ? `\u20B9${offer.originalPrice - offer.discountedPrice} OFF`
-                            : `${offer.discountPercentage}% OFF${Number(offer.maxDiscount) ? ` (up to \u20B9${Number(offer.maxDiscount)})` : ""}`}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-xs text-slate-700 leading-5">
-                          <p>Admin: {Number(offer.adminBearPercentage ?? 100)}%</p>
-                          <p>Restaurant: {Number(offer.restaurantBearPercentage ?? 0)}%</p>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="text-sm text-slate-700">
-                          {offer.dishId === "all"
-                            ? (Number(offer.minOrderValue) ? `Min \u20B9${Number(offer.minOrderValue)}` : "All Items")
-                            : (
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs text-slate-400 line-through">{"\u20B9"}{offer.originalPrice}</span>
-                                <span className="text-sm font-semibold text-green-600">{"\u20B9"}{offer.discountedPrice}</span>
-                              </div>
-                            )}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="text-sm text-slate-700">
-                          {Number(offer.minOrderValue) ? `\u20B9${Number(offer.minOrderValue)}` : "—"}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="text-sm text-slate-700">
-                          {`${Number(offer.usedCount || 0)} / ${Number(offer.usageLimit || 0) > 0 ? Number(offer.usageLimit) : "∞"}`}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        {(() => {
-                          const expired = offer.endDate ? (new Date(offer.endDate).getTime() < new Date(new Date().toDateString()).getTime()) : false
-                          const status = expired ? 'expired' : (offer.status || 'inactive')
-                          const cls =
-                            status === 'active'
-                              ? 'bg-green-100 text-green-700'
-                              : status === 'paused'
-                              ? 'bg-orange-100 text-orange-700'
-                              : status === 'expired'
-                              ? 'bg-red-100 text-red-700'
-                              : 'bg-gray-100 text-gray-700'
-                          return (
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${cls}`}>
-                              {status}
-                            </span>
-                          )
-                        })()}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <button
-                          type="button"
-                          onClick={() => handleToggleShowInCart(offer.offerId, offer.dishId, offer.showInCart !== false)}
-                          disabled={!!updatingCartVisibility[`${offer.offerId}-${offer.dishId}`]}
-                          className={`relative inline-flex h-6 w-12 items-center rounded-full transition-colors ${
-                            offer.showInCart !== false ? "bg-green-600" : "bg-slate-300"
-                          } disabled:opacity-60`}
-                        >
-                          <span
-                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                              offer.showInCart !== false ? "translate-x-7" : "translate-x-1"
-                            }`}
-                          />
-                        </button>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="text-sm text-slate-700 whitespace-nowrap">
-                          {offer.endDate
-                            ? (() => {
-                                const d = new Date(offer.endDate)
-                                const dd = String(d.getDate()).padStart(2, '0')
-                                const month = d.toLocaleString('en-US', { month: 'short' })
-                                const yyyy = d.getFullYear()
-                                return `${dd} ${month} ${yyyy}`
-                              })()
-                            : 'No expiry'}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteOffer(offer.offerId)}
-                          disabled={!!deletingOffer[offer.offerId]}
-                          className="px-3 py-1.5 rounded-lg bg-red-600 text-white text-xs font-semibold hover:bg-red-700 disabled:opacity-60"
-                        >
-                          {deletingOffer[offer.offerId] ? "Deleting..." : "Delete"}
-                        </button>
-                      </td>
-                    </tr>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase text-slate-600">
+                  {["Sl", "Title", "Code", "Type", "Total Uses", "Min Purchase", "Max Discount", "Discount", "Discount Type", "Start Date", "Expire Date", "Status", "Action"].map((h) => (
+                    <th key={h} className={`whitespace-nowrap px-3 py-3 font-semibold ${h === "Action" ? "text-right" : ""}`}>{h}</th>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </tr>
+              </thead>
+              <tbody>
+                {coupons.map((c, i) => (
+                  <tr key={c.id} className="border-b border-slate-100 align-middle">
+                    <td className="px-3 py-3 text-slate-500">{i + 1}</td>
+                    <td className="px-3 py-3">
+                      <p className="max-w-[14rem] truncate font-medium text-slate-800" title={c.title}>{c.title || "-"}</p>
+                      {c.couponType === "store_wise" && <p className="max-w-[14rem] truncate text-xs text-slate-500" title={c.restaurantName}>{c.restaurantName}</p>}
+                      {c.couponType === "zone_wise" && <p className="max-w-[14rem] truncate text-xs text-slate-500">{(c.zones || []).map((z) => z.name).filter(Boolean).join(", ")}</p>}
+                      {c.customerScope === "specific" && <p className="text-xs text-slate-500">{c.customerCount} customer{c.customerCount === 1 ? "" : "s"}</p>}
+                      {c.createdByRole === "RESTAURANT" && <p className="text-xs text-slate-500">By restaurant</p>}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-3 font-mono text-xs text-slate-800">{c.couponCode}</td>
+                    <td className="whitespace-nowrap px-3 py-3">{TYPE_LABEL[c.couponType] || c.couponType}</td>
+                    <td className="px-3 py-3">{c.totalUses}</td>
+                    <td className="whitespace-nowrap px-3 py-3">{rupees(c.minOrderValue)}</td>
+                    <td className="whitespace-nowrap px-3 py-3">{c.discountType === "percentage" && c.maxDiscount ? rupees(c.maxDiscount) : "-"}</td>
+                    <td className="whitespace-nowrap px-3 py-3">{discountText(c)}</td>
+                    <td className="whitespace-nowrap px-3 py-3">{c.couponType === "free_delivery" ? "-" : c.discountType === "percentage" ? "Percent" : "Amount"}</td>
+                    <td className="whitespace-nowrap px-3 py-3">{showDay(c.startDate)}</td>
+                    <td className="whitespace-nowrap px-3 py-3">
+                      {showDay(c.endDate)}
+                      {c.isExpired && <span className="ml-1.5 rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-semibold text-rose-600">Expired</span>}
+                    </td>
+                    <td className="px-3 py-3">
+                      <Switch checked={c.isActive} disabled={busyId === c.id} onChange={() => toggleStatus(c)} label={`Switch ${c.couponCode} ${c.isActive ? "off" : "on"}`} />
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-3 text-right">
+                      <button type="button" onClick={() => startEdit(c)} disabled={busyId === c.id} className="rounded p-1.5 text-blue-600 hover:bg-blue-50" title="Edit" aria-label={`Edit ${c.couponCode}`}>
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button type="button" onClick={() => remove(c)} disabled={busyId === c.id} className="rounded p-1.5 text-rose-600 hover:bg-rose-50" title="Delete" aria-label={`Delete ${c.couponCode}`}>
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           )}
         </div>
-      </div>
-    </div>
+      </Card>
+    </PageFrame>
   )
 }

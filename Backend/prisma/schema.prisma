@@ -172,6 +172,8 @@ enum OrderPaymentMethod {
   razorpay
   razorpay_qr
   wallet
+  /// Bank transfer, UPI and the like, verified by the admin. See FoodOrder.offlinePayment.
+  offline
 }
 
 enum OrderPaymentStatus {
@@ -621,6 +623,7 @@ model FoodUser {
   refunds       Refund[]
   offerUsages   FoodOfferUsage[]
   safetyReports FoodSafetyEmergencyReport[]
+  refundRequests FoodRefundRequest[]
 
   @@index([referredById])
   @@index([isActive])
@@ -764,7 +767,18 @@ model FoodRestaurant {
   /// Admin-chosen place in the customer app's restaurant list (1 = first).
   /// Null means no fixed place: listed after the positioned ones.
   displayPosition      Int?
+  /// The admin restaurant list's Featured toggle; the public card carries it.
+  isFeatured           Boolean @default(false)
 
+  /// The restaurant offers takeaway (when Business Settings > Order has it on).
+  takeawayEnabled Boolean @default(true)
+  /// Extra packaging charge (Business Settings > Order, extraPackagingCharge):
+  /// the restaurant's own charge per order, paid to the restaurant. Charged
+  /// only while the global switch is on and this is on; `Required` adds it to
+  /// every order, otherwise the customer opts in (extraPackaging: true).
+  extraPackagingEnabled  Boolean @default(false)
+  extraPackagingAmount   Decimal @default(0) @db.Decimal(14, 2)
+  extraPackagingRequired Boolean @default(false)
   diningEnabled   Boolean @default(false)
   diningMaxGuests Int     @default(6)
   diningType      String  @default("family-dining")
@@ -1320,10 +1334,29 @@ model FoodOrder {
   platformFee          Decimal      @default(0) @db.Decimal(14, 2)
   /// Quick Mode surcharge; also included in platformFee.
   quickDeliveryFee     Decimal      @default(0) @db.Decimal(14, 2)
+  /// Business Settings > Business info "additional charge" (a flat platform
+  /// charge, e.g. a service charge); also included in platformFee.
+  additionalCharge     Decimal      @default(0) @db.Decimal(14, 2)
+  additionalChargeName String       @default("") @db.VarChar(60)
   deliveryMode         DeliveryMode @default(basic)
   restaurantCommission Decimal      @default(0) @db.Decimal(14, 2)
   discount             Decimal      @default(0) @db.Decimal(14, 2)
   couponCode           String?      @db.VarChar(64)
+  /// The coupon that was actually applied. couponCode alone is not proof: it
+  /// is also stored when a code was entered and rejected. Coupon uses (Total
+  /// Uses, the per-customer limit) are counted from this column.
+  couponId             String?      @db.VarChar(24)
+  /// What a free-delivery coupon took off: the delivery fee plus its GST.
+  /// The fee columns are already 0 on such an order; this keeps what the
+  /// platform absorbed. Rider pay (riderEarning) is not reduced by it.
+  couponDeliveryWaiver Decimal      @default(0) @db.Decimal(14, 2)
+  /// Delivery fee + its GST waived by Business Settings "free delivery over".
+  freeDeliveryWaiver   Decimal      @default(0) @db.Decimal(14, 2)
+  /// Part of `discount`: the Business Settings new-customer discount, borne by the platform.
+  newCustomerDiscount  Decimal      @default(0) @db.Decimal(14, 2)
+  /// Part of `discount`: what food campaign dishes took off their price, borne
+  /// by the platform (the restaurant is settled on the full campaign price).
+  campaignDiscount     Decimal      @default(0) @db.Decimal(14, 2)
   total                Decimal      @db.Decimal(14, 2)
   currency             String       @default("INR") @db.VarChar(3)
   /// Straight-line restaurant ↔ customer km, used for fee calculation.
@@ -1336,11 +1369,18 @@ model FoodOrder {
   paymentMethod     OrderPaymentMethod
   paymentStatus     OrderPaymentStatus @default(cod_pending)
   paymentAmountDue  Decimal?           @db.Decimal(14, 2)
+  /// Partial payment: the part of `total` taken from the customer's wallet when
+  /// the order was placed; `paymentMethod` then pays the rest (`paymentAmountDue`).
+  /// 0 for every other order (a full-wallet order is paymentMethod 'wallet', 0 here).
+  walletAmount      Decimal            @default(0) @db.Decimal(14, 2)
   razorpayOrderId   String?
   razorpayPaymentId String?
   razorpaySignature String?
   /// QR checkout details — written once, never filtered on.
   qr                Json?
+  /// Offline payment: the method (snapshotted), what the customer filled in,
+  /// and the admin's verification. Null for every other method.
+  offlinePayment    Json?
   refundStatus      OrderRefundStatus  @default(none)
   refundAmount      Decimal            @default(0) @db.Decimal(14, 2)
   refundId          String             @default("")
@@ -1371,6 +1411,10 @@ model FoodOrder {
   restaurantRating        Int?
   restaurantRatingComment String    @default("")
   restaurantRatedAt       DateTime?
+  /// The restaurant's public reply to that review (Business Settings decides
+  /// whether restaurants may reply). Empty = no reply.
+  restaurantReply         String    @default("")
+  restaurantRepliedAt     DateTime?
   partnerRating           Int?
   partnerRatingComment    String    @default("")
   partnerRatedAt          DateTime?
@@ -1390,6 +1434,16 @@ model FoodOrder {
   sendCutlery   Boolean   @default(true)
   deliveryFleet String    @default("standard")
   scheduledAt   DateTime?
+  /// A scheduled order (Business Settings > Order, scheduled orders): when the
+  /// restaurant is alerted and riders may be dispatched. Null = at once, as
+  /// every order did before scheduling existed.
+  releaseAt     DateTime?
+  /// 'delivery' or 'takeaway'. A takeaway order has no delivery fee, no rider
+  /// and is handed over by the restaurant against the code in deliveryOtp.
+  orderType     String    @default("delivery") @db.VarChar(16)
+  /// Tip for the rider, paid by the customer with the order. Part of `total`
+  /// and of `riderEarning` (all of it goes to the rider); never the platform's.
+  riderTip      Decimal   @default(0) @db.Decimal(14, 2)
 
   riderEarning   Decimal @default(0) @db.Decimal(14, 2)
   /// Can be negative when discounts/rider pay exceed platform income.
@@ -1414,6 +1468,7 @@ model FoodOrder {
   restaurant      FoodRestaurant       @relation(fields: [restaurantId], references: [id])
   zone            FoodZone?            @relation(fields: [zoneId], references: [id])
   deliveryPartner FoodDeliveryPartner? @relation(fields: [dispatchDeliveryPartnerId], references: [id])
+  coupon          FoodOffer?           @relation(fields: [couponId], references: [id], onDelete: SetNull)
 
   items          OrderItem[]
   itemRatings    OrderItemRating[]
@@ -1428,6 +1483,7 @@ model FoodOrder {
   chatConversations FoodChatConversation[]
   supportTickets    FoodSupportTicket[]
   emergencyRequests DeliveryOrderEmergencyRequest[]
+  refundRequests    FoodRefundRequest[]
 
   @@index([createdAt(sort: Desc)])
   @@index([orderStatus, createdAt(sort: Desc)])
@@ -1440,6 +1496,8 @@ model FoodOrder {
   @@index([paymentStatus, createdAt(sort: Desc)])
   @@index([paymentMethod, createdAt(sort: Desc)])
   @@index([zoneId])
+  @@index([couponId, userId])
+  @@index([releaseAt])
   @@map("food_orders")
 }
 
@@ -1461,6 +1519,10 @@ model OrderItem {
   isVeg        Boolean @default(true)
   image        String  @default("")
   notes        String  @default("")
+
+  /// Set when the line is a food campaign dish (itemId is then the campaign id).
+  /// `price` is the campaign's full price; its discount is in the order's campaignDiscount.
+  itemCampaignId String? @db.VarChar(24)
 
   /// [{ addonId, name, price }] as chosen and priced at order time. Already folded
   /// into `price`. Json rather than a table — written once, never queried across orders.
@@ -1562,6 +1624,9 @@ model FoodTransaction {
   /// 'paid'…). Distinct from `status`, which is the transaction's own lifecycle.
   paymentStatusLabel String  @default("cod_pending")
   amountDue          Decimal @default(0) @db.Decimal(14, 2)
+  /// Partial payment: the order's wallet part (FoodOrder.walletAmount); the
+  /// rider or the gateway took totalCustomerPaid - walletAmount.
+  walletAmount       Decimal @default(0) @db.Decimal(14, 2)
 
   gatewayProvider   String  @default("razorpay")
   razorpayOrderId   String?
@@ -1575,6 +1640,8 @@ model FoodTransaction {
   restaurantShare                  Decimal @db.Decimal(14, 2)
   commissionAmount                 Decimal @db.Decimal(14, 2)
   riderShare                       Decimal @db.Decimal(14, 2)
+  /// Part of riderShare: the customer's tip, all of it the rider's.
+  riderTip                         Decimal @default(0) @db.Decimal(14, 2)
   /// Can be negative when discounts/rider pay exceed platform income.
   platformNetProfit                Decimal @db.Decimal(14, 2)
   taxAmount                        Decimal @default(0) @db.Decimal(14, 2)
@@ -1988,9 +2055,22 @@ model FoodZone {
 
   isActive Boolean @default(true)
 
+  /// The old Zone setup's per-zone payment switches, enforced when an order is
+  /// placed in this zone (see shared/zonePayment.js). Wallet and offline
+  /// payment are not governed by these.
+  cashOnDelivery Boolean @default(true)
+  /// Online payment: razorpay, card and razorpay_qr.
+  digitalPayment Boolean @default(true)
+  /// The zone an order falls back to when neither the request nor the
+  /// restaurant names one. At most one row is true (partial unique index
+  /// food_zones_one_default, in the migration).
+  isDefault      Boolean @default(false)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  heroBanners             FoodHeroBanner[]
+  broadcasts              NotificationBroadcast[]
   restaurants             FoodRestaurant[]         @relation("RestaurantZone")
   pendingRestaurants      FoodRestaurant[]         @relation("RestaurantPendingZone")
   orders                  FoodOrder[]
@@ -2013,6 +2093,14 @@ model FoodOffer {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 
   couponCode    String       @unique @db.VarChar(64)
+  /// Shown in the admin list and to customers. Blank for coupons created
+  /// before titles existed; the code stands in for it then.
+  title         String       @default("") @db.VarChar(191)
+  /// The previous system's coupon types. store_wise mirrors
+  /// restaurantScope = selected, first_order mirrors isFirstOrderOnly; both
+  /// older columns are still what checkout reads, so a coupon written before
+  /// this column existed behaves exactly as it did.
+  couponType    FoodCouponType @default(default)
   discountType  DiscountType @default(percentage)
   discountValue Decimal      @db.Decimal(14, 2)
 
@@ -2026,6 +2114,9 @@ model FoodOffer {
   /// match how restaurantIds already works; a join table would buy nothing
   /// here, since the list is only ever read whole to check membership.
   customerIds String[]
+
+  /// zone_wise coupons: the zones an order's restaurant must be in.
+  zoneIds String[] @default([])
 
   minOrderValue Decimal  @default(0) @db.Decimal(14, 2)
   maxDiscount   Decimal? @db.Decimal(14, 2)
@@ -2049,6 +2140,7 @@ model FoodOffer {
 
   restaurant FoodRestaurant?  @relation(fields: [restaurantId], references: [id])
   usages     FoodOfferUsage[]
+  orders     FoodOrder[]
 
   @@index([restaurantId, createdAt(sort: Desc)])
   @@index([discountType])
@@ -2056,7 +2148,16 @@ model FoodOffer {
   @@index([restaurantScope])
   @@index([status])
   @@index([createdByRole])
+  @@index([couponType])
   @@map("food_offers")
+}
+
+enum FoodCouponType {
+  default
+  store_wise
+  zone_wise
+  free_delivery
+  first_order
 }
 
 model FoodOfferUsage {
@@ -3218,6 +3319,11 @@ model FoodSupportTicket {
   description   String       @default("")
   status        TicketStatus @default(open)
   adminResponse String       @default("")
+  /// Order issue reports (POST /user/orders/:id/issues): the Business Settings
+  /// order-issue reason picked, and the customer's photos. Blank / empty on
+  /// tickets raised from the support screen.
+  reasonId      String       @default("") @db.VarChar(24)
+  images        String[]     @default([])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -3231,9 +3337,64 @@ model FoodSupportTicket {
   @@map("food_support_tickets")
 }
 
-model FoodRestaurantSupportTicket {
-  id           String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+enum FoodRefundRequestStatus {
+  pending
+  /// Claimed by an admin's approval while the money moves; becomes `refunded`,
+  /// or back to `pending` (with failureReason) if the refund could not be made.
+  approved
+  refunded
+  rejected
+}
+
+/// A customer's request for a refund on a delivered order (the old panel's
+/// Refund Requests). At most one open (pending / approved) per order -- a
+/// partial unique index in constraints.sql.
+model FoodRefundRequest {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  orderId      String @db.VarChar(24)
+  userId       String @db.VarChar(24)
   restaurantId String @db.VarChar(24)
+
+  /// Business Settings refund reason id, or blank when the customer typed one.
+  reasonId String   @default("") @db.VarChar(24)
+  reason   String
+  note     String   @default("")
+  images   String[] @default([])
+
+  /// What could still be refunded when the request was made.
+  requestedAmount Decimal                 @db.Decimal(14, 2)
+  status          FoodRefundRequestStatus @default(pending)
+  /// What the admin approved; set once refunded.
+  refundedAmount  Decimal?                @db.Decimal(14, 2)
+  /// 'razorpay' (original method) or 'wallet'.
+  refundMethod    String                  @default("") @db.VarChar(16)
+  adminNote       String                  @default("")
+  /// Why the last approval attempt failed (the request went back to pending).
+  failureReason   String                  @default("")
+  decidedById     String?                 @db.VarChar(24)
+  decidedAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  order FoodOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  user  FoodUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([orderId])
+  @@index([restaurantId, createdAt(sort: Desc)])
+  @@map("food_refund_requests")
+}
+
+model FoodRestaurantSupportTicket {
+  id           String  @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  /// Null once the restaurant deleted its account: the ticket stays for the
+  /// admin's history, named by restaurantName.
+  restaurantId String? @db.VarChar(24)
+  /// The restaurant's name when the ticket was raised (kept after deletion).
+  restaurantName String @default("")
 
   category    RestaurantTicketCategory
   issueType   String
@@ -3244,11 +3405,13 @@ model FoodRestaurantSupportTicket {
   priority      TicketPriority @default(medium)
   status        TicketStatus   @default(open)
   adminResponse String         @default("")
+  /// When the admin last wrote adminResponse; null until then.
+  respondedAt   DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  restaurant FoodRestaurant @relation(fields: [restaurantId], references: [id])
+  restaurant FoodRestaurant? @relation(fields: [restaurantId], references: [id], onDelete: SetNull)
 
   @@index([restaurantId, createdAt(sort: Desc)])
   @@index([status, createdAt(sort: Desc)])
@@ -3477,8 +3640,19 @@ model NotificationBroadcast {
   createdById String  @db.VarChar(24)
   targetCount Int     @default(0)
 
+  /// Shown as the push's big picture and carried on each inbox row's metadata.
+  image      String    @default("")
+  /// Audience narrowed to one zone; null = everywhere.
+  zoneId     String?   @db.VarChar(24)
+  /// Off hides it from every recipient's inbox (the old list's Status switch).
+  isActive   Boolean   @default(true)
+  /// How many times it has been pushed: 1 on create, +1 per Resend.
+  sendCount  Int       @default(1)
+  lastSentAt DateTime?
+
   createdAt DateTime @default(now())
 
+  zone          FoodZone?          @relation(fields: [zoneId], references: [id], onDelete: SetNull)
   createdBy     FoodAdmin          @relation(fields: [createdById], references: [id])
   notifications FoodNotification[]
 
@@ -3576,14 +3750,33 @@ model FoodHeroBanner {
   /// ponytail: id array, matching the Mongo access pattern.
   linkedRestaurantIds String[]
 
+  /// What tapping the banner opens: a restaurant (linkedRestaurantIds), a dish
+  /// (linkedFoodId) or the ctaLink. The old panel's store wise / item wise /
+  /// default banner types.
+  bannerType   HeroBannerType @default(restaurant)
+  /// Plain id, no FK: a deleted dish just stops being returned.
+  linkedFoodId String?        @db.VarChar(24)
+  /// Null = shown in every zone.
+  zoneId       String?        @db.VarChar(24)
+  isFeatured   Boolean        @default(false)
+
   sortOrder Int     @default(0)
   isActive  Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  zone FoodZone? @relation(fields: [zoneId], references: [id], onDelete: SetNull)
+
   @@index([isActive, sortOrder])
+  @@index([zoneId, isActive])
   @@map("food_hero_banners")
+}
+
+enum HeroBannerType {
+  restaurant
+  food
+  link
 }
 
 model FoodUnder250Banner {
@@ -3880,6 +4073,45 @@ model FoodSystemSetting {
   updatedAt DateTime @updatedAt
 
   @@map("food_system_settings")
+}
+
+/// Transactional emails already sent (or being sent), one row per event:
+/// `eventKey` is template + entity (+ the version it changed from), and its
+/// unique index is what stops a retry sending the same email twice.
+/// Written by core/email/transactionalEmail.js.
+model FoodEmailSendLog {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  eventKey    String @unique @db.VarChar(191)
+  templateKey String @db.VarChar(64)
+  recipient   String @default("")
+  /// sending | sent | failed
+  status      String @default("sending") @db.VarChar(16)
+  attempts    Int    @default(1)
+  error       String @default("")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@index([templateKey, createdAt])
+  @@map("food_email_send_logs")
+}
+
+/// Who changed which settings area, and which fields -- never the values.
+/// Written by the 3rd Party settings page (third_party.* areas).
+model FoodSettingsAuditLog {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  area       String   @db.VarChar(64)
+  action     String   @db.VarChar(32)
+  fields     String[]
+  adminId    String?  @db.VarChar(24)
+  adminEmail String   @default("")
+
+  createdAt DateTime @default(now())
+
+  @@index([area, createdAt])
+  @@map("food_settings_audit_logs")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

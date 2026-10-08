@@ -2,7 +2,9 @@ import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { fromRestaurantLocation, toRestaurant } from '../../restaurant/restaurant.mapper.js';
+import { detachRestaurantHistory } from '../../restaurant/services/restaurantDeletion.helpers.js';
 import { logger } from '../../../../utils/logger.js';
+import { emailRestaurantDecision, emailAccountSuspension } from '../../../../core/notifications/emailEvents.js';
 
 /**
  * Restaurant approval and lifecycle, extracted from admin.service.js.
@@ -98,8 +100,20 @@ export async function updateRestaurantStatus(id, body = {}) {
         data.rejectionReason = 'Disabled by admin';
     }
 
+    const before = await prisma.foodRestaurant.findUnique({
+        where: { id: String(id) },
+        select: { id: true, status: true, rejectionReason: true, updatedAt: true },
+    });
     const { count } = await prisma.foodRestaurant.updateMany({ where: { id: String(id) }, data });
     if (!count) return null;
+
+    // The on/off toggle: off suspends a trading restaurant, on lifts a
+    // suspension -- or, for one never approved, is its approval.
+    if (before && before.status !== status) {
+        if (status === 'rejected' && before.status === 'approved') emailAccountSuspension('restaurant', before, true);
+        else if (status === 'approved' && before.rejectionReason === 'Disabled by admin') emailAccountSuspension('restaurant', before, false);
+        else if (status === 'approved') emailRestaurantDecision(before, true);
+    }
 
     return toRestaurant(await prisma.foodRestaurant.findUnique({ where: { id: String(id) } }));
 }
@@ -213,6 +227,8 @@ export async function approveRestaurant(id) {
     } catch (e) {
         logger.error('Failed to send restaurant approval notification:', e);
     }
+    // Only a registration approval; publishing a location move is not one.
+    if (existing.status !== 'approved') emailRestaurantDecision(existing, true);
 
     return toRestaurant(updated);
 }
@@ -271,6 +287,7 @@ export async function rejectRestaurant(id, reason) {
     } catch (e) {
         logger.error('Failed to send restaurant rejection notification:', e);
     }
+    if (existing.status !== 'rejected') emailRestaurantDecision(existing, false, rejectionReason);
 
     return toRestaurant(updated);
 }
@@ -310,9 +327,8 @@ export async function deleteRestaurant(id) {
         });
 
         await tx.foodOffer.deleteMany({ where: { restaurantId: restaurant.id } });
-        await tx.foodSupportTicket.deleteMany({ where: { restaurantId: restaurant.id } });
-        await tx.foodRestaurantSupportTicket.deleteMany({ where: { restaurantId: restaurant.id } });
-        await tx.feedbackExperience.deleteMany({ where: { restaurantId: restaurant.id } });
+        // Support tickets and feedback are kept, detached, for the history.
+        await detachRestaurantHistory(tx, restaurant);
         await tx.foodRestaurantWithdrawal.deleteMany({ where: { restaurantId: restaurant.id } });
         await tx.foodSubscriptionTransaction.deleteMany({ where: { restaurantId: restaurant.id } });
         await tx.foodRestaurantSubscriptionHistory.deleteMany({ where: { restaurantId: restaurant.id } });

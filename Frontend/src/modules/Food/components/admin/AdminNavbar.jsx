@@ -45,6 +45,7 @@ import { adminAPI } from "@food/api";
 import { clearModuleAuth } from "@food/utils/auth";
 import { getCachedSettings, loadBusinessSettings } from "@food/utils/businessSettings";
 import useAdminNotifications from "@food/hooks/useAdminNotifications";
+import AdminAreaNav from "./AdminAreaNav";
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -305,22 +306,34 @@ export default function AdminNavbar({ onMenuClick }) {
             </div>
           </div>
 
-          {/* Center: Search Bar */}
-          <div className="flex-1 flex justify-center max-w-md mx-8">
+          {/* The previous panel's area links: Users, Transactions & Reports, Settings, Dispatch */}
+          <AdminAreaNav />
+
+          {/* Search, as in the previous panel: "Search or Ctrl+K" */}
+          <div className="flex-1 flex justify-end min-w-[190px] max-w-xs mx-4">
             <button
               onClick={() => setSearchOpen(true)}
-              className="flex items-center gap-2 px-4 py-2 rounded-full bg-neutral-100 text-neutral-600 cursor-pointer hover:bg-neutral-200 transition-colors w-full border border-neutral-200"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-[5px] bg-[#F3F4F5] text-[#677788] cursor-pointer hover:bg-[#E7EAF3] transition-colors w-full"
             >
-              <Search className="w-4 h-4 text-neutral-700" />
-              <span className="text-sm flex-1 text-left text-neutral-700">Search</span>
-              <span className="text-xs px-2 py-0.5 rounded bg-white text-neutral-600 border border-neutral-200">
+              <span className="text-sm flex-1 text-left text-[#99A7BA] whitespace-nowrap">Search or</span>
+              <span className="text-xs font-semibold px-1.5 py-0.5 rounded bg-[#E7EAF3] text-[#677788]">
                 Ctrl+K
               </span>
+              <Search className="w-4 h-4 text-[#677788]" />
             </button>
           </div>
 
           {/* Right: User Profile */}
           <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => navigate("/admin/food/chattings")}
+              className="hidden md:flex h-11 w-11 items-center justify-center rounded-full text-[#334257] hover:bg-neutral-100 transition-colors"
+              aria-label="Messages"
+              title="Messages"
+            >
+              <i className="tio-messages-outlined text-2xl" />
+            </button>
             <Popover open={notificationsOpen} onOpenChange={setNotificationsOpen}>
               <PopoverTrigger asChild>
                 <button
@@ -488,6 +501,17 @@ export default function AdminNavbar({ onMenuClick }) {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+
+            {/* The module badge of the previous panel: back to the Food menu */}
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent("admin-area-select", { detail: { area: "food" } }))}
+              className="hidden lg:flex items-center gap-2 self-stretch -my-3 -mr-6 px-6 bg-[#0661CB] text-white font-semibold hover:bg-[#0552AD] transition-colors"
+              title="Food module"
+            >
+              <img src={lagechLogo} alt="" className="h-6 w-6 rounded bg-white object-contain p-0.5" />
+              Food
+            </button>
           </div>
         </div>
       </header>

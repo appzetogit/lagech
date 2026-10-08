@@ -98,7 +98,11 @@ function formatDateTime(value) {
   })
 }
 
-export default function SupportTickets() {
+/**
+ * `preset` fixes filters for a focused view: Order Issue Reports is this page
+ * with { source: "user", type: "order" } -- the customer's "Report an issue".
+ */
+export default function SupportTickets({ preset = null, title = "Support Tickets", subtitle = "" } = {}) {
   const [tickets, setTickets] = useState([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -112,6 +116,7 @@ export default function SupportTickets() {
     type: "",
     category: "",
     source: "all",
+    ...(preset || {}),
   })
   const [selectedTicket, setSelectedTicket] = useState(null)
   const [isViewOpen, setIsViewOpen] = useState(false)
@@ -267,9 +272,9 @@ export default function SupportTickets() {
           <div className="flex items-center gap-3 mb-2">
             <MessageSquare className="w-6 h-6 text-slate-600" />
             <div>
-              <h1 className="text-2xl font-bold text-slate-900">Support Tickets</h1>
+              <h1 className="text-2xl font-bold text-slate-900">{title}</h1>
               <p className="text-sm text-slate-600 mt-1">
-                Review and respond to user and restaurant support requests.
+                {subtitle || "Review and respond to user and restaurant support requests."}
               </p>
             </div>
           </div>
@@ -355,7 +360,8 @@ export default function SupportTickets() {
             <select
               value={filters.source}
               onChange={(e) => handleFilterChange("source", e.target.value)}
-              className="px-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white"
+              disabled={Boolean(preset?.source)}
+              className="px-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white disabled:opacity-60"
             >
               {SOURCE_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -390,8 +396,8 @@ export default function SupportTickets() {
               <select
                 value={filters.type}
                 onChange={(e) => handleFilterChange("type", e.target.value)}
-                className="px-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white"
-                disabled={filters.source === "restaurant"}
+                className="px-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white disabled:opacity-60"
+                disabled={filters.source === "restaurant" || Boolean(preset?.type)}
               >
                 {USER_TYPE_OPTIONS.map((option) => (
                   <option key={option.value || "all"} value={option.value}>
@@ -519,6 +525,12 @@ export default function SupportTickets() {
                       {ticket.orderRef ? (
                         <p className="text-xs text-slate-500">Order ref: {ticket.orderRef}</p>
                       ) : null}
+                      {ticket.orderDisplayId ? (
+                        <p className="text-xs text-slate-500">
+                          Order #{ticket.orderDisplayId}
+                          {ticket.images?.length ? ` · ${ticket.images.length} photo(s)` : ""}
+                        </p>
+                      ) : null}
 
                       {ticket.adminResponse ? (
                         <div className="rounded-lg bg-blue-50 border border-blue-100 px-3 py-2 text-sm text-blue-900">
@@ -640,6 +652,26 @@ export default function SupportTickets() {
                       <div>
                         <p className="text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Order Reference</p>
                         <p className="text-sm text-slate-900 font-medium">{selectedTicket.orderRef}</p>
+                      </div>
+                    ) : null}
+
+                    {selectedTicket.orderDisplayId ? (
+                      <div>
+                        <p className="text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Order</p>
+                        <p className="text-sm text-slate-900 font-medium">#{selectedTicket.orderDisplayId}</p>
+                      </div>
+                    ) : null}
+
+                    {selectedTicket.images?.length ? (
+                      <div>
+                        <p className="text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">Photos</p>
+                        <div className="flex flex-wrap gap-2">
+                          {selectedTicket.images.map((src) => (
+                            <a key={src} href={src} target="_blank" rel="noreferrer">
+                              <img src={src} alt="Customer photo" className="h-24 w-24 rounded-lg border border-slate-200 object-cover" />
+                            </a>
+                          ))}
+                        </div>
                       </div>
                     ) : null}
 

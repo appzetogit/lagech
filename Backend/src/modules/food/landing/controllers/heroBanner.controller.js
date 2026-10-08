@@ -3,7 +3,10 @@ import {
     createHeroBannersFromFiles,
     deleteHeroBanner,
     updateHeroBannerOrder,
-    toggleHeroBannerStatus
+    toggleHeroBannerStatus,
+    createHeroBanner,
+    updateHeroBanner,
+    setHeroBannerFeatured
 } from '../services/heroBanner.service.js';
 import { sendResponse } from '../../../../utils/response.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
@@ -78,3 +81,37 @@ export const toggleHeroBannerStatusController = async (req, res, next) => {
     }
 };
 
+
+/** POST /hero-banners (multipart: file + title, zoneId, bannerType, linkedRestaurantIds|restaurantId, linkedFoodId, ctaLink, isFeatured) */
+export const createHeroBannerController = async (req, res, next) => {
+    try {
+        const banner = await createHeroBanner(req.file, req.body || {});
+        return sendResponse(res, 201, 'Banner created', { banner });
+    } catch (error) {
+        next(error);
+    }
+};
+
+/** PATCH /hero-banners/:id (multipart; file optional) */
+export const updateHeroBannerController = async (req, res, next) => {
+    try {
+        const banner = await updateHeroBanner(req.params.id, req.file, req.body || {});
+        if (!banner) return res.status(404).json({ success: false, message: 'Banner not found' });
+        return sendResponse(res, 200, 'Banner updated', { banner });
+    } catch (error) {
+        next(error);
+    }
+};
+
+/** PATCH /hero-banners/:id/featured { isFeatured } */
+export const toggleHeroBannerFeaturedController = async (req, res, next) => {
+    try {
+        const { isFeatured } = req.body || {};
+        if (typeof isFeatured !== 'boolean') throw new ValidationError('boolean isFeatured is required');
+        const banner = await setHeroBannerFeatured(req.params.id, isFeatured);
+        if (!banner) return res.status(404).json({ success: false, message: 'Banner not found' });
+        return sendResponse(res, 200, 'Banner updated', banner);
+    } catch (error) {
+        next(error);
+    }
+};

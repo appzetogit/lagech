@@ -11,6 +11,7 @@ import {
     isRazorpayConfigured
 } from '../../orders/helpers/razorpay.helper.js';
 import { findWalletTopupBonus } from './walletBonus.service.js';
+import { getBusinessSettings } from '../../shared/businessSettings.js';
 
 /**
  * User wallet operations.
@@ -56,6 +57,12 @@ export const creditReferralReward = async (userId, amountInr, metadata = {}) => 
 };
 
 export const createWalletTopupOrder = async (userId, amountInr) => {
+    // Business Settings > Customer: wallet and "add fund". Only starting a
+    // top-up is refused; a payment already made is still verified and credited.
+    const rules = await getBusinessSettings('business_customer');
+    if (!rules.walletEnabled || !rules.addFundEnabled) {
+        throw new ValidationError('Adding money to the wallet is not available right now.');
+    }
     const amount = Number(amountInr);
     if (!Number.isFinite(amount) || amount <= 0) {
         throw new ValidationError('Amount must be greater than 0');

@@ -3,6 +3,7 @@ import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { recordTransaction } from '../../../../core/payments/transaction.service.js';
 import { syncBatchStatus } from '../../restaurant/services/restaurantPayout.service.js';
+import { emailWithdrawalDecision } from '../../../../core/notifications/emailEvents.js';
 
 /**
  * Withdrawal approvals, extracted from admin.service.js.
@@ -131,6 +132,7 @@ export async function updateWithdrawalStatus(id, { status, adminNote, rejectionR
     });
     // A payout line decided from this list still moves its batch along.
     if (updated?.batchId) await syncBatchStatus(updated.batchId);
+    emailWithdrawalDecision('restaurant', updated?.id);
     return { ...updated, amount: Number(updated.amount) };
 }
 
@@ -274,5 +276,6 @@ export async function updateDeliveryWithdrawalStatus(
             deliveryPartner: { select: { id: true, name: true, phone: true } },
         },
     });
+    emailWithdrawalDecision('rider', updated?.id);
     return { ...updated, amount: Number(updated.amount) };
 }

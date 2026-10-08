@@ -5,6 +5,7 @@ import { getDeliveryCashLimitSettings, getDeliveryEmergencyHelp } from '../../ad
 import { prisma } from '../../../../config/prisma.js';
 import { validateDeliveryRegisterDto, validateDeliveryProfileUpdateDto, validateDeliveryBankDetailsDto } from '../validators/delivery.validator.js';
 import { sendResponse } from '../../../../utils/response.js';
+import { assertSelfRegistrationOpen } from '../../shared/businessSettings.js';
 import { getDeliveryReferralStats } from '../services/deliveryReferral.service.js';
 import {
     createOrderEmergencyRequest,
@@ -14,6 +15,8 @@ import {
 
 export const registerDeliveryPartnerController = async (req, res, next) => {
     try {
+        // Closed sign-up says so before any field error.
+        await assertSelfRegistrationOpen('rider');
         const validated = validateDeliveryRegisterDto(req.body);
         // upload.any() gives req.files as an array — reshape to { fieldname: [file] }
         // so the existing named lookups (files.profilePhoto[0]) keep working, and

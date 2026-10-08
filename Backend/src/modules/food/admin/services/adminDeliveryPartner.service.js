@@ -2,6 +2,7 @@ import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { NotFoundError, ValidationError } from '../../../../core/auth/errors.js';
 import { logger } from '../../../../utils/logger.js';
+import { emailDeliveryPartnerDecision, emailAccountSuspension } from '../../../../core/notifications/emailEvents.js';
 
 /**
  * The admin delivery-partner list and its money summary, extracted from
@@ -27,7 +28,14 @@ const emptyStats = () => ({
     totalWithdrawn: 0,
     pendingWithdrawal: 0,
     totalOrders: 0,
+    activeOrders: 0,
 });
+
+/** Orders a rider has accepted and not yet finished: "on a delivery". */
+const ACTIVE_DELIVERY = {
+    dispatchStatus: 'accepted',
+    orderStatus: { notIn: ['delivered', 'cancelled_by_user', 'cancelled_by_restaurant', 'cancelled_by_admin', 'pending_payment'] },
+};
 
 /**
  * Per-partner money summary for a page of riders.
@@ -44,7 +52,7 @@ export async function getBulkDeliveryPartnerStats(partnerIds) {
         orderStatus: 'delivered',
     };
 
-    const [earnings, cash, deposits, bonuses, withdrawals] = await Promise.all([
+    const [earnings, cash, deposits, bonuses, withdrawals, active] = await Promise.all([
         // Earnings and the delivered-order count come from one grouping.
         prisma.foodOrder.groupBy({
             by: ['dispatchDeliveryPartnerId'],
@@ -56,7 +64,8 @@ export async function getBulkDeliveryPartnerStats(partnerIds) {
         prisma.foodOrder.groupBy({
             by: ['dispatchDeliveryPartnerId'],
             where: { ...deliveredByPartner, paymentMethod: 'cash' },
-            _sum: { total: true },
+            // Less a partial payment's wallet part, which the rider never held.
+            _sum: { total: true, walletAmount: true },
         }),
         prisma.foodDeliveryCashDeposit.groupBy({
             by: ['deliveryPartnerId'],
@@ -74,6 +83,11 @@ export async function getBulkDeliveryPartnerStats(partnerIds) {
             where: { deliveryPartnerId: { in: ids }, status: { in: ['approved', 'pending'] } },
             _sum: { amount: true },
         }),
+        prisma.foodOrder.groupBy({
+            by: ['dispatchDeliveryPartnerId'],
+            where: { dispatchDeliveryPartnerId: { in: ids }, ...ACTIVE_DELIVERY },
+            _count: { _all: true },
+        }),
     ]);
 
     const statsMap = new Map(ids.map((id) => [id, emptyStats()]));
@@ -87,7 +101,7 @@ export async function getBulkDeliveryPartnerStats(partnerIds) {
     }
     for (const row of cash) {
         const stats = at(row.dispatchDeliveryPartnerId);
-        if (stats) stats.cashCollected = num(row._sum.total);
+        if (stats) stats.cashCollected = Math.round(((Number(row._sum.total) || 0) - (Number(row._sum.walletAmount) || 0)) * 100) / 100;
     }
     for (const row of deposits) {
         const stats = at(row.deliveryPartnerId);
@@ -102,6 +116,10 @@ export async function getBulkDeliveryPartnerStats(partnerIds) {
         if (!stats) continue;
         if (row.status === 'approved') stats.totalWithdrawn = num(row._sum.amount);
         if (row.status === 'pending') stats.pendingWithdrawal = num(row._sum.amount);
+    }
+    for (const row of active) {
+        const stats = at(row.dispatchDeliveryPartnerId);
+        if (stats) stats.activeOrders = row._count._all;
     }
 
     for (const stats of statsMap.values()) {
@@ -155,7 +173,13 @@ const serializePartner = (doc, stats = {}, sl = 0) => {
             (doc.fcmTokenMobile || []).length > 0 || (doc.fcmTokens || []).length > 0,
         profilePhoto: doc.profilePhoto || null,
         profileImage: doc.profilePhoto ? { url: doc.profilePhoto } : null,
+        // Delivered orders: the old panel's "Total completed orders".
         totalOrders: stats.totalOrders || 0,
+        activeOrders: stats.activeOrders || 0,
+        // The old panel's Availability column: on a delivery beats online/offline.
+        availability: (stats.activeOrders || 0) > 0
+            ? 'on_delivery'
+            : (doc.availabilityStatus === 'online' ? 'online' : 'offline'),
         pocketBalance: stats.pocketBalance || 0,
         cashInHand: stats.cashInHand || 0,
         totalEarning: stats.totalEarning || 0,
@@ -389,11 +413,22 @@ export async function getDeliveryJoinRequests(query = {}) {
 const decidePartner = async (id, data) => {
     if (!isId(id)) return null;
 
+    // As it was before, for the email: only a real change sends one.
+    const before = await prisma.foodDeliveryPartner.findUnique({
+        where: { id: String(id) },
+        select: { id: true, status: true, updatedAt: true },
+    });
     const { count } = await prisma.foodDeliveryPartner.updateMany({
         where: { id: String(id) },
         data,
     });
     if (!count) return null;
+
+    if (before && before.status !== data.status) {
+        // Approving a deactivated rider is lifting a suspension, not an approval.
+        if (before.status === 'deactivated' && data.status === 'approved') emailAccountSuspension('rider', before, false);
+        else emailDeliveryPartnerDecision(before, data.status === 'approved', data.rejectionReason);
+    }
 
     return prisma.foodDeliveryPartner.findUnique({ where: { id: String(id) } });
 };
@@ -545,6 +580,10 @@ export async function updateDeliveryPartnerProfile(id, { name, phone } = {}) {
 export async function deleteDeliveryPartner(id) {
     if (!isId(id)) throw new NotFoundError('Delivery partner not found');
 
+    const before = await prisma.foodDeliveryPartner.findUnique({
+        where: { id: String(id) },
+        select: { id: true, status: true, updatedAt: true },
+    });
     const { count } = await prisma.foodDeliveryPartner.updateMany({
         where: { id: String(id) },
         data: {
@@ -556,6 +595,7 @@ export async function deleteDeliveryPartner(id) {
         },
     });
     if (!count) throw new NotFoundError('Delivery partner not found');
+    if (before?.status === 'approved') emailAccountSuspension('rider', before, true);
 
     return prisma.foodDeliveryPartner.findUnique({ where: { id: String(id) } });
 }

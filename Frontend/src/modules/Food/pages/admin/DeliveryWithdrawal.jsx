@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo } from "react"
 import { Search, Wallet, Eye, CheckCircle, XCircle, Loader2, Package, QrCode } from "@food/components/admin/theme/icons"
 import { adminAPI } from "@food/api"
+import ExportMenu from "@food/components/admin/ExportMenu"
+import { exportDate, exportMoney, fetchAllPages } from "@food/utils/listExport"
 import { toast } from "sonner"
 import {
   Dialog,
@@ -13,6 +15,30 @@ const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
 
+
+// The same match the table applies on the page.
+const matchesSearch = (r, searchQuery) => {
+  const q = String(searchQuery || "").toLowerCase().trim()
+  if (!q) return true
+  return (
+    r.deliveryName?.toLowerCase().includes(q) ||
+    r.deliveryIdString?.toLowerCase().includes(q) ||
+    r.deliveryPhone?.toLowerCase().includes(q) ||
+    r.amount?.toString().includes(q)
+  )
+}
+
+const EXPORT_COLUMNS = [
+  { label: "Sl", value: (r, i) => i + 1 },
+  { label: "Amount", value: (r) => exportMoney(r.amount) },
+  { label: "Delivery Boy", value: (r) => r.deliveryName || "" },
+  { label: "ID", value: (r) => r.deliveryIdString || "" },
+  { label: "Phone", value: (r) => (r.deliveryPhone && r.deliveryPhone !== "N/A" ? r.deliveryPhone : "") },
+  { label: "Request Time", value: (r) => exportDate(r.requestedAt || r.createdAt) },
+  { label: "Approved/Rejected Time", value: (r) => exportDate(r.processedAt) },
+  { label: "Status", value: (r) => r.status },
+  { label: "Rejection Reason", value: (r) => r.rejectionReason || "" },
+]
 
 const TABS = [
   { key: "All", label: "All" },
@@ -67,17 +93,23 @@ export default function DeliveryWithdrawal() {
     return () => clearTimeout(timer)
   }, [searchQuery])
 
-  const filteredRequests = useMemo(() => {
-    if (!searchQuery.trim()) return requests
-    const q = searchQuery.toLowerCase().trim()
-    return requests.filter(
-      (r) =>
-        r.deliveryName?.toLowerCase().includes(q) ||
-        r.deliveryIdString?.toLowerCase().includes(q) ||
-        r.deliveryPhone?.toLowerCase().includes(q) ||
-        r.amount?.toString().includes(q)
+  const filteredRequests = useMemo(
+    () => requests.filter((r) => matchesSearch(r, searchQuery)),
+    [requests, searchQuery],
+  )
+
+  // Every request on the current tab (all pages), with the page's search.
+  const exportAllRequests = async () => {
+    const all = await fetchAllPages(
+      ({ page, limit }) =>
+        adminAPI.getDeliveryWithdrawals({ status: activeTab, page, limit, search: searchQuery.trim() || undefined }),
+      (res) => {
+        const d = res?.data?.data || {}
+        return { rows: d.requests || [], total: d.total }
+      },
     )
-  }, [requests, searchQuery])
+    return all.filter((r) => matchesSearch(r, searchQuery))
+  }
 
   const getStatusBadge = (status) => {
     if (status === "Approved" || status === "Processed") return "bg-green-100 text-green-700"
@@ -197,15 +229,23 @@ export default function DeliveryWithdrawal() {
                 {filteredRequests.length}
               </span>
             </div>
-            <div className="relative flex-1 sm:flex-initial min-w-[200px] max-w-xs">
-              <input
-                type="text"
-                placeholder="Search by delivery name, ID, phone"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10 pr-4 py-2.5 w-full text-sm rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400"
+            <div className="flex items-center gap-3">
+              <div className="relative flex-1 sm:flex-initial min-w-[200px] max-w-xs">
+                <input
+                  type="text"
+                  placeholder="Search by delivery name, ID, phone"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10 pr-4 py-2.5 w-full text-sm rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400"
+                />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              </div>
+              <ExportMenu
+                filename={`delivery-withdrawals-${activeTab.toLowerCase()}`}
+                sheetName="Delivery Withdrawals"
+                columns={EXPORT_COLUMNS}
+                getRows={exportAllRequests}
               />
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             </div>
           </div>
 

@@ -75,6 +75,7 @@ export const setRestaurantDisplayPosition = handle(
 // Bulk import / export: categories, addons, restaurants, foods
 const IMPORTERS = { categories: bulk.importCategories, addons: bulk.importAddons, restaurants: bulk.importRestaurants, foods: bulk.importFoods };
 const EXPORTERS = { categories: bulk.exportCategories, addons: bulk.exportAddons, restaurants: bulk.exportRestaurants, foods: bulk.exportFoods };
-export const bulkTemplate = (entity) => download((req) => bulk.buildTemplate(entity, req.query?.format));
+export const bulkTemplate = (entity) => download((req) =>
+    bulk.buildTemplate(entity, req.query?.format, { withData: ['1', 'true', 'yes'].includes(String(req.query?.withData || '').toLowerCase()) }));
 export const bulkImport = (entity) => handle((req) => IMPORTERS[entity](req.file), { message: 'Import finished' });
 export const bulkExport = (entity) => download((req) => EXPORTERS[entity](req.query || {}));

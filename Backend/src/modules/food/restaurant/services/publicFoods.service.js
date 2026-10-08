@@ -1,3 +1,4 @@
+import { getPrioritySort } from '../../shared/businessSettings.js';
 import { prisma } from '../../../../config/prisma.js';
 import { resolveListingZone } from '../../shared/zone.service.js';
 import { isId } from '../../../../utils/helpers.js';
@@ -83,12 +84,21 @@ export async function listPublicFoods(query = {}) {
         ]);
     }
 
+    // Business Settings > Priority setup, "category item lists": applies when
+    // a category is asked for. Newest first otherwise, as always.
+    const isCategoryList = isId(query.categoryId) || keywords.length > 0;
+    const prioritySort = isCategoryList ? await getPrioritySort('categoryItems') : null;
+    const orderBy = {
+        price_low: [{ price: 'asc' }, { createdAt: 'desc' }],
+        price_high: [{ price: 'desc' }, { createdAt: 'desc' }],
+    }[prioritySort] || { createdAt: 'desc' };
+
     const list = await prisma.foodItem.findMany({
         where,
         // variants is a relation now, so it has to be asked for — an omitted
         // include silently returns dishes that look like they have no sizes.
         include: { variants: { orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] } },
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         // With a price cap the cheap dishes can be anywhere in the catalog, so
         // read it all and cap after pricing; taking the newest N first dropped
         // every older cheap dish.

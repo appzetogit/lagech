@@ -2,7 +2,9 @@ import { useState, useEffect } from "react"
 import { useSearchParams } from "react-router-dom"
 import { Search, Download, ChevronDown, ChevronLeft, ChevronRight, Calendar, Eye, FileDown, FileSpreadsheet, FileText, X, Mail, Phone, MapPin, Package, IndianRupee, Calendar as CalendarIcon, User, CheckCircle, XCircle } from "@food/components/admin/theme/icons"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
-import { exportCustomersToCSV, exportCustomersToExcel, exportCustomersToPDF } from "@food/components/admin/customers/customersExportUtils"
+import { exportCustomersToPDF } from "@food/components/admin/customers/customersExportUtils"
+import ExportMenu from "@food/components/admin/ExportMenu"
+import { fetchAllPages, exportDate, exportMoney } from "@food/utils/listExport"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@food/components/ui/dialog"
@@ -12,6 +14,17 @@ const debugWarn = (...args) => {}
 const debugError = (...args) => {}
 
 const PAGE_SIZE = 20
+
+// The old panel's customer export columns.
+const EXPORT_COLUMNS = [
+  { label: "Sl", value: (_, i) => i + 1 },
+  { label: "Name", value: (c) => c.name },
+  { label: "Contact", value: (c) => [c.email, c.phone].filter(Boolean).join(" / ") },
+  { label: "Total order", value: (c) => Number(c.totalOrder) || 0 },
+  { label: "Total order amount", value: (c) => exportMoney(c.totalOrderAmount || 0) },
+  { label: "Joining date", value: (c) => exportDate(c.joiningDate) },
+  { label: "Active", value: (c) => (c.status ? "Active" : "Inactive") },
+]
 
 const EMPTY_FILTERS = {
   orderDate: "",
@@ -206,31 +219,39 @@ export default function Customers() {
     }
   }
 
-  const handleExport = (format) => {
+  // Every customer matching the applied search and filters, not just this page.
+  // "Choose first" caps the export the same way it caps the list.
+  const getExportRows = () => {
+    const chooseFirst = parseInt(filters.chooseFirst, 10)
+    const useChooseFirst = Number.isFinite(chooseFirst) && chooseFirst > 0
+    return fetchAllPages(
+      ({ page: pageNo, limit }) =>
+        adminAPI.getCustomers({
+          page: pageNo,
+          limit,
+          ...(searchQuery && { search: searchQuery }),
+          ...(filters.status && { status: filters.status }),
+          ...(filters.joiningDate && { joiningDate: filters.joiningDate }),
+          ...(filters.orderDate && { orderDate: filters.orderDate }),
+          ...(filters.sortBy && { sortBy: filters.sortBy }),
+        }),
+      (res) => {
+        const data = res?.data?.data || res?.data
+        return { rows: data?.customers || data?.users || [], total: data?.total }
+      },
+      { pageSize: 500, ...(useChooseFirst && { maxRows: chooseFirst }) },
+    )
+  }
+
+  // PDF stays a print of the page on screen, as before.
+  const handleExportPDF = () => {
     if (customers.length === 0) {
       toast.error("No customers to export")
       return
     }
-
-    const filename = "customers"
     try {
-      switch (format) {
-        case "csv":
-          exportCustomersToCSV(customers, filename)
-          toast.success("CSV export started")
-          break
-        case "excel":
-          exportCustomersToExcel(customers, filename)
-          toast.success("Excel export started")
-          break
-        case "pdf":
-          exportCustomersToPDF(customers, filename)
-          toast.success("PDF download started")
-          break
-        default:
-          toast.error("Invalid export format")
-          break
-      }
+      exportCustomersToPDF(customers, "customers")
+      toast.success("PDF download started")
     } catch (error) {
       debugError("Export error:", error)
       toast.error("Failed to export customers")
@@ -407,31 +428,16 @@ export default function Customers() {
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               </div>
 
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button className="px-4 py-2.5 text-sm font-medium rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-2 transition-all">
-                    <Download className="w-4 h-4" />
-                    <span className="text-black font-bold">Export</span>
-                    <ChevronDown className="w-3 h-3" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56 bg-white border border-slate-200 rounded-lg shadow-lg z-50">
-                  <DropdownMenuLabel>Export Format</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => handleExport("csv")} className="cursor-pointer">
-                    <FileDown className="w-4 h-4 mr-2" />
-                    Export as CSV
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleExport("excel")} className="cursor-pointer">
-                    <FileSpreadsheet className="w-4 h-4 mr-2" />
-                    Export as Excel
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleExport("pdf")} className="cursor-pointer">
-                    <FileText className="w-4 h-4 mr-2" />
-                    Export as PDF
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <button
+                type="button"
+                onClick={handleExportPDF}
+                title="PDF of this page"
+                className="px-4 py-2.5 text-sm font-medium rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-2 transition-all"
+              >
+                <FileText className="w-4 h-4" />
+                <span className="text-black font-bold">PDF</span>
+              </button>
+              <ExportMenu filename="customers" columns={EXPORT_COLUMNS} getRows={getExportRows} />
             </div>
           </div>
 

@@ -8,6 +8,14 @@ import {
   formatDateTime,
 } from "@food/api/adminCustomerExtras"
 import { PageHeader, Pager, inputClass } from "./wallet/shared"
+import ExportMenu from "@food/components/admin/ExportMenu"
+import { fetchAllPages, exportDate } from "@food/utils/listExport"
+
+const EXPORT_COLUMNS = [
+  { label: "Sl", value: (_, i) => i + 1 },
+  { label: "Email", value: (s) => s.email },
+  { label: "Subscribed at", value: (s) => exportDate(s.createdAt) },
+]
 
 /** Newsletter subscribers (old panel: Subscribed Mail List). */
 export default function SubscribedMailList() {
@@ -15,7 +23,6 @@ export default function SubscribedMailList() {
   const [page, setPage] = useState(1)
   const [reload, setReload] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [exporting, setExporting] = useState(false)
   const [data, setData] = useState({ subscribers: [], pagination: null })
 
   useEffect(() => {
@@ -40,24 +47,17 @@ export default function SubscribedMailList() {
     }
   }, [search, page, reload])
 
-  const exportCsv = async () => {
-    try {
-      setExporting(true)
-      const res = await customerExtrasAPI.exportSubscribers({ search: search.trim() || undefined })
-      const url = URL.createObjectURL(new Blob([res.data], { type: "text/csv;charset=utf-8" }))
-      const a = document.createElement("a")
-      a.href = url
-      a.download = `subscribed-mail-list-${new Date().toISOString().slice(0, 10)}.csv`
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      URL.revokeObjectURL(url)
-    } catch {
-      toast.error("Could not export the list")
-    } finally {
-      setExporting(false)
-    }
-  }
+  // Every subscriber matching the search, across all pages.
+  const getExportRows = () =>
+    fetchAllPages(
+      ({ page: pageNo, limit }) =>
+        customerExtrasAPI.getSubscribers({ search: search.trim() || undefined, page: pageNo, limit }),
+      (res) => {
+        const d = dataOf(res)
+        return { rows: d.subscribers || [], total: d.pagination?.total, pages: d.pagination?.pages }
+      },
+      { pageSize: 100 },
+    )
 
   const remove = async (s) => {
     if (!window.confirm(`Remove ${s.email} from the mail list?`)) return
@@ -87,9 +87,7 @@ export default function SubscribedMailList() {
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <input className={`${inputClass} pl-9`} placeholder="Search by email" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1) }} />
               </div>
-              <button type="button" onClick={exportCsv} disabled={exporting || !total} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
-                {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Export CSV
-              </button>
+              <ExportMenu filename="subscribed_mail_list" columns={EXPORT_COLUMNS} getRows={getExportRows} disabled={!total} />
             </div>
           </div>
           {loading ? (
