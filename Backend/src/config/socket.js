@@ -250,7 +250,6 @@ export const initSocket = async (server) => {
             if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
             if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return;
 
-            const heading = Number.isFinite(Number(data.heading)) ? Number(data.heading) : 0;
             const speed = Number.isFinite(Number(data.speed)) ? Number(data.speed) : 0;
             const accuracy = Number.isFinite(Number(data.accuracy)) ? Number(data.accuracy) : null;
 
@@ -259,6 +258,23 @@ export const initSocket = async (server) => {
             const lastTS = _lastLocationBroadcast[data.orderId] || 0;
             if (now - lastTS < 2000) return;
             _lastLocationBroadcast[data.orderId] = now;
+
+            // A ping without a heading keeps the order's last known heading
+            // rather than snapping the customer's bike icon to north (0).
+            let heading = 0;
+            let headingFromDevice = false;
+            try {
+                const [{ riderHeadings }, { getRedisClient }] = await Promise.all([
+                    import('../modules/food/delivery/services/riderHeading.js'),
+                    import('./redis.js'),
+                ]);
+                const redis = getRedisClient();
+                ({ heading, headingFromDevice } = await riderHeadings.resolve(data.orderId, data.heading, {
+                    redis: redis?.isReady ? redis : null,
+                }));
+            } catch (err) {
+                logger.warn(`Heading lookup failed: ${err?.message || err}`);
+            }
 
             const payload = {
                 orderId: String(data.orderId),
@@ -269,6 +285,8 @@ export const initSocket = async (server) => {
                 boy_lng: lng,
                 riderLocation: [lat, lng], // Add array format for safety
                 heading,
+                // false: the rider sent no heading and `heading` is the last known one.
+                headingFromDevice,
                 speed,
                 accuracy,
                 timestamp: now

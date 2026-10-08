@@ -146,7 +146,9 @@ test('switching to cash moves the order and the ledger row together', async () =
     const order = await outForDelivery();
 
     const result = await switchToCash(order.id, partnerId);
-    assert.deepEqual(result, { success: true });
+    assert.equal(result.success, true);
+    assert.equal(result.method, 'cash');
+    assert.equal(result.amount, 500, 'what the rider now takes in cash');
 
     const [row, tx] = await Promise.all([
         prisma.foodOrder.findUnique({ where: { id: order.id } }),

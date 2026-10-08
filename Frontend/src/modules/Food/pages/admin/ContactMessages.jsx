@@ -16,6 +16,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@food/components/ui/dropdown-menu"
+import ExportMenu from "@food/components/admin/ExportMenu"
+import { fetchAllPages, exportDate } from "@food/utils/listExport"
 
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
@@ -91,10 +93,39 @@ export default function ContactMessages() {
     })
   }
 
+  const blankNA = (value) => (value && value !== "N/A" ? value : "")
+  const exportColumns = [
+    { label: "Sl", value: (_, i) => i + 1 },
+    { label: "Name", value: (f) => blankNA(f.customer?.name) },
+    { label: "Email", value: (f) => blankNA(f.customer?.email) },
+    { label: "Phone", value: (f) => blankNA(f.customer?.phone) },
+    { label: "Feedback", value: (f) => (f.comment ? normalizeFeedbackScaleText(f.comment) : "") },
+    { label: "Rating", value: (f) => normalizeRatingToFive(f.rating) },
+    { label: "Date", value: (f) => exportDate(f.submittedAt) },
+  ]
+
+  // Every message matching the rating filter and search, across all pages.
+  const getExportRows = () =>
+    fetchAllPages(
+      ({ page, limit }) =>
+        adminAPI.getContactMessages({
+          page,
+          limit,
+          rating: ratingFilter !== 'all' ? ratingFilter : undefined,
+          search: searchQuery.trim() || undefined,
+        }),
+      (res) => ({
+        rows: res?.data?.data?.reviews || [],
+        total: res?.data?.data?.pagination?.total,
+        pages: res?.data?.data?.pagination?.totalPages,
+      }),
+      { pageSize: 100 },
+    )
+
   const renderStars = (rating) => {
     const stars = []
     const count = Math.floor(rating || 0)
-    
+
     for (let i = 0; i < count; i++) {
       stars.push(<Star key={i} className="w-5 h-5 fill-amber-500 text-amber-500" />)
     }
@@ -176,6 +207,8 @@ export default function ContactMessages() {
               />
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             </div>
+
+            <ExportMenu filename="user_feedback" columns={exportColumns} getRows={getExportRows} />
           </div>
         </div>
       </div>

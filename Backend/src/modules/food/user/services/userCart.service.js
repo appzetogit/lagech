@@ -41,6 +41,8 @@ const normalizeCartItems = (items = []) => {
             return {
                 lineItemId: String(item.lineItemId || item.id || ''),
                 itemId: String(item.itemId || item.productId || item.id || ''),
+                // A food campaign dish; priced from the campaign wherever it is priced.
+                ...(item.campaignId ? { campaignId: String(item.campaignId) } : {}),
                 name: String(item.name || 'Item').trim(),
                 price,
                 otherPrice: (() => {
@@ -85,6 +87,9 @@ const normalizePricingSnapshot = (pricing = null) => {
         deliveryFeeGst,
         platformFee,
         quickDeliveryFee,
+        /** Part of platformFee (Business Settings additional charge). */
+        additionalCharge: toNonNegativeNumber(pricing.additionalCharge, 0),
+        additionalChargeName: String(pricing.additionalChargeName || ''),
         deliveryMode,
         discount,
         total,
@@ -99,6 +104,7 @@ const mapCartItemsForPricing = (items = []) =>
     items.map((item) => ({
         itemId: item.itemId,
         id: item.itemId,
+        campaignId: item.campaignId || undefined,
         price: item.price,
         quantity: item.quantity,
         variantId: item.variantId || undefined,

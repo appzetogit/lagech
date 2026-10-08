@@ -1,6 +1,44 @@
-import { useEffect, useMemo, useState } from "react";
-import { BellRing, Loader2, Search, Send, Trash2 } from "@food/components/admin/theme/icons";
-import { adminAPI } from "@food/api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { BellRing, Loader2, Search, Send, Trash2, Upload, RefreshCw, Download, ChevronDown, X } from "@food/components/admin/theme/icons";
+import api, { adminAPI, uploadAPI } from "@food/api";
+import { resolveMediaUrl } from "../../../../../shared/utils/mediaUrl.js";
+
+const ADMIN = { contextModule: "admin" };
+
+/** The sent list as a file: CSV, or a tab-separated .xls Excel opens directly. */
+const exportHistory = (rows, kind) => {
+  const headers = ["SL", "Title", "Description", "Image", "Target", "Zone", "Recipients", "Status", "Times sent", "Created", "Last sent"];
+  const lines = rows.map((item, index) => [
+    index + 1,
+    item.title || "",
+    item.message || "",
+    item.image ? resolveMediaUrl(item.image) : "",
+    item.targetLabel || item.targetType || "",
+    item.zoneName || "All zones",
+    item.targetCount || 0,
+    item.isActive === false ? "Inactive" : "Active",
+    item.sendCount || 1,
+    item.createdAt ? new Date(item.createdAt).toISOString() : "",
+    item.lastSentAt ? new Date(item.lastSentAt).toISOString() : "",
+  ]);
+  const csv = kind === "csv";
+  const cell = (value) => {
+    const text = String(value ?? "");
+    return csv ? `"${text.replace(/"/g, '""')}"` : text.replace(/[\t\r\n]+/g, " ");
+  };
+  const body = [headers, ...lines].map((row) => row.map(cell).join(csv ? "," : "\t")).join("\n");
+  const blob = new Blob(["\ufeff" + body], {
+    type: csv ? "text/csv;charset=utf-8;" : "application/vnd.ms-excel",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `push_notifications_${new Date().toISOString().split("T")[0]}.${csv ? "csv" : "xls"}`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+};
 
 const TARGET_OPTIONS = [
   { value: "ALL", label: "All" },
@@ -54,7 +92,16 @@ export default function NotificationBroadcast() {
     lapsedIncludeNeverOrdered: false,
     // Optional coupon sent with the campaign.
     couponId: "",
+    // Narrows every audience except a hand-picked list.
+    zoneId: "",
   });
+  const [zones, setZones] = useState([]);
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreview, setImagePreview] = useState("");
+  const [formError, setFormError] = useState("");
+  const [busyId, setBusyId] = useState("");
+  const [exportOpen, setExportOpen] = useState(false);
+  const imageInput = useRef(null);
   const [lapsedPreview, setLapsedPreview] = useState(null);
   const [coupons, setCoupons] = useState([]);
   const [lapsedLoading, setLapsedLoading] = useState(false);
@@ -118,7 +165,54 @@ export default function NotificationBroadcast() {
 
   useEffect(() => {
     loadHistory();
+    adminAPI.getZones({ limit: 1000 })
+      .then((res) => setZones(res?.data?.data?.zones || []))
+      .catch(() => setZones([]));
   }, []);
+
+  const clearImage = () => {
+    setImageFile(null);
+    setImagePreview("");
+    if (imageInput.current) imageInput.current.value = "";
+  };
+
+  const handleImage = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      setFormError("Image must be 2 MB or smaller");
+      return;
+    }
+    setFormError("");
+    setImageFile(file);
+    setImagePreview(URL.createObjectURL(file));
+  };
+
+  const handleResend = async (item) => {
+    if (!window.confirm(`Send "${item.title}" again to the same ${item.targetCount || ""} recipients?`)) return;
+    try {
+      setBusyId(item._id);
+      await api.post(`/food/admin/notifications/broadcast/${item._id}/resend`, {}, ADMIN);
+      await loadHistory();
+    } catch (error) {
+      alert(error?.response?.data?.message || "Failed to resend");
+    } finally {
+      setBusyId("");
+    }
+  };
+
+  const handleStatus = async (item) => {
+    const next = item.isActive === false;
+    try {
+      setBusyId(item._id);
+      await api.patch(`/food/admin/notifications/broadcast/${item._id}/status`, { isActive: next }, ADMIN);
+      setHistory((prev) => prev.map((row) => (row._id === item._id ? { ...row, isActive: next } : row)));
+    } catch (error) {
+      alert(error?.response?.data?.message || "Failed to update status");
+    } finally {
+      setBusyId("");
+    }
+  };
 
   useEffect(() => {
     if (form.targetType !== "CUSTOM") return;
@@ -219,10 +313,18 @@ export default function NotificationBroadcast() {
 
     try {
       setSubmitting(true);
+      setFormError("");
+      let image = "";
+      if (imageFile) {
+        const uploaded = await uploadAPI.uploadMedia(imageFile, { folder: "food/push-notifications" });
+        image = uploaded?.data?.data?.url || "";
+      }
       await adminAPI.createBroadcastNotification({
         title: form.title.trim(),
         message: form.message.trim(),
         targetType: form.targetType,
+        ...(image ? { image } : {}),
+        ...(form.zoneId && form.targetType !== "CUSTOM" ? { zoneId: form.zoneId } : {}),
         ...(form.couponId ? { couponId: form.couponId } : {}),
         ...(form.targetType === "LAPSED"
           ? {
@@ -244,11 +346,14 @@ export default function NotificationBroadcast() {
               }))
             : [],
       });
-      setForm({ title: "", message: "", targetType: "ALL" });
+      setForm((prev) => ({ ...prev, title: "", message: "", targetType: "ALL", couponId: "", zoneId: "" }));
+      clearImage();
       setSelectedRecipients([]);
       setSearch("");
       window.dispatchEvent(new Event("adminBroadcastUpdated"));
       await loadHistory();
+    } catch (error) {
+      setFormError(error?.response?.data?.message || "Failed to send notification");
     } finally {
       setSubmitting(false);
     }
@@ -271,9 +376,9 @@ export default function NotificationBroadcast() {
             <BellRing className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">Broadcast Notification</h1>
+            <h1 className="text-2xl font-bold text-slate-900">Push Notification</h1>
             <p className="text-sm text-slate-500 mt-1">
-              Send one notification to all, role-based, or selected recipients without touching other admin flows.
+              Send one notification to customers, restaurants, delivery partners or selected people, optionally in one zone and with an image.
             </p>
           </div>
         </div>
@@ -304,6 +409,52 @@ export default function NotificationBroadcast() {
                 ))}
               </select>
             </label>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <label className="block">
+              <span className="text-sm font-semibold text-slate-700">Zone</span>
+              <select
+                value={form.targetType === "CUSTOM" ? "" : form.zoneId}
+                disabled={form.targetType === "CUSTOM"}
+                onChange={(event) => setForm((prev) => ({ ...prev, zoneId: event.target.value }))}
+                className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50"
+              >
+                <option value="">All zones</option>
+                {zones.map((zone) => (
+                  <option key={zone._id || zone.id} value={zone._id || zone.id}>{zone.name}</option>
+                ))}
+              </select>
+              <span className="mt-1 block text-xs text-slate-500">
+                {form.targetType === "CUSTOM"
+                  ? "Particular persons are sent to exactly as picked."
+                  : "Customers with a saved address or an order in the zone; restaurants and riders assigned to it."}
+              </span>
+            </label>
+
+            <div>
+              <span className="text-sm font-semibold text-slate-700">Image <span className="font-normal text-slate-500">(optional)</span></span>
+              <div className="mt-2 flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => imageInput.current?.click()}
+                  className="w-32 h-16 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 overflow-hidden flex items-center justify-center hover:border-blue-500"
+                >
+                  {imagePreview ? (
+                    <img src={imagePreview} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <Upload className="w-6 h-6 text-slate-400" />
+                  )}
+                </button>
+                {imagePreview && (
+                  <button type="button" onClick={clearImage} className="inline-flex items-center gap-1 text-xs text-slate-600 hover:text-red-600">
+                    <X className="w-3 h-3" /> Remove
+                  </button>
+                )}
+                <input ref={imageInput} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={handleImage} />
+              </div>
+              <span className="mt-1 block text-xs text-slate-500">Shown as the notification's picture. JPG, PNG or WebP, max 2 MB.</span>
+            </div>
           </div>
 
           {form.targetType === "LAPSED" && (
@@ -478,6 +629,8 @@ export default function NotificationBroadcast() {
             </div>
           )}
 
+          {formError && <p className="text-sm text-red-600">{formError}</p>}
+
           <div className="flex justify-end">
             <button
               type="submit"
@@ -485,7 +638,7 @@ export default function NotificationBroadcast() {
               className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
             >
               {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-              Send Broadcast
+              Save &amp; Send
             </button>
           </div>
         </form>
@@ -494,8 +647,24 @@ export default function NotificationBroadcast() {
       <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6">
         <div className="flex items-center justify-between gap-4 mb-4">
           <div>
-            <h2 className="text-xl font-bold text-slate-900">History</h2>
-            <p className="text-sm text-slate-500">Latest sent broadcasts and their targets.</p>
+            <h2 className="text-xl font-bold text-slate-900">Notification List</h2>
+            <p className="text-sm text-slate-500">Sent notifications. Resend pushes one again to the same recipients.</p>
+          </div>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setExportOpen((open) => !open)}
+              disabled={history.length === 0}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              <Download className="w-4 h-4" /> Export <ChevronDown className="w-3 h-3" />
+            </button>
+            {exportOpen && (
+              <div className="absolute right-0 mt-1 w-32 rounded-xl border border-slate-200 bg-white shadow-lg z-10">
+                <button type="button" onClick={() => { setExportOpen(false); exportHistory(history, "xls"); }} className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50">Excel</button>
+                <button type="button" onClick={() => { setExportOpen(false); exportHistory(history, "csv"); }} className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50">CSV</button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -511,23 +680,64 @@ export default function NotificationBroadcast() {
             <table className="min-w-full text-sm">
               <thead>
                 <tr className="text-left text-slate-500 border-b border-slate-200">
+                  <th className="py-3 pr-4 font-semibold">SL</th>
+                  <th className="py-3 pr-4 font-semibold">Image</th>
                   <th className="py-3 pr-4 font-semibold">Title</th>
-                  <th className="py-3 pr-4 font-semibold">Message</th>
+                  <th className="py-3 pr-4 font-semibold">Description</th>
                   <th className="py-3 pr-4 font-semibold">Target</th>
+                  <th className="py-3 pr-4 font-semibold">Zone</th>
                   <th className="py-3 pr-4 font-semibold">Recipients</th>
                   <th className="py-3 pr-4 font-semibold">Date</th>
+                  <th className="py-3 pr-4 font-semibold">Status</th>
                   <th className="py-3 text-right font-semibold">Action</th>
                 </tr>
               </thead>
               <tbody>
-                {history.map((item) => (
+                {history.map((item, index) => (
                   <tr key={item?._id} className="border-b border-slate-100 align-top">
+                    <td className="py-4 pr-4 text-slate-700">{index + 1}</td>
+                    <td className="py-4 pr-4">
+                      {item?.image ? (
+                        <img src={resolveMediaUrl(item.image)} alt="" className="w-16 h-10 rounded-lg object-cover bg-slate-100" />
+                      ) : (
+                        <span className="text-xs text-slate-400">None</span>
+                      )}
+                    </td>
                     <td className="py-4 pr-4 font-semibold text-slate-900">{item?.title || "Notification"}</td>
                     <td className="py-4 pr-4 text-slate-600 max-w-sm">{item?.message || "-"}</td>
                     <td className="py-4 pr-4 text-slate-700">{item?.targetLabel || item?.targetType}</td>
+                    <td className="py-4 pr-4 text-slate-700">{item?.zoneName || "All zones"}</td>
                     <td className="py-4 pr-4 text-slate-700">{item?.targetCount || item?.targets?.length || 0}</td>
-                    <td className="py-4 pr-4 text-slate-500 whitespace-nowrap">{toDateLabel(item?.createdAt)}</td>
-                    <td className="py-4 text-right">
+                    <td className="py-4 pr-4 text-slate-500 whitespace-nowrap">
+                      {toDateLabel(item?.createdAt)}
+                      {item?.sendCount > 1 && (
+                        <div className="text-xs text-slate-400">Sent {item.sendCount}x, last {toDateLabel(item.lastSentAt)}</div>
+                      )}
+                    </td>
+                    <td className="py-4 pr-4">
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={item?.isActive !== false}
+                        title={item?.isActive !== false ? "Shown in recipients' inbox" : "Hidden from recipients' inbox"}
+                        disabled={busyId === item?._id}
+                        onClick={() => handleStatus(item)}
+                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-50 ${item?.isActive !== false ? "bg-blue-600" : "bg-slate-300"}`}
+                      >
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${item?.isActive !== false ? "translate-x-4" : "translate-x-0.5"}`} />
+                      </button>
+                    </td>
+                    <td className="py-4 text-right whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => handleResend(item)}
+                        disabled={busyId === item?._id || item?.isActive === false}
+                        title={item?.isActive === false ? "Turn it on to resend" : "Send again to the same recipients"}
+                        className="mr-2 inline-flex items-center gap-2 rounded-xl border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-600 hover:bg-blue-50 disabled:opacity-50"
+                      >
+                        {busyId === item?._id ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                        Resend
+                      </button>
                       <button
                         type="button"
                         onClick={() => handleDelete(item?._id)}

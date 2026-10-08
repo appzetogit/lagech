@@ -30,7 +30,9 @@ const toRing = (geoJson) => {
 
 export async function importZones(mysql, report) {
     const [rows] = await mysql.query(
-        'SELECT id, name, display_name, status, created_at, ST_AsGeoJSON(coordinates) AS geo FROM zones ORDER BY id'
+        `SELECT id, name, display_name, status, created_at, cash_on_delivery, digital_payment, is_default,
+                ST_AsGeoJSON(coordinates) AS geo
+         FROM zones ORDER BY id`
     );
     const idMap = await loadIdMap(ENTITY);
 
@@ -41,6 +43,11 @@ export async function importZones(mysql, report) {
             serviceLocation: String(row.display_name || row.name).trim(),
             coordinates: toRing(row.geo),
             isActive: row.status === 1,
+            // The old Zone setup's switches. A default flag is only ever set,
+            // never cleared, so a default chosen here survives a re-run.
+            cashOnDelivery: Number(row.cash_on_delivery) === 1,
+            digitalPayment: Number(row.digital_payment) === 1,
+            ...(Number(row.is_default) === 1 && row.status === 1 ? { isDefault: true } : {}),
         };
 
         const existingId = idMap.get(String(row.id));

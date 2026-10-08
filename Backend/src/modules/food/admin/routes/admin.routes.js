@@ -28,6 +28,9 @@ import adminCustomerExtrasRoutes from './adminCustomerExtras.routes.js';
 import adminRiderExtrasRoutes from './adminRiderExtras.routes.js';
 import adminSystemExtrasRoutes from './adminSystemExtras.routes.js';
 import adminCatalogExtrasRoutes from './adminCatalogExtras.routes.js';
+import adminOrderReportsRoutes from './adminOrderReports.routes.js';
+import adminListToolsRoutes from './adminListTools.routes.js';
+import adminRefundRequestsRoutes from './adminRefundRequests.routes.js';
 
 const router = express.Router();
 
@@ -154,6 +157,9 @@ router.use(adminRiderExtrasRoutes); // Add Delivery Man, vehicle categories, rid
 // system settings, social media, gallery -- guarded by the mapping above.
 router.use(adminSystemExtrasRoutes);
 router.use(adminCatalogExtrasRoutes); // reviews, gallery, addon categories, recommended, bulk import/export, campaigns
+router.use(adminOrderReportsRoutes); // transaction / order report and restaurant-wise report, with exports
+router.use(adminListToolsRoutes); // order export, restaurant featured / verify all
+router.use(adminRefundRequestsRoutes); // customer refund requests: list, detail, approve, reject
 
 router.post('/sub-admins', requireAdminPermission('sub_admin_management', 'create'), adminController.createSubAdmin);
 router.get('/sub-admins', adminController.listSubAdmins);
@@ -176,6 +182,8 @@ router.get('/notifications/broadcast', notificationBroadcastController.getBroadc
 // system_settings guard the broadcast routes already carry.
 router.get('/notifications/lapsed-customers', notificationBroadcastController.getLapsedCustomersController);
 router.delete('/notifications/broadcast/:id', notificationBroadcastController.deleteBroadcastNotificationController);
+router.post('/notifications/broadcast/:id/resend', notificationBroadcastController.resendBroadcastNotificationController);
+router.patch('/notifications/broadcast/:id/status', notificationBroadcastController.setBroadcastNotificationStatusController);
 
 // ----- Customer wallet, loyalty points, newsletter list, user overview -----
 router.use(adminCustomerExtrasRoutes);
@@ -362,6 +370,9 @@ router.post('/foods/bulk-approve', adminController.bulkApproveFoodItems);
 // ----- Offers & Coupons -----
 router.get('/offers', adminController.getAllOffers);
 router.post('/offers', adminController.createAdminOffer);
+router.get('/offers/:id', adminController.getAdminOffer);
+router.put('/offers/:id', adminController.updateAdminOffer);
+router.patch('/offers/:id/status', adminController.setAdminOfferStatus);
 router.patch('/offers/:id/cart-visibility', adminController.updateAdminOfferCartVisibility);
 router.delete('/offers/:id', adminController.deleteAdminOffer);
 
@@ -555,6 +566,8 @@ router.get(
 // Before /orders/:orderId, which would otherwise take "dispatch-board" as an order id.
 router.get('/orders/dispatch-board', adminController.getDispatchBoard);
 router.get('/orders/:orderId', orderController.getOrderByIdAdminController);
+// Printable invoice: JSON, or ?format=html (thermal 80 mm; &size=a4).
+router.get('/orders/:orderId/invoice', orderController.getOrderInvoiceAdminController);
 router.patch('/orders/:orderId/accept', orderController.acceptOrderAdminController);
 router.patch('/orders/:orderId/reject', orderController.rejectOrderAdminController);
 // Assigning a rider by hand. The controller existed but no route reached it,
@@ -576,6 +589,10 @@ router.post(
     orderController.resendDeliveryNotificationAdminController
 );
 router.post('/orders/:orderId/refund', orderController.processRefundAdminController);
+// Offline payments: the admin confirms the money arrived, or says why not.
+// Under /orders, so order_management (edit) guards them like the rest.
+router.patch('/orders/:orderId/offline-payment/verify', orderController.verifyOfflinePaymentAdminController);
+router.patch('/orders/:orderId/offline-payment/reject', orderController.rejectOfflinePaymentAdminController);
 router.delete('/orders/:orderId', orderController.deleteOrderAdminController);
 
 // ----- CMS Pages (About + legal) -----

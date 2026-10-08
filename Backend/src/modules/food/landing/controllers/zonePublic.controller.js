@@ -1,6 +1,8 @@
 import { prisma } from '../../../../config/prisma.js';
 import { getRedisClient } from '../../../../config/redis.js';
-import { findZoneForPoint } from '../../shared/zone.service.js';
+import { findZoneForPoint, resolveListingZone } from '../../shared/zone.service.js';
+import { getZonePaymentOptions, resolveOrderZoneId } from '../../shared/zonePayment.js';
+import { isId } from '../../../../utils/helpers.js';
 
 const ACTIVE_ZONES_CACHE_KEY = 'zones:active:list:v1';
 const ACTIVE_ZONES_CACHE_TTL_SECONDS = 120;
@@ -70,7 +72,44 @@ const toPublicZone = (zone) => ({
     isActive: zone.isActive,
     coordinates: zone.coordinates,
     createdAt: zone.createdAt,
+    // Additive: the zone's payment switches and whether it is the default zone.
+    cashOnDelivery: zone.cashOnDelivery !== false,
+    digitalPayment: zone.digitalPayment !== false,
+    isDefault: zone.isDefault === true,
 });
+
+/**
+ * GET /zones/payment-options?restaurantId=..|zoneId=..|lat=..&lng=..
+ *
+ * Which payment methods an order would be accepted with. An order's zone is
+ * the zone sent, else the restaurant's, else the default zone, so a checkout
+ * that knows the restaurant gets exactly what createOrder will enforce.
+ */
+export const zonePaymentOptionsPublicController = async (req, res, next) => {
+    try {
+        const restaurantId = String(req.query.restaurantId || '').trim();
+        const restaurant = isId(restaurantId)
+            ? await prisma.foodRestaurant.findUnique({ where: { id: restaurantId }, select: { zoneId: true } })
+            : null;
+        const listing = req.query.zoneId || (req.query.lat != null && req.query.lng != null)
+            ? await resolveListingZone(req.query)
+            : { zoneId: null };
+        const zoneId = await resolveOrderZoneId(listing.zoneId, restaurant);
+        const options = await getZonePaymentOptions(zoneId);
+        return res.status(200).json({
+            success: true,
+            message: 'Payment options fetched',
+            data: {
+                ...options,
+                // Methods not governed by zones are always listed here as
+                // available; offline payment has its own public endpoint.
+                wallet: true,
+            },
+        });
+    } catch (error) {
+        next(error);
+    }
+};
 
 /** GET /zones/detect?lat=..&lng=.. */
 export const detectZonePublicController = async (req, res, next) => {
@@ -117,10 +156,11 @@ export const detectZonePublicController = async (req, res, next) => {
 export const listZonesPublicController = async (_req, res, next) => {
     try {
         const zones = await getActiveZones();
+        const defaultZone = zones.find((zone) => zone.isDefault === true) || null;
         return res.status(200).json({
             success: true,
             message: 'Zones fetched successfully',
-            data: { zones: zones.map(toPublicZone) },
+            data: { zones: zones.map(toPublicZone), defaultZoneId: defaultZone?.id || null },
         });
     } catch (error) {
         next(error);

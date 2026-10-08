@@ -1,6 +1,7 @@
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
+import { getBusinessModels } from '../../shared/businessSettings.js';
 
 /**
  * Restaurant commissions and the delivery payout slabs, extracted from
@@ -65,6 +66,14 @@ export async function setRestaurantBillingMode(restaurantId, mode) {
     if (!isId(restaurantId)) throw new ValidationError('Restaurant not found');
     if (!BILLING_MODES.includes(String(mode))) {
         throw new ValidationError(`Billing mode must be one of: ${BILLING_MODES.join(', ')}`);
+    }
+    // Business Settings > Business info: only a business model that is on may be chosen.
+    const models = await getBusinessModels();
+    if (mode === 'subscription' && !models.subscriptionModel) {
+        throw new ValidationError('The subscription business model is off (Business Settings > Business info). Turn it on to put a restaurant on a subscription.');
+    }
+    if (mode !== 'subscription' && !models.commissionModel && models.subscriptionModel) {
+        throw new ValidationError('The commission business model is off (Business Settings > Business info): restaurants must be on a subscription.');
     }
 
     const { count } = await prisma.foodRestaurant.updateMany({

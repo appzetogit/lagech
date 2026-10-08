@@ -139,6 +139,12 @@ CREATE UNIQUE INDEX "earning_addon_one_grant_per_partner"
 CREATE UNIQUE INDEX IF NOT EXISTS "food_user_addresses_one_default_per_user"
   ON "food_user_addresses" ("userId") WHERE "isDefault";
 
+-- ─── one open refund request per order ──────────────────────────────────────
+-- The service checks before it inserts; two taps arriving together would both
+-- pass that check. Rejected and refunded requests are history and may repeat.
+CREATE UNIQUE INDEX IF NOT EXISTS "food_refund_requests_one_open_per_order"
+  ON "food_refund_requests" ("orderId") WHERE ("status" IN ('pending', 'approved'));
+
 -- ─── menu item variants ──────────────────────────────────────────────────────
 -- normalizeFoodVariantsInput already rejects a price <= 0, but it was the only
 -- thing asserting it: a variant written by the bulk uploader, an admin script or

@@ -2,12 +2,39 @@ import { useState, useMemo, useEffect } from "react"
 import { Search, Download, ChevronDown, Star, ArrowUpDown, Settings, FileText, FileSpreadsheet, Code, Check, Columns, Loader2, Eye } from "@food/components/admin/theme/icons"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
-import { exportReviewsToCSV, exportReviewsToExcel, exportReviewsToPDF, exportReviewsToJSON } from "@food/components/admin/deliveryman/deliverymanExportUtils"
+import { exportReviewsToPDF } from "@food/components/admin/deliveryman/deliverymanExportUtils"
+import ExportMenu from "@food/components/admin/ExportMenu"
+import { fetchAllPages, exportDate } from "@food/utils/listExport"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
+
+// The search box filters in the browser; the export applies the same test.
+const filterReviews = (list, search) => {
+  const query = String(search || "").toLowerCase().trim()
+  if (!query) return list
+  return list.filter(review =>
+    String(review.deliveryman || "").toLowerCase().includes(query) ||
+    String(review.customer || "").toLowerCase().includes(query) ||
+    String(review.review || "").toLowerCase().includes(query) ||
+    (review.orderId && String(review.orderId).toLowerCase().includes(query)) ||
+    (review.deliverymanId && review.deliverymanId.toString().toLowerCase().includes(query))
+  )
+}
+
+const EXPORT_COLUMNS = [
+  { label: "Sl", value: (_, i) => i + 1 },
+  { label: "Order ID", value: (r) => r.orderId },
+  { label: "Deliveryman", value: (r) => r.deliveryman },
+  { label: "Deliveryman phone", value: (r) => (r.deliverymanPhone === "N/A" ? "" : r.deliverymanPhone) },
+  { label: "Customer", value: (r) => r.customer },
+  { label: "Customer phone", value: (r) => (r.customerPhone === "N/A" ? "" : r.customerPhone) },
+  { label: "Review", value: (r) => r.review },
+  { label: "Rating", value: (r) => Number(r.rating) || 0 },
+  { label: "Date", value: (r) => exportDate(r.submittedAt) },
+]
 
 
 export default function DeliverymanReviews() {
@@ -28,32 +55,25 @@ export default function DeliverymanReviews() {
     date: true,
   })
 
-  const filteredReviews = useMemo(() => {
-    if (!searchQuery.trim()) {
-      return reviews
-    }
-    
-    const query = searchQuery.toLowerCase().trim()
-    return reviews.filter(review =>
-      review.deliveryman.toLowerCase().includes(query) ||
-      review.customer.toLowerCase().includes(query) ||
-      review.review.toLowerCase().includes(query) ||
-      (review.orderId && review.orderId.toLowerCase().includes(query)) ||
-      (review.deliverymanId && review.deliverymanId.toString().toLowerCase().includes(query))
-    )
-  }, [reviews, searchQuery])
+  const filteredReviews = useMemo(() => filterReviews(reviews, searchQuery), [reviews, searchQuery])
 
-  const handleExport = (format) => {
+  // Every review (all API pages, not only the 1000 the table loads), narrowed
+  // by the same search the table applies.
+  const getExportRows = async () => {
+    const all = await fetchAllPages(
+      ({ page, limit }) => adminAPI.getDeliverymanReviews({ page, limit }),
+      (res) => ({ rows: res?.data?.data?.reviews || [], total: res?.data?.data?.total }),
+      { pageSize: 1000 },
+    )
+    return filterReviews(all, searchQuery)
+  }
+
+  const handleExportPDF = () => {
     if (filteredReviews.length === 0) {
       alert("No data to export")
       return
     }
-    switch (format) {
-      case "csv": exportReviewsToCSV(filteredReviews); break
-      case "excel": exportReviewsToExcel(filteredReviews); break
-      case "pdf": exportReviewsToPDF(filteredReviews); break
-      case "json": exportReviewsToJSON(filteredReviews); break
-    }
+    exportReviewsToPDF(filteredReviews)
   }
 
   const toggleColumn = (columnKey) => {
@@ -193,35 +213,15 @@ export default function DeliverymanReviews() {
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               </div>
 
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button className="px-4 py-2.5 text-sm font-medium rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-2 transition-all">
-                    <Download className="w-4 h-4" />
-                    <span className="text-black font-bold">Export</span>
-                    <ChevronDown className="w-3 h-3" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56 bg-white border border-slate-200 rounded-lg shadow-lg z-50 animate-in fade-in-0 zoom-in-95 duration-200 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95">
-                  <DropdownMenuLabel>Export Format</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => handleExport("csv")} className="cursor-pointer">
-                    <FileText className="w-4 h-4 mr-2" />
-                    Export as CSV
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleExport("excel")} className="cursor-pointer">
-                    <FileSpreadsheet className="w-4 h-4 mr-2" />
-                    Export as Excel
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleExport("pdf")} className="cursor-pointer">
-                    <FileText className="w-4 h-4 mr-2" />
-                    Export as PDF
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleExport("json")} className="cursor-pointer">
-                    <Code className="w-4 h-4 mr-2" />
-                    Export as JSON
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <button
+                type="button"
+                onClick={handleExportPDF}
+                className="px-4 py-2.5 text-sm font-medium rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-2 transition-all"
+              >
+                <FileText className="w-4 h-4" />
+                <span className="text-black font-bold">PDF</span>
+              </button>
+              <ExportMenu filename="deliveryman_reviews" columns={EXPORT_COLUMNS} getRows={getExportRows} />
               <button 
                 onClick={() => setIsSettingsOpen(true)}
                 className="p-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 transition-all"

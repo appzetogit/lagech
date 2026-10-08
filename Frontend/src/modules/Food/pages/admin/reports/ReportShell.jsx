@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react"
-import { Download, Loader2 } from "@food/components/admin/theme/icons"
+import { Loader2 } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminAPI } from "@food/api"
+import ExportMenu from "@food/components/admin/ExportMenu"
+import { fetchAllPages } from "@food/utils/listExport"
 
 export const rupees = (value) =>
   `₹${Number(value || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -43,8 +45,8 @@ export function downloadCsv(filename, columns, rows) {
 
 /**
  * The frame every money report shares: period and restaurant filters, total
- * tiles, a table, paging and CSV export. `load(params)` fetches one page;
- * export fetches up to 500 rows with the same filters.
+ * tiles, a table, paging and Excel/CSV export. `load(params)` fetches one page;
+ * export walks every page with the same filters.
  */
 export default function ReportShell({ title, icon: Icon, description, load, tiles, columns, rowsKey, csvName, extraFilters = null, filterState = {} }) {
   const [range, setRange] = useState(rangeFor(29))
@@ -53,7 +55,6 @@ export default function ReportShell({ title, icon: Icon, description, load, tile
   const [page, setPage] = useState(1)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [exporting, setExporting] = useState(false)
 
   useEffect(() => {
     adminAPI
@@ -83,19 +84,15 @@ export default function ReportShell({ title, icon: Icon, description, load, tile
   const rows = data?.[rowsKey] || []
   const pages = data?.pagination?.pages || 1
 
-  const exportCsv = async () => {
-    try {
-      setExporting(true)
-      const res = await load({ ...params, page: 1, limit: 500 })
-      const all = res?.data?.data?.[rowsKey] || []
-      downloadCsv(`${csvName}-${range.from}-to-${range.to}.csv`, columns, all)
-      if ((res?.data?.data?.pagination?.total || 0) > all.length) toast.message("Exported the first 500 rows; narrow the dates for the rest")
-    } catch (err) {
-      toast.error("Export failed")
-    } finally {
-      setExporting(false)
-    }
-  }
+  const exportColumns = columns.map((c) => ({ label: c.label, value: (r) => (c.csv ? c.csv(r) : r[c.key]) }))
+  const exportAll = () =>
+    fetchAllPages(
+      ({ page: p, limit }) => load({ ...params, page: p, limit }),
+      (res) => {
+        const d = res?.data?.data || {}
+        return { rows: d[rowsKey] || [], total: d.pagination?.total, pages: d.pagination?.pages }
+      },
+    )
 
   const input = "rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white"
 
@@ -132,9 +129,14 @@ export default function ReportShell({ title, icon: Icon, description, load, tile
               </select>
             </label>
             {extraFilters}
-            <button type="button" onClick={exportCsv} disabled={exporting || !rows.length} className="ml-auto inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50">
-              {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} Export CSV
-            </button>
+            <ExportMenu
+              className="ml-auto"
+              filename={`${csvName}-${range.from}-to-${range.to}`}
+              sheetName={title}
+              columns={exportColumns}
+              getRows={exportAll}
+              disabled={!rows.length}
+            />
           </div>
         </div>
 

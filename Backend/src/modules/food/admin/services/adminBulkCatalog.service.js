@@ -67,10 +67,33 @@ const specFor = (entity) => {
     return spec;
 };
 
-/** An empty template: headers, plus a "How to fill" sheet in Excel. */
-export async function buildTemplate(entity, format) {
+/**
+ * The import template: headers, plus a "How to fill" sheet in Excel.
+ *
+ * With `withData`, the old panel's "Template with existing data": every
+ * current record in the import's own columns, so it can be edited and
+ * uploaded again (rows keep their Id where the import updates by Id).
+ */
+export async function buildTemplate(entity, format, { withData = false } = {}) {
     const spec = specFor(entity);
-    return writeSheet({ format: formatOf(format), name: `${spec.name}_Template`, headers: spec.columns, notes: spec.notes });
+    const rows = withData ? await templateRows(entity) : [];
+    return writeSheet({
+        format: formatOf(format),
+        name: `${spec.name}_${withData ? 'Template_With_Data' : 'Template'}`,
+        headers: spec.columns,
+        rows,
+        notes: spec.notes,
+    });
+}
+
+/** Existing records cut to the import columns (exports add read-only columns). */
+async function templateRows(entity) {
+    const spec = specFor(entity);
+    const exported = await EXPORT_ROWS[entity]({});
+    // Restaurants' export starts with an Id the import does not take; the
+    // others' exports start with the import columns themselves.
+    const start = entity === 'restaurants' ? 1 : 0;
+    return exported.map((row) => row.slice(start, start + spec.columns.length));
 }
 
 async function readRecords(entity, file) {
@@ -199,6 +222,15 @@ export async function importCategories(file) {
 }
 
 export async function exportCategories(query = {}) {
+    return writeSheet({
+        format: formatOf(query.format),
+        name: 'Categories',
+        headers: CATEGORY_COLUMNS,
+        rows: await categoryRows(query),
+    });
+}
+
+async function categoryRows(query = {}) {
     const where = { restaurantId: null };
     if (String(query.parentId || '') === 'root') where.parentId = null;
     else if (String(query.parentId || '') === 'sub') where.parentId = { not: null };
@@ -207,12 +239,7 @@ export async function exportCategories(query = {}) {
         orderBy: [{ parentId: { sort: 'asc', nulls: 'first' } }, { sortOrder: 'asc' }, { name: 'asc' }],
         include: { parent: { select: { name: true } }, zone: { select: { name: true, zoneName: true } } },
     });
-    return writeSheet({
-        format: formatOf(query.format),
-        name: 'Categories',
-        headers: CATEGORY_COLUMNS,
-        rows: rows.map(categoryExportRow),
-    });
+    return rows.map(categoryExportRow);
 }
 
 // ─── add-ons ─────────────────────────────────────────────────────────────────
@@ -315,6 +342,10 @@ export async function importAddons(file) {
 }
 
 export async function exportAddons(query = {}) {
+    return writeSheet({ format: formatOf(query.format), name: 'Addons', headers: ADDON_COLUMNS, rows: await addonRows(query) });
+}
+
+async function addonRows(query = {}) {
     const where = { isDeleted: false };
     if (isId(query.restaurantId)) where.restaurantId = String(query.restaurantId);
     if (isId(query.categoryId)) where.categoryId = String(query.categoryId);
@@ -327,7 +358,7 @@ export async function exportAddons(query = {}) {
         include: { restaurant: { select: { restaurantName: true } }, category: { select: { name: true } } },
         take: 20000,
     });
-    return writeSheet({ format: formatOf(query.format), name: 'Addons', headers: ADDON_COLUMNS, rows: rows.map(addonExportRow) });
+    return rows.map(addonExportRow);
 }
 
 // ─── foods ───────────────────────────────────────────────────────────────────
@@ -448,6 +479,10 @@ export async function importFoods(file) {
 }
 
 export async function exportFoods(query = {}) {
+    return writeSheet({ format: formatOf(query.format), name: 'Foods', headers: FOOD_EXPORT_COLUMNS, rows: await foodRows(query) });
+}
+
+async function foodRows(query = {}) {
     const where = {};
     if (isId(query.restaurantId)) where.restaurantId = String(query.restaurantId);
     if (isId(query.categoryId)) {
@@ -474,7 +509,7 @@ export async function exportFoods(query = {}) {
         },
         take: 20000,
     });
-    return writeSheet({ format: formatOf(query.format), name: 'Foods', headers: FOOD_EXPORT_COLUMNS, rows: rows.map(foodExportRow) });
+    return rows.map(foodExportRow);
 }
 
 // ─── restaurants ─────────────────────────────────────────────────────────────
@@ -527,6 +562,15 @@ export async function importRestaurants(file) {
 }
 
 export async function exportRestaurants(query = {}) {
+    return writeSheet({
+        format: formatOf(query.format),
+        name: 'Restaurants',
+        headers: RESTAURANT_EXPORT_COLUMNS,
+        rows: await restaurantRows(query),
+    });
+}
+
+async function restaurantRows(query = {}) {
     const where = {};
     if (['pending', 'approved', 'rejected'].includes(String(query.status || ''))) where.status = String(query.status);
     if (isId(query.zoneId)) where.zoneId = String(query.zoneId);
@@ -543,10 +587,7 @@ export async function exportRestaurants(query = {}) {
         },
         take: 20000,
     });
-    return writeSheet({
-        format: formatOf(query.format),
-        name: 'Restaurants',
-        headers: RESTAURANT_EXPORT_COLUMNS,
-        rows: rows.map(restaurantExportRow),
-    });
+    return rows.map(restaurantExportRow);
 }
+
+const EXPORT_ROWS = { categories: categoryRows, addons: addonRows, foods: foodRows, restaurants: restaurantRows };

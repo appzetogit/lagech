@@ -1,6 +1,7 @@
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { logger } from '../../../../utils/logger.js';
+import { getBusinessSettings } from '../../shared/businessSettings.js';
 import { haversineKm as geoHaversineKm, parseGeoPoint } from '../../shared/geo.utils.js';
 import {
   notifyOwnersActionableAlert,
@@ -42,6 +43,8 @@ export function generateFourDigitDeliveryOtp() {
 export function sanitizeOrderForExternal(orderDoc) {
   const o = { ...(orderDoc || {}) };
   delete o.deliveryOtp;
+  // What the customer typed to prove an offline payment is for the admin only.
+  delete o.offlinePayment;
   const dv = o.deliveryVerification;
   if (dv && dv.dropOtp != null) {
     const d = dv.dropOtp;
@@ -63,11 +66,22 @@ export function sanitizeOrderForDeliveryPartner(orderDoc) {
   const o = sanitizeOrderForExternal(orderDoc);
   const cookingNote = String(o.note || "").trim();
   const deliveryInstructions = String(o.deliveryInstructions || "").trim();
+  // What the rider takes at the door: a pay-at-delivery order's amount due,
+  // which for a partial payment (wallet + cash) is the total less the wallet part.
+  const method = String(o.payment?.method || o.paymentMethod || "").toLowerCase();
+  const payStatus = String(o.payment?.status || o.paymentStatus || "").toLowerCase();
+  const total = Number(o.pricing?.total ?? o.total) || 0;
+  const walletAmount = Number(o.payment?.walletAmount) || 0;
+  const amountToCollect =
+    (method === "cash" || method === "razorpay_qr") && payStatus !== "paid"
+      ? Math.round(Math.max(0, total - walletAmount) * 100) / 100
+      : 0;
   return {
     ...o,
     cookingNote,
     deliveryInstructions,
     note: deliveryInstructions,
+    amountToCollect,
   };
 }
 
@@ -128,18 +142,52 @@ export async function partnerHasActiveDelivery(deliveryPartnerId) {
   return Boolean(active);
 }
 
-export async function getBusyDeliveryPartnerIds() {
-  const rows = await prisma.foodOrder.findMany({
+/** Deliveries a rider holds now: accepted by them and not yet delivered or cancelled. */
+export async function countPartnerActiveDeliveries(deliveryPartnerId, { excludeOrderId = null, client = prisma } = {}) {
+  if (!deliveryPartnerId) return 0;
+  return client.foodOrder.count({
     where: {
+      dispatchDeliveryPartnerId: String(deliveryPartnerId),
       dispatchStatus: 'accepted',
-      dispatchDeliveryPartnerId: { not: null },
       orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
+      ...(excludeOrderId ? { id: { not: String(excludeOrderId) } } : {}),
     },
-    select: { dispatchDeliveryPartnerId: true },
-    distinct: ['dispatchDeliveryPartnerId'],
   });
+}
 
-  return new Set(rows.map((row) => row.dispatchDeliveryPartnerId));
+/**
+ * How many deliveries a rider may hold at once (Business Settings >
+ * Deliveryman, "Maximum assigned order limit"; 1 behaves as before the
+ * setting existed). Never below 1.
+ */
+export async function getRiderOrderLimit() {
+  const { maxAssignedOrders } = await getBusinessSettings('business_deliveryman');
+  return Math.max(1, Number(maxAssignedOrders) || 1);
+}
+
+/** Whether a rider is at their limit and must finish a delivery before taking another. */
+export async function partnerAtDeliveryLimit(deliveryPartnerId) {
+  if (!deliveryPartnerId) return false;
+  const [count, limit] = await Promise.all([countPartnerActiveDeliveries(deliveryPartnerId), getRiderOrderLimit()]);
+  return count >= limit;
+}
+
+/** Riders holding as many deliveries as the limit allows; dispatch skips them. */
+export async function getBusyDeliveryPartnerIds() {
+  const [rows, limit] = await Promise.all([
+    prisma.foodOrder.groupBy({
+      by: ['dispatchDeliveryPartnerId'],
+      where: {
+        dispatchStatus: 'accepted',
+        dispatchDeliveryPartnerId: { not: null },
+        orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
+      },
+      _count: { _all: true },
+    }),
+    getRiderOrderLimit(),
+  ]);
+
+  return new Set(rows.filter((row) => row._count._all >= limit).map((row) => row.dispatchDeliveryPartnerId));
 }
 
 /** Accepts either a raw order id or the display id ("FOD-…"). */
@@ -463,6 +511,8 @@ export function buildDeliverySocketPayload(orderDoc, restaurantDoc = null) {
     cookingNote: order?.note || "",
     deliveryInstructions: order?.deliveryInstructions || "",
     riderEarning: order?.riderEarning || 0,
+    // Part of riderEarning: the customer's tip, shown to the rider on the offer.
+    riderTip: Number(order?.riderTip) || 0,
     earnings: order?.riderEarning || order?.pricing?.deliveryFee || 0,
     deliveryFee: order?.pricing?.deliveryFee || 0,
     deliveryFleet: order?.deliveryFleet,
@@ -488,6 +538,17 @@ export async function notifyRestaurantNewOrder(orderDoc) {
   try {
     if (!orderDoc || !canExposeOrderToRestaurant(orderDoc)) return;
 
+    // The restaurant's own money for this order (items + packaging − commission
+    // − its share of discounts), as on the order list and details. The popup and
+    // the push show this, not the customer's bill (delivery fee, platform fee).
+    let finance = null;
+    try {
+      const { buildRestaurantFinanceView } = await import("./order.service.js");
+      finance = await buildRestaurantFinanceView({ ...orderDoc, id: String(orderDoc._id || orderDoc.id) });
+    } catch {
+      // The app falls back to fetching the order.
+    }
+
     const io = getIO();
     if (io) {
       const payload = {
@@ -495,6 +556,10 @@ export async function notifyRestaurantNewOrder(orderDoc) {
         orderMongoId: orderDoc._id || undefined,
         orderId: orderDoc.order_id || orderDoc._id,
       };
+      // A takeaway's pickup code is the customer's to show, never the restaurant's to read.
+      delete payload.deliveryOtp;
+      delete payload.offlinePayment;
+      if (finance) payload.finance = finance;
       logger.info(
         `[RestaurantOrders] Emitting new_order to ${rooms.restaurant(orderDoc.restaurantId)} for order ${orderDoc._id?.toString?.() || ''}`,
       );
@@ -533,10 +598,21 @@ export async function notifyRestaurantNewOrder(orderDoc) {
       : "";
     const total = orderDoc.pricing?.total ?? 0;
     
+    // Already confirmed (Business Settings > Order > confirmed by delivery
+    // partner): nothing to accept, the restaurant just starts preparing. The
+    // apps read needsAcceptance to drop Accept/Reject and the looping alarm.
+    const orderStatus = String(orderDoc.orderStatus || orderDoc.status || "");
+    const needsAcceptance = !["confirmed", "preparing", "ready_for_pickup"].includes(orderStatus);
+
     // Construct rich body for the custom notification layout in Flutter
-    let bodyText = `Order #${orderDoc.order_id || orderDoc._id} is waiting for review.`;
+    let bodyText = needsAcceptance
+      ? `Order #${orderDoc.order_id || orderDoc._id} is waiting for review.`
+      : `Order #${orderDoc.order_id || orderDoc._id} is confirmed. Please start preparing.`;
     if (itemsList) bodyText += `\nItems: ${itemsList}`;
-    if (total > 0) bodyText += `\nTotal: ₹${total}`;
+    // The restaurant's earning (after commission), not the customer's total.
+    const earning = finance ? Number(finance.netPayout) : NaN;
+    if (Number.isFinite(earning)) bodyText += `\nYou earn: ₹${earning}`;
+    else if (total > 0) bodyText += `\nTotal: ₹${total}`;
     if (orderDoc.customerName) bodyText += `\nCustomer: ${orderDoc.customerName}`;
     if (addressStr) bodyText += `\nAddress: ${addressStr}`;
 
@@ -572,8 +648,16 @@ export async function notifyRestaurantNewOrder(orderDoc) {
           itemsList: str(itemsList),
           address: str(addressStr),
           total: str(total),
+          // What the restaurant gets (after commission); show this, not total.
+          restaurantEarning: str(finance ? finance.netPayout : ""),
+          itemTotal: str(finance ? finance.itemTotal : orderDoc.pricing?.subtotal ?? ""),
+          commission: str(finance ? finance.commission : ""),
           paymentMethod: str(orderDoc.payment?.method),
           acceptanceDeadlineAt: str(orderDoc.acceptanceDeadlineAt?.toISOString?.() || ""),
+          orderType: str(orderDoc.orderType || "delivery"),
+          orderStatus: str(orderStatus),
+          needsAcceptance: needsAcceptance ? "true" : "false",
+          scheduledAt: str(orderDoc.releaseAt && orderDoc.scheduledAt ? new Date(orderDoc.scheduledAt).toISOString() : ""),
         },
       },
     );

@@ -77,6 +77,9 @@ export const getRestaurantVatReport = handle(200, 'Restaurant VAT report', (req)
 // ─── Email templates (admin) ─────────────────────────────────────────────────
 
 export const listEmailTemplates = handle(200, 'Email templates', () => emailTemplates.listEmailTemplates());
+export const getEmailSettings = handle(200, 'Email settings', () => emailTemplates.getEmailSettings());
+export const saveEmailSettings = handle(200, 'Email settings saved', (req) =>
+    emailTemplates.saveEmailSettings(req.body || {}, adminId(req)));
 export const getEmailTemplate = handle(200, 'Email template', (req) => emailTemplates.getEmailTemplate(req.params.key));
 export const saveEmailTemplate = handle(200, 'Email template saved', (req) =>
     emailTemplates.saveEmailTemplate(req.params.key, validate(emailTemplateSchema, req.body), adminId(req)));
@@ -112,3 +115,8 @@ export const publicSocialMedia = handle(200, 'Social media', () => extras.getPub
 export const publicAppSettings = handle(200, 'App settings', () => extras.getPublicAppSettings());
 export const publicLanding = handle(200, 'Landing page', () => extras.getPublicLanding());
 export const publicPageMeta = handle(200, 'Page meta data', () => extras.getPublicPageMeta());
+export const publicAnalytics = handle(200, 'Analytics', () => extras.getPublicAnalytics());
+export const publicOfflinePaymentMethods = handle(200, 'Offline payment methods', () => extras.getPublicOfflinePaymentMethods());
+export const publicBusinessSettings = handle(200, 'Business settings', () => extras.getPublicBusinessSettings());
+export const publicRefundReasons = handle(200, 'Refund reasons', () => extras.getPublicReasons('business_refund'));
+export const publicOrderIssueReasons = handle(200, 'Order issue reasons', () => extras.getPublicReasons('business_order_issue_reasons'));

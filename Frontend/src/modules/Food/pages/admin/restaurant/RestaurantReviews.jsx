@@ -307,6 +307,7 @@ export default function RestaurantReviews() {
                 </div>
               </div>
               <div className="bg-slate-50 rounded-lg p-4"><p className="text-xs text-slate-600 mb-2 font-semibold">Review Feedback</p><p className="text-sm text-slate-800 leading-relaxed whitespace-pre-wrap">{selectedReview.review || 'No review text provided'}</p></div>
+              <div className="bg-slate-50 rounded-lg p-4"><p className="text-xs text-slate-600 mb-2 font-semibold">Store reply</p><p className="text-sm text-slate-800 leading-relaxed whitespace-pre-wrap">{selectedReview.storeReply || 'No reply'}</p></div>
               <div className="bg-slate-50 rounded-lg p-4"><p className="text-xs text-slate-600 mb-1">Submitted At</p><p className="text-sm font-medium text-slate-900">{formatDateTime(selectedReview.submittedAt)}</p></div>
             </div>
           )}

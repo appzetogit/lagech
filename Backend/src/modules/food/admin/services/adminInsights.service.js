@@ -180,7 +180,7 @@ export async function getDashboardInsights(query = {}) {
             SELECT to_char(date_trunc('month', o."createdAt"), 'YYYY-MM') AS month,
                    SUM(o."total") AS "grossSale",
                    SUM(o."restaurantCommission") AS commission,
-                   SUM(o."deliveryFee" - o."riderEarning") AS "deliveryMargin",
+                   SUM(o."deliveryFee" - (o."riderEarning" - o."riderTip")) AS "deliveryMargin",
                    SUM(o."platformFee") AS "platformFee",
                    COUNT(*)::int AS orders
             FROM food_orders o

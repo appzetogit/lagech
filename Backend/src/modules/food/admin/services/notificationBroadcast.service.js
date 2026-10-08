@@ -185,6 +185,33 @@ export const getLapsedCustomers = async ({
     };
 };
 
+/**
+ * Customers who belong to a zone: a saved address inside its boundary, or an
+ * order placed in it. Customers carry no zone of their own, so this is the
+ * nearest honest answer to the old panel's per-zone customer topic.
+ */
+const loadZoneUserIds = async (zoneId) => {
+    const rows = await prisma.$queryRaw`
+        SELECT a."userId" AS id
+        FROM "food_user_addresses" a
+        JOIN "food_zones" z ON z."id" = ${zoneId}
+        WHERE a."location" IS NOT NULL AND z."boundary" IS NOT NULL
+          AND ST_Contains(z."boundary"::geometry, a."location"::geometry)
+        UNION
+        SELECT o."userId" AS id FROM "food_orders" o WHERE o."zoneId" = ${zoneId}`;
+    return rows.map((row) => row.id).filter(Boolean);
+};
+
+/** The `where` that narrows each audience to one zone. */
+const zoneWhere = async (ownerType, zoneId) => {
+    if (!zoneId) return {};
+    if (ownerType === 'USER') return { id: { in: await loadZoneUserIds(zoneId) } };
+    return { zoneId };
+};
+
+const loadZonedAudience = async (ownerType, zoneId) =>
+    loadAudience(ownerType, await zoneWhere(ownerType, zoneId));
+
 const resolveCustomTargets = async ({ targets = [], targetIds = [] } = {}) => {
     // The panel normally sends the full rows it rendered; ids are the fallback.
     const explicit = dedupeTargets(targets);
@@ -200,7 +227,8 @@ const resolveCustomTargets = async ({ targets = [], targetIds = [] } = {}) => {
     return loadAudience('USER', { id: { in: ids } });
 };
 
-const resolveTargets = async ({ targetType, targetIds = [], targets = [], lapsedDays, lapsedIncludeNeverOrdered } = {}) => {
+const resolveTargets = async ({ targetType, targetIds = [], targets = [], lapsedDays, lapsedIncludeNeverOrdered, zoneId = null } = {}) => {
+    // A hand-picked list is exactly who was picked; the zone does not narrow it.
     if (targetType === 'CUSTOM') return resolveCustomTargets({ targets, targetIds });
     if (targetType === 'LAPSED') {
         // Resolved now, not when the campaign was drafted: a customer who
@@ -209,20 +237,21 @@ const resolveTargets = async ({ targetType, targetIds = [], targets = [], lapsed
             days: lapsedDays,
             includeNeverOrdered: lapsedIncludeNeverOrdered,
         });
-        return customers.map((c) => ({
+        const inZone = zoneId ? new Set(await loadZoneUserIds(zoneId)) : null;
+        return customers.filter((c) => !inZone || inZone.has(c.id)).map((c) => ({
             ownerType: 'USER',
             ownerId: c.id,
             label: String(c.name || c.phone || 'User').trim(),
             subLabel: join(c.phone, c.email),
         }));
     }
-    if (targetType === 'USER') return loadAudience('USER');
-    if (targetType === 'RESTAURANT') return loadAudience('RESTAURANT');
-    if (targetType === 'DELIVERY') return loadAudience('DELIVERY_PARTNER');
+    if (targetType === 'USER') return loadZonedAudience('USER', zoneId);
+    if (targetType === 'RESTAURANT') return loadZonedAudience('RESTAURANT', zoneId);
+    if (targetType === 'DELIVERY') return loadZonedAudience('DELIVERY_PARTNER', zoneId);
 
     if (targetType === 'ALL') {
         const all = await Promise.all(
-            ['USER', 'RESTAURANT', 'DELIVERY_PARTNER'].map((type) => loadAudience(type))
+            ['USER', 'RESTAURANT', 'DELIVERY_PARTNER'].map((type) => loadZonedAudience(type, zoneId))
         );
         return all.flat();
     }
@@ -245,6 +274,7 @@ const emitRealtimeNotifications = (targets = [], broadcast) => {
         title: broadcast.title,
         message: broadcast.message,
         link: broadcast.link || '',
+        image: broadcast.image || '',
         targetType: broadcast.targetType,
         createdAt: broadcast.createdAt,
     };
@@ -335,10 +365,87 @@ const withCouponCode = (message, code) => {
 Use code ${couponCode}`;
 };
 
+/**
+ * The image as stored: an uploaded file's URL (absolute, or the /uploads/...
+ * path the upload API returns on a local base URL). Anything else is refused
+ * rather than sent to every device.
+ */
+const normalizeImage = (value) => {
+    const image = String(value || '').trim();
+    if (!image) return '';
+    if (/^https?:\/\//i.test(image) || image.startsWith('/uploads/')) return image;
+    throw new ValidationError('image must be an uploaded image URL');
+};
+
+/**
+ * FCM fetches the big picture itself, so it needs an absolute URL. A relative
+ * /uploads/ path is made absolute against the site; without a known site it is
+ * left out of the push (the inbox still has it).
+ */
+const absoluteImageUrl = (image) => {
+    if (!image) return '';
+    if (/^https?:\/\//i.test(image)) return image;
+    const site = String(process.env.FRONTEND_URL || '').trim().replace(/\/+$/, '');
+    return site ? `${site}${image}` : '';
+};
+
+/**
+ * Inbox rows, push and socket event for one send. Create and Resend both go
+ * through here; inbox rows upsert on (broadcastId, owner), so a resend never
+ * duplicates one.
+ */
+const deliverBroadcast = async (broadcast, targets) => {
+    await createInboxNotifications({
+        notifications: targets.map((target) => ({
+            ownerType: target.ownerType,
+            ownerId: target.ownerId,
+            title: broadcast.title,
+            message: broadcast.message,
+            link: broadcast.link,
+            category: 'broadcast',
+            broadcastId: broadcast.id,
+            metadata: {
+                broadcastId: broadcast.id,
+                ownerLabel: target.label || '',
+                ownerSubLabel: target.subLabel || '',
+                // So the app can show the code as something tappable rather
+                // than leaving the customer to retype it out of the message.
+                couponCode: broadcast.couponCode || '',
+                image: broadcast.image || '',
+            },
+        })),
+    });
+
+    const pushImage = absoluteImageUrl(broadcast.image);
+    await notifyOwnersSafely(
+        targets.map(({ ownerType, ownerId }) => ({ ownerType, ownerId })),
+        {
+            title: broadcast.title,
+            body: broadcast.message,
+            data: {
+                type: 'admin_broadcast',
+                broadcastId: broadcast.id,
+                link: broadcast.link,
+                couponCode: broadcast.couponCode || '',
+                ...(pushImage ? { image: pushImage } : {}),
+            },
+        }
+    );
+
+    emitRealtimeNotifications(targets, broadcast);
+};
+
 export const createBroadcastNotification = async ({ body = {}, adminId } = {}) => {
     const title = normalizeText(body?.title, 'title');
     const message = normalizeText(body?.message, 'message');
     const link = normalizeText(body?.link, 'link', false);
+    const image = normalizeImage(body?.image);
+
+    const zoneRaw = String(body?.zoneId || '').trim();
+    const zoneId = zoneRaw && zoneRaw !== 'all' ? zoneRaw : null;
+    if (zoneId && (!isId(zoneId) || !(await prisma.foodZone.count({ where: { id: zoneId } })))) {
+        throw new ValidationError('The selected zone does not exist');
+    }
 
     const targetType = String(body?.targetType || '').trim().toUpperCase();
     if (!TARGET_TYPES.has(targetType)) throw new ValidationError('targetType is invalid');
@@ -351,9 +458,12 @@ export const createBroadcastNotification = async ({ body = {}, adminId } = {}) =
         targets: body?.targets,
         lapsedDays: body?.lapsedDays,
         lapsedIncludeNeverOrdered: body?.lapsedIncludeNeverOrdered,
+        zoneId,
     });
     if (!resolvedTargets.length) {
-        throw new ValidationError(`No recipients found for ${targetType.toLowerCase()} broadcast`);
+        throw new ValidationError(
+            `No recipients found for ${targetType.toLowerCase()} broadcast${zoneId ? ' in this zone' : ''}`
+        );
     }
 
     // Before the message, not after: a customer who reads it and tries the
@@ -377,44 +487,13 @@ export const createBroadcastNotification = async ({ body = {}, adminId } = {}) =
             targets: resolvedTargets,
             createdById,
             targetCount: resolvedTargets.length,
+            image,
+            zoneId,
+            lastSentAt: new Date(),
         },
     });
 
-    await createInboxNotifications({
-        notifications: resolvedTargets.map((target) => ({
-            ownerType: target.ownerType,
-            ownerId: target.ownerId,
-            title,
-            message: finalMessage,
-            link,
-            category: 'broadcast',
-            broadcastId: broadcast.id,
-            metadata: {
-                broadcastId: broadcast.id,
-                ownerLabel: target.label || '',
-                ownerSubLabel: target.subLabel || '',
-                // So the app can show the code as something tappable rather
-                // than leaving the customer to retype it out of the message.
-                couponCode: coupon?.code || '',
-            },
-        })),
-    });
-
-    await notifyOwnersSafely(
-        resolvedTargets.map(({ ownerType, ownerId }) => ({ ownerType, ownerId })),
-        {
-            title,
-            body: finalMessage,
-            data: {
-                type: 'admin_broadcast',
-                broadcastId: broadcast.id,
-                link,
-                couponCode: coupon?.code || '',
-            },
-        }
-    );
-
-    emitRealtimeNotifications(resolvedTargets, broadcast);
+    await deliverBroadcast(broadcast, resolvedTargets);
 
     return {
         broadcast,
@@ -435,15 +514,19 @@ export const getBroadcastNotifications = async ({ page = 1, limit = 10 } = {}) =
             orderBy: { createdAt: 'desc' },
             skip: (nextPage - 1) * nextLimit,
             take: nextLimit,
-            include: { createdBy: { select: { id: true, name: true, email: true } } },
+            include: {
+                createdBy: { select: { id: true, name: true, email: true } },
+                zone: { select: { id: true, name: true } },
+            },
         }),
         prisma.notificationBroadcast.count(),
     ]);
 
     return {
-        items: items.map((item) => ({
+        items: items.map(({ zone, ...item }) => ({
             ...item,
             _id: item.id,
+            zoneName: zone?.name || null,
             targetLabel: item.targetType === 'CUSTOM'
                 ? `${item.targetCount || (Array.isArray(item.targets) ? item.targets.length : 0)} selected recipients`
                 : OWNER_LABEL[item.targetType] || item.targetType,
@@ -469,4 +552,42 @@ export const deleteBroadcastNotification = async (broadcastId) => {
     await prisma.notificationBroadcast.delete({ where: { id } });
 
     return { broadcast, deletedInboxCount };
+};
+
+/**
+ * Resend: push the same broadcast to the same recorded audience again. The
+ * inbox rows upsert on (broadcastId, owner), so nobody gets a second copy;
+ * theirs comes back unread and undismissed.
+ */
+export const resendBroadcastNotification = async (broadcastId) => {
+    const id = requireId(broadcastId, 'broadcastId');
+    const broadcast = await prisma.notificationBroadcast.findUnique({ where: { id } });
+    if (!broadcast) throw new NotFoundError('Broadcast notification not found');
+    if (!broadcast.isActive) {
+        throw new ValidationError('Turn this notification on before resending it');
+    }
+
+    const targets = dedupeTargets(broadcast.targets);
+    if (!targets.length) throw new ValidationError('This notification has no recorded recipients');
+
+    await deliverBroadcast(broadcast, targets);
+    await prisma.foodNotification.updateMany({
+        where: { broadcastId: id },
+        data: { isRead: false, readAt: null },
+    });
+
+    const updated = await prisma.notificationBroadcast.update({
+        where: { id },
+        data: { sendCount: { increment: 1 }, lastSentAt: new Date() },
+    });
+    return { broadcast: updated, recipients: targets.length };
+};
+
+/** Status switch: off hides it from every recipient's inbox; on shows it again. */
+export const setBroadcastNotificationStatus = async (broadcastId, isActive) => {
+    const id = requireId(broadcastId, 'broadcastId');
+    if (typeof isActive !== 'boolean') throw new ValidationError('boolean isActive is required');
+    const { count } = await prisma.notificationBroadcast.updateMany({ where: { id }, data: { isActive } });
+    if (!count) throw new NotFoundError('Broadcast notification not found');
+    return prisma.notificationBroadcast.findUnique({ where: { id } });
 };

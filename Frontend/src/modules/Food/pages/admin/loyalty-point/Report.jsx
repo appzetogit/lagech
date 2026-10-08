@@ -9,8 +9,24 @@ import {
   formatMoney,
 } from "@food/api/adminCustomerExtras"
 import { CustomerPicker, PageHeader, Pager, StatCard, inputClass } from "../wallet/shared"
+import ExportMenu from "@food/components/admin/ExportMenu"
+import { fetchAllPages, exportDate, exportMoney } from "@food/utils/listExport"
 
 const EMPTY = { from: "", to: "", type: "" }
+
+const EXPORT_COLUMNS = [
+  { label: "Sl", value: (_, i) => i + 1 },
+  { label: "Transaction ID", value: (t) => t.id },
+  { label: "Date", value: (t) => exportDate(t.createdAt) },
+  { label: "Customer", value: (t) => t.customer?.name || "" },
+  { label: "Phone", value: (t) => t.customer?.phone || "" },
+  { label: "Type", value: (t) => (t.type === "credit" ? "Earned" : "Converted") },
+  { label: "Details", value: (t) => t.note || "" },
+  { label: "Credit points", value: (t) => (t.type === "credit" ? Number(t.points) || 0 : "") },
+  { label: "Debit points", value: (t) => (t.type === "debit" ? Number(t.points) || 0 : "") },
+  { label: "Wallet amount", value: (t) => (t.walletAmount > 0 ? exportMoney(t.walletAmount) : "") },
+  { label: "Points after", value: (t) => Number(t.balanceAfter) || 0 },
+]
 
 /** How customers earn and convert points. Saved where the other reward settings live. */
 function LoyaltySettings({ onSaved }) {
@@ -133,6 +149,22 @@ export default function LoyaltyPointReport() {
     setPage(1)
     setFilters((f) => ({ ...f, [key]: value }))
   }
+  // Every ledger entry matching the filters below, across all pages.
+  const getExportRows = () =>
+    fetchAllPages(
+      ({ page: pageNo, limit }) => {
+        const params = { page: pageNo, limit }
+        for (const [k, v] of Object.entries(filters)) if (v) params[k] = v
+        if (customer) params.userId = customer.id
+        return customerExtrasAPI.getLoyaltyTransactions(params)
+      },
+      (res) => {
+        const d = dataOf(res)
+        return { rows: d.transactions || [], total: d.pagination?.total, pages: d.pagination?.pages }
+      },
+      { pageSize: 100 },
+    )
+
   const filtered = Boolean(customer || Object.values(filters).some(Boolean))
   const totals = data.totals || { earned: 0, converted: 0, walletPaid: 0, outstanding: 0 }
   const rows = data.transactions || []
@@ -140,7 +172,9 @@ export default function LoyaltyPointReport() {
   return (
     <div className="min-h-screen bg-slate-50 p-4 lg:p-6">
       <div className="mx-auto max-w-7xl space-y-6">
-        <PageHeader icon={Medal} title="Loyalty Point Report" description="Points customers earned on delivered orders and converted into wallet balance." />
+        <PageHeader icon={Medal} title="Loyalty Point Report" description="Points customers earned on delivered orders and converted into wallet balance.">
+          <ExportMenu filename="loyalty_point_report" columns={EXPORT_COLUMNS} getRows={getExportRows} />
+        </PageHeader>
 
         <LoyaltySettings onSaved={() => setReload((n) => n + 1)} />
 

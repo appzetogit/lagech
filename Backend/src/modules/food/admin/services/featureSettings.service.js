@@ -1,4 +1,5 @@
 import { prisma } from '../../../../config/prisma.js';
+import { invalidateBusinessSettings } from '../../shared/businessSettings.js';
 
 export const FEATURE_KEYS = {
     RESTAURANT_SUBSCRIPTION: 'restaurant_subscription',
@@ -62,6 +63,8 @@ export async function updateFeatureSetting(key, payload = {}) {
         where: { key: trimmed },
         data: { isEnabled: nextEnabled },
     });
+    // The subscription flag is also Business info's subscription switch (cached).
+    if (count) invalidateBusinessSettings(trimmed);
     const updated = count ? await prisma.foodFeatureSetting.findUnique({ where: { key: trimmed } }) : null;
 
     return updated

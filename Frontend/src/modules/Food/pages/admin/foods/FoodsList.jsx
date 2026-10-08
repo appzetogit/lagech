@@ -7,6 +7,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@food/componen
 import { Popover, PopoverContent, PopoverTrigger } from "@food/components/ui/popover"
 import { getFoodDisplayOtherPrice, getFoodDisplayPrice, getFoodVariants } from "@food/utils/foodVariants"
 import { canCurrentAdminAction } from "@food/utils/adminRbac"
+import ExportMenu from "@food/components/admin/ExportMenu"
+import { exportMoney, fetchAllPages } from "@food/utils/listExport"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -59,6 +61,21 @@ const FOOD_FALLBACK_IMAGE =
       <rect x="20" y="48" width="40" height="8" rx="4" fill="#CBD5E1"/>
     </svg>`
   )
+
+// Rows straight from GET /food/admin/foods, labelled the way the table shows them.
+const EXPORT_COLUMNS = [
+  { label: "Sl", value: (_food, index) => index + 1 },
+  { label: "Id", value: (food) => String(food.id || food._id || "") },
+  { label: "Name", value: (food) => food.name || "" },
+  { label: "Category", value: (food) => food.categoryName || "" },
+  { label: "Restaurant", value: (food) => food.restaurantName || getRestaurantName(food.restaurant) || "" },
+  { label: "Price", value: (food) => exportMoney(getFoodDisplayPrice(food)) },
+  {
+    label: "Status",
+    value: (food) =>
+      food.isAvailable !== false && String(food.approvalStatus || "").toLowerCase() !== "rejected" ? "Active" : "Inactive",
+  },
+]
 
 /** `openAdd` (Food Setup -> Add new in the sidebar) opens the add form on arrival. */
 export default function FoodsList({ openAdd = false } = {}) {
@@ -249,6 +266,22 @@ export default function FoodsList({ openAdd = false } = {}) {
       setLoading(false)
     }
   }, [currentPage, pageSize, selectedRestaurant, debouncedSearchQuery])
+
+  // Export: every page of the list's own request (restaurant + search filters).
+  const getExportRows = () =>
+    fetchAllPages(
+      ({ page, limit }) => {
+        const params = { page, limit }
+        if (selectedRestaurant !== "all") params.restaurantId = selectedRestaurant
+        if (debouncedSearchQuery) params.search = debouncedSearchQuery
+        return adminAPI.getFoods(params)
+      },
+      (res) => {
+        const list = res?.data?.data?.foods
+        return { rows: Array.isArray(list) ? list : [], total: res?.data?.data?.total ?? res?.data?.total }
+      },
+      { pageSize: 500 },
+    )
 
   useEffect(() => {
     fetchAllFoods()
@@ -843,6 +876,7 @@ export default function FoodsList({ openAdd = false } = {}) {
               <Upload className="w-4 h-4" />
               <span>Bulk Upload</span>
             </button>
+            <ExportMenu filename="foods" sheetName="Foods" columns={EXPORT_COLUMNS} getRows={getExportRows} disabled={loading} />
             {isRestaurantSelected && selectedDeleteCount > 0 && (
               <button
                 type="button"

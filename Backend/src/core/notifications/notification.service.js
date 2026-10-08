@@ -153,6 +153,8 @@ export const getInboxNotifications = async ({ ownerType, ownerId, page = 1, limi
         ownerType: normalizeOwnerType(ownerType),
         ownerId: requireId(ownerId, 'ownerId'),
         dismissedAt: null,
+        // A broadcast the admin switched off is hidden, not deleted.
+        NOT: { broadcast: { is: { isActive: false } } },
     };
     const { skip, ...meta } = normalizePagination({ page, limit });
 

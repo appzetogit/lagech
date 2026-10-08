@@ -93,6 +93,7 @@ function buildIncomingOrderPushData(order, payload, acceptanceDeadlineAt) {
     payload?.customerAddress ? `Drop: ${s(payload.customerAddress)}` : '',
     distance ? `${distance} km` : '',
     `Earning: Rs.${earning}`,
+    Number(payload?.riderTip) > 0 ? `(incl. Rs.${s(payload.riderTip)} tip)` : '',
   ].filter(Boolean);
 
   return {
@@ -111,6 +112,7 @@ function buildIncomingOrderPushData(order, payload, acceptanceDeadlineAt) {
     tripDistanceKm: s(payload?.tripDistanceKm ?? ''),
     tripDurationMins: s(payload?.tripDurationMins ?? ''),
     riderEarning: s(payload?.riderEarning ?? 0),
+    riderTip: s(payload?.riderTip ?? 0),
     earnings: s(payload?.earnings ?? payload?.riderEarning ?? 0),
     paymentMethod: s(payload?.paymentMethod || order?.payment?.method),
     total: s(payload?.total ?? order?.pricing?.total ?? 0),
@@ -237,10 +239,14 @@ export async function tryAutoAssign(orderId, options = {}) {
   const lockTimeout = DRIVER_ACCEPT_WINDOW_MS + 5000; // 50s
 
   // Claim the dispatch lock atomically; only the winner proceeds.
+  // A takeaway never has a rider, and a scheduled order is not dispatched
+  // before its release time (releaseScheduledOrders starts it then).
   const { count: claimed } = await prisma.foodOrder.updateMany({
     where: {
       id,
       dispatchingAt: null,
+      orderType: { not: 'takeaway' },
+      AND: [{ OR: [{ releaseAt: null }, { releaseAt: { lte: new Date() } }] }],
       OR: [
         { dispatchStatus: 'unassigned' },
         {

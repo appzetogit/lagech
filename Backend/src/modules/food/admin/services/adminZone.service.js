@@ -1,5 +1,6 @@
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
+import { ValidationError } from '../../../../core/auth/errors.js';
 import { invalidateActiveZonesCache } from '../../landing/controllers/zonePublic.controller.js';
 
 /**
@@ -10,6 +11,23 @@ import { invalidateActiveZonesCache } from '../../landing/controllers/zonePublic
  * by the zone_boundary_sync trigger. So there is still one thing to write, and
  * zone matching is an indexed ST_Contains rather than a ray-casting scan.
  */
+
+/** Form values arrive as booleans from JSON and as "true"/"1" from older callers. */
+const toFlag = (value) => value === true || value === 'true' || value === 1 || value === '1';
+
+/**
+ * Make `zoneId` the only default zone. Both writes in one transaction, so there
+ * is never a moment with two defaults (the partial unique index would refuse
+ * it) or, on failure, none.
+ */
+const makeOnlyDefault = (zoneId) =>
+    prisma.$transaction([
+        prisma.foodZone.updateMany({
+            where: { isDefault: true, id: { not: zoneId } },
+            data: { isDefault: false },
+        }),
+        prisma.foodZone.update({ where: { id: zoneId }, data: { isDefault: true } }),
+    ]);
 
 const normalizeRing = (coordinates) =>
     (Array.isArray(coordinates) ? coordinates : []).map((c) => ({
@@ -39,10 +57,32 @@ export async function getZones(query = {}) {
         ];
     }
 
-    const [zones, total] = await Promise.all([
-        prisma.foodZone.findMany({ where, orderBy: { createdAt: 'desc' }, skip, take: limit }),
+    const [rows, total] = await Promise.all([
+        prisma.foodZone.findMany({
+            where,
+            orderBy: { createdAt: 'desc' },
+            skip,
+            take: limit,
+            include: { _count: { select: { restaurants: true } } },
+        }),
         prisma.foodZone.count({ where }),
     ]);
+
+    // Riders carry a plain zoneId (no relation), so they are counted apart.
+    const riderCounts = rows.length
+        ? await prisma.foodDeliveryPartner.groupBy({
+            by: ['zoneId'],
+            where: { zoneId: { in: rows.map((z) => z.id) } },
+            _count: { _all: true },
+        })
+        : [];
+    const ridersByZone = new Map(riderCounts.map((r) => [r.zoneId, r._count._all]));
+
+    const zones = rows.map(({ _count, ...zone }) => ({
+        ...zone,
+        restaurantCount: _count?.restaurants || 0,
+        deliveryPartnerCount: ridersByZone.get(zone.id) || 0,
+    }));
 
     return { zones, total, page, limit };
 }
@@ -75,8 +115,15 @@ export async function createZone(body = {}) {
             unit: body.unit === 'miles' ? 'miles' : 'kilometer',
             coordinates,
             isActive: body.isActive !== false,
+            ...(body.cashOnDelivery !== undefined ? { cashOnDelivery: toFlag(body.cashOnDelivery) } : {}),
+            ...(body.digitalPayment !== undefined ? { digitalPayment: toFlag(body.digitalPayment) } : {}),
         },
     });
+
+    if (toFlag(body.isDefault) && zone.isActive) {
+        await makeOnlyDefault(zone.id);
+        zone.isDefault = true;
+    }
 
     void invalidateActiveZonesCache();
     return { zone };
@@ -96,7 +143,22 @@ export async function updateZone(id, body = {}) {
         data.serviceLocation = String(body.serviceLocation).trim();
     }
     if (body.unit !== undefined) data.unit = body.unit === 'miles' ? 'miles' : 'kilometer';
-    if (body.isActive !== undefined) data.isActive = body.isActive !== false;
+    if (body.isActive !== undefined) data.isActive = body.isActive !== false && body.isActive !== 'false';
+    if (body.cashOnDelivery !== undefined) data.cashOnDelivery = toFlag(body.cashOnDelivery);
+    if (body.digitalPayment !== undefined) data.digitalPayment = toFlag(body.digitalPayment);
+
+    const wantsDefault = body.isDefault !== undefined && toFlag(body.isDefault);
+    if (body.isDefault !== undefined && !wantsDefault && existing.isDefault) {
+        // There is always a default once one exists; it moves, it is not removed.
+        throw new ValidationError('Make another zone the default instead of switching this one off');
+    }
+    const willBeActive = data.isActive ?? existing.isActive;
+    if (existing.isDefault && !willBeActive) {
+        throw new ValidationError('The default zone cannot be deactivated. Make another zone the default first.');
+    }
+    if (wantsDefault && !willBeActive) {
+        throw new ValidationError('Only an active zone can be the default zone');
+    }
 
     // A ring shorter than 3 points is ignored rather than saved — it would make
     // the zone match nothing, and the database would refuse it anyway.
@@ -110,13 +172,22 @@ export async function updateZone(id, body = {}) {
         data.serviceLocation = nextName;
     }
 
-    const zone = await prisma.foodZone.update({ where: { id: existing.id }, data });
+    let zone = await prisma.foodZone.update({ where: { id: existing.id }, data });
+    if (wantsDefault && !zone.isDefault) {
+        await makeOnlyDefault(zone.id);
+        zone = { ...zone, isDefault: true };
+    }
     void invalidateActiveZonesCache();
     return { zone };
 }
 
 export async function deleteZone(id) {
     if (!isId(id)) return null;
+
+    const target = await prisma.foodZone.findUnique({ where: { id: String(id) }, select: { isDefault: true } });
+    if (target?.isDefault) {
+        throw new ValidationError('The default zone cannot be deleted. Make another zone the default first.');
+    }
 
     // deleteMany, so a zone that has already gone returns null rather than
     // throwing P2025 out of the controller.

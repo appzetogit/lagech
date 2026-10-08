@@ -1,8 +1,12 @@
 import crypto from 'crypto';
 import { prisma } from '../../../config/prisma.js';
 import { finalizeOrderPayment } from '../../../modules/food/orders/services/order.service.js';
+import { handleCollectWebhookEvent } from '../../../modules/food/orders/services/order-payment.service.js';
+import { remainderAmount } from '../../../modules/food/orders/services/partialPayment.service.js';
 import { config } from '../../../config/env.js';
 import { logger } from '../../../utils/logger.js';
+import { getThirdPartySettingsSync } from '../../thirdParty/thirdParty.runtime.js';
+import { emailOrderPlaced } from '../../notifications/emailEvents.js';
 
 /**
  * Razorpay webhook handler.
@@ -19,23 +23,28 @@ import { logger } from '../../../utils/logger.js';
  */
 export const handleRazorpayWebhook = async (req, res) => {
     const signature = req.headers['x-razorpay-signature'];
-    const secret = config.razorpayWebhookSecret;
+    // The admin's saved webhook secret (3rd Party > Payment Setup) and the
+    // server's: either proves the call came from Razorpay, and accepting both
+    // keeps webhooks working while the dashboard and this server are switched over.
+    const secrets = [...new Set([
+        getThirdPartySettingsSync('payment').webhookSecret,
+        config.razorpayWebhookSecret,
+    ].filter(Boolean))];
 
     // 1. Verify the signature against the raw body buffer.
-    if (!signature || !secret || !req.rawBody) {
+    if (!signature || !secrets.length || !req.rawBody) {
         logger.warn('Razorpay Webhook: Missing signature or rawBody buffer.');
         return res.status(400).send('Invalid signature');
     }
 
-    const expected = crypto.createHmac('sha256', secret).update(req.rawBody).digest('hex');
-
     // timingSafeEqual, not !==: a plain string compare returns as soon as it
     // finds a differing byte, which leaks how much of a forged signature was
     // right. Length is checked first because timingSafeEqual throws on a mismatch.
-    const expectedBuf = Buffer.from(expected, 'utf8');
     const actualBuf = Buffer.from(String(signature), 'utf8');
-    const signatureValid =
-        expectedBuf.length === actualBuf.length && crypto.timingSafeEqual(expectedBuf, actualBuf);
+    const signatureValid = secrets.some((secret) => {
+        const expectedBuf = Buffer.from(crypto.createHmac('sha256', secret).update(req.rawBody).digest('hex'), 'utf8');
+        return expectedBuf.length === actualBuf.length && crypto.timingSafeEqual(expectedBuf, actualBuf);
+    });
 
     if (!signatureValid) {
         logger.warn('Razorpay Webhook: Signature verification failed.');
@@ -46,21 +55,36 @@ export const handleRazorpayWebhook = async (req, res) => {
     logger.info(`Razorpay Webhook Received: ${event}`);
 
     try {
+        // --- Customer paid the rider's door-collection QR / payment link ---
+        // Recognised by the QR's notes (purpose 'cod_collect'); everything else
+        // falls through to the checkout handling below.
+        if (['qr_code.credited', 'payment.captured', 'payment_link.paid'].includes(event)) {
+            if (await handleCollectWebhookEvent(event, payload)) {
+                return res.status(200).json({ status: 'ok' });
+            }
+        }
+
         // --- Payment captured ---
-        if (event === 'payment.captured') {
+        if (event === 'payment.captured' && !payload?.payment?.entity?.order_id) {
+            // A payment with no Razorpay order (a QR or link payment that is not
+            // ours). Matching on a null order id would select every order that
+            // has none, so nothing is looked up.
+            logger.warn(`Webhook [payment.captured]: payment ${payload?.payment?.entity?.id} has no order_id; ignored`);
+        } else if (event === 'payment.captured') {
             const paymentObj = payload.payment.entity;
             const rzOrderId = paymentObj.order_id;
             const rzPaymentId = paymentObj.id;
 
             const existingOrder = await prisma.foodOrder.findFirst({
                 where: { razorpayOrderId: rzOrderId },
-                select: { id: true, orderId: true, total: true, paymentStatus: true },
+                select: { id: true, orderId: true, total: true, walletAmount: true, paymentMethod: true, paymentStatus: true },
             });
 
             // Cross-check the captured amount before marking anything paid: a
             // gateway callback is not proof of the right amount.
             if (existingOrder) {
-                const expectedPaise = Math.round(Number(existingOrder.total || 0) * 100);
+                // A partial payment (wallet + online) charged only the rest online.
+                const expectedPaise = Math.round(remainderAmount(existingOrder) * 100);
                 const paidPaise = Number(paymentObj.amount);
 
                 if (!Number.isFinite(paidPaise) || paidPaise !== expectedPaise) {
@@ -104,6 +128,8 @@ export const handleRazorpayWebhook = async (req, res) => {
                 } catch (finalizeErr) {
                     logger.error(`Webhook finalize error (Order ${order.orderId}): ${finalizeErr.message}`);
                 }
+                // Same key as verifyPayment's, so whichever runs second sends nothing.
+                emailOrderPlaced(order.id);
                 logger.info(`Webhook [payment.captured]: Synced Order ${order.orderId} (Status=paid)`);
             } else {
                 logger.warn(

@@ -4,7 +4,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
-import { exportReportsToCSV, exportReportsToExcel, exportReportsToPDF, exportReportsToJSON } from "@food/components/admin/reports/reportsExportUtils"
+import { exportReportsToPDF, exportReportsToJSON } from "@food/components/admin/reports/reportsExportUtils"
+import { exportDate, exportRows, fetchAllPages } from "@food/utils/listExport"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -46,42 +47,61 @@ export default function FeedbackExperienceReport() {
     fetchFeedbackExperiences()
   }, [filters])
 
+  // The filters the API applies (the search box is matched on the page).
+  const feedbackParams = () => {
+    // Convert 0-5 rating filter to backend's 1-10 scale if needed
+    const ratingFilterValue = filters.rating ? parseInt(filters.rating) * 2 : null
+    return {
+      ...(filters.fromDate && { startDate: filters.fromDate }),
+      ...(filters.toDate && { endDate: filters.toDate }),
+      ...(ratingFilterValue && { rating: ratingFilterValue }),
+      ...(filters.experience && { experience: filters.experience }),
+      ...(filters.module && { module: filters.module }),
+    }
+  }
+
+  const formatFeedback = (fb) => {
+    // Convert rating to 0-5 scale if > 5 (backend sends 1-10 scale)
+    let ratingValue = fb.rating || 0
+    if (ratingValue > 5) {
+      ratingValue = Math.round(ratingValue / 2)
+    }
+    return {
+      _id: fb._id,
+      userName: fb.userName || 'N/A',
+      userEmail: fb.userEmail || 'N/A',
+      userPhone: fb.userPhone || 'N/A',
+      restaurantName: fb.restaurantId?.restaurantName || 'N/A',
+      rating: ratingValue,
+      experience: normalizeExperienceScaleText(fb.comment || 'N/A'),
+      module: fb.module,
+      createdAt: fb.createdAt
+    }
+  }
+
+  const matchesSearch = (feedback) => {
+    const query = searchQuery.toLowerCase().trim()
+    if (!query) return true
+    return (
+      feedback.userName?.toLowerCase().includes(query) ||
+      feedback.userEmail?.toLowerCase().includes(query) ||
+      feedback.userPhone?.includes(query) ||
+      feedback._id?.toString().includes(query)
+    )
+  }
+
   const fetchFeedbackExperiences = async () => {
     try {
       setLoading(true)
-      // Convert 0-5 rating filter to backend's 1-10 scale if needed
-      const ratingFilterValue = filters.rating ? parseInt(filters.rating) * 2 : null
-
       const params = {
         page: 1,
         limit: 1000,
-        ...(filters.fromDate && { startDate: filters.fromDate }),
-        ...(filters.toDate && { endDate: filters.toDate }),
-        ...(ratingFilterValue && { rating: ratingFilterValue }),
-        ...(filters.experience && { experience: filters.experience }),
-        ...(filters.module && { module: filters.module }),
+        ...feedbackParams(),
       }
       const response = await adminAPI.getFeedbackExperiences(params)
       if (response.data && response.data.data) {
         const rawData = response.data.data.feedbacks || []
-        const formattedData = rawData.map(fb => {
-          // Convert rating to 0-5 scale if > 5 (backend sends 1-10 scale)
-          let ratingValue = fb.rating || 0
-          if (ratingValue > 5) {
-            ratingValue = Math.round(ratingValue / 2)
-          }
-          return {
-            _id: fb._id,
-            userName: fb.userName || 'N/A',
-            userEmail: fb.userEmail || 'N/A',
-            userPhone: fb.userPhone || 'N/A',
-            restaurantName: fb.restaurantId?.restaurantName || 'N/A',
-            rating: ratingValue,
-            experience: normalizeExperienceScaleText(fb.comment || 'N/A'),
-            module: fb.module,
-            createdAt: fb.createdAt
-          }
-        })
+        const formattedData = rawData.map(formatFeedback)
         setFeedbackExperiences(formattedData)
 
         // Convert statistics to 0-5 scale if needed
@@ -107,21 +127,10 @@ export default function FeedbackExperienceReport() {
     }
   }
 
-  const filteredFeedback = useMemo(() => {
-    let result = [...feedbackExperiences]
-    
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase().trim()
-      result = result.filter(feedback =>
-        feedback.userName?.toLowerCase().includes(query) ||
-        feedback.userEmail?.toLowerCase().includes(query) ||
-        feedback.userPhone?.includes(query) ||
-        feedback._id?.toString().includes(query)
-      )
-    }
-
-    return result
-  }, [feedbackExperiences, searchQuery])
+  const filteredFeedback = useMemo(
+    () => feedbackExperiences.filter(matchesSearch),
+    [feedbackExperiences, searchQuery],
+  )
 
   const handleReset = () => {
     setFilters({
@@ -134,7 +143,48 @@ export default function FeedbackExperienceReport() {
     setSearchQuery("")
   }
 
+  // Excel / CSV: every matching feedback, all pages, with the same filters
+  // and search (the API returns at most 100 per page).
+  const exportAllFeedback = async (format) => {
+    try {
+      const raw = await fetchAllPages(
+        ({ page, limit }) => adminAPI.getFeedbackExperiences({ ...feedbackParams(), page, limit }),
+        (res) => {
+          const d = res?.data?.data || {}
+          return { rows: d.feedbacks || [], total: d.pagination?.total, pages: d.pagination?.pages }
+        },
+        { pageSize: 100 },
+      )
+      const rows = raw.map(formatFeedback).filter(matchesSearch)
+      if (!rows.length) {
+        toast.error("No data to export")
+        return
+      }
+      exportRows(format, {
+        filename: "feedback_experience_report",
+        sheetName: "Feedback Experience",
+        rows,
+        columns: [
+          { label: "Sl", value: (fb, i) => i + 1 },
+          { label: "User Name", value: (fb) => fb.userName || "N/A" },
+          { label: "Email", value: (fb) => fb.userEmail || "N/A" },
+          { label: "Phone", value: (fb) => fb.userPhone || "N/A" },
+          { label: "Rating", value: (fb) => Number(fb.rating) || 0 },
+          { label: "Experience", value: (fb) => fb.experience || "N/A" },
+          { label: "Module", value: (fb) => fb.module || "N/A" },
+          { label: "Date", value: (fb) => exportDate(fb.createdAt) },
+        ],
+      })
+    } catch (error) {
+      toast.error(error?.response?.data?.message || "Export failed")
+    }
+  }
+
   const handleExport = (format) => {
+    if (format === "csv" || format === "excel") {
+      exportAllFeedback(format)
+      return
+    }
     if (filteredFeedback.length === 0) {
       toast.error("No data to export")
       return
@@ -160,8 +210,6 @@ export default function FeedbackExperienceReport() {
       createdAt: new Date(fb.createdAt).toLocaleString(),
     }))
     switch (format) {
-      case "csv": exportReportsToCSV(exportData, headers, "feedback_experience_report"); break;
-      case "excel": exportReportsToExcel(exportData, headers, "feedback_experience_report"); break;
       case "pdf": exportReportsToPDF(exportData, headers, "feedback_experience_report", "Feedback Experience Report"); break;
       case "json": exportReportsToJSON(exportData, "feedback_experience_report"); break;
     }

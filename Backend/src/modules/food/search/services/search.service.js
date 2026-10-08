@@ -1,3 +1,4 @@
+import { getPrioritySort } from '../../shared/businessSettings.js';
 import { prisma } from '../../../../config/prisma.js';
 import { normalizeTag } from '../../shared/tags.util.js';
 import { isId } from '../../../../utils/helpers.js';
@@ -62,6 +63,13 @@ export const searchUnified = async (query = {}, options = {}) => {
     // found — the old app did the same.
     const listingZone = await resolveListingZone(query);
     const zoneId = listingZone.zoneId;
+
+    // Business Settings > Priority setup, "search": rating (default),
+    // newest, or nearest (only reorders when the app sent coordinates).
+    const prioritySort = await getPrioritySort('search');
+    const restaurantOrder = prioritySort === 'newest'
+        ? [{ createdAt: 'desc' }]
+        : [{ rating: 'desc' }, { createdAt: 'desc' }];
 
     const pageNumber = Math.max(parseInt(page, 10) || 1, 1);
     const limitNumber = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 50);
@@ -135,7 +143,7 @@ export const searchUnified = async (query = {}, options = {}) => {
                 ],
             },
             select: RESTAURANT_SEARCH_SELECT,
-            orderBy: [{ rating: 'desc' }, { createdAt: 'desc' }],
+            orderBy: restaurantOrder,
             take: fetchLimit,
         });
 
@@ -197,7 +205,7 @@ export const searchUnified = async (query = {}, options = {}) => {
         const allMatching = await prisma.foodRestaurant.findMany({
             where,
             select: RESTAURANT_SEARCH_SELECT,
-            orderBy: [{ rating: 'desc' }, { createdAt: 'desc' }],
+            orderBy: restaurantOrder,
             take: fetchLimit,
         });
         for (const restaurant of allMatching) found.set(restaurant.id, restaurant);
@@ -205,7 +213,8 @@ export const searchUnified = async (query = {}, options = {}) => {
 
     let results = [...found.values()];
 
-    if (hasGeoSorting && results.length) {
+    // A custom rating or newest order is kept rather than re-sorted by distance.
+    if (hasGeoSorting && results.length && (!prioritySort || prioritySort === 'nearest')) {
         results = results
             .map((restaurant) => addDistanceScore(restaurant, userLat, userLng))
             .sort((a, b) => (a.distanceScore || 999) - (b.distanceScore || 999));

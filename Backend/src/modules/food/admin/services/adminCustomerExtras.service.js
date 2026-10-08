@@ -16,6 +16,7 @@ import {
     upsertLoyaltySettings,
 } from '../../user/services/loyaltyPoint.service.js';
 import { serializeWalletBonus } from '../../user/services/walletBonus.service.js';
+import { emailWalletCredited } from '../../../../core/notifications/emailEvents.js';
 import {
     validateAddFundDto,
     validateLoyaltySettingsDto,
@@ -132,6 +133,8 @@ export async function addFundToCustomer(adminId, body = {}) {
     } catch {
         /* a notification failure must not undo the credit */
     }
+    // Keyed by the ledger row, which a retried request (same requestId) reuses.
+    emailWalletCredited(user.id, transaction.id, dto.amount, wallet.balance);
 
     return {
         transaction: serializeWalletTransaction(transaction, new Map([[user.id, user]])),

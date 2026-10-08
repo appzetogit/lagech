@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
+import { emailAccountSuspension } from '../../../../core/notifications/emailEvents.js';
 
 /**
  * The admin customer list, extracted from admin.service.js.
@@ -193,7 +194,9 @@ export async function updateCustomerStatus(id, isActive) {
     if (!isId(id)) return null;
     const active = Boolean(isActive);
 
+    let before = null;
     const updated = await prisma.$transaction(async (tx) => {
+        before = await tx.foodUser.findUnique({ where: { id: String(id) }, select: { id: true, isActive: true, updatedAt: true } });
         const { count } = await tx.foodUser.updateMany({
             where: { id: String(id) },
             data: { isActive: active },
@@ -211,5 +214,6 @@ export async function updateCustomerStatus(id, isActive) {
         return tx.foodUser.findUnique({ where: { id: String(id) } });
     });
 
+    if (updated && before && before.isActive !== active) emailAccountSuspension('customer', before, !active);
     return updated;
 }

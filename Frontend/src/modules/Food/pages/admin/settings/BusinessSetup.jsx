@@ -3,6 +3,7 @@ import { Info, Phone, Upload, X, Loader2 } from "@food/components/admin/theme/ic
 import { toast } from "sonner";
 import { adminAPI } from "@food/api";
 import { setCachedSettings, updateFavicon, updateTitle } from "@food/utils/businessSettings";
+import BusinessSettingsTabs from "./businessSettings/BusinessSettingsTabs";
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -20,7 +21,8 @@ const hasSuspiciousEmailTld = (emailValue) => {
 }
 
 
-export default function BusinessSetup() {
+/** Company information, logos and favicons (FoodBusinessSettings). */
+function CompanyInfoSection() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [logoPreview, setLogoPreview] = useState(null);
@@ -261,32 +263,21 @@ export default function BusinessSetup() {
 
   if (loading) {
     return (
-      <div className="p-4 lg:p-6 bg-slate-50 min-h-screen flex items-center justify-center">
+      <div className="py-16 flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
       </div>
     );
   }
 
   return (
-    <div className="p-4 lg:p-6 bg-slate-50 min-h-screen">
-      {/* Page header */}
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-4">
-        <div>
-          <h1 className="text-xl lg:text-2xl font-bold text-slate-900">Business setup</h1>
-          <p className="text-xs lg:text-sm text-slate-500 mt-1">
-            Manage your company information, general configuration and business rules.
-          </p>
+    <div>
+      {/* Note card */}
+      <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 flex items-start gap-3 mb-4">
+        <div className="mt-0.5">
+          <Info className="w-4 h-4 text-amber-500" />
         </div>
-
-        {/* Note card (top-right) */}
-        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 flex items-start gap-3 max-w-md">
-          <div className="mt-0.5">
-            <Info className="w-4 h-4 text-amber-500" />
-          </div>
-          <div className="text-xs lg:text-sm text-slate-700">
-            <p className="font-semibold text-amber-700 mb-0.5">Note</p>
-            <p>Don&apos;t forget to click the &quot;Save Information&quot; button below to save changes.</p>
-          </div>
+        <div className="text-xs lg:text-sm text-slate-700">
+          <p>Company information and logos are saved with the &quot;Save Information&quot; button below; the business rules further down have their own Save button.</p>
         </div>
       </div>
 
@@ -832,4 +823,12 @@ function ToggleSwitch({ initial = false }) {
       <span className="h-4 w-4 rounded-full bg-white shadow-sm" />
     </button>
   );
+}
+
+/**
+ * Business Settings: the old panel's tabs. Business Info keeps the company
+ * information and logos above its business rules.
+ */
+export default function BusinessSetup() {
+  return <BusinessSettingsTabs companyInfo={<CompanyInfoSection />} />;
 }

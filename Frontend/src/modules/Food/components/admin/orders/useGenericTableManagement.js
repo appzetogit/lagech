@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react"
-import { exportToExcel, exportToPDF } from "./ordersExportUtils"
+import { exportToCSV, exportToExcel, exportToPDF } from "./ordersExportUtils"
 import { restaurantLabel } from "@food/utils/entityLabels"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
@@ -66,6 +66,9 @@ export function useGenericTableManagement(data, title, searchFields = []) {
     switch (format) {
       case "excel":
         exportToExcel(filteredData, filename)
+        break
+      case "csv":
+        exportToCSV(filteredData, filename)
         break
       case "pdf":
         await exportToPDF(filteredData, filename)

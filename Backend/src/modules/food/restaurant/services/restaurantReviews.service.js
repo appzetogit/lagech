@@ -1,7 +1,8 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
-import { NotFoundError } from '../../../../core/auth/errors.js';
+import { ForbiddenError, NotFoundError, ValidationError } from '../../../../core/auth/errors.js';
+import { getBusinessSettings } from '../../shared/businessSettings.js';
 
 /**
  * Customer reviews of one restaurant, for the customer app: the star rating a
@@ -13,7 +14,13 @@ import { NotFoundError } from '../../../../core/auth/errors.js';
  * (food_order_item_ratings.isHidden); this list is of order-level restaurant
  * reviews, so an order is left out when any of its dish reviews was hidden --
  * it is the same customer's write-up of the same meal.
+ *
+ * A restaurant may reply to a review when Business Settings > Restaurant
+ * "restaurant can reply to reviews" is on (food_orders.restaurantReply). The
+ * reply is public: it comes back with the review here.
  */
+
+const MAX_REPLY = 1000;
 
 const MAX_LIMIT = 50;
 
@@ -44,6 +51,7 @@ export async function getRestaurantReviews(restaurantId, query = {}) {
             SELECT o.id, o."restaurantRating" AS rating, o."restaurantRatingComment" AS comment,
                    COALESCE(o."restaurantRatedAt", o."deliveredAt", o."createdAt") AS "ratedAt",
                    COALESCE(NULLIF(u.name, ''), o."customerName") AS name,
+                   o."restaurantReply" AS reply, o."restaurantRepliedAt" AS "repliedAt",
                    (SELECT i.name FROM food_order_items i WHERE i."orderId" = o.id ORDER BY i.price DESC LIMIT 1) AS "dishName",
                    (SELECT COALESCE(NULLIF(f.image, ''), i.image) FROM food_order_items i
                       LEFT JOIN food_items f ON f.id = i."itemId"
@@ -89,7 +97,49 @@ export async function getRestaurantReviews(restaurantId, query = {}) {
             ratedAt: row.ratedAt,
             dishName: row.dishName || null,
             dishImage: row.dishImage || null,
+            /** The restaurant's reply, or null. */
+            reply: row.reply ? { text: row.reply, repliedAt: row.repliedAt } : null,
         })),
         pagination: { page, limit, total: filteredTotal, pages: Math.ceil(filteredTotal / limit) },
+    };
+}
+
+/** Whether restaurants may reply to reviews right now (Business Settings). */
+export async function restaurantsCanReply() {
+    return (await getBusinessSettings('business_vendor')).canReplyToReviews === true;
+}
+
+/** The restaurant's own reviews, for its app: the public list plus whether it may reply. */
+export async function listOwnRestaurantReviews(restaurantId, query = {}) {
+    const [data, canReply] = await Promise.all([getRestaurantReviews(restaurantId, query), restaurantsCanReply()]);
+    return { ...data, canReply };
+}
+
+/**
+ * Reply to (or edit the reply to) the review a customer left on one of this
+ * restaurant's orders. An empty reply takes it down. Refused while the admin
+ * has replies switched off.
+ */
+export async function replyToRestaurantReview(restaurantId, orderId, body = {}) {
+    if (!isId(restaurantId)) throw new NotFoundError('Restaurant not found');
+    if (!isId(orderId)) throw new NotFoundError('Review not found');
+    if (!(await restaurantsCanReply())) throw new ForbiddenError('Replying to reviews is switched off by the admin');
+    if (typeof body.reply !== 'string') throw new ValidationError('Write a reply');
+    const reply = body.reply.trim();
+    if (reply.length > MAX_REPLY) throw new ValidationError(`A reply can be at most ${MAX_REPLY} characters`);
+
+    const order = await prisma.foodOrder.findFirst({
+        where: { id: String(orderId), restaurantId: String(restaurantId), restaurantRating: { not: null } },
+        select: { id: true },
+    });
+    if (!order) throw new NotFoundError('Review not found');
+    const row = await prisma.foodOrder.update({
+        where: { id: order.id },
+        data: { restaurantReply: reply, restaurantRepliedAt: reply ? new Date() : null },
+        select: { id: true, restaurantReply: true, restaurantRepliedAt: true },
+    });
+    return {
+        id: row.id,
+        reply: row.restaurantReply ? { text: row.restaurantReply, repliedAt: row.restaurantRepliedAt } : null,
     };
 }

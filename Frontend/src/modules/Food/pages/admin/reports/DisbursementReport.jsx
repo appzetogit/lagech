@@ -1,25 +1,14 @@
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
-import { Download, Loader2, PiggyBank } from "@food/components/admin/theme/icons"
+import { Loader2, PiggyBank } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminAPI } from "@food/api"
 import { adminSystemExtrasAPI } from "@food/api/adminSystemExtras"
-import { downloadCsv, rupees } from "./ReportShell"
-
-const isoDay = (date) => {
-  const d = new Date(date)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
-}
-const daysAgo = (n) => {
-  const d = new Date()
-  d.setDate(d.getDate() - n)
-  return isoDay(d)
-}
-
-const TABS = [
-  { key: "restaurant", label: "Restaurants", path: "/admin/food/disbursement-report/restaurants" },
-  { key: "rider", label: "Delivery men", path: "/admin/food/disbursement-report/deliverymen" },
-]
+import { rupees } from "./ReportShell"
+import ExportMenu from "@food/components/admin/ExportMenu"
+import { exportMoney, fetchAllPages } from "@food/utils/listExport"
+import { daysAgo, isoDay, DisbursementTabs } from "./disbursementShared"
+import RiderDisbursementReport from "./RiderDisbursementReport"
 
 const STATUS = [
   ["", "All"],
@@ -35,21 +24,28 @@ const BATCH_BADGE = {
   canceled: "bg-slate-200 text-slate-700",
 }
 
-const CSV_COLUMNS = [
-  { key: "restaurantName", label: "Restaurant" },
-  { key: "payouts", label: "Payouts" },
-  { key: "total", label: "Total" },
-  { key: "paid", label: "Paid" },
-  { key: "pending", label: "Pending" },
-  { key: "cancelled", label: "Cancelled" },
+const EXPORT_COLUMNS = [
+  { label: "Sl", value: (r, i) => i + 1 },
+  { label: "Restaurant", value: (r) => r.restaurantName },
+  { label: "Payouts", value: (r) => Number(r.payouts) || 0 },
+  { label: "Total", value: (r) => exportMoney(r.total) },
+  { label: "Paid", value: (r) => exportMoney(r.paid) },
+  { label: "Pending", value: (r) => exportMoney(r.pending) },
+  { label: "Cancelled", value: (r) => exportMoney(r.cancelled) },
 ]
 
 /**
- * What the payout runs disbursed: totals by status, a row per payee and each
- * run. Restaurants only for now -- riders have no payout runs, and their tab
- * says so; it is ready for them when they do.
+ * What the payout runs disbursed: totals by status, a row per restaurant and
+ * each run. The Delivery men tab lists each rider payout line instead
+ * (RiderDisbursementReport).
  */
 export default function DisbursementReport({ entityType = "restaurant" }) {
+  if (entityType === "rider") return <RiderDisbursementReport />
+  return <RestaurantDisbursementReport />
+}
+
+function RestaurantDisbursementReport() {
+  const entityType = "restaurant"
   const [range, setRange] = useState({ from: daysAgo(29), to: isoDay(new Date()) })
   const [status, setStatus] = useState("")
   const [restaurantId, setRestaurantId] = useState("")
@@ -57,10 +53,8 @@ export default function DisbursementReport({ entityType = "restaurant" }) {
   const [page, setPage] = useState(1)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [exporting, setExporting] = useState(false)
 
   useEffect(() => {
-    if (entityType !== "restaurant") return
     adminAPI
       .getRestaurants({ limit: 1000 })
       .then((res) => {
@@ -86,17 +80,14 @@ export default function DisbursementReport({ entityType = "restaurant" }) {
     }
   }, [range.from, range.to, status, restaurantId, page, entityType])
 
-  const exportCsv = async () => {
-    try {
-      setExporting(true)
-      const res = await adminSystemExtrasAPI.getDisbursementReport({ ...params, page: 1, limit: 500 })
-      downloadCsv(`disbursement-report-${range.from}-to-${range.to}.csv`, CSV_COLUMNS, res?.data?.data?.rows || [])
-    } catch {
-      toast.error("Export failed")
-    } finally {
-      setExporting(false)
-    }
-  }
+  const exportAll = () =>
+    fetchAllPages(
+      ({ page: p, limit }) => adminSystemExtrasAPI.getDisbursementReport({ ...params, page: p, limit }),
+      (res) => {
+        const d = res?.data?.data || {}
+        return { rows: d.rows || [], total: d.pagination?.total, pages: d.pagination?.pages }
+      },
+    )
 
   const input = "rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white"
   const rows = data?.rows || []
@@ -112,17 +103,7 @@ export default function DisbursementReport({ entityType = "restaurant" }) {
             <h1 className="text-2xl font-bold text-slate-900">Disbursement Report</h1>
           </div>
           <p className="text-sm text-slate-600 mt-1 max-w-3xl">Money sent out by the automatic payout runs in the period: what was paid, what is still waiting and what was cancelled.</p>
-          <div className="mt-4 flex gap-1 border-b border-slate-200">
-            {TABS.map((tab) => (
-              <Link
-                key={tab.key}
-                to={tab.path}
-                className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${tab.key === entityType ? "border-blue-600 text-blue-700" : "border-transparent text-slate-500 hover:text-slate-800"}`}
-              >
-                {tab.label}
-              </Link>
-            ))}
-          </div>
+          <DisbursementTabs active={entityType} />
           <div className="mt-5 flex flex-wrap items-end gap-3">
             <label className="space-y-1">
               <span className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">From</span>
@@ -147,9 +128,14 @@ export default function DisbursementReport({ entityType = "restaurant" }) {
                 </select>
               </label>
             )}
-            <button type="button" onClick={exportCsv} disabled={exporting || !rows.length} className="ml-auto inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50">
-              {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} Export CSV
-            </button>
+            <ExportMenu
+              className="ml-auto"
+              filename={`disbursement-report-${range.from}-to-${range.to}`}
+              sheetName="Disbursement Report"
+              columns={EXPORT_COLUMNS}
+              getRows={exportAll}
+              disabled={!rows.length}
+            />
           </div>
         </div>
 

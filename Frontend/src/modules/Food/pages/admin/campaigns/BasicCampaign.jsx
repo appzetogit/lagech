@@ -3,7 +3,19 @@ import { Layers, Loader2, Pencil, Plus, Store, Trash2, X } from "@food/component
 import { toast } from "sonner"
 import { adminAPI } from "@food/api"
 import { adminCatalogExtrasAPI, errorMessage, loadRestaurantOptions } from "@food/api/adminCatalogExtras"
+import ExportMenu from "@food/components/admin/ExportMenu"
+import { exportDate } from "@food/utils/listExport"
 import { ImageUpload, STATE_BADGE, STATE_LABEL, STATE_TABS, formatWhen, fromLocalInput, toLocalInput } from "./campaignShared"
+
+const EXPORT_COLUMNS = [
+  { label: "Sl", value: (_c, index) => index + 1 },
+  { label: "Title", value: (c) => c.title },
+  { label: "Description", value: (c) => c.description },
+  { label: "Starts", value: (c) => exportDate(c.startsAt) },
+  { label: "Ends", value: (c) => exportDate(c.endsAt) },
+  { label: "Restaurants", value: (c) => Number(c.restaurantCount || 0) },
+  { label: "Status", value: (c) => STATE_LABEL[c.state] || c.state },
+]
 
 function CampaignForm({ campaign, onClose, onSaved }) {
   const [form, setForm] = useState({
@@ -215,9 +227,13 @@ export default function BasicCampaign() {
             </div>
             <p className="text-sm text-slate-600 mt-1">Promotions restaurants take part in. Customers see a campaign while it is switched on and between its start and end.</p>
           </div>
-          <button type="button" onClick={() => setEditing({})} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white">
-            <Plus className="w-4 h-4" /> New campaign
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* The list endpoint is unpaged, so data.campaigns is every campaign in the chosen tab. */}
+            <ExportMenu filename="basic_campaigns" sheetName="Basic Campaigns" columns={EXPORT_COLUMNS} getRows={() => data.campaigns} disabled={loading} className="py-2" />
+            <button type="button" onClick={() => setEditing({})} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white">
+              <Plus className="w-4 h-4" /> New campaign
+            </button>
+          </div>
         </div>
 
         <div className="flex flex-wrap gap-2">
