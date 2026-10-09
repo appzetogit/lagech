@@ -139,11 +139,19 @@ async function deassignOrderForRedispatch({
 
     const order = await prisma.foodOrder.findUnique({ where: { id: existingOrder.id } });
 
-    const db = getFirebaseDB();
-    if (db) {
-        await db.ref(`active_orders/${order.id}`).remove().catch((error) => {
-            logger.warn(`Failed to clear tracking for reassigned order ${order.id}: ${error.message}`);
-        });
+    // getFirebaseDB throws when the Realtime Database is not set up. Tracking
+    // is best-effort: that threw here, after the order had already been taken
+    // off the rider, so the reassignment answered 500 and the order was never
+    // re-dispatched and nobody was told.
+    try {
+        const db = getFirebaseDB();
+        if (db) {
+            await db.ref(`active_orders/${order.id}`).remove().catch((error) => {
+                logger.warn(`Failed to clear tracking for reassigned order ${order.id}: ${error.message}`);
+            });
+        }
+    } catch (error) {
+        logger.warn(`Tracking cleanup skipped for reassigned order ${order.id}: ${error.message}`);
     }
 
     const payload = {

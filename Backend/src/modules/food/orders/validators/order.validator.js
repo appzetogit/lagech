@@ -51,10 +51,17 @@ const addressSchema = z.object({
     state: z.string().min(1, 'State required'),
     zipCode: z.string().optional(),
     phone: z.string().optional(),
+    // USER_APP_API.md documents `location: { lat, lng }`; zod drops undeclared
+    // keys, so an app sending that shape placed an order with no coordinates:
+    // no distance, the flat fee, and a rider pay of 0 from the bands.
+    latitude: z.number().optional(),
+    longitude: z.number().optional(),
     location: z
         .object({
             type: z.literal('Point').optional(),
-            coordinates: z.tuple([z.number(), z.number()]).optional()
+            coordinates: z.tuple([z.number(), z.number()]).optional(),
+            lat: z.number().optional(),
+            lng: z.number().optional()
         })
         .optional()
 });

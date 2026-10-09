@@ -463,6 +463,37 @@ export async function tryAutoAssign(orderId, options = {}) {
   }
 }
 
+/**
+ * Tell one rider an order was handed to them by the admin (Assign rider):
+ * the same new_order socket event and incoming-order push a dispatch round
+ * sends, so the app shows its accept screen. Without this the assignment
+ * reached the rider only if they happened to poll their list.
+ */
+export async function notifyPartnerOfAssignment(orderId, partnerId) {
+  const id = String(orderId);
+  const row = await prisma.foodOrder.findUnique({ where: { id }, include: dispatchInclude });
+  if (!row) return;
+  const order = toOrder(row);
+  const payload = await enrichPayloadWithTripRoadDistance(order, buildDeliverySocketPayload(order, row.restaurant));
+  const acceptanceDeadlineAt = new Date(Date.now() + DRIVER_ACCEPT_WINDOW_MS);
+
+  const io = getIO();
+  if (io) {
+    io.to(rooms.delivery(partnerId)).emit('new_order', { ...payload, assignedByAdmin: true, acceptanceDeadlineAt });
+  }
+  try {
+    await notifyOwnersActionableAlert([{ ownerType: 'DELIVERY_PARTNER', ownerId: String(partnerId) }], {
+      title: 'New order assigned to you',
+      body: `Order #${order.order_id || id} was assigned to you. Tap to accept.`,
+      androidTag: `order_${id}`,
+      androidChannelId: 'incoming_orders_channel_v3',
+      data: { ...buildIncomingOrderPushData(order, payload, acceptanceDeadlineAt), assignedByAdmin: 'true' },
+    });
+  } catch (err) {
+    logger.warn(`Assignment push failed for order ${id}: ${err.message}`);
+  }
+}
+
 export async function processDispatchTimeout(orderId, partnerId) {
   const id = String(orderId);
   const row = await prisma.foodOrder.findUnique({ where: { id }, include: orderInclude });

@@ -344,6 +344,44 @@ async function applyCancellationRefund(order, { cancelledBy = 'system', refundAm
   return none({ reason: `unsupported_method_${paymentMethod}`, method: paymentMethod });
 }
 
+/**
+ * Record a cancellation on the order's ledger row, after the refund ran:
+ * 'refunded' when money went back (to the card, the wallet, or a partial
+ * payment's wallet part), else 'failed' -- nothing was collected. Was only done
+ * for customer and restaurant cancellations and looked at Razorpay alone, so a
+ * refunded wallet order, an admin cancellation and an auto-cancel all left the
+ * row reading 'captured' or 'failed'.
+ */
+async function syncCancelledLedger(order, kind, { role, byId = null, note = "" } = {}) {
+  const refunded =
+    String(order?.paymentStatus || "").toLowerCase() === "refunded" ||
+    String(order?.refundStatus || "").toLowerCase() === "processed";
+  try {
+    await foodTransactionService.updateTransactionStatus(order.id, kind, {
+      status: refunded ? "refunded" : "failed",
+      note,
+      recordedByRole: role,
+      recordedById: byId ? String(byId) : undefined,
+    });
+  } catch (err) {
+    logger.warn(`Cancelled order ledger sync failed for ${order?.id}: ${err?.message || err}`);
+  }
+}
+
+/** The refund sentence for a cancellation message, or "". */
+function cancellationRefundDetail(order) {
+  const refunded =
+    String(order?.paymentStatus || "").toLowerCase() === "refunded" ||
+    String(order?.refundStatus || "").toLowerCase() === "processed";
+  if (!refunded) return "";
+  const amount = Number(order.refundAmount) || Number(order.total) || 0;
+  const method = String(order.paymentMethod || "").toLowerCase();
+  if (isPartialPayment(order)) return ` Your refund of ₹${amount} has been processed.`;
+  return method === "razorpay"
+    ? ` Your refund of ₹${amount} is being processed and will be credited to your original payment method within 5-7 working days.`
+    : ` ₹${amount} has been returned to your Lagech wallet.`;
+}
+
 // ----- Acceptance window expiry -----
 
 async function expireUnacceptedOrders(where = {}) {
@@ -386,14 +424,39 @@ async function expireUnacceptedOrders(where = {}) {
       await prisma.foodOrder.findUnique({ where: { id: doc.id }, include: orderInclude }),
     );
 
+    let final = updated;
     try {
       const refund = await applyCancellationRefund(updated, { cancelledBy: 'auto_cancel' });
       if (Object.keys(refund.paymentPatch).length > 0) {
-        await prisma.foodOrder.update({ where: { id: doc.id }, data: refund.paymentPatch });
+        final = toOrder(await prisma.foodOrder.update({ where: { id: doc.id }, data: refund.paymentPatch, include: orderInclude }));
       }
     } catch (err) {
       logger.warn(`expireUnacceptedOrders refund failed for ${doc.id}: ${err?.message || err}`);
     }
+    await syncCancelledLedger(final, "auto_cancelled_not_accepted", {
+      role: "SYSTEM",
+      note: "Not accepted by the restaurant in time",
+    });
+
+    // The socket below only reaches an open app; a customer whose order was
+    // dropped (and refunded) has to be told even when it is closed.
+    void notifyOwnersSafely(
+      [
+        { ownerType: "USER", ownerId: final.userId },
+        { ownerType: "RESTAURANT", ownerId: final.restaurantId },
+      ],
+      {
+        title: "Order Cancelled ❌",
+        body: `Order #${final.order_id || final.id} was cancelled because the restaurant did not accept it in time.${cancellationRefundDetail(final)}`,
+        data: {
+          type: "order_status_update",
+          orderId: final.id,
+          orderMongoId: final.id,
+          orderStatus: "cancelled_by_restaurant",
+          link: `/food/user/orders/${final.id}`,
+        },
+      },
+    );
 
     try {
       const io = getIO();
@@ -1417,7 +1480,9 @@ function buildRestaurantFinanceViewSync(order, tx = null) {
     return {
       itemTotal: subtotal,
       packagingFee,
-      commission: Number(tx.restaurantCommission) || 0,
+      // commissionAmount is what the ledger charged; restaurantCommission is
+      // the pricing snapshot copied from the order (the same number).
+      commission: Number(tx.commissionAmount ?? tx.restaurantCommission) || 0,
       restaurantDiscountShare: Number(tx.restaurantDiscountShare) || 0,
       discount: Number(order?.discount) || 0,
       taxAmount: Number(tx.taxAmount ?? order?.tax) || 0,
@@ -1770,8 +1835,16 @@ export async function cancelOrder(orderId, userId, reason) {
   }
 
   const from = order.orderStatus;
-  const paymentMethod = String(order.paymentMethod || "cash").toLowerCase();
-  const paymentStatus = String(order.paymentStatus || "cod_pending").toLowerCase();
+
+  // Claim the cancellation before refunding. The status check above is a read;
+  // a restaurant reject or an admin cancel landing in the same moment read the
+  // same 'created' and each refunded the order -- a wallet order went back to
+  // the wallet three times. Only the caller that moves the status refunds.
+  const { count: claimed } = await prisma.foodOrder.updateMany({
+    where: { id: order.id, orderStatus: from },
+    data: { orderStatus: "cancelled_by_user", acceptanceDeadlineAt: null },
+  });
+  if (!claimed) throw new ValidationError("Order cannot be cancelled");
 
   let refund;
   try {
@@ -1783,7 +1856,7 @@ export async function cancelOrder(orderId, userId, reason) {
 
   const updated = toOrder(await prisma.foodOrder.update({
     where: { id: order.id },
-    data: { orderStatus: "cancelled_by_user", ...refund.paymentPatch },
+    data: { ...refund.paymentPatch },
     include: orderInclude,
   }));
 
@@ -1802,26 +1875,13 @@ export async function cancelOrder(orderId, userId, reason) {
     reason: reason || "",
   });
 
-  const finalPaymentMethod = String(updated.paymentMethod || paymentMethod || "cash").toLowerCase();
-  const finalPaymentStatus = String(updated.paymentStatus || paymentStatus || "cod_pending").toLowerCase();
-  const isOnlinePaid =
-    finalPaymentMethod === "razorpay" &&
-    (finalPaymentStatus === "paid" || finalPaymentStatus === "refunded");
+  await syncCancelledLedger(updated, 'cancelled_by_user', {
+    role: 'USER',
+    byId: userId,
+    note: `Order cancelled by user: ${reason || "No reason"}`,
+  });
 
-  try {
-    await foodTransactionService.updateTransactionStatus(order.id, 'cancelled_by_user', {
-      status: isOnlinePaid ? 'refunded' : 'failed',
-      note: `Order cancelled by user: ${reason || "No reason"}`,
-      recordedByRole: 'USER',
-      recordedById: userId,
-    });
-  } catch (err) {
-    logger.warn(`cancelOrder transaction sync failed: ${err?.message || err}`);
-  }
-
-  const refundDetail = isOnlinePaid
-    ? ` Your refund of ₹${updated.total} is being processed and will be credited to your original payment method within 5-7 working days.`
-    : "";
+  const refundDetail = cancellationRefundDetail(updated);
 
   await notifyOwnersSafely(
     [
@@ -2090,24 +2150,10 @@ export async function listOrdersRestaurant(restaurantId, query) {
     // The handover code (a takeaway's pickup code) is the customer's to show.
     delete out.deliveryOtp;
     const tx = txByOrderId.get(order.id);
-    out.finance = buildRestaurantFinanceViewSync(
-      order,
-      tx
-        ? {
-            amounts: {
-              restaurantCommission: Number(tx.commissionAmount),
-              restaurantDiscountShare: Number(tx.restaurantDiscountShare),
-              taxAmount: Number(tx.taxAmount),
-              totalCustomerPaid: Number(tx.totalCustomerPaid),
-              restaurantShare: Number(tx.restaurantShare),
-            },
-            settlement: {
-              isRestaurantSettled: tx.isRestaurantSettled,
-              restaurantSettledAt: tx.restaurantSettledAt,
-            },
-          }
-        : null,
-    );
+    // The flat ledger row, the shape buildRestaurantFinanceViewSync reads. A
+    // nested { amounts, settlement } object was passed here, which it does not
+    // read, so every order in the list showed "You'll receive ₹0".
+    out.finance = buildRestaurantFinanceViewSync(order, tx || null);
     return out;
   });
 
@@ -2186,8 +2232,11 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
     normalizedPaymentMethod === "cash" &&
     prevPaymentStatus === "cod_pending";
 
-  let updated = toOrder(await prisma.foodOrder.update({
-    where: { id: order.id },
+  // Guarded on the status this was decided from, so a customer cancel, an admin
+  // cancel or the expiry sweep landing in the same moment is not overwritten --
+  // and a cancellation is refunded only by whoever actually made it.
+  const { count: moved } = await prisma.foodOrder.updateMany({
+    where: { id: order.id, orderStatus: from },
     data: {
       orderStatus,
       // The acceptance window exists only to auto-cancel orders the restaurant
@@ -2196,8 +2245,11 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
       acceptanceDeadlineAt: null,
       ...(codBecomesPaid ? { paymentStatus: 'paid' } : {}),
     },
-    include: orderInclude,
-  }));
+  });
+  if (!moved) {
+    throw new ValidationError("This order was just updated by someone else. Please refresh and try again.");
+  }
+  let updated = toOrder(await prisma.foodOrder.findUnique({ where: { id: order.id }, include: orderInclude }));
 
   await pushStatusHistory(order.id, {
     byRole: "RESTAURANT",
@@ -2206,6 +2258,32 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
     to: orderStatus,
     note: note || "",
   });
+
+  // Refund before anyone is told, so the message says what actually happened.
+  if (String(orderStatus).includes("cancel")) {
+    try {
+      const refund = await applyCancellationRefund(updated, { cancelledBy: 'restaurant' });
+      if (Object.keys(refund.paymentPatch).length > 0) {
+        updated = toOrder(await prisma.foodOrder.update({
+          where: { id: order.id },
+          data: refund.paymentPatch,
+          include: orderInclude,
+        }));
+      }
+    } catch (err) {
+      logger.error(`Automated refund failed for Order ${order.id} (Restaurant Cancel): ${err?.message || err}`);
+      updated = toOrder(await prisma.foodOrder.update({
+        where: { id: order.id },
+        data: { refundStatus: "failed", refundAmount: updated.total },
+        include: orderInclude,
+      }));
+    }
+    await syncCancelledLedger(updated, 'cancelled_by_restaurant', {
+      role: 'RESTAURANT',
+      byId: restaurantId,
+      note: `Order cancelled by restaurant${note ? `: ${note}` : ''}`,
+    });
+  }
 
   if (String(orderStatus) === "delivered") {
     try {
@@ -2236,12 +2314,7 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
       ? "Your takeaway order is ready. Show your pickup code at the restaurant to collect it."
       : "Your order is ready and waiting to be picked up.";
   } else if (String(orderStatus).includes("cancel")) {
-    const isOnlinePaid =
-      updated.paymentMethod === "razorpay" &&
-      (updated.paymentStatus === "paid" || updated.paymentStatus === "refunded");
-    const refundDetail = isOnlinePaid
-      ? ` Your refund of ₹${updated.total} is being processed and will be credited to your original payment method within 5-7 working days.`
-      : "";
+    const refundDetail = cancellationRefundDetail(updated);
     title = "Order Cancelled ❌";
     body = (note && String(note).trim()) ? note : `Unfortunately, your order has been cancelled by the restaurant.${refundDetail}`;
   }
@@ -2289,22 +2362,6 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
     const assignedRiderId = row.dispatchDeliveryPartnerId;
     if (assignedRiderId) {
       notifyList.push({ ownerType: "DELIVERY_PARTNER", ownerId: assignedRiderId });
-    }
-
-    if (isCancellation) {
-      try {
-        const isOnlinePaid =
-          updated.paymentMethod === "razorpay" &&
-          (updated.paymentStatus === "paid" || updated.paymentStatus === "refunded");
-        await foodTransactionService.updateTransactionStatus(order.id, 'cancelled_by_restaurant', {
-          status: isOnlinePaid ? 'refunded' : 'failed',
-          note: `Order cancelled by restaurant/admin`,
-          recordedByRole: 'RESTAURANT',
-          recordedById: restaurantId,
-        });
-      } catch (err) {
-        logger.warn(`updateOrderStatusRestaurant transaction sync failed: ${err?.message || err}`);
-      }
     }
 
     // Fire-and-forget: awaiting a push fan-out put Google's latency inside the
@@ -2380,26 +2437,6 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
     from,
     to: orderStatus,
   });
-
-  if (String(orderStatus).includes("cancel")) {
-    try {
-      const refund = await applyCancellationRefund(updated, { cancelledBy: 'restaurant' });
-      if (Object.keys(refund.paymentPatch).length > 0) {
-        updated = toOrder(await prisma.foodOrder.update({
-          where: { id: order.id },
-          data: refund.paymentPatch,
-          include: orderInclude,
-        }));
-      }
-    } catch (err) {
-      logger.error(`Automated refund failed for Order ${order.id} (Restaurant Cancel): ${err?.message || err}`);
-      updated = toOrder(await prisma.foodOrder.update({
-        where: { id: order.id },
-        data: { refundStatus: "failed", refundAmount: updated.total },
-        include: orderInclude,
-      }));
-    }
-  }
 
   return normalizeOrderForClient(updated);
 }
@@ -2809,6 +2846,14 @@ export async function assignDeliveryPartnerAdmin(orderId, deliveryPartnerId, adm
     include: orderInclude,
   });
   if (!row) throw new NotFoundError("Order not found");
+  // A closed or unpaid order has nothing to deliver; assigning one put it on
+  // the rider's list as a live offer.
+  if (["delivered", "cancelled_by_user", "cancelled_by_restaurant", "cancelled_by_admin"].includes(row.orderStatus)) {
+    throw new ValidationError("This order is already closed; it cannot be assigned to a delivery partner.");
+  }
+  if (row.orderStatus === "pending_payment") {
+    throw new ValidationError("This order is still waiting for its payment.");
+  }
   if (row.dispatchStatus === "accepted") {
     throw new ValidationError("Order already accepted by partner");
   }
@@ -2820,16 +2865,30 @@ export async function assignDeliveryPartnerAdmin(orderId, deliveryPartnerId, adm
   if (!partner || partner.status !== "approved") {
     throw new ValidationError("Delivery partner not available");
   }
+  // As in the old panel: a rider already holding the most orders allowed
+  // (Business Settings > Deliveryman) cannot be given another.
+  const { partnerAtDeliveryLimit } = await import("./order.helpers.js");
+  if (await partnerAtDeliveryLimit(String(deliveryPartnerId))) {
+    throw new ValidationError("This delivery partner already holds the maximum number of orders.");
+  }
 
-  const updated = toOrder(await prisma.foodOrder.update({
-    where: { id: row.id },
+  // Guarded: a rider accepting the order in this moment keeps it.
+  const { count: assigned } = await prisma.foodOrder.updateMany({
+    where: { id: row.id, dispatchStatus: { not: "accepted" }, orderStatus: row.orderStatus },
     data: {
       dispatchStatus: 'assigned',
       dispatchDeliveryPartnerId: String(deliveryPartnerId),
       dispatchAssignedAt: new Date(),
+      dispatchAcceptedAt: null,
     },
-    include: orderInclude,
-  }));
+  });
+  if (!assigned) throw new ValidationError("The order changed meanwhile. Please refresh and try again.");
+  const updated = toOrder(await prisma.foodOrder.findUnique({ where: { id: row.id }, include: orderInclude }));
+
+  // The rider has to know: the accept screen, over the socket and a push.
+  void dispatchService.notifyPartnerOfAssignment(row.id, String(deliveryPartnerId)).catch((err) => {
+    logger.warn(`Assignment notification failed for order ${row.id}: ${err?.message || err}`);
+  });
 
   await pushStatusHistory(row.id, {
     byRole: 'ADMIN',
@@ -2941,8 +3000,24 @@ export async function updateOrderStatusAdmin(orderId, orderStatus, note = "", ad
     normalizedPaymentMethod === "cash" &&
     prevPaymentStatus === "cod_pending";
 
+  const isCancel = String(orderStatus).includes("cancel");
+
+  // Claim the change first, guarded on the status it was decided from; the
+  // refund below runs only for the caller that made it (see cancelOrder).
+  const { count: moved } = await prisma.foodOrder.updateMany({
+    where: { id: order.id, orderStatus: from },
+    data: {
+      orderStatus,
+      ...(codBecomesPaid ? { paymentStatus: 'paid' } : {}),
+      ...(isCancel || ["confirmed", "preparing"].includes(String(orderStatus)) ? { acceptanceDeadlineAt: null } : {}),
+    },
+  });
+  if (!moved) {
+    throw new ValidationError("This order was just updated by someone else. Please refresh and try again.");
+  }
+
   let refundPatch = {};
-  if (String(orderStatus).includes("cancel")) {
+  if (isCancel) {
     try {
       const refund = await applyCancellationRefund(order, { cancelledBy: 'admin' });
       refundPatch = refund.paymentPatch;
@@ -2954,9 +3029,17 @@ export async function updateOrderStatusAdmin(orderId, orderStatus, note = "", ad
 
   let updated = toOrder(await prisma.foodOrder.update({
     where: { id: order.id },
-    data: { orderStatus, ...(codBecomesPaid ? { paymentStatus: 'paid' } : {}), ...refundPatch },
+    data: { ...refundPatch },
     include: orderInclude,
   }));
+
+  if (isCancel) {
+    await syncCancelledLedger(updated, orderStatus, {
+      role: byRole,
+      byId: adminId,
+      note: note || "Order cancelled by admin",
+    });
+  }
 
   await pushStatusHistory(order.id, {
     byRole,
@@ -3002,7 +3085,7 @@ export async function updateOrderStatusAdmin(orderId, orderStatus, note = "", ad
     body = "Your order is ready and waiting to be picked up.";
   } else if (String(orderStatus).includes("cancel")) {
     title = "Order Cancelled ❌";
-    body = (note && String(note).trim()) ? note : `Unfortunately, your order has been cancelled by support.`;
+    body = `${(note && String(note).trim()) ? note : "Unfortunately, your order has been cancelled by support."}${cancellationRefundDetail(updated)}`;
   }
 
   await notifyOwnersSafely(notifyList, {
@@ -3066,17 +3149,20 @@ export async function markOrderDeliveredAdmin(orderId, adminId, note = "") {
   const prevPaymentStatus = String(order.paymentStatus || "cod_pending").toLowerCase();
   const codBecomesPaid = normalizedPaymentMethod === "cash" && prevPaymentStatus === "cod_pending";
 
-  const updated = toOrder(await prisma.foodOrder.update({
-    where: { id: order.id },
+  // Guarded on the status: a cancellation in the same moment wins.
+  const { count: moved } = await prisma.foodOrder.updateMany({
+    where: { id: order.id, orderStatus: from },
     data: {
       orderStatus: "delivered",
       deliveryPhase: "delivered",
       deliveryStatus: "delivered",
       deliveredAt: row.deliveredAt || new Date(),
+      acceptanceDeadlineAt: null,
       ...(codBecomesPaid ? { paymentStatus: 'paid' } : {}),
     },
-    include: orderInclude,
-  }));
+  });
+  if (!moved) throw new ValidationError("This order was just updated by someone else. Please refresh and try again.");
+  const updated = toOrder(await prisma.foodOrder.findUnique({ where: { id: order.id }, include: orderInclude }));
 
   await pushStatusHistory(order.id, {
     byRole: "ADMIN",

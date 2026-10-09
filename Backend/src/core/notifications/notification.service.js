@@ -121,7 +121,10 @@ export const recordPushInInbox = async ({ ownerType, ownerId, payload = {} } = {
     try {
         const type = String(ownerType || '').toUpperCase();
         if (!INBOX_OWNER_TYPES.has(type) || !isId(ownerId)) return null;
-        if (payload.skipInbox) return null;
+        // A data-only leg is a second copy of an alert already kept (the
+        // actionable new-order alert sends both legs) or a signal to dismiss
+        // a screen ("order taken"); keeping it listed every new order twice.
+        if (payload.skipInbox || payload.dataOnly) return null;
         const title = String(payload.title || '').trim();
         const message = String(payload.body || payload.message || '').trim();
         if (!title || !message) return null;

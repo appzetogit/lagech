@@ -183,6 +183,22 @@ function assertOwnedBy(row, deliveryPartnerId) {
   }
 }
 
+/**
+ * The trip steps (reached pickup, picked up) need the order to be the rider's
+ * accepted, live delivery: an offer the admin assigned but the rider has not
+ * accepted, or an order cancelled meanwhile, cannot be picked up.
+ */
+function assertLiveAcceptedTrip(row) {
+  if (TERMINAL_ORDER_STATUSES.includes(String(row.orderStatus || ''))) {
+    throw new ValidationError(
+      String(row.orderStatus) === 'delivered' ? 'Order already delivered' : 'This order was cancelled.',
+    );
+  }
+  if (String(row.dispatchStatus || '') !== 'accepted') {
+    throw new ValidationError('Accept the order before starting the trip.');
+  }
+}
+
 export async function getCurrentTripDelivery(deliveryPartnerId) {
   if (!deliveryPartnerId) throw new ValidationError('Delivery partner ID required');
 
@@ -726,8 +742,7 @@ export async function rejectOrderDelivery(orderId, deliveryPartnerId, { reason =
 export async function confirmReachedPickupDelivery(orderId, deliveryPartnerId) {
   const { row, order } = await loadOrder(orderId);
   assertOwnedBy(row, deliveryPartnerId);
-
-  if (row.orderStatus === 'delivered') throw new ValidationError('Order already delivered');
+  assertLiveAcceptedTrip(row);
 
   const currentPhase = row.deliveryPhase || '';
   const currentStatus = row.deliveryStatus || '';
@@ -795,6 +810,7 @@ export async function confirmReachedPickupDelivery(orderId, deliveryPartnerId) {
 export async function confirmPickupDelivery(orderId, deliveryPartnerId, billImageUrl) {
   const { row } = await loadOrder(orderId);
   assertOwnedBy(row, deliveryPartnerId);
+  assertLiveAcceptedTrip(row);
 
   const from = row.orderStatus;
   const nextStatus = 'picked_up';
@@ -997,8 +1013,12 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
     logger.info(`[DeliveryComplete] COD order ${row.id} marked as paid upon delivery.`);
   }
 
-  const updated = toOrder(await prisma.foodOrder.update({
-    where: { id: row.id },
+  // Guarded on the status this was decided from: two completes racing (a
+  // double tap, a retry) deliver once, and an admin cancel that landed first
+  // is not overwritten -- otherwise the rider is credited twice, or paid for
+  // a cancelled order.
+  const { count: moved } = await prisma.foodOrder.updateMany({
+    where: { id: row.id, orderStatus: from, dispatchDeliveryPartnerId: String(deliveryPartnerId) },
     data: {
       orderStatus: 'delivered',
       deliveryPhase: 'delivered',
@@ -1014,8 +1034,9 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
           }
         : {}),
     },
-    include: orderInclude,
-  }));
+  });
+  if (!moved) throw new ValidationError('This order was just updated. Please refresh and try again.');
+  const updated = toOrder(await prisma.foodOrder.findUnique({ where: { id: row.id }, include: orderInclude }));
 
   await pushStatusHistory(row.id, {
     byRole: 'DELIVERY_PARTNER',
