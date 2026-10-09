@@ -179,8 +179,9 @@ test('online Razorpay + tip: hidden until paid, verified, delivered, tip all the
         assert.equal(riderView.body.data.order.riderTip, 25);
         await W.deliver(id, rider, user, { collect: 'none' });
         await W.assertDeliveredMoney(id, { riderPay: 20, tip: 25, rider, cashCollected: 0 });
-        // The customer was told the order was placed once the payment went through.
-        assert.ok((await W.inboxFor('USER', user.id, id)).length > 0);
+        // The customer is told the order was placed once the payment went through, once.
+        await waitFor(async () => (await W.inboxFor('USER', user.id, id)).some((n) => n.category === 'order_created'), 'placed push');
+        assert.equal((await W.inboxFor('USER', user.id, id)).filter((n) => n.category === 'order_created').length, 1);
     } finally {
         await W.set('business_deliveryman', {});
     }

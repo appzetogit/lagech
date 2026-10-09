@@ -1275,6 +1275,25 @@ export async function finalizeOrderPayment(orderId, { source = "SYSTEM", userId 
   // a scheduled one at its release time instead (releaseScheduledOrders).
   if (!isHeldForSchedule(current)) await notifyRestaurantNewOrder(current);
 
+  // The customer's "order placed" push. A cash or wallet order gets it at
+  // placement; an online one was skipped there (still unpaid) and never got
+  // it at all. An offline payment's verification sends its own message.
+  if (source !== "ADMIN") {
+    const restaurant = await prisma.foodRestaurant
+      .findUnique({ where: { id: String(current.restaurantId) }, select: { restaurantName: true } })
+      .catch(() => null);
+    void notifyOwnersSafely([{ ownerType: "USER", ownerId: String(current.userId) }], {
+      title: "Order Confirmed! 🍔",
+      body: `Your order #${current.order_id || current.id} from ${restaurant?.restaurantName || "the restaurant"} has been placed successfully.${isHeldForSchedule(current) ? " It is scheduled for later; we will start on it shortly before then." : ""}`,
+      data: {
+        type: "order_created",
+        orderId: current.id,
+        orderMongoId: current.id,
+        link: `/food/user/orders/${current.id}`,
+      },
+    });
+  }
+
   return current;
 }
 
