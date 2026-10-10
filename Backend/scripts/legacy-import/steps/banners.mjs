@@ -20,7 +20,7 @@ import { loadIdMap, recordId } from '../idMap.mjs';
 const ENTITY = 'banner';
 const IMAGE_DIR = 'legacy/banner';
 
-export async function importBanners(mysql, report) {
+export async function importBanners(mysql, report, ctx = {}) {
     const idMap = await loadIdMap(ENTITY);
     const restaurants = await loadIdMap('restaurant');
     const foods = await loadIdMap('food');
@@ -28,9 +28,17 @@ export async function importBanners(mysql, report) {
     const [[foodModule]] = await mysql.query(
         "SELECT id FROM modules WHERE module_type = 'food' ORDER BY status DESC, id LIMIT 1",
     );
-    const [rows] = await mysql.query('SELECT * FROM banners WHERE module_id = ? ORDER BY id DESC', [foodModule.id]);
+    const SQL = 'SELECT * FROM banners WHERE module_id = ? ORDER BY id DESC';
+    const [rows] = await mysql.query(SQL, [foodModule.id]);
+    const baseline = ctx.sync ? await ctx.baselineRows(SQL, [foodModule.id]) : null;
 
     for (const [index, row] of rows.entries()) {
+        // Sync: banners are the new admin's now; an old-side change is only reported.
+        if (ctx.sync && idMap.has(String(row.id))) {
+            ctx.leaveAlone(report, ENTITY, row, baseline,
+                ['title', 'type', 'image', 'data', 'zone_id', 'status', 'featured', 'default_link']);
+            continue;
+        }
         const file = String(row.image || '').trim();
         if (!file || !fs.existsSync(path.join(config.uploadStorageRoot || 'uploads', IMAGE_DIR, file))) {
             report.skip(ENTITY, row.id, row.title, `image ${file || '(none)'} not found in the copied storage`);

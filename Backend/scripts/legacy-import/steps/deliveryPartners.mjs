@@ -18,6 +18,7 @@ import { prisma } from '../../../src/config/prisma.js';
 import { config } from '../../../src/config/env.js';
 import { buildPublicUrl } from '../../../src/services/storage.service.js';
 import { loadIdMap, recordId } from '../idMap.mjs';
+import { byId, fillBlanks, guardedUpdate, same } from '../sync.mjs';
 
 const ENTITY = 'delivery_partner';
 const IMAGE_DIR = 'legacy/delivery-man';
@@ -87,7 +88,77 @@ const identityOf = (row, missing) => {
     return common;
 };
 
-export async function importDeliveryPartners(mysql, report) {
+/** One old rider row as this system's columns. */
+const riderData = (row, vehicleName, missing) => {
+    const phone = last10(row.phone);
+    const first = String(row.f_name || '').trim();
+    const last = String(row.l_name || '').trim();
+    return {
+        name: (first === last ? first : `${first} ${last}`).trim() || `Rider ${phone}`,
+        phone,
+        countryCode: '+91',
+        email: emailOf(row.email),
+        profilePhoto: imageUrl(row.image, missing),
+        vehicleType: vehicleName.toLowerCase() === 'bike' ? 'bike' : vehicleName.toLowerCase() || null,
+        vehicleName: vehicleName || null,
+        ...identityOf(row, missing),
+        ...statusOf(row),
+        // Everyone starts offline; their old app's online switch means nothing here.
+        availabilityStatus: 'offline',
+        totalDeliveries: Number(row.order_count) || 0,
+        ...(row.created_at ? { createdAt: row.created_at } : {}),
+    };
+};
+
+/** Sync: what may be filled on a rider imported before, when blank here. */
+export const RIDER_FILL = [
+    'email', 'profilePhoto', 'vehicleType', 'vehicleName',
+    'drivingLicenseNumber', 'drivingLicensePhoto', 'aadharNumber', 'aadharPhoto',
+    'customFields', 'customDocuments',
+];
+
+/**
+ * Sync rules for one already-imported rider: blanks filled; the approval
+ * status follows the old system only while this system still has the status
+ * originally imported (an admin here approving, suspending or rejecting
+ * someone is final). Exported for the test.
+ */
+export function planRiderSync(current, original, target) {
+    const fill = fillBlanks(current, target, RIDER_FILL);
+    const status = guardedUpdate(current, original, target, ['status']);
+    const patch = { ...fill.patch };
+    if (status.patch.status) {
+        Object.assign(patch, {
+            status: target.status,
+            approvedAt: target.approvedAt ?? null,
+            rejectedAt: target.rejectedAt ?? null,
+            rejectionReason: target.rejectionReason ?? null,
+        });
+    }
+    return { patch, kept: [...fill.kept, ...(status.protected ? ['status'] : [])] };
+}
+
+async function syncRider(row, mappedId, target, baselineRow, vehicleNameOf, report) {
+    const current = await prisma.foodDeliveryPartner.findUnique({ where: { id: mappedId } });
+    if (!current) {
+        report.skip(ENTITY, row.id, row.phone, 'imported before but deleted here since; not recreated');
+        return;
+    }
+    const original = baselineRow ? riderData(baselineRow, vehicleNameOf(baselineRow), []) : null;
+    const { patch, kept } = planRiderSync(current, original, target);
+    const legacyMoved = original ? kept.filter((field) => !same(original[field], target[field])) : kept;
+    if (original && !same(original.totalDeliveries, target.totalDeliveries)) legacyMoved.push('totalDeliveries');
+    if (Object.keys(patch).length) {
+        await prisma.foodDeliveryPartner.update({ where: { id: mappedId }, data: patch });
+        report.done(ENTITY, 'updated');
+        report.detail(ENTITY, Object.keys(patch));
+    } else {
+        report.done(ENTITY, legacyMoved.length ? 'protected' : 'unchanged');
+    }
+    if (legacyMoved.length) report.detail(ENTITY, legacyMoved.map((field) => `${field} (kept)`));
+}
+
+export async function importDeliveryPartners(mysql, report, ctx = {}) {
     const idMap = await loadIdMap(ENTITY);
     const [rows] = await mysql.query('SELECT * FROM delivery_men ORDER BY id');
     const [[vehicle]] = await mysql.query('SELECT type FROM d_m_vehicles WHERE id = 2');
@@ -111,31 +182,39 @@ export async function importDeliveryPartners(mysql, report) {
         report.done(ENTITY, exists ? 'updated' : 'created');
     };
 
+    const vehicleNameOf = (row) => vehicleNames.get(Number(row.vehicle_id)) || '';
+    const baseline = ctx.sync ? byId((await ctx.baseline.query('SELECT * FROM delivery_men'))[0]) : null;
+
     for (const row of rows) {
         const phone = last10(row.phone);
         if (phone.length !== 10) {
             report.skip(ENTITY, row.id, row.phone, 'phone is not a 10-digit number');
             continue;
         }
-        const first = String(row.f_name || '').trim();
-        const last = String(row.l_name || '').trim();
-        const vehicleName = vehicleNames.get(Number(row.vehicle_id)) || '';
+        const data = riderData(row, vehicleNameOf(row), missing);
 
-        await save(row.id, {
-            name: (first === last ? first : `${first} ${last}`).trim() || `Rider ${phone}`,
-            phone,
-            countryCode: '+91',
-            email: emailOf(row.email),
-            profilePhoto: imageUrl(row.image, missing),
-            vehicleType: vehicleName.toLowerCase() === 'bike' ? 'bike' : vehicleName.toLowerCase() || null,
-            vehicleName: vehicleName || null,
-            ...identityOf(row, missing),
-            ...statusOf(row),
-            // Everyone starts offline; their old app's online switch means nothing here.
-            availabilityStatus: 'offline',
-            totalDeliveries: Number(row.order_count) || 0,
-            ...(row.created_at ? { createdAt: row.created_at } : {}),
-        }, row.phone);
+        if (ctx.sync) {
+            const mappedId = idMap.get(String(row.id));
+            if (mappedId) {
+                await syncRider(row, mappedId, data, baseline.get(String(row.id)), vehicleNameOf, report);
+                continue;
+            }
+            // A rider who signed up here since, with the same phone, is the
+            // same person: link to that account and fill its blanks only.
+            const here = await prisma.foodDeliveryPartner.findUnique({ where: { phone } });
+            if (here) {
+                const { patch } = fillBlanks(here, data, RIDER_FILL);
+                if (Object.keys(patch).length) await prisma.foodDeliveryPartner.update({ where: { id: here.id }, data: patch });
+                await recordId(ENTITY, row.id, here.id);
+                idMap.set(String(row.id), here.id);
+                report.warn(ENTITY, row.id, phone,
+                    `already registered here as "${here.name}" (${here.status}); linked to that account, its own details and status kept`);
+                report.done(ENTITY, 'updated');
+                continue;
+            }
+        }
+
+        await save(row.id, data, row.phone);
     }
 
     // Riders the old admin deleted, wherever something still points at them.
@@ -149,6 +228,11 @@ export async function importDeliveryPartners(mysql, report) {
         ORDER BY id`);
 
     for (const { id } of orphans) {
+        // Sync: a placeholder made before stays as it is.
+        if (ctx.sync && idMap.has(String(id))) {
+            report.done(ENTITY, 'unchanged');
+            continue;
+        }
         await save(id, {
             name: `Former rider #${id}`,
             // Not ten digits, so no OTP login can ever match it.
