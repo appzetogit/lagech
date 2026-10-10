@@ -14,6 +14,36 @@ Verified against `Backend/src/modules/food/delivery/` and `Backend/src/modules/f
 
 ## 1. Auth
 
+**Which flow?** Read `GET /v1/food/public/business-settings` → `data.login.otpProvider`:
+`"firebase"` (the default — also treat a missing value as `"firebase"`) or `"sms"`.
+The server accepts both flows at all times; the setting only tells the app which one to show
+(admin: Settings → Login Setup → OTP provider).
+
+**Firebase flow** (Firebase project `pr-2602-048---lagech`, as the old 6amMart app with `firebase_otp_verification=1`):
+1. `FirebaseAuth.instance.verifyPhoneNumber(phoneNumber: '+91' + phone, …)`. Firebase sends a **6-digit** code.
+   `codeSent` → show the OTP screen (6 boxes); `verificationCompleted` (Android auto-retrieval) → sign in straight away;
+   `verificationFailed` → show the error (`too-many-requests`, `invalid-phone-number`, `quota-exceeded`, …);
+   resend with `forceResendingToken`.
+2. `signInWithCredential(PhoneAuthProvider.credential(verificationId, smsCode))` → `user.getIdToken()`.
+3. `POST /food/auth/delivery/firebase-login` with `{ "idToken": "<Firebase ID token>", …same optional fields as verify-otp }`.
+   No `phone` is read: the number comes from the verified token (`+91XXXXXXXXXX` → `XXXXXXXXXX`).
+4. `FirebaseAuth.instance.signOut()` — the app keeps only our access/refresh tokens.
+
+The response is **exactly** the matching `verify-otp` response (same new-account, deactivated and approval rules, same tokens;
+signing in evicts the previous device as usual). Errors: `400` body invalid (no `idToken`); `401` with a readable `message` when
+the token is expired/invalid/revoked, was issued for another Firebase project, is not a phone sign-in, carries no phone number,
+or the number is not `+91`; `429` rate limited (failed attempts only, same limiter as verify-otp).
+
+**SMS flow (fallback, `otpProvider: "sms"`)**: `request-otp` / `verify-otp` as below (4-digit code). `USE_DEFAULT_OTP=true`
+(fixed `1234`, returned in the response) is for testing only and **must be turned off before go-live**; Firebase login never uses it.
+
+### `POST /food/auth/delivery/firebase-login`
+```json
+{ "idToken": "eyJhbGciOi…", "fcmToken": "…", "platform": "mobile" }
+```
+→ identical to `verify-otp`: tokens + `user`, or `{ needsRegistration: true, phone }` for an unknown number,
+or `{ pendingApproval: true, isRejected, rejectionReason, message }` (no tokens) while the account is not approved.
+
 ### `POST /food/auth/delivery/request-otp`
 ```json
 { "phone": "9876543210" }

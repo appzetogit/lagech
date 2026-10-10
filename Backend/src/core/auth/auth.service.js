@@ -17,6 +17,7 @@ import {
   replaceFirebaseDeviceToken,
   upsertFirebaseDeviceToken,
 } from "../notifications/firebase.service.js";
+import { verifyFirebasePhoneIdToken } from "./firebasePhone.verifier.js";
 
 const ROLES = {
   USER: "USER",
@@ -112,6 +113,18 @@ export const verifyUserOtpAndLogin = async (
     throw new AuthError(result.reason || "OTP verification failed");
   }
 
+  return loginUserWithVerifiedPhone(phone, { ref, fcmToken, platform, name });
+};
+
+/**
+ * Customer login once the phone number is proven — by our SMS OTP or by a
+ * Firebase phone ID token. Both paths share this, so new-user handling,
+ * the deactivated check, referral crediting and token issuing are identical.
+ */
+const loginUserWithVerifiedPhone = async (
+  phone,
+  { ref, fcmToken, platform, name } = {},
+) => {
   let userDoc = await prisma.foodUser.findUnique({ where: { phone } });
 
   // Ensure user exists and mark as verified on successful OTP.
@@ -341,7 +354,11 @@ export const verifyRestaurantOtpAndLogin = async (phone, otp, fcmToken, platform
   if (!result.valid) {
     throw new AuthError(result.reason || "OTP verification failed");
   }
+  return loginRestaurantWithVerifiedPhone(phone, { fcmToken, platform });
+};
 
+/** Restaurant login once the phone is proven (SMS OTP or Firebase). */
+const loginRestaurantWithVerifiedPhone = async (phone, { fcmToken, platform } = {}) => {
   // Restaurants may store ownerPhone with country code or formatting.
   // Match by exact phone, last-10 digits, or suffix match to avoid false "needsRegistration".
   const digits = String(phone || "").replace(/\D/g, "");
@@ -457,7 +474,11 @@ export const verifyDeliveryOtpAndLogin = async (phone, otp, fcmToken, platform) 
   if (!result.valid) {
     throw new AuthError(result.reason || "OTP verification failed");
   }
+  return loginDeliveryWithVerifiedPhone(phone, { fcmToken, platform });
+};
 
+/** Rider login once the phone is proven (SMS OTP or Firebase). */
+const loginDeliveryWithVerifiedPhone = async (phone, { fcmToken, platform } = {}) => {
   const normalized = normalizePhoneForDelivery(phone);
   if (!normalized) {
     return { needsRegistration: true, phone };
@@ -524,6 +545,31 @@ export const verifyDeliveryOtpAndLogin = async (phone, otp, fcmToken, platform) 
     user: deliveryPartner,
     needsRegistration: false,
   };
+};
+
+// ─── Firebase Phone Authentication ───────────────────────────────────────────
+//
+// The app verifies the phone number with Firebase and sends us the Firebase ID
+// token. Once the token is verified the login is exactly the SMS OTP one for
+// that role: the verified phone goes through the same function. USE_DEFAULT_OTP
+// has no effect here — it only fixes the SMS OTP code.
+
+export const firebaseLoginUser = async (
+  idToken,
+  { ref, fcmToken, platform, name } = {},
+) => {
+  const { phone } = await verifyFirebasePhoneIdToken(idToken);
+  return loginUserWithVerifiedPhone(phone, { ref, fcmToken, platform, name });
+};
+
+export const firebaseLoginRestaurant = async (idToken, { fcmToken, platform } = {}) => {
+  const { phone } = await verifyFirebasePhoneIdToken(idToken);
+  return loginRestaurantWithVerifiedPhone(phone, { fcmToken, platform });
+};
+
+export const firebaseLoginDelivery = async (idToken, { fcmToken, platform } = {}) => {
+  const { phone } = await verifyFirebasePhoneIdToken(idToken);
+  return loginDeliveryWithVerifiedPhone(phone, { fcmToken, platform });
 };
 
 export const logout = async (refreshToken, fcmToken, platform) => {

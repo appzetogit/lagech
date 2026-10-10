@@ -13,7 +13,15 @@ import {
   changeAdminPassword,
   requestAdminForgotPasswordOtp,
   resetAdminPasswordWithOtp,
+  firebaseLoginUser,
+  firebaseLoginRestaurant,
+  firebaseLoginDelivery,
 } from "./auth.service.js";
+import {
+  validateUserFirebaseLoginDto,
+  validateRestaurantFirebaseLoginDto,
+  validateDeliveryFirebaseLoginDto,
+} from "../../dtos/auth/firebaseLogin.dto.js";
 import { validateUserOtpRequestDto } from "../../dtos/auth/userOtpRequest.dto.js";
 import { validateUserOtpVerifyDto } from "../../dtos/auth/userOtpVerify.dto.js";
 import { validateAdminLoginDto } from "../../dtos/auth/adminLogin.dto.js";
@@ -55,6 +63,37 @@ export const verifyUserOtpController = async (req, res, next) => {
       platform,
       name,
     );
+    return sendResponse(res, 200, "Login successful", result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Firebase phone login: same responses as the matching verify-otp.
+export const firebaseLoginUserController = async (req, res, next) => {
+  try {
+    const { idToken, ref, fcmToken, platform, name } = validateUserFirebaseLoginDto(req.body);
+    const result = await firebaseLoginUser(idToken, { ref, fcmToken, platform, name });
+    return sendResponse(res, 200, "Login successful", result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const firebaseLoginRestaurantController = async (req, res, next) => {
+  try {
+    const { idToken, fcmToken, platform } = validateRestaurantFirebaseLoginDto(req.body);
+    const result = await firebaseLoginRestaurant(idToken, { fcmToken, platform });
+    return sendResponse(res, 200, "Login successful", result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const firebaseLoginDeliveryController = async (req, res, next) => {
+  try {
+    const { idToken, fcmToken, platform } = validateDeliveryFirebaseLoginDto(req.body);
+    const result = await firebaseLoginDelivery(idToken, { fcmToken, platform });
     return sendResponse(res, 200, "Login successful", result);
   } catch (error) {
     next(error);

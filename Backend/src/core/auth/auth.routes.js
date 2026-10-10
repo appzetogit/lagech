@@ -13,7 +13,10 @@ import {
     updateAdminProfileController,
     changeAdminPasswordController,
     requestAdminForgotPasswordOtpController,
-    resetAdminPasswordWithOtpController
+    resetAdminPasswordWithOtpController,
+    firebaseLoginUserController,
+    firebaseLoginRestaurantController,
+    firebaseLoginDeliveryController
 } from './auth.controller.js';
 import { authMiddleware, requireAdmin } from './auth.middleware.js';
 import {
@@ -45,6 +48,13 @@ router.post('/restaurant/verify-otp', ...verifyLimiters, verifyRestaurantOtpCont
 // Delivery partner OTP login
 router.post('/delivery/request-otp', ...requestOtpLimiters, requestDeliveryOtpController);
 router.post('/delivery/verify-otp', ...verifyLimiters, verifyDeliveryOtpController);
+
+// Firebase Phone Authentication login (the app verifies the phone with
+// Firebase and sends the ID token). Limited like verify-otp: failed attempts
+// count, a successful login is free.
+router.post('/user/firebase-login', ...verifyLimiters, firebaseLoginUserController);
+router.post('/restaurant/firebase-login', ...verifyLimiters, firebaseLoginRestaurantController);
+router.post('/delivery/firebase-login', ...verifyLimiters, firebaseLoginDeliveryController);
 
 // Admin login
 router.post('/admin/login', ...verifyLimiters, adminLoginController);

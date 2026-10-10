@@ -10,7 +10,7 @@ let cachedServiceAccount = null;
 
 const sanitizeString = (value) => String(value ?? '').trim();
 
-const getServiceAccountFromEnv = () => {
+export const getServiceAccountFromEnv = () => {
     if (cachedServiceAccount) return cachedServiceAccount;
 
     const rawJson = sanitizeString(config.firebaseServiceAccount);

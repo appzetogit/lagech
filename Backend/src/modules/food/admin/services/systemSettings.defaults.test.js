@@ -52,6 +52,13 @@ test('login setup keeps phone OTP on whatever is sent', () => {
     assert.equal(clean.rider.otpLogin, true);
 });
 
+test('login setup: the OTP provider is firebase unless sms is chosen', () => {
+    assert.equal(cleanSettings('login_setup', {}).otpProvider, 'firebase');
+    assert.equal(cleanSettings('login_setup', { otpProvider: 'SMS' }).otpProvider, 'sms');
+    assert.equal(cleanSettings('login_setup', { otpProvider: 'firebase' }).otpProvider, 'firebase');
+    assert.equal(cleanSettings('login_setup', { otpProvider: 'whatsapp' }).otpProvider, 'firebase');
+});
+
 test('landing page drops empty list items and unknown keys, caps lengths', () => {
     const clean = cleanSettings('landing_page', {
         hero: { title: 'x'.repeat(500), extra: 1 },

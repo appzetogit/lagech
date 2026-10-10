@@ -3,6 +3,11 @@ import { PageFrame, Card, Switch, SaveButton, Loading, setIn, formatDateTime, us
 
 const APP_LABELS = { customer: "Customer app", restaurant: "Restaurant app", rider: "Rider app" }
 
+const OTP_PROVIDER_LABELS = {
+  firebase: "Firebase Phone Authentication (Firebase sends and checks the code)",
+  sms: "Our SMS gateway (SMS India Hub)",
+}
+
 /**
  * Sign-in options per app. Phone number with OTP is how everyone signs in
  * today, so it stays on. The other options are saved for the apps to read;
@@ -23,6 +28,25 @@ export default function LoginSetup() {
         <Card><Loading /></Card>
       ) : (
         <>
+          <Card
+            title="OTP provider"
+            description="Which phone verification all three apps use. Firebase is the default; switch to SMS only as a fallback while Firebase is unavailable."
+          >
+            <div className="space-y-2">
+              {(catalog.otpProviders || ["firebase", "sms"]).map((provider) => (
+                <label key={provider} className="flex items-center gap-2 text-sm text-slate-800">
+                  <input
+                    type="radio"
+                    name="otpProvider"
+                    value={provider}
+                    checked={(value?.otpProvider || "firebase") === provider}
+                    onChange={() => setValue((cur) => ({ ...cur, otpProvider: provider }))}
+                  />
+                  {OTP_PROVIDER_LABELS[provider] || provider}
+                </label>
+              ))}
+            </div>
+          </Card>
           <div className="grid gap-6 md:grid-cols-3">
             {Object.entries(options).map(([app, list]) => (
               <Card key={app} title={APP_LABELS[app] || app}>

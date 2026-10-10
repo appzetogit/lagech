@@ -9,6 +9,7 @@ import {
     APPS,
     PLATFORMS,
     LOGIN_OPTIONS,
+    OTP_PROVIDERS,
     ANALYTICS_TOOLS,
     cleanSettings,
     readStoredSettings,
@@ -33,7 +34,7 @@ import { FEATURE_KEYS, isFeatureEnabled, updateFeatureSetting } from './featureS
 const AREA_CATALOG = {
     page_meta: { pages: META_PAGES },
     app_settings: { apps: APPS, platforms: PLATFORMS },
-    login_setup: { options: LOGIN_OPTIONS },
+    login_setup: { options: LOGIN_OPTIONS, otpProviders: OTP_PROVIDERS },
     notification_channels: {
         events: NOTIFICATION_EVENTS.map(({ key, label, audience }) => ({ key, label, audience })),
         wired: { push: true, sms: false, email: false },
@@ -262,11 +263,18 @@ export async function getPublicBusinessSettings() {
         getOfflinePaymentSettings(),
         getMaintenanceState(),
     ]);
+    const loginSetup = (await readArea('login_setup')).value;
     const subscriptionModel = await isSubscriptionModelOn();
     const additional = additionalChargeFor(info);
     const nc = customer.newCustomerDiscount;
     return {
         maintenance,
+        /**
+         * Which phone OTP flow the apps use: 'firebase' (Firebase Phone Auth +
+         * POST /auth/<role>/firebase-login, the default) or 'sms' (request-otp /
+         * verify-otp). Apps treat a missing value as 'firebase'.
+         */
+        login: { otpProvider: loginSetup.otpProvider },
         currency: { code: info.currency, decimals: info.currencyDecimals },
         payment: {
             cod: payment.cod,

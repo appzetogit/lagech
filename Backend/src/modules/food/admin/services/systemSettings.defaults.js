@@ -138,15 +138,34 @@ export const LOGIN_OPTIONS = {
     ],
 };
 
+/**
+ * Who sends and checks the phone OTP, for all three apps:
+ *  - 'firebase' (default): Firebase Phone Authentication. The app verifies the
+ *    number with Firebase and signs in through POST /auth/<role>/firebase-login.
+ *  - 'sms': our own SMS OTP (request-otp / verify-otp), the fallback.
+ * Both server flows stay available whichever is chosen; this tells the apps
+ * which one to show.
+ */
+export const OTP_PROVIDERS = ['firebase', 'sms'];
+export const DEFAULT_OTP_PROVIDER = 'firebase';
+
+export const cleanOtpProvider = (value) => {
+    const v = String(value ?? '').trim().toLowerCase();
+    return OTP_PROVIDERS.includes(v) ? v : DEFAULT_OTP_PROVIDER;
+};
+
 const cleanLoginSetup = (value) => {
     const input = obj(value);
-    return Object.fromEntries(Object.entries(LOGIN_OPTIONS).map(([app, options]) => {
-        const saved = obj(input[app]);
-        return [app, Object.fromEntries(options.map((option) => [
-            option.key,
-            option.locked ? option.default : bool(saved[option.key], option.default),
-        ]))];
-    }));
+    return {
+        ...Object.fromEntries(Object.entries(LOGIN_OPTIONS).map(([app, options]) => {
+            const saved = obj(input[app]);
+            return [app, Object.fromEntries(options.map((option) => [
+                option.key,
+                option.locked ? option.default : bool(saved[option.key], option.default),
+            ]))];
+        })),
+        otpProvider: cleanOtpProvider(input.otpProvider),
+    };
 };
 
 // ─── Landing page ────────────────────────────────────────────────────────────

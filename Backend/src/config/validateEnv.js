@@ -25,7 +25,8 @@ const PRODUCTION_SECRETS = [
         'the operator rejects the message, so no OTP is delivered'],
     ['FIREBASE_SERVICE_ACCOUNT or FIREBASE_SERVICE_ACCOUNT_PATH',
         (c) => c.firebaseServiceAccount || c.firebaseServiceAccountPath,
-        'no push notification is sent — restaurants are not told about new orders'],
+        'no push notification is sent — restaurants are not told about new orders — and'
+        + ' Firebase phone login (POST /auth/<role>/firebase-login) cannot verify anyone'],
 ];
 
 /**
@@ -95,7 +96,8 @@ export const findConfigWarnings = (cfg = config) => {
         warnings.push(
             'USE_DEFAULT_OTP is ON in production. Every OTP is 1234 and is returned in the'
             + ' login response: anyone can sign in as any phone number, including restaurant'
-            + ' owners and delivery riders. Testing only -- remove before real customers.',
+            + ' owners and delivery riders. Testing only -- remove before real customers.'
+            + ' Firebase phone login does not use it, so turning it off never affects that.',
         );
     }
     if (cfg.nodeEnv === 'production' && !(cfg.corsOrigins || []).length) {
