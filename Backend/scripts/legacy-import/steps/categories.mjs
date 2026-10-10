@@ -40,20 +40,26 @@ const imageFor = (file, report, row) => {
     return buildPublicUrl(`${IMAGE_DIR}/${name}`);
 };
 
-export async function importCategories(mysql, report) {
+const CATEGORY_SQL = 'SELECT id, name, image, parent_id, position, status, priority, featured, created_at FROM categories WHERE module_id = ? ORDER BY position, id';
+const CATEGORY_COLUMNS = ['name', 'image', 'parent_id', 'position', 'status', 'priority'];
+
+export async function importCategories(mysql, report, ctx = {}) {
     const [[foodModule]] = await mysql.query(
         "SELECT id FROM modules WHERE module_type = 'food' ORDER BY status DESC, id LIMIT 1"
     );
     if (!foodModule) throw new Error('No food module in the legacy database');
 
     // Parents before children: a sub-category's parent must already exist.
-    const [rows] = await mysql.query(
-        'SELECT id, name, image, parent_id, position, status, priority, featured, created_at FROM categories WHERE module_id = ? ORDER BY position, id',
-        [foodModule.id]
-    );
+    const [rows] = await mysql.query(CATEGORY_SQL, [foodModule.id]);
     const idMap = await loadIdMap(ENTITY);
+    const baseline = ctx.sync ? await ctx.baselineRows(CATEGORY_SQL, [foodModule.id]) : null;
 
     for (const row of rows) {
+        // Sync: categories are the new admin's now; an old-side change is only reported.
+        if (ctx.sync && idMap.has(String(row.id))) {
+            ctx.leaveAlone(report, ENTITY, row, baseline, CATEGORY_COLUMNS);
+            continue;
+        }
         const isSub = row.position > 0;
         if (row.position > 1) {
             report.skip(ENTITY, row.id, row.name, 'third-level category; the new tree is one level');

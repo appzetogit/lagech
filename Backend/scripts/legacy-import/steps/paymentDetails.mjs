@@ -10,7 +10,7 @@
  * details on this system since keeps what they entered.
  */
 import { prisma } from '../../../src/config/prisma.js';
-import { loadIdMap } from '../idMap.mjs';
+import { loadIdMap, mappedThisRun } from '../idMap.mjs';
 
 const clean = (value) => String(value ?? '').trim();
 
@@ -47,16 +47,25 @@ const blanksOnly = (current, wanted) => Object.fromEntries(
     Object.entries(wanted).filter(([key, value]) => value && !clean(current?.[key])),
 );
 
-export async function importPaymentDetails(mysql, report) {
-    const restaurants = await loadIdMap('restaurant');
-    const riders = await loadIdMap('delivery_partner');
-    const [rows] = await mysql.query('SELECT * FROM disbursement_withdrawal_methods ORDER BY id');
-
+const groupByOwner = (rows) => {
     const byOwner = new Map();
     for (const row of rows) {
         const key = row.store_id ? `store:${row.store_id}` : `rider:${row.delivery_man_id}`;
         byOwner.set(key, [...(byOwner.get(key) || []), row]);
     }
+    return byOwner;
+};
+
+export async function importPaymentDetails(mysql, report, ctx = {}) {
+    const restaurants = await loadIdMap('restaurant');
+    const riders = await loadIdMap('delivery_partner');
+    const SQL = 'SELECT * FROM disbursement_withdrawal_methods ORDER BY id';
+    const [rows] = await mysql.query(SQL);
+    const byOwner = groupByOwner(rows);
+    // Sync: a restaurant imported before is the new admin's; only restaurants
+    // this run brought in get their details. Riders keep the fill-blanks rule.
+    const newRestaurants = ctx.sync ? mappedThisRun('restaurant') : null;
+    const baselineByOwner = ctx.sync ? groupByOwner((await ctx.baseline.query(SQL))[0]) : null;
 
     for (const [key, ownerRows] of byOwner) {
         const [kind, legacyId] = key.split(':');
@@ -68,6 +77,11 @@ export async function importPaymentDetails(mysql, report) {
                 report.skip('payment_details', legacyId, key, 'restaurant not imported');
                 continue;
             }
+            if (ctx.sync && !newRestaurants.has(legacyId)) {
+                const was = JSON.stringify(detailsFrom(baselineByOwner.get(key) || []));
+                report.done('payment_details', was === JSON.stringify({ bank, upi, preferred }) ? 'unchanged' : 'protected');
+                continue;
+            }
             const current = await prisma.foodRestaurant.findUnique({
                 where: { id },
                 select: { accountNumber: true, ifscCode: true, accountHolderName: true, upiId: true, payoutMethod: true },
@@ -77,7 +91,7 @@ export async function importPaymentDetails(mysql, report) {
             if (bank.accountNumber && !bank.ifscCode) {
                 report.warn('payment_details', legacyId, key, 'bank account has no IFSC; it cannot be paid by bank until one is added');
             }
-            report.done('payment_details', Object.keys(data).length ? 'updated' : 'created');
+            report.done('payment_details', Object.keys(data).length ? 'updated' : 'unchanged');
         } else {
             const id = riders.get(legacyId);
             if (!id) {
@@ -95,7 +109,7 @@ export async function importPaymentDetails(mysql, report) {
                 upiId: upi.upiId,
             });
             if (Object.keys(data).length) await prisma.foodDeliveryPartner.update({ where: { id }, data });
-            report.done('payment_details', Object.keys(data).length ? 'updated' : 'created');
+            report.done('payment_details', Object.keys(data).length ? 'updated' : 'unchanged');
         }
     }
 }

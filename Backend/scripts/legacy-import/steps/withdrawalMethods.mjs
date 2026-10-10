@@ -11,7 +11,7 @@
  * A payee who has already chosen a method on this system keeps their choice.
  */
 import { prisma } from '../../../src/config/prisma.js';
-import { loadIdMap, recordId } from '../idMap.mjs';
+import { loadIdMap, mappedThisRun, recordId } from '../idMap.mjs';
 import { fieldFromLegacy } from '../../../src/modules/food/admin/services/payoutMethods.util.js';
 
 const ENTITY = 'withdrawal_method';
@@ -25,12 +25,19 @@ const parseJson = (value, fallback) => {
     }
 };
 
-async function importMethods(mysql, report) {
+async function importMethods(mysql, report, ctx) {
     const idMap = await loadIdMap(ENTITY);
-    const [rows] = await mysql.query('SELECT * FROM withdrawal_methods ORDER BY id');
+    const SQL = 'SELECT * FROM withdrawal_methods ORDER BY id';
+    const [rows] = await mysql.query(SQL);
+    const baseline = ctx.sync ? await ctx.baselineRows(SQL) : null;
     let defaultId = null;
 
     for (const [index, row] of rows.entries()) {
+        // Sync: methods are the new admin's now, including which is default.
+        if (ctx.sync && idMap.has(String(row.id))) {
+            ctx.leaveAlone(report, ENTITY, row, baseline, ['method_name', 'method_fields', 'is_active', 'is_default']);
+            continue;
+        }
         const name = String(row.method_name || '').trim().slice(0, 80);
         const raw = parseJson(row.method_fields, []);
         const seen = new Set();
@@ -61,7 +68,7 @@ async function importMethods(mysql, report) {
         report.done(ENTITY, exists ? 'updated' : 'created');
     }
 
-    if (defaultId) {
+    if (defaultId && !ctx.sync) {
         await prisma.$transaction([
             prisma.foodWithdrawalMethod.updateMany({ where: { id: { not: defaultId } }, data: { isDefault: false } }),
             prisma.foodWithdrawalMethod.update({ where: { id: defaultId }, data: { isDefault: true } }),
@@ -69,11 +76,15 @@ async function importMethods(mysql, report) {
     }
 }
 
-async function importPayeeChoices(mysql, report) {
+async function importPayeeChoices(mysql, report, ctx) {
     const entity = 'payout_method_detail';
     const methods = await loadIdMap(ENTITY);
     const restaurants = await loadIdMap('restaurant');
     const riders = await loadIdMap('delivery_partner');
+    // Sync: a restaurant imported before is the new admin's, so only
+    // restaurants this run brought in get a method chosen; riders keep the
+    // fill-a-blank rule (a choice made here is never replaced).
+    const newRestaurants = ctx.sync ? mappedThisRun('restaurant') : null;
 
     let rows = [];
     try {
@@ -100,6 +111,10 @@ async function importPayeeChoices(mysql, report) {
             report.skip(entity, row.id, key, `${ownerType} not imported`);
             continue;
         }
+        if (ctx.sync && ownerType === 'restaurant' && !newRestaurants.has(String(legacyOwner))) {
+            report.done(entity, 'unchanged');
+            continue;
+        }
         if (!methodId) {
             report.skip(entity, row.id, key, 'its withdrawal method was not imported');
             continue;
@@ -118,7 +133,8 @@ async function importPayeeChoices(mysql, report) {
             select: { id: true },
         });
         if (existing) {
-            report.skip(entity, row.id, key, 'already has a payout method chosen on this system');
+            if (ctx.sync) report.done(entity, 'unchanged');
+            else report.skip(entity, row.id, key, 'already has a payout method chosen on this system');
             continue;
         }
         await prisma.foodPayoutMethodDetail.create({ data: { ownerType, ownerId, methodId, values } });
@@ -126,7 +142,7 @@ async function importPayeeChoices(mysql, report) {
     }
 }
 
-export async function importWithdrawalMethods(mysql, report) {
-    await importMethods(mysql, report);
-    await importPayeeChoices(mysql, report);
+export async function importWithdrawalMethods(mysql, report, ctx = {}) {
+    await importMethods(mysql, report, ctx);
+    await importPayeeChoices(mysql, report, ctx);
 }

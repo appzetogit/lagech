@@ -26,7 +26,7 @@
  * they count. Run after `orders` to link them; re-running links any missed.
  */
 import { prisma } from '../../../src/config/prisma.js';
-import { loadIdMap, recordId } from '../idMap.mjs';
+import { loadIdMap, mappedThisRun, recordId } from '../idMap.mjs';
 import { istDayEnd, istDayStart } from '../../../src/modules/food/shared/customerRewards.util.js';
 
 const ENTITY = 'coupon';
@@ -138,7 +138,14 @@ export function mapLegacyCoupon(row, maps) {
     };
 }
 
-export async function importCoupons(mysql, report) {
+const COUPON_SQL = `SELECT c.*, DATE_FORMAT(c.start_date, '%Y-%m-%d') AS start_day, DATE_FORMAT(c.expire_date, '%Y-%m-%d') AS expire_day
+           FROM coupons c WHERE c.module_id = ? ORDER BY c.id`;
+const COUPON_COLUMNS = [
+    'title', 'code', 'start_day', 'expire_day', 'min_purchase', 'max_discount', 'discount', 'discount_type',
+    'coupon_type', 'limit', 'status', 'data', 'customer_id', 'store_id',
+];
+
+export async function importCoupons(mysql, report, ctx = {}) {
     const idMap = await loadIdMap(ENTITY);
     const maps = {
         restaurants: await loadIdMap('restaurant'),
@@ -147,14 +154,35 @@ export async function importCoupons(mysql, report) {
     };
 
     const [[foodModule]] = await mysql.query("SELECT id FROM modules WHERE module_type = 'food' ORDER BY status DESC, id LIMIT 1");
-    const [rows] = await mysql.query(
-        `SELECT c.*, DATE_FORMAT(c.start_date, '%Y-%m-%d') AS start_day, DATE_FORMAT(c.expire_date, '%Y-%m-%d') AS expire_day
-           FROM coupons c WHERE c.module_id = ? ORDER BY c.id`,
-        [foodModule.id],
-    );
+    const [rows] = await mysql.query(COUPON_SQL, [foodModule.id]);
+
+    // Sync: coupons are the new admin's now. Only orders this run imported are
+    // linked to a coupon -- an order placed here with a rejected code must
+    // not start counting as a use.
+    const baseline = ctx.sync ? await ctx.baselineRows(COUPON_SQL, [foodModule.id]) : null;
+    const newOrders = ctx.sync ? [...mappedThisRun('order').values()] : null;
+    const linkOrders = async (couponId, code, legacyId) => {
+        if (newOrders && !newOrders.length) return;
+        const { count: linked } = await prisma.foodOrder.updateMany({
+            where: {
+                couponId: null,
+                couponCode: { equals: code, mode: 'insensitive' },
+                ...(newOrders ? { id: { in: newOrders } } : {}),
+            },
+            data: { couponId },
+        });
+        if (linked) console.log(`  coupon #${legacyId} ${code}: linked ${linked} imported order(s) that used it`);
+    };
 
     for (const row of rows) {
         const name = row.title || row.code || '(untitled)';
+        if (ctx.sync && idMap.has(String(row.id))) {
+            ctx.leaveAlone(report, ENTITY, row, baseline, COUPON_COLUMNS);
+            const id = idMap.get(String(row.id));
+            const coupon = await prisma.foodOffer.findUnique({ where: { id }, select: { id: true, couponCode: true } });
+            if (coupon) await linkOrders(coupon.id, coupon.couponCode, row.id);
+            continue;
+        }
         const mapped = mapLegacyCoupon(row, maps);
         if (mapped.skip) {
             report.skip(ENTITY, row.id, name, mapped.skip);
@@ -176,11 +204,7 @@ export async function importCoupons(mysql, report) {
         await recordId(ENTITY, row.id, saved.id);
 
         // Imported orders that used this code count towards Total Uses.
-        const { count: linked } = await prisma.foodOrder.updateMany({
-            where: { couponId: null, couponCode: { equals: mapped.data.couponCode, mode: 'insensitive' } },
-            data: { couponId: saved.id },
-        });
-        if (linked) console.log(`  coupon #${row.id} ${mapped.data.couponCode}: linked ${linked} imported order(s) that used it`);
+        await linkOrders(saved.id, mapped.data.couponCode, row.id);
         report.done(ENTITY, exists ? 'updated' : 'created');
     }
 }

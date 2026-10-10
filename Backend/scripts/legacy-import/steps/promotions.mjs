@@ -31,14 +31,25 @@ async function upsert(entity, legacyId, map, delegate, data, report) {
     report.done(entity, exists ? 'updated' : 'created');
 }
 
-export async function importPromotions(mysql, report) {
+export async function importPromotions(mysql, report, ctx = {}) {
     const restaurants = await loadIdMap('restaurant');
     const adMap = await loadIdMap('advertisement');
     const reelMap = await loadIdMap('reel');
     const [[foodModule]] = await mysql.query("SELECT id FROM modules WHERE module_type = 'food' ORDER BY status DESC, id LIMIT 1");
 
-    const [ads] = await mysql.query('SELECT * FROM advertisements WHERE module_id = ? ORDER BY id', [foodModule.id]);
+    const ADS_SQL = 'SELECT * FROM advertisements WHERE module_id = ? ORDER BY id';
+    const REELS_SQL = 'SELECT * FROM reels WHERE module_id = ? ORDER BY id';
+    const baseAds = ctx.sync ? await ctx.baselineRows(ADS_SQL, [foodModule.id]) : null;
+    const baseReels = ctx.sync ? await ctx.baselineRows(REELS_SQL, [foodModule.id]) : null;
+
+    const [ads] = await mysql.query(ADS_SQL, [foodModule.id]);
     for (const row of ads) {
+        // Sync: promotions are managed here now; an old-side change is only reported.
+        if (ctx.sync && adMap.has(String(row.id))) {
+            ctx.leaveAlone(report, 'advertisement', row, baseAds,
+                ['title', 'description', 'add_type', 'video_attachment', 'cover_image', 'profile_image', 'start_date', 'end_date', 'priority', 'status', 'store_id']);
+            continue;
+        }
         const restaurantId = restaurants.get(String(row.store_id));
         if (!restaurantId) {
             report.skip('advertisement', row.id, row.title, `restaurant ${row.store_id} not imported`);
@@ -73,8 +84,13 @@ export async function importPromotions(mysql, report) {
         }, report);
     }
 
-    const [reels] = await mysql.query('SELECT * FROM reels WHERE module_id = ? ORDER BY id', [foodModule.id]);
+    const [reels] = await mysql.query(REELS_SQL, [foodModule.id]);
     for (const row of reels) {
+        if (ctx.sync && reelMap.has(String(row.id))) {
+            ctx.leaveAlone(report, 'reel', row, baseReels,
+                ['description', 'video', 'thumbnail', 'is_always_visible', 'start_date', 'end_date', 'status', 'store_id']);
+            continue;
+        }
         const restaurantId = restaurants.get(String(row.store_id));
         const videoUrl = media('legacy/reels', row.video);
         if (!restaurantId || !videoUrl) {

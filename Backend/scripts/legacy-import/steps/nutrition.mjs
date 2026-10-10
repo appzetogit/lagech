@@ -11,7 +11,7 @@
  * dish's list is replaced, not appended to, so a re-run gives the same result.
  */
 import { prisma } from '../../../src/config/prisma.js';
-import { loadIdMap } from '../idMap.mjs';
+import { loadIdMap, mappedThisRun } from '../idMap.mjs';
 import { normalizeFacts } from '../../../src/modules/food/shared/nutrition.util.js';
 
 const ENTITY = 'nutrition';
@@ -38,7 +38,7 @@ const loadTags = async (mysql, { tags, join, label, key }) => {
     return byItem;
 };
 
-export async function importNutrition(mysql, report) {
+export async function importNutrition(mysql, report, ctx = {}) {
     const foodMap = await loadIdMap('food');
     if (!foodMap.size) {
         report.warn(ENTITY, '-', '(all)', 'no dishes have been imported yet; run the foods step first');
@@ -50,8 +50,25 @@ export async function importNutrition(mysql, report) {
     if (!nutrition) report.warn(ENTITY, '-', '(all)', 'the backup has no nutritions/item_nutrition tables; nutrition not imported');
     if (!allergens) report.warn(ENTITY, '-', '(all)', 'the backup has no allergies/item_allergy tables; allergens not imported');
 
+    // Sync: nutrition belongs to the dish, and dishes imported before are the
+    // new admin's; only dishes this run brought in get theirs.
+    const newDishes = ctx.sync ? mappedThisRun('food') : null;
+    const baseline = ctx.sync
+        ? {
+            nutrition: await loadTags(ctx.baseline, { tags: 'nutritions', join: 'item_nutrition', label: 'nutrition', key: 'nutrition_id' }),
+            allergens: await loadTags(ctx.baseline, { tags: 'allergies', join: 'item_allergy', label: 'allergy', key: 'allergy_id' }),
+        }
+        : null;
+
     const itemIds = new Set([...(nutrition?.keys() || []), ...(allergens?.keys() || [])]);
     for (const legacyId of itemIds) {
+        if (ctx.sync && !newDishes.has(legacyId)) {
+            if (!foodMap.has(legacyId)) continue;
+            const was = JSON.stringify([baseline.nutrition?.get(legacyId) || [], baseline.allergens?.get(legacyId) || []]);
+            const now = JSON.stringify([nutrition?.get(legacyId) || [], allergens?.get(legacyId) || []]);
+            report.done(ENTITY, was === now ? 'unchanged' : 'protected');
+            continue;
+        }
         const foodId = foodMap.get(legacyId);
         if (!foodId) {
             report.skip(ENTITY, legacyId, `item ${legacyId}`, 'dish was not imported (see the foods step)');

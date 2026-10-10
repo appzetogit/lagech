@@ -7,120 +7,30 @@
  *
  *   LEGACY_MYSQL_URL=mysql://user:pass@127.0.0.1:3306/legacy_lagech \
  *   DATABASE_URL=postgresql://... UPLOAD_STORAGE_ROOT=/srv/lagech/uploads \
- *   node scripts/legacy-import/index.mjs zones categories
+ *   node scripts/legacy-import/index.mjs [--sync] [--dry-run] zones categories ...
  *
- * Steps run in dependency order whatever order they are named in. Re-running is
- * safe: rows already imported are updated through legacy.id_map, not duplicated.
- * Every row that is skipped or changed on the way in is listed at the end --
- * nothing is dropped silently.
+ *   --sync     incremental: bring in what the old system added or changed
+ *              since the first import, without undoing edits made here (see
+ *              sync.mjs for the rules). Needs LEGACY_BASELINE_MYSQL_URL, the
+ *              copy the previous import read.
+ *   --dry-run  do everything inside one Postgres transaction that is rolled
+ *              back, and print what would have happened. Nothing is written.
+ *
+ * Steps run in dependency order whatever order they are named in. Every row
+ * that is skipped or changed on the way in is listed at the end -- nothing is
+ * dropped silently.
+ *
+ * This file only sets up --dry-run before anything touches the database: the
+ * dry-run client has to be in place before the first module that imports the
+ * Prisma client is loaded. The import itself is run.mjs.
  */
-import 'dotenv/config';
-import mysql from 'mysql2/promise';
-import { prisma } from '../../src/config/prisma.js';
-import { ensureIdMap } from './idMap.mjs';
-import { importZones } from './steps/zones.mjs';
-import { importCategories } from './steps/categories.mjs';
-import { importRestaurants } from './steps/restaurants.mjs';
-import { importFoods } from './steps/foods.mjs';
-import { importNutrition } from './steps/nutrition.mjs';
-import { importCustomers } from './steps/customers.mjs';
-import { importDeliveryPartners } from './steps/deliveryPartners.mjs';
-import { importOrders } from './steps/orders.mjs';
-import { importBalances } from './steps/balances.mjs';
-import { importPaymentDetails } from './steps/paymentDetails.mjs';
-import { importSettings } from './steps/settings.mjs';
-import { importRatings } from './steps/ratings.mjs';
-import { importBanners } from './steps/banners.mjs';
-import { importCancelReasons } from './steps/cancelReasons.mjs';
-import { importPromotions } from './steps/promotions.mjs';
-import { importFavorites } from './steps/favorites.mjs';
-import { importNewsletter } from './steps/newsletter.mjs';
-import { importWithdrawalMethods } from './steps/withdrawalMethods.mjs';
-import { importSocialMedia } from './steps/socialMedia.mjs';
-import { importCoupons } from './steps/coupons.mjs';
+import { register } from 'node:module';
 
-const STEPS = [
-    ['zones', importZones],
-    ['categories', importCategories],
-    ['restaurants', importRestaurants],
-    ['foods', importFoods],
-    ['nutrition', importNutrition],
-    ['customers', importCustomers],
-    ['riders', importDeliveryPartners],
-    ['payment-details', importPaymentDetails],
-    ['withdrawal-methods', importWithdrawalMethods],
-    ['orders', importOrders],
-    ['balances', importBalances],
-    ['ratings', importRatings],
-    ['banners', importBanners],
-    ['cancel-reasons', importCancelReasons],
-    ['promotions', importPromotions],
-    ['coupons', importCoupons],
-    ['favorites', importFavorites],
-    ['newsletter', importNewsletter],
-    ['social-media', importSocialMedia],
-    ['settings', importSettings],
-];
-
-const createReport = () => {
-    const counts = {};
-    const skipped = [];
-    const warnings = [];
-    const bump = (entity, key) => {
-        counts[entity] ??= { created: 0, updated: 0, skipped: 0 };
-        counts[entity][key] += 1;
-    };
-    return {
-        done: (entity, outcome) => bump(entity, outcome),
-        skip: (entity, legacyId, name, reason) => {
-            bump(entity, 'skipped');
-            skipped.push(`${entity} #${legacyId} "${name}": ${reason}`);
-        },
-        warn: (entity, legacyId, name, message) => warnings.push(`${entity} #${legacyId} "${name}": ${message}`),
-        print: () => {
-            console.log('\n── import summary ──');
-            for (const [entity, c] of Object.entries(counts)) {
-                console.log(`${entity.padEnd(12)} created ${c.created}  updated ${c.updated}  skipped ${c.skipped}`);
-            }
-            if (skipped.length) console.log(`\nskipped (${skipped.length}):\n  ${skipped.join('\n  ')}`);
-            if (warnings.length) console.log(`\nwarnings (${warnings.length}):\n  ${warnings.join('\n  ')}`);
-            return skipped.length;
-        },
-    };
-};
-
-const requested = new Set(process.argv.slice(2));
-const unknown = [...requested].filter((name) => !STEPS.some(([step]) => step === name));
-if (!requested.size || unknown.length) {
-    console.error(`Usage: node scripts/legacy-import/index.mjs <${STEPS.map(([s]) => s).join('|')}> ...`);
-    if (unknown.length) console.error(`Unknown step(s): ${unknown.join(', ')}`);
-    process.exit(1);
-}
-if (!process.env.LEGACY_MYSQL_URL) {
-    console.error('LEGACY_MYSQL_URL is required (the MySQL database restored from the backup).');
-    process.exit(1);
+if (process.argv.includes('--dry-run')) {
+    register('./dryRun/hooks.mjs', {
+        parentURL: import.meta.url,
+        data: { shimUrl: new URL('./dryRun/prisma.mjs', import.meta.url).href },
+    });
 }
 
-const legacy = await mysql.createConnection({
-    uri: process.env.LEGACY_MYSQL_URL,
-    // Old ids are BIGINT; returned as strings they can never lose precision.
-    supportBigNumbers: true,
-    bigNumberStrings: true,
-    dateStrings: false,
-});
-
-const report = createReport();
-try {
-    await ensureIdMap();
-    for (const [name, run] of STEPS) {
-        if (!requested.has(name)) continue;
-        console.log(`→ ${name}`);
-        await run(legacy, report);
-    }
-} finally {
-    await legacy.end();
-    await prisma.$disconnect();
-}
-
-// Non-zero when anything was skipped, so a scripted run cannot pass unnoticed.
-process.exitCode = report.print() > 0 ? 2 : 0;
+await import('./run.mjs');

@@ -26,10 +26,19 @@
  *
  * Every imported row is tracked in legacy.id_map, so a re-run updates rather
  * than duplicates, and the adjustments are recomputed from scratch each time.
+ *
+ * A sync (--sync) never touches the adjustments: balances here are never
+ * reset to the old wallet. It brings in only the ledger rows the old system
+ * added since (by legacy id), so every balance moves by exactly those; a
+ * withdrawal imported before follows the old system's status only while this
+ * system has not acted on it. A sync also brings in the old admin's payments
+ * of rider earnings (`provide_d_m_earnings`), which the full import leaves to
+ * the opening adjustments.
  */
 import { prisma } from '../../../src/config/prisma.js';
 import { getWalletSummaries } from '../../../src/modules/food/restaurant/services/restaurantFinance.service.js';
 import { loadIdMap, recordId } from '../idMap.mjs';
+import { NOT_IN_BASELINE, changedColumns, guardedUpdate, same } from '../sync.mjs';
 
 const money = (value) => Math.round((Number(value) || 0) * 100) / 100;
 const note = (text) => `Previous system: ${text}`;
@@ -56,6 +65,47 @@ const upsertTracked = async (entity, legacyId, map, delegate, data) => {
     return exists ? 'updated' : 'created';
 };
 
+/**
+ * Sync for one ledger row. New: created. Imported before: the status (with its
+ * processed date) follows the old system only while this system still has the
+ * status originally imported; any other old-side change is reported, not
+ * written -- the money may already have moved here.
+ *
+ * @returns {Promise<'created'|'updated'|'unchanged'|'protected'|null>} null when skipped
+ */
+const syncTracked = async (report, entity, legacyId, map, delegate, target, original, { guard = [], compare = [] } = {}) => {
+    const mappedId = map.get(String(legacyId));
+    if (!mappedId) return upsertTracked(entity, legacyId, map, delegate, target);
+    const current = await delegate.findUnique({ where: { id: mappedId } });
+    if (!current) {
+        report.skip(entity, legacyId, '-', 'imported before but deleted here since; not recreated');
+        return null;
+    }
+    const status = guard.length ? guardedUpdate(current, original, target, guard) : { patch: {}, protected: false };
+    const patch = { ...status.patch };
+    if (patch.status) patch.processedAt = target.processedAt ?? null;
+    // Only what the old system changed is "left alone"; a status this system
+    // moved on its own, with the old one unchanged, is just this system's.
+    const moved = original
+        ? changedColumns(original, target, [...guard, ...compare])
+            .filter((field) => !(field in patch) && !same(current[field], target[field]))
+        : [];
+    if (!original) report.detail(entity, [NOT_IN_BASELINE]);
+    if (Object.keys(patch).length) {
+        await delegate.update({ where: { id: mappedId }, data: patch });
+        report.detail(entity, Object.keys(patch));
+        if (moved.length) report.detail(entity, moved.map((field) => `${field} (kept)`));
+        return 'updated';
+    }
+    if (moved.length) {
+        report.detail(entity, moved.map((field) => `${field} (kept)`));
+        return 'protected';
+    }
+    return 'unchanged';
+};
+
+const byKey = (rows) => new Map(rows.map((row) => [String(row.id), row]));
+
 /** Remove a previous run's adjustment so it is recomputed against current data. */
 const dropTracked = async (map, key, delegate) => {
     const id = map.get(key);
@@ -63,7 +113,43 @@ const dropTracked = async (map, key, delegate) => {
     map.delete(key);
 };
 
-async function importRiderMoney(mysql, report) {
+const COLLECTED_SQL = "SELECT * FROM account_transactions WHERE from_type = 'deliveryman' AND type = 'collected' ORDER BY id";
+const RIDER_REQUESTS_SQL = 'SELECT * FROM withdraw_requests WHERE delivery_man_id IS NOT NULL ORDER BY id';
+const RIDER_PAYOUTS_SQL = 'SELECT * FROM disbursement_details WHERE delivery_man_id IS NOT NULL ORDER BY id';
+
+const depositData = (row, partnerId) => ({
+    deliveryPartnerId: partnerId,
+    amount: money(row.amount),
+    paymentMethod: depositMethod(row.method),
+    status: 'Completed',
+    adminNote: note(`collected by ${row.created_by || 'admin'} · ${row.method}${row.ref ? ` · ${row.ref}` : ''}`),
+    createdAt: row.created_at,
+});
+
+/** Rider withdrawal requests and payouts as one list of withdrawals. */
+const riderWithdrawalList = (requests, payouts, maps) => [
+    ...requests.map((row) => ({
+        entity: 'rider_withdrawal', map: maps.requests, key: row.id, riderId: row.delivery_man_id, amount: row.amount,
+        status: WITHDRAWAL_STATUS[row.approved] || 'pending', createdAt: row.created_at, updatedAt: row.updated_at,
+        text: `withdrawal request #${row.id}`,
+    })),
+    ...payouts.map((row) => ({
+        entity: 'rider_payout', map: maps.payouts, key: row.id, riderId: row.delivery_man_id, amount: row.disbursement_amount,
+        status: DISBURSEMENT_STATUS[row.status] || 'pending', createdAt: row.created_at, updatedAt: row.updated_at,
+        text: `payout #${row.disbursement_id}`,
+    })),
+];
+
+const riderWithdrawalData = (w, partnerId) => ({
+    deliveryPartnerId: partnerId,
+    amount: money(w.amount),
+    status: w.status,
+    adminNote: note(w.text),
+    processedAt: w.status === 'pending' ? null : w.updatedAt,
+    createdAt: w.createdAt,
+});
+
+async function importRiderMoney(mysql, report, ctx = {}) {
     const riders = await loadIdMap('delivery_partner');
     const deposits = await loadIdMap('rider_deposit');
     const requestsMap = await loadIdMap('rider_withdrawal');
@@ -74,56 +160,69 @@ async function importRiderMoney(mysql, report) {
     const bonusAdjust = await loadIdMap('rider_bonus_adjust');
 
     // ── cash handed in ──
-    const [collected] = await mysql.query(
-        "SELECT * FROM account_transactions WHERE from_type = 'deliveryman' AND type = 'collected' ORDER BY id",
-    );
+    const [collected] = await mysql.query(COLLECTED_SQL);
+    const baseCollected = ctx.sync ? byKey((await ctx.baseline.query(COLLECTED_SQL))[0]) : null;
     for (const row of collected) {
         const partnerId = riders.get(String(row.from_id));
         if (!partnerId) {
             report.skip('rider_deposit', row.id, `rider ${row.from_id}`, 'rider not imported');
             continue;
         }
-        const outcome = await upsertTracked('rider_deposit', row.id, deposits, prisma.foodDeliveryCashDeposit, {
-            deliveryPartnerId: partnerId,
-            amount: money(row.amount),
-            paymentMethod: depositMethod(row.method),
-            status: 'Completed',
-            adminNote: note(`collected by ${row.created_by || 'admin'} · ${row.method}${row.ref ? ` · ${row.ref}` : ''}`),
-            createdAt: row.created_at,
-        });
+        const data = depositData(row, partnerId);
+        let outcome;
+        if (ctx.sync) {
+            const was = baseCollected.get(String(row.id));
+            outcome = await syncTracked(report, 'rider_deposit', row.id, deposits, prisma.foodDeliveryCashDeposit, data,
+                was ? depositData(was, riders.get(String(was.from_id))) : null,
+                { compare: ['deliveryPartnerId', 'amount', 'paymentMethod'] });
+            if (!outcome) continue;
+            if (outcome === 'created') ctx.affect?.('rider', partnerId);
+        } else {
+            outcome = await upsertTracked('rider_deposit', row.id, deposits, prisma.foodDeliveryCashDeposit, data);
+        }
         report.done('rider_deposit', outcome);
     }
 
     // ── withdrawals and payouts ──
-    const [requests] = await mysql.query('SELECT * FROM withdraw_requests WHERE delivery_man_id IS NOT NULL ORDER BY id');
-    const [payouts] = await mysql.query('SELECT * FROM disbursement_details WHERE delivery_man_id IS NOT NULL ORDER BY id');
-    const riderWithdrawals = [
-        ...requests.map((row) => ({
-            entity: 'rider_withdrawal', map: requestsMap, key: row.id, riderId: row.delivery_man_id, amount: row.amount,
-            status: WITHDRAWAL_STATUS[row.approved] || 'pending', createdAt: row.created_at, updatedAt: row.updated_at,
-            text: `withdrawal request #${row.id}`,
-        })),
-        ...payouts.map((row) => ({
-            entity: 'rider_payout', map: payoutsMap, key: row.id, riderId: row.delivery_man_id, amount: row.disbursement_amount,
-            status: DISBURSEMENT_STATUS[row.status] || 'pending', createdAt: row.created_at, updatedAt: row.updated_at,
-            text: `payout #${row.disbursement_id}`,
-        })),
-    ];
+    const [requests] = await mysql.query(RIDER_REQUESTS_SQL);
+    const [payouts] = await mysql.query(RIDER_PAYOUTS_SQL);
+    const maps = { requests: requestsMap, payouts: payoutsMap };
+    const riderWithdrawals = riderWithdrawalList(requests, payouts, maps);
+    const baseWithdrawals = ctx.sync
+        ? new Map(riderWithdrawalList(
+            (await ctx.baseline.query(RIDER_REQUESTS_SQL))[0],
+            (await ctx.baseline.query(RIDER_PAYOUTS_SQL))[0],
+            maps,
+        ).map((w) => [`${w.entity}:${w.key}`, w]))
+        : null;
     for (const w of riderWithdrawals) {
         const partnerId = riders.get(String(w.riderId));
         if (!partnerId || money(w.amount) < 1) {
             report.skip(w.entity, w.key, `rider ${w.riderId}`, partnerId ? 'under ₹1' : 'rider not imported');
             continue;
         }
-        const outcome = await upsertTracked(w.entity, w.key, w.map, prisma.foodDeliveryWithdrawal, {
-            deliveryPartnerId: partnerId,
-            amount: money(w.amount),
-            status: w.status,
-            adminNote: note(w.text),
-            processedAt: w.status === 'pending' ? null : w.updatedAt,
-            createdAt: w.createdAt,
-        });
+        const data = riderWithdrawalData(w, partnerId);
+        let outcome;
+        if (ctx.sync) {
+            const was = baseWithdrawals.get(`${w.entity}:${w.key}`);
+            outcome = await syncTracked(report, w.entity, w.key, w.map, prisma.foodDeliveryWithdrawal, data,
+                was ? riderWithdrawalData(was, riders.get(String(was.riderId))) : null,
+                { guard: ['status'], compare: ['deliveryPartnerId', 'amount'] });
+            if (!outcome) continue;
+            if (outcome === 'created' || outcome === 'updated') ctx.affect?.('rider', partnerId);
+            if (outcome === 'created' && data.status === 'pending') {
+                report.warn(w.entity, w.key, `rider ${w.riderId}`, `imported PENDING (₹${data.amount}); if the old system pays it, do not pay it again here`);
+            }
+        } else {
+            outcome = await upsertTracked(w.entity, w.key, w.map, prisma.foodDeliveryWithdrawal, data);
+        }
         report.done(w.entity, outcome);
+    }
+
+    // A sync never recomputes opening balances: see the file comment.
+    if (ctx.sync) {
+        await syncRiderEarningPayouts(mysql, report, ctx, riders);
+        return;
     }
 
     // ── opening balances ──
@@ -205,15 +304,95 @@ async function importRiderMoney(mysql, report) {
         `opening balance adjustments: cash for ${adjusted.cash} rider(s), withdrawable for ${adjusted.earnings}`);
 }
 
-async function importRestaurantMoney(mysql, report) {
-    const restaurants = await loadIdMap('restaurant');
-    const withdrawals = await loadIdMap('restaurant_withdrawal');
-    const withdrawalAdjust = await loadIdMap('restaurant_withdrawal_adjust');
+const EARNINGS_PAID_SQL = 'SELECT * FROM provide_d_m_earnings ORDER BY id';
+const isAdjustment = (row) => String(row.method || '').trim().toLowerCase() === 'adjustment';
+
+/**
+ * Sync: what the old admin paid riders out of their earnings
+ * (`provide_d_m_earnings`), new since the baseline copy.
+ *
+ *   - a payment (method Online, UPI, cash...) -> an approved withdrawal
+ *     recorded by the admin: withdrawable goes down.
+ *   - an "adjustment" -> the rider's earnings settled against the cash they
+ *     were holding: an approved withdrawal AND a completed cash deposit of the
+ *     same amount, so withdrawable and cash in hand both go down -- as the old
+ *     wallet's total_withdrawn and collected_cash did.
+ *
+ * The first import did not bring this table across row by row; its opening
+ * balance adjustments already account for every payment in the baseline copy.
+ * So only rows that are neither in the baseline copy nor mapped before count
+ * as new.
+ */
+async function syncRiderEarningPayouts(mysql, report, ctx, riders) {
+    const paid = await loadIdMap('rider_earning_payout');
+    const settled = await loadIdMap('rider_earning_settlement');
+    let rows;
+    try {
+        [rows] = await mysql.query(EARNINGS_PAID_SQL);
+    } catch (error) {
+        report.warn('rider_earning_payout', '-', 'provide_d_m_earnings', `not read: ${error.message}`);
+        return;
+    }
+    const baseline = new Set((await ctx.baseline.query('SELECT id FROM provide_d_m_earnings'))[0].map((row) => String(row.id)));
+
+    for (const row of rows) {
+        const key = String(row.id);
+        if (baseline.has(key) && !paid.has(key)) {
+            report.done('rider_earning_payout', 'unchanged');
+            report.detail('rider_earning_payout', ["(in the baseline copy: covered by the first import's opening-balance adjustment)"]);
+            continue;
+        }
+        const partnerId = riders.get(String(row.delivery_man_id));
+        if (!partnerId || money(row.amount) <= 0) {
+            report.skip('rider_earning_payout', row.id, `rider ${row.delivery_man_id}`, partnerId ? 'no amount' : 'rider not imported');
+            continue;
+        }
+        const adjustment = isAdjustment(row);
+        const method = String(row.method || '').trim();
+        const text = adjustment
+            ? `earnings settled against cash held (adjustment #${row.id})`
+            : `earnings paid by admin (${method || 'no method'}${row.ref ? ` · ${row.ref}` : ''}, #${row.id})`;
+
+        if (paid.has(key)) {
+            report.done('rider_earning_payout', 'unchanged');
+        } else {
+            await upsertTracked('rider_earning_payout', row.id, paid, prisma.foodDeliveryWithdrawal, {
+                deliveryPartnerId: partnerId,
+                amount: money(row.amount),
+                status: 'approved',
+                paymentMethod: adjustment ? 'adjustment' : /cash/i.test(method) ? 'cash' : 'upi',
+                source: 'admin_payment',
+                adminNote: note(text),
+                processedAt: row.created_at,
+                createdAt: row.created_at,
+            });
+            report.done('rider_earning_payout', 'created');
+            ctx.affect?.('rider', partnerId);
+        }
+        if (adjustment && !settled.has(key)) {
+            await upsertTracked('rider_earning_settlement', row.id, settled, prisma.foodDeliveryCashDeposit, {
+                deliveryPartnerId: partnerId,
+                amount: money(row.amount),
+                paymentMethod: 'cash',
+                status: 'Completed',
+                adminNote: note(text),
+                createdAt: row.created_at,
+            });
+            report.done('rider_earning_settlement', 'created');
+        } else if (adjustment) {
+            report.done('rider_earning_settlement', 'unchanged');
+        }
+    }
+}
+
+/**
+ * Old vendor id -> old store id. A deleted store has no stores row to say
+ * whose it was, but its payouts do: a disbursement's withdrawal request names
+ * the vendor, and the disbursement line names the store.
+ */
+export async function storeOwners(mysql) {
     const [stores] = await mysql.query('SELECT id, vendor_id FROM stores');
     const storeByVendor = new Map(stores.map((s) => [String(s.vendor_id), String(s.id)]));
-    // A deleted store has no stores row to say whose it was, but its payouts
-    // do: a disbursement's withdrawal request names the vendor, and the
-    // disbursement line names the store.
     const [payoutOwners] = await mysql.query(`
         SELECT DISTINCT w.vendor_id, d.store_id
         FROM withdraw_requests w
@@ -222,8 +401,47 @@ async function importRestaurantMoney(mysql, report) {
     for (const owner of payoutOwners) {
         if (!storeByVendor.has(String(owner.vendor_id))) storeByVendor.set(String(owner.vendor_id), String(owner.store_id));
     }
+    return storeByVendor;
+}
 
-    const [requests] = await mysql.query('SELECT * FROM withdraw_requests WHERE vendor_id IS NOT NULL ORDER BY id');
+const restaurantWithdrawalData = (row, restaurantId) => {
+    const fields = (() => {
+        try {
+            return JSON.parse(row.withdrawal_method_fields || '{}') || {};
+        } catch {
+            return {};
+        }
+    })();
+    const upi = Boolean(fields.upi_id);
+    return {
+        restaurantId,
+        amount: money(row.amount),
+        status: WITHDRAWAL_STATUS[row.approved] || 'pending',
+        source: row.type === 'disbursement' ? 'disbursement' : 'manual',
+        paymentMethod: upi ? 'upi' : 'bank_transfer',
+        bankDetails: upi
+            ? { upiId: fields.upi_id, name: fields.name || '' }
+            : {
+                accountHolderName: fields.account_holder_name || '',
+                accountNumber: fields.account_number || '',
+                ifscCode: fields.ifsc_code || fields.ifsc || '',
+            },
+        adminNote: note(`${row.type} #${row.id}${row.transaction_note && row.type !== 'disbursement' ? ` · ${row.transaction_note}` : ''}`),
+        processedAt: row.approved === 0 ? null : row.updated_at,
+        createdAt: row.created_at,
+    };
+};
+
+const RESTAURANT_REQUESTS_SQL = 'SELECT * FROM withdraw_requests WHERE vendor_id IS NOT NULL ORDER BY id';
+
+async function importRestaurantMoney(mysql, report, ctx = {}) {
+    const restaurants = await loadIdMap('restaurant');
+    const withdrawals = await loadIdMap('restaurant_withdrawal');
+    const withdrawalAdjust = await loadIdMap('restaurant_withdrawal_adjust');
+    const storeByVendor = await storeOwners(mysql);
+
+    const [requests] = await mysql.query(RESTAURANT_REQUESTS_SQL);
+    const baseRequests = ctx.sync ? byKey((await ctx.baseline.query(RESTAURANT_REQUESTS_SQL))[0]) : null;
     for (const row of requests) {
         const storeId = storeByVendor.get(String(row.vendor_id));
         const restaurantId = storeId && restaurants.get(storeId);
@@ -231,33 +449,26 @@ async function importRestaurantMoney(mysql, report) {
             report.skip('restaurant_withdrawal', row.id, `vendor ${row.vendor_id}`, restaurantId ? 'under ₹1' : 'restaurant not imported');
             continue;
         }
-        const fields = (() => {
-            try {
-                return JSON.parse(row.withdrawal_method_fields || '{}') || {};
-            } catch {
-                return {};
+        const data = restaurantWithdrawalData(row, restaurantId);
+        let outcome;
+        if (ctx.sync) {
+            const was = baseRequests.get(String(row.id));
+            outcome = await syncTracked(report, 'restaurant_withdrawal', row.id, withdrawals, prisma.foodRestaurantWithdrawal, data,
+                was ? restaurantWithdrawalData(was, restaurantId) : null,
+                { guard: ['status'], compare: ['amount', 'paymentMethod', 'bankDetails'] });
+            if (!outcome) continue;
+            if (outcome === 'created' || outcome === 'updated') ctx.affect?.('restaurant', restaurantId);
+            if (outcome === 'created' && data.status === 'pending') {
+                report.warn('restaurant_withdrawal', row.id, `vendor ${row.vendor_id}`, `imported PENDING (₹${data.amount}); if the old system pays it, do not pay it again here`);
             }
-        })();
-        const upi = Boolean(fields.upi_id);
-        const outcome = await upsertTracked('restaurant_withdrawal', row.id, withdrawals, prisma.foodRestaurantWithdrawal, {
-            restaurantId,
-            amount: money(row.amount),
-            status: WITHDRAWAL_STATUS[row.approved] || 'pending',
-            source: row.type === 'disbursement' ? 'disbursement' : 'manual',
-            paymentMethod: upi ? 'upi' : 'bank_transfer',
-            bankDetails: upi
-                ? { upiId: fields.upi_id, name: fields.name || '' }
-                : {
-                    accountHolderName: fields.account_holder_name || '',
-                    accountNumber: fields.account_number || '',
-                    ifscCode: fields.ifsc_code || fields.ifsc || '',
-                },
-            adminNote: note(`${row.type} #${row.id}${row.transaction_note && row.type !== 'disbursement' ? ` · ${row.transaction_note}` : ''}`),
-            processedAt: row.approved === 0 ? null : row.updated_at,
-            createdAt: row.created_at,
-        });
+        } else {
+            outcome = await upsertTracked('restaurant_withdrawal', row.id, withdrawals, prisma.foodRestaurantWithdrawal, data);
+        }
         report.done('restaurant_withdrawal', outcome);
     }
+
+    // A sync never recomputes opening balances: see the file comment.
+    if (ctx.sync) return;
 
     // ── opening balances ──
     const [wallets] = await mysql.query('SELECT * FROM store_wallets');
@@ -296,7 +507,7 @@ async function importRestaurantMoney(mysql, report) {
     report.warn('restaurant_balance', '-', '(all)', `opening balance adjustments for ${adjusted} restaurant(s)`);
 }
 
-export async function importBalances(mysql, report) {
-    await importRiderMoney(mysql, report);
-    await importRestaurantMoney(mysql, report);
+export async function importBalances(mysql, report, ctx = {}) {
+    await importRiderMoney(mysql, report, ctx);
+    await importRestaurantMoney(mysql, report, ctx);
 }

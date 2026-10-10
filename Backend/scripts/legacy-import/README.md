@@ -2,7 +2,8 @@
 
 Reads a MySQL copy of the old database and writes into this system's Postgres.
 Every step is idempotent: a re-run updates what it imported before (tracked in
-`legacy.id_map`) instead of duplicating it. The run ends with a list of
+`legacy.id_map`) instead of duplicating it. Once the new system is in use,
+catch up with `--sync` instead (below), which keeps what was edited here. The run ends with a list of
 everything skipped or changed on the way in, and exits with code 2 if anything
 was skipped.
 
@@ -53,6 +54,60 @@ node scripts/legacy-import/index.mjs zones categories restaurants foods nutritio
 Copy the old `storage/app/public/{category,product,store,profile,delivery-man}`
 folders into `$UPLOAD_STORAGE_ROOT/legacy/` first (stores' covers under
 `legacy/store/cover`), or images are reported missing and imported without.
+
+## Sync: catching up with a newer copy (`--sync`)
+
+Once this system is in use, a plain re-run would overwrite what admins have
+edited here. `--sync` brings in only what the old system added or changed
+since the previous import. It compares two copies of the old database: the
+newer one (`LEGACY_MYSQL_URL`) and the one the previous import read
+(`LEGACY_BASELINE_MYSQL_URL`).
+
+| Data | What a sync does |
+|---|---|
+| New rows (not in `legacy.id_map`) | Imported exactly as the full import would, images included |
+| Orders imported before | Status, timestamps, payment status, cancellation, rider, ratings, and the ledger split that follows from them, when the old system changed them. Items, address and amounts never move. History and item ratings are replaced only if nobody edited them here |
+| Customers, riders imported before | Blanks filled; nothing set here is overwritten. Active/blocked (customers) and approval status (riders) follow the old system only while this system still has the value originally imported |
+| Restaurants, categories, dishes, nutrition, zones, coupons, banners, settings, social media, withdrawal methods, cancel reasons, ads/reels, addresses | Never modified. A change in the old system is counted as "left alone" |
+| Money | Only ledger rows new since the last import (cash collections, rider withdrawals and payouts, admin payments of rider earnings (`provide_d_m_earnings`; an "adjustment" there settles earnings against cash, so it is also a cash deposit), restaurant withdrawals and payouts, order transactions), by legacy id. Opening-balance adjustments are never recomputed, so balances move by exactly those rows. A withdrawal imported before follows the old status only while untouched here |
+| Ratings | Recomputed for the restaurants and riders whose orders were added or changed |
+| Favourites | Only those added in the old system since the baseline copy, so one a customer removed here does not come back |
+
+Run all the steps together: later steps rely on what earlier ones brought in
+during the same run (new dishes get nutrition, new restaurants get payout
+details, new orders get linked to coupons).
+
+```sh
+LEGACY_MYSQL_URL='mysql://legacy_ro:<pass>@127.0.0.1:3306/legacy_lagech_new' \
+LEGACY_BASELINE_MYSQL_URL='mysql://legacy_ro:<pass>@127.0.0.1:3306/legacy_lagech' \
+DATABASE_URL=... UPLOAD_STORAGE_ROOT=/srv/lagech/uploads UPLOAD_BASE_URL=/uploads \
+REDIS_URL= NODE_ENV=development \
+node scripts/legacy-import/index.mjs --sync --dry-run zones categories restaurants foods \
+  nutrition customers riders payment-details withdrawal-methods orders balances ratings \
+  banners cancel-reasons promotions coupons favorites newsletter social-media settings
+```
+
+`--dry-run` runs everything inside one Postgres transaction and rolls it back:
+every import of the Prisma client (the steps' and the app services' alike)
+is routed into that transaction, nested transactions included, and outside it
+the client refuses writes. It ends by comparing every table's row count and
+newest `updatedAt` before and after. It does hold row locks on what it would
+change (a few seconds to a minute) and waits at most 10 s for a lock itself.
+
+The summary has, per entity, add / update / unchanged / left alone /
+skipped, the columns behind every update and every "left alone", and a wallet
+table: each rider's cash in hand and withdrawable and each restaurant's
+balance, before and after here, against the old wallet at the baseline copy
+and now. "Moved here" and "moved old" should match. The known reason they do not: the
+old system's daily restaurant payouts that are scheduled but not paid
+(`disbursement_details` pending). The old balance already excludes them; here
+they arrive once paid and a later sync brings them in (column "old unpaid").
+Anything left under "unexplained" is worth a look before a real run.
+
+Running a sync twice writes nothing the second time. After a real sync, use
+the copy it read as the baseline for the next one: rows it imported are not in
+the older baseline, and changes to them could not be told apart otherwise
+(they are counted under "not in the baseline copy").
 
 ## Switch-over checklist
 
