@@ -8,12 +8,21 @@ import { loadIdMap } from '../idMap.mjs';
 
 const ENTITY = 'favorite';
 
-export async function importFavorites(mysql, report) {
+export async function importFavorites(mysql, report, ctx = {}) {
     const users = await loadIdMap('user');
     const restaurants = await loadIdMap('restaurant');
     const foods = await loadIdMap('food');
-    const [rows] = await mysql.query('SELECT id, user_id, store_id, item_id, created_at FROM wishlists ORDER BY id');
+    const SQL = 'SELECT id, user_id, store_id, item_id, created_at FROM wishlists ORDER BY id';
+    const [rows] = await mysql.query(SQL);
+    // Favourites keep no id map. A sync takes only those added in the old
+    // system since the baseline copy: one imported before and removed by the
+    // customer here must not come back.
+    const baseline = ctx.sync ? await ctx.baselineRows(SQL) : null;
     for (const row of rows) {
+        if (ctx.sync && baseline.has(String(row.id))) {
+            report.done(ENTITY, 'unchanged');
+            continue;
+        }
         const userId = users.get(String(row.user_id));
         const [entityType, entityId] = row.store_id != null
             ? ['restaurant', restaurants.get(String(row.store_id))]
@@ -29,6 +38,7 @@ export async function importFavorites(mysql, report) {
                 data: { userId, entityType, entityId, ...(row.created_at ? { createdAt: row.created_at } : {}) },
             });
         }
-        report.done(ENTITY, exists ? 'updated' : 'created');
+        // Nothing is written for a favourite that is already there.
+        report.done(ENTITY, exists ? 'unchanged' : 'created');
     }
 }

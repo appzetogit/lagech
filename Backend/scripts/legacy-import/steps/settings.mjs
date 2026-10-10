@@ -13,7 +13,29 @@
  */
 import { prisma } from '../../../src/config/prisma.js';
 
-export async function importSettings(mysql, report) {
+const SETTINGS_SQL = "SELECT `key` AS id, value FROM business_settings WHERE `key` IN ('dm_max_cash_in_hand', 'cash_in_hand_overflow_delivery_man')";
+const MODELS_SQL = 'SELECT store_business_model AS id, COUNT(*) AS n FROM stores GROUP BY store_business_model';
+
+/** Sync: settings are the new admin's now. Only reports what the old system changed. */
+async function reportSettingChanges(mysql, report, ctx) {
+    const [rows] = await mysql.query(SETTINGS_SQL);
+    const baseline = await ctx.baselineRows(SETTINGS_SQL);
+    for (const row of rows) ctx.leaveAlone(report, 'settings', row, baseline, ['value']);
+    const [models] = await mysql.query(MODELS_SQL);
+    const baseModels = await ctx.baselineRows(MODELS_SQL);
+    const onlyCommission = models.every((m) => m.id === 'commission');
+    report.done('settings', onlyCommission ? 'unchanged' : 'protected');
+    if (!onlyCommission || baseModels.size !== models.length) {
+        report.warn('settings', '-', 'restaurant_subscription',
+            `left as it is; the old system now has ${models.map((m) => `${m.n} on ${m.id}`).join(', ')}`);
+    }
+}
+
+export async function importSettings(mysql, report, ctx = {}) {
+    if (ctx.sync) {
+        await reportSettingChanges(mysql, report, ctx);
+        return;
+    }
     const [rows] = await mysql.query(
         "SELECT `key`, value FROM business_settings WHERE `key` IN ('dm_max_cash_in_hand', 'cash_in_hand_overflow_delivery_man')",
     );

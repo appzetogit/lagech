@@ -33,8 +33,27 @@ export const loadIdMap = async (entity) => {
     return new Map(rows.map((row) => [row.legacy_id, row.new_id]));
 };
 
-export const recordId = (entity, legacyId, newId) => prisma.$executeRaw`
-    INSERT INTO legacy.id_map (entity, legacy_id, new_id)
-    VALUES (${entity}, ${BigInt(legacyId)}, ${newId})
-    ON CONFLICT (entity, legacy_id) DO UPDATE SET new_id = EXCLUDED.new_id, mapped_at = now()
-`;
+/** entity -> legacy id -> new id, for rows this run mapped for the first time. */
+const firstMapped = new Map();
+
+export const recordId = async (entity, legacyId, newId) => {
+    const [row] = await prisma.$queryRaw`
+        INSERT INTO legacy.id_map (entity, legacy_id, new_id)
+        VALUES (${entity}, ${BigInt(legacyId)}, ${newId})
+        ON CONFLICT (entity, legacy_id) DO UPDATE SET new_id = EXCLUDED.new_id, mapped_at = now()
+        RETURNING (xmax = 0) AS inserted
+    `;
+    if (row?.inserted) {
+        if (!firstMapped.has(entity)) firstMapped.set(entity, new Map());
+        firstMapped.get(entity).set(String(legacyId), newId);
+    }
+};
+
+/**
+ * Rows this run brought in for the first time (created, or linked to an
+ * account that already existed here), by entity. A sync uses it to tell what
+ * is new: those rows get the full import treatment in later steps.
+ *
+ * @returns {Map<string, string>} legacy id -> new id
+ */
+export const mappedThisRun = (entity) => firstMapped.get(entity) || new Map();

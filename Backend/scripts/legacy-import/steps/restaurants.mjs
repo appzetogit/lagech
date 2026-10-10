@@ -26,6 +26,7 @@ import {
     updateRestaurantById,
 } from '../../../src/modules/food/admin/services/adminRestaurantWrite.service.js';
 import { loadIdMap, recordId } from '../idMap.mjs';
+import { byId } from '../sync.mjs';
 
 const ENTITY = 'restaurant';
 
@@ -137,21 +138,15 @@ const ownerNameOf = (row) => {
     return (first === last ? first : `${first} ${last}`).trim() || String(row.name).trim();
 };
 
-export async function importRestaurants(mysql, report) {
-    const zoneMap = await loadIdMap('zone');
-    const idMap = await loadIdMap(ENTITY);
-    const defaultCommission = await readDefaultCommission(mysql);
-
-    const [[foodModule]] = await mysql.query(
-        "SELECT id FROM modules WHERE module_type = 'food' ORDER BY status DESC, id LIMIT 1"
-    );
+/** The food module's stores with their owners, and each store's schedule slots. */
+async function loadStores(mysql, foodModuleId) {
     const [rows] = await mysql.query(`
         SELECT s.*, v.f_name, v.l_name, v.phone AS owner_phone, v.email AS owner_email,
                v.status AS vendor_status, v.rejection_note, s.status AS store_status
         FROM stores s
         JOIN vendors v ON v.id = s.vendor_id
         WHERE s.module_id = ?
-        ORDER BY s.id`, [foodModule.id]);
+        ORDER BY s.id`, [foodModuleId]);
     const [allSlots] = await mysql.query(
         'SELECT store_id, day, opening_time, closing_time FROM store_schedule ORDER BY store_id, day, opening_time'
     );
@@ -160,8 +155,38 @@ export async function importRestaurants(mysql, report) {
         const key = String(slot.store_id);
         slotsByStore.set(key, [...(slotsByStore.get(key) || []), slot]);
     }
+    // For the sync's change check: the schedule as one comparable value.
+    for (const row of rows) {
+        row.schedule = (slotsByStore.get(String(row.id)) || [])
+            .map((slot) => `${slot.day} ${hhmm(slot.opening_time)}-${hhmm(slot.closing_time)}`).join(',');
+    }
+    return { rows, slotsByStore };
+}
+
+/** The old columns a restaurant is built from; a change in any is an old-side edit. */
+const STORE_COLUMNS = [
+    'name', 'phone', 'email', 'address', 'latitude', 'longitude', 'zone_id', 'logo', 'cover_photo',
+    'store_status', 'active', 'veg', 'non_veg', 'delivery_time', 'comission',
+    'f_name', 'l_name', 'owner_phone', 'owner_email', 'vendor_status', 'rejection_note', 'schedule',
+];
+
+export async function importRestaurants(mysql, report, ctx = {}) {
+    const zoneMap = await loadIdMap('zone');
+    const idMap = await loadIdMap(ENTITY);
+    const defaultCommission = await readDefaultCommission(mysql);
+
+    const [[foodModule]] = await mysql.query(
+        "SELECT id FROM modules WHERE module_type = 'food' ORDER BY status DESC, id LIMIT 1"
+    );
+    const { rows, slotsByStore } = await loadStores(mysql, foodModule.id);
+    const baseline = ctx.sync ? byId((await loadStores(ctx.baseline, foodModule.id)).rows) : null;
 
     for (const row of rows) {
+        // Sync: restaurants are the new admin's now; an old-side change is only reported.
+        if (ctx.sync && idMap.has(String(row.id))) {
+            ctx.leaveAlone(report, ENTITY, row, baseline, STORE_COLUMNS);
+            continue;
+        }
         const zoneId = zoneMap.get(String(row.zone_id));
         if (!zoneId) {
             report.skip(ENTITY, row.id, row.name, `zone ${row.zone_id} was not imported`);
@@ -269,7 +294,7 @@ export async function importRestaurants(mysql, report) {
         report.done(ENTITY, exists ? 'updated' : 'created');
     }
 
-    await importDeletedRestaurants(mysql, report, { idMap, zoneMap, foodModuleId: foodModule.id, defaultCommission });
+    await importDeletedRestaurants(mysql, report, { idMap, zoneMap, foodModuleId: foodModule.id, defaultCommission, ctx });
 }
 
 /**
@@ -281,7 +306,7 @@ export async function importRestaurants(mysql, report) {
  * and is never listed to customers. A deleted store with no surviving name is
  * left out, as before.
  */
-async function importDeletedRestaurants(mysql, report, { idMap, zoneMap, foodModuleId, defaultCommission }) {
+async function importDeletedRestaurants(mysql, report, { idMap, zoneMap, foodModuleId, defaultCommission, ctx }) {
     const [rows] = await mysql.query(`
         SELECT ref.id,
                MAX(CASE WHEN t.\`key\` = 'name' THEN t.value END) AS name,
@@ -300,6 +325,11 @@ async function importDeletedRestaurants(mysql, report, { idMap, zoneMap, foodMod
     for (const row of rows) {
         const name = String(row.name || '').trim();
         if (!name) continue;
+        // Sync: a placeholder made before stays as the new admin has it.
+        if (ctx.sync && idMap.has(String(row.id))) {
+            report.done(ENTITY, 'unchanged');
+            continue;
+        }
         const address = String(row.address || '').trim();
         const zoneId = zoneMap.get(String(row.zone_id)) || null;
 

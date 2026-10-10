@@ -28,15 +28,22 @@ const toRing = (geoJson) => {
     return points;
 };
 
-export async function importZones(mysql, report) {
-    const [rows] = await mysql.query(
-        `SELECT id, name, display_name, status, created_at, cash_on_delivery, digital_payment, is_default,
+const ZONE_SQL = `SELECT id, name, display_name, status, created_at, cash_on_delivery, digital_payment, is_default,
                 ST_AsGeoJSON(coordinates) AS geo
-         FROM zones ORDER BY id`
-    );
+         FROM zones ORDER BY id`;
+const ZONE_COLUMNS = ['name', 'display_name', 'status', 'cash_on_delivery', 'digital_payment', 'is_default', 'geo'];
+
+export async function importZones(mysql, report, ctx = {}) {
+    const [rows] = await mysql.query(ZONE_SQL);
     const idMap = await loadIdMap(ENTITY);
+    const baseline = ctx.sync ? await ctx.baselineRows(ZONE_SQL) : null;
 
     for (const row of rows) {
+        // Sync: zones are the new admin's now; an old-side change is only reported.
+        if (ctx.sync && idMap.has(String(row.id))) {
+            ctx.leaveAlone(report, ENTITY, row, baseline, ZONE_COLUMNS);
+            continue;
+        }
         const body = {
             name: String(row.display_name || row.name).trim(),
             zoneName: String(row.name).trim(),
@@ -47,7 +54,8 @@ export async function importZones(mysql, report) {
             // never cleared, so a default chosen here survives a re-run.
             cashOnDelivery: Number(row.cash_on_delivery) === 1,
             digitalPayment: Number(row.digital_payment) === 1,
-            ...(Number(row.is_default) === 1 && row.status === 1 ? { isDefault: true } : {}),
+            // A sync never moves the default away from the one chosen here.
+            ...(Number(row.is_default) === 1 && row.status === 1 && !ctx.sync ? { isDefault: true } : {}),
         };
 
         const existingId = idMap.get(String(row.id));

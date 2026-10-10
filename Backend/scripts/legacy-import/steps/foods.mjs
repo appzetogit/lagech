@@ -108,7 +108,17 @@ const imageUrl = (file) => {
     return fs.existsSync(onDisk) ? buildPublicUrl(`${IMAGE_DIR}/${name}`) : undefined;
 };
 
-export async function importFoods(mysql, report) {
+/**
+ * The old columns a dish is built from; a change in any is an old-side edit.
+ * Running counters (avg_rating, rating_count, order_count) are not edits.
+ */
+const ITEM_COLUMNS = [
+    'name', 'description', 'price', 'discount', 'discount_type', 'image', 'images', 'veg', 'status',
+    'recommended', 'is_approved', 'category_id', 'category_ids', 'food_variations', 'store_id',
+    'available_time_starts', 'available_time_ends', 'maximum_cart_quantity',
+];
+
+export async function importFoods(mysql, report, ctx = {}) {
     const restaurantMap = await loadIdMap('restaurant');
     const categoryMap = await loadIdMap('category');
     const idMap = await loadIdMap(ENTITY);
@@ -116,7 +126,19 @@ export async function importFoods(mysql, report) {
     const [[foodModule]] = await mysql.query(
         "SELECT id FROM modules WHERE module_type = 'food' ORDER BY status DESC, id LIMIT 1"
     );
-    const [items] = await mysql.query('SELECT * FROM items WHERE module_id = ? ORDER BY id', [foodModule.id]);
+    const ITEMS_SQL = 'SELECT * FROM items WHERE module_id = ? ORDER BY id';
+    const [allItems] = await mysql.query(ITEMS_SQL, [foodModule.id]);
+    let items = allItems;
+    if (ctx.sync) {
+        // Sync: dishes are the restaurants' and the new admin's now; only new
+        // ones come across, and an old-side change is only reported.
+        const baseline = await ctx.baselineRows(ITEMS_SQL, [foodModule.id]);
+        items = allItems.filter((item) => {
+            if (!idMap.has(String(item.id))) return true;
+            ctx.leaveAlone(report, ENTITY, item, baseline, ITEM_COLUMNS);
+            return false;
+        });
+    }
     // Search tags, tidied the way the admin form tidies them.
     const [tagRows] = await mysql.query('SELECT it.item_id, t.tag FROM item_tag it JOIN tags t ON t.id = it.tag_id');
     const tagsByItem = new Map();

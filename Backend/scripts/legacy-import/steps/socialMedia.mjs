@@ -25,10 +25,17 @@ const platformName = (value) => {
     return name ? name.charAt(0).toUpperCase() + name.slice(1) : '';
 };
 
-export async function importSocialMedia(mysql, report) {
+export async function importSocialMedia(mysql, report, ctx = {}) {
     const idMap = await loadIdMap(ENTITY);
-    const [rows] = await mysql.query('SELECT * FROM social_media ORDER BY id');
+    const SQL = 'SELECT * FROM social_media ORDER BY id';
+    const [rows] = await mysql.query(SQL);
+    const baseline = ctx.sync ? await ctx.baselineRows(SQL) : null;
     for (const [index, row] of rows.entries()) {
+        // Sync: the links are the new admin's now; an old-side change is only reported.
+        if (ctx.sync && idMap.has(String(row.id))) {
+            ctx.leaveAlone(report, ENTITY, row, baseline, ['name', 'link', 'status']);
+            continue;
+        }
         const platform = platformName(row.name).slice(0, 40);
         const url = webAddress(row.link);
         if (!platform || !url) {

@@ -17,6 +17,7 @@ import { prisma } from '../../../src/config/prisma.js';
 import { config } from '../../../src/config/env.js';
 import { buildPublicUrl } from '../../../src/services/storage.service.js';
 import { loadIdMap, recordId } from '../idMap.mjs';
+import { byId, classifyProtected, fillBlanks, guardedUpdate, same } from '../sync.mjs';
 
 const USER = 'user';
 const ADDRESS = 'address';
@@ -67,9 +68,69 @@ export const parseFormattedAddress = (text) => {
     };
 };
 
-async function importUsers(mysql, report) {
+/** One old customer row as this system's columns. */
+const userData = (row, image) => ({
+    phone: last10(row.phone),
+    countryCode: '+91',
+    name: fullName(row),
+    email: emailOf(row.email),
+    profileImage: image || '',
+    isVerified: row.is_phone_verified === 1,
+    isActive: row.status === 1,
+    ...(row.created_at ? { createdAt: row.created_at } : {}),
+});
+
+/** Sync: what may change on a customer imported before. */
+const USER_FILL = ['name', 'email', 'profileImage'];
+const USER_STATUS = ['isActive'];
+const USER_VERIFIED = ['isVerified'];
+
+/**
+ * Sync rules for one already-imported customer, as a patch: blanks filled,
+ * active/blocked following the old system only while this system still holds
+ * the imported value. Exported for the test.
+ */
+export function planUserSync(current, original, target) {
+    const fill = fillBlanks(current, target, USER_FILL);
+    const status = guardedUpdate(current, original, target, USER_STATUS);
+    const verified = guardedUpdate(current, original, target, USER_VERIFIED);
+    return {
+        patch: { ...fill.patch, ...status.patch, ...verified.patch },
+        kept: [...fill.kept, ...(status.protected ? USER_STATUS : []), ...(verified.protected ? USER_VERIFIED : [])],
+    };
+}
+
+async function syncUser(row, mappedId, baselineRow, report) {
+    const current = await prisma.foodUser.findUnique({
+        where: { id: mappedId },
+        select: { id: true, name: true, email: true, profileImage: true, isActive: true, isVerified: true },
+    });
+    if (!current) {
+        report.skip(USER, row.id, row.phone, 'imported before but deleted here since; not recreated');
+        return null;
+    }
+    const target = userData(row, imageUrl(row.image));
+    const original = baselineRow ? userData(baselineRow, imageUrl(baselineRow.image)) : null;
+    const { patch, kept } = planUserSync(current, original, target);
+    // Only what the old system changed counts as "left alone"; a value that
+    // differs because it was edited here, with the old one unchanged, is just
+    // this system's own data.
+    const legacyMoved = original ? kept.filter((field) => !same(original[field], target[field])) : kept;
+    if (Object.keys(patch).length) {
+        await prisma.foodUser.update({ where: { id: mappedId }, data: patch });
+        report.done(USER, 'updated');
+        report.detail(USER, Object.keys(patch));
+    } else {
+        report.done(USER, legacyMoved.length ? 'protected' : 'unchanged');
+    }
+    if (legacyMoved.length) report.detail(USER, legacyMoved.map((field) => `${field} (kept)`));
+    return mappedId;
+}
+
+async function importUsers(mysql, report, ctx = {}) {
     const idMap = await loadIdMap(USER);
     const [rows] = await mysql.query('SELECT * FROM users ORDER BY id');
+    const baseline = ctx.sync ? byId((await ctx.baseline.query('SELECT * FROM users ORDER BY id'))[0]) : null;
 
     const notCarried = { firebaseTokens: 0, referralCodes: 0, missingImages: 0 };
 
@@ -80,23 +141,19 @@ async function importUsers(mysql, report) {
             continue;
         }
 
+        const mappedId = idMap.get(String(row.id));
+        if (ctx.sync && mappedId) {
+            await syncUser(row, mappedId, baseline.get(String(row.id)), report);
+            continue;
+        }
+
         const image = imageUrl(row.image);
         if (image === null) notCarried.missingImages += 1;
         if (row.cm_firebase_token) notCarried.firebaseTokens += 1;
         if (row.ref_code) notCarried.referralCodes += 1;
 
-        const data = {
-            phone,
-            countryCode: '+91',
-            name: fullName(row),
-            email: emailOf(row.email),
-            profileImage: image || '',
-            isVerified: row.is_phone_verified === 1,
-            isActive: row.status === 1,
-            ...(row.created_at ? { createdAt: row.created_at } : {}),
-        };
+        const data = userData(row, image);
 
-        const mappedId = idMap.get(String(row.id));
         let existing = mappedId
             ? await prisma.foodUser.findUnique({ where: { id: mappedId }, select: { id: true } })
             : null;
@@ -123,8 +180,10 @@ async function importUsers(mysql, report) {
                     ...(existing.name ? {} : { name: data.name }),
                     ...(existing.email ? {} : { email: data.email }),
                     ...(existing.profileImage ? {} : { profileImage: data.profileImage }),
-                    isActive: data.isActive,
-                    ...(row.created_at ? { createdAt: row.created_at } : {}),
+                    // Sync: an account made here since keeps its own status and
+                    // sign-up date; only blanks are filled.
+                    ...(ctx.sync ? {} : { isActive: data.isActive }),
+                    ...(row.created_at && !ctx.sync ? { createdAt: row.created_at } : {}),
                 },
             });
             userId = existing.id;
@@ -141,8 +200,9 @@ async function importUsers(mysql, report) {
     }
 
     // Who referred whom, once everyone exists. Counted from the links, so a
-    // re-run cannot inflate it.
-    const referred = rows.filter((row) => row.ref_by);
+    // re-run cannot inflate it. A sync only links customers it brought in now,
+    // and never replaces a referrer already recorded here.
+    const referred = rows.filter((row) => row.ref_by && (!ctx.sync || ctx.isCreated(USER, row.id)));
     for (const row of referred) {
         const userId = idMap.get(String(row.id));
         const referrerId = idMap.get(String(row.ref_by));
@@ -150,7 +210,10 @@ async function importUsers(mysql, report) {
             report.warn(USER, row.id, row.phone, `referrer ${row.ref_by} not imported; referral link dropped`);
             continue;
         }
-        await prisma.foodUser.update({ where: { id: userId }, data: { referredById: referrerId } });
+        await prisma.foodUser.updateMany({
+            where: { id: userId, ...(ctx.sync ? { referredById: null } : {}) },
+            data: { referredById: referrerId },
+        });
     }
     const referrers = new Set(referred.map((row) => idMap.get(String(row.ref_by))).filter(Boolean));
     for (const referrerId of referrers) {
@@ -171,7 +234,10 @@ async function importUsers(mysql, report) {
     }
 }
 
-async function importAddresses(mysql, report) {
+/** The old columns an address is built from; a change in any is an old-side edit. */
+const ADDRESS_COLUMNS = ['address', 'address_type', 'contact_person_name', 'contact_person_number', 'latitude', 'longitude', 'house', 'road', 'floor'];
+
+async function importAddresses(mysql, report, ctx = {}) {
     const userMap = await loadIdMap(USER);
     const idMap = await loadIdMap(ADDRESS);
     const [rows] = await mysql.query('SELECT * FROM customer_addresses ORDER BY user_id, id');
@@ -187,10 +253,27 @@ async function importAddresses(mysql, report) {
     const zoneNames = new Map(zones.map((zone) => [zone.id, zone.name]));
     const fallbacks = { cityFromZone: 0, noCity: 0 };
 
+    // Sync: an address imported before is the customer's to edit or delete
+    // here now, and is left alone; only new ones come across.
+    const baseline = ctx.sync ? byId((await ctx.baseline.query('SELECT * FROM customer_addresses'))[0]) : null;
+    const liveUsers = ctx.sync
+        ? new Set((await prisma.foodUser.findMany({ where: { id: { in: [...new Set(userMap.values())] } }, select: { id: true } })).map((u) => u.id))
+        : null;
+
     for (const row of rows) {
         const userId = userMap.get(String(row.user_id));
         if (!userId) {
             report.skip(ADDRESS, row.id, row.address_type, `customer ${row.user_id} no longer exists in the old data`);
+            continue;
+        }
+        if (ctx.sync && idMap.has(String(row.id))) {
+            const { outcome, columns } = classifyProtected(baseline.get(String(row.id)), row, ADDRESS_COLUMNS);
+            report.done(ADDRESS, outcome);
+            if (outcome === 'protected') report.detail(ADDRESS, columns);
+            continue;
+        }
+        if (ctx.sync && !liveUsers.has(userId)) {
+            report.skip(ADDRESS, row.id, row.address_type, `customer ${row.user_id} was deleted here since`);
             continue;
         }
 
@@ -244,6 +327,10 @@ async function importAddresses(mysql, report) {
             isDefault: newestByUser.get(String(row.user_id)) === row.id,
             ...(row.created_at ? { createdAt: row.created_at } : {}),
         };
+        // Sync: a customer who already has a default here keeps it.
+        if (ctx.sync && data.isDefault && (await prisma.userAddress.count({ where: { userId, isDefault: true } })) > 0) {
+            data.isDefault = false;
+        }
         if (!hasPin) report.warn(ADDRESS, row.id, street.slice(0, 40), 'no usable map pin; imported without one');
 
         const mappedId = idMap.get(String(row.id));
@@ -265,7 +352,7 @@ async function importAddresses(mysql, report) {
     }
 }
 
-export async function importCustomers(mysql, report) {
-    await importUsers(mysql, report);
-    await importAddresses(mysql, report);
+export async function importCustomers(mysql, report, ctx = {}) {
+    await importUsers(mysql, report, ctx);
+    await importAddresses(mysql, report, ctx);
 }
