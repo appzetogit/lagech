@@ -5,6 +5,7 @@ import { FileText, Package } from "@food/components/admin/theme/icons"
 import { adminAPI } from "@food/api"
 import { adminCatalogExtrasAPI, blobErrorMessage, saveBlobResponse } from "@food/api/adminCatalogExtras"
 import { API_BASE_URL } from "@food/api/config"
+import { socketAuth, reconnectOnAuthError } from "@food/utils/socketAuth"
 import { toast } from "sonner"
 
 import { usePaginationParams } from "@food/hooks/usePaginationParams"
@@ -945,7 +946,7 @@ export default function OrdersPage({ statusKey = "all" }) {
       transports: ["websocket", "polling"],
       // The server rejects a socket without a token (AUTH_MISSING). A function,
       // so every reconnect sends the current, possibly refreshed, token.
-      auth: (cb) => cb({ token: localStorage.getItem("admin_accessToken") || "" }),
+      auth: socketAuth("admin"),
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
@@ -953,6 +954,7 @@ export default function OrdersPage({ statusKey = "all" }) {
       timeout: 20000,
     })
     socketRef.current = socket
+    const stopAuthRetry = reconnectOnAuthError(socket, "admin")
 
     const handleIncomingRealtimeOrder = (payload = {}) => {
       const orderId = payload?.orderId || payload?.orderMongoId || ""
@@ -1010,6 +1012,7 @@ export default function OrdersPage({ statusKey = "all" }) {
     socket.on("order_status_update", handleRealtimeStatusChange)
 
     return () => {
+      stopAuthRetry()
       socketConnectedRef.current = false
       socket.off("admin_new_order", handleIncomingRealtimeOrder)
       socket.off("play_notification_sound", handleIncomingRealtimeOrder)

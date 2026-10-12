@@ -3,6 +3,7 @@ import io from 'socket.io-client';
 import { API_BASE_URL } from '@food/api/config';
 import { restaurantAPI } from '@food/api';
 import { dispatchNotificationInboxRefresh } from '@food/hooks/useNotificationInbox';
+import { socketAuth, reconnectOnAuthError } from '@food/utils/socketAuth';
 import {
   attachRestaurantAlertUnlockListeners,
   getRestaurantOrderAlertKey,
@@ -440,10 +441,11 @@ export const useRestaurantNotifications = () => {
       timeout: 20000,
       forceNew: false,
       autoConnect: true,
-      auth: {
-        token: localStorage.getItem('restaurant_accessToken') || localStorage.getItem('accessToken')
-      }
+      // Refreshed on every connect: a token fixed at page load is refused on
+      // the first reconnect after it expires, and alerts stop silently.
+      auth: socketAuth('restaurant')
     });
+    const stopAuthRetry = reconnectOnAuthError(socketRef.current, 'restaurant');
 
     socketRef.current.on('connect', () => {
       debugLog('? Restaurant Socket connected, restaurantId:', restaurantId);
@@ -598,6 +600,7 @@ export const useRestaurantNotifications = () => {
     });
 
     return () => {
+      stopAuthRetry();
       if (socketRef.current) {
         socketRef.current.disconnect();
         socketRef.current = null;

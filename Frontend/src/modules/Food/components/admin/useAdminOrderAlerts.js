@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react"
 import io from "socket.io-client"
 import { toast } from "sonner"
 import { API_BASE_URL } from "@food/api/config"
+import { socketAuth, reconnectOnAuthError } from "@food/utils/socketAuth"
 import alertSound from "@food/assets/audio/alert.mp3"
 
 /**
@@ -28,8 +29,9 @@ export function useAdminOrderAlerts(onOrdersPage) {
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
-      auth: (cb) => cb({ token: localStorage.getItem("admin_accessToken") || "" }),
+      auth: socketAuth("admin"),
     })
+    const stopAuthRetry = reconnectOnAuthError(socket, "admin")
 
     const seen = new Map()
     const onNewOrder = (payload = {}) => {
@@ -60,6 +62,7 @@ export function useAdminOrderAlerts(onOrdersPage) {
 
     socket.on("admin_new_order", onNewOrder)
     return () => {
+      stopAuthRetry()
       socket.off("admin_new_order", onNewOrder)
       socket.disconnect()
     }
