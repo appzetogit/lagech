@@ -468,7 +468,7 @@ async function expireUnacceptedOrders(where = {}) {
           note: "Not accepted by restaurant",
           message: "Order was not accepted by restaurant in time.",
         };
-        io.to(rooms.user(updated.userId)).emit("order_status_update", payload);
+        io.to([rooms.user(updated.userId), rooms.admin()]).emit("order_status_update", payload);
         io.to(rooms.restaurant(updated.restaurantId)).emit("order_status_update", payload);
       }
     } catch (err) {
@@ -524,7 +524,7 @@ export async function autoConfirmForDeliverymanModel(orderId) {
     const io = getIO();
     if (io) {
       const payload = { orderMongoId: id, orderId: id, orderStatus: "confirmed" };
-      io.to(rooms.user(updated.userId)).emit("order_status_update", payload);
+      io.to([rooms.user(updated.userId), rooms.admin()]).emit("order_status_update", payload);
       io.to(rooms.restaurant(updated.restaurantId)).emit("order_status_update", payload);
     }
   } catch (err) {
@@ -1400,7 +1400,7 @@ export async function rejectOfflinePaymentAdmin(orderId, adminId, reason = "") {
   try {
     const io = getIO();
     if (io) {
-      io.to(rooms.user(row.userId)).emit("order_status_update", {
+      io.to([rooms.user(row.userId), rooms.admin()]).emit("order_status_update", {
         orderMongoId: row.id,
         orderId: row.id,
         orderStatus: "cancelled_by_admin",
@@ -1924,7 +1924,7 @@ export async function cancelOrder(orderId, userId, reason) {
         orderStatus: updated.orderStatus,
         message: `Order #${updated.order_id || updated.id} has been cancelled successfully.${refundDetail}`,
       };
-      io.to(rooms.user(userId)).emit("order_status_update", payload);
+      io.to([rooms.user(userId), rooms.admin()]).emit("order_status_update", payload);
       io.to(rooms.restaurant(updated.restaurantId)).emit("order_status_update", payload);
     }
   } catch (err) {
@@ -2352,7 +2352,7 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
 
     if (io) {
       io.to(rooms.restaurant(restaurantId)).emit("order_status_update", payload);
-      io.to(rooms.user(updated.userId)).emit("order_status_update", payload);
+      io.to([rooms.user(updated.userId), rooms.admin()]).emit("order_status_update", payload);
       const assignedRiderId = row.dispatchDeliveryPartnerId;
       if (assignedRiderId) {
         io.to(rooms.delivery(assignedRiderId)).emit("order_status_update", payload);
@@ -2539,7 +2539,7 @@ export async function handoverTakeawayRestaurant(orderId, restaurantId, code) {
         title: "Order collected 🎉",
         message: `Takeaway order #${label} has been handed over.`,
       };
-      io.to(rooms.user(updated.userId)).emit("order_status_update", payload);
+      io.to([rooms.user(updated.userId), rooms.admin()]).emit("order_status_update", payload);
       io.to(rooms.restaurant(updated.restaurantId)).emit("order_status_update", payload);
     }
   } catch (err) {
@@ -2970,7 +2970,7 @@ export async function deleteOrderAdmin(orderId, adminId) {
         deletedBy: "ADMIN",
         adminId: adminId ? String(adminId) : null,
       };
-      if (row.userId) io.to(rooms.user(row.userId)).emit("order_deleted", payload);
+      if (row.userId) io.to([rooms.user(row.userId), rooms.admin()]).emit("order_deleted", payload);
       if (row.restaurantId) io.to(rooms.restaurant(row.restaurantId)).emit("order_deleted", payload);
       if (row.dispatchDeliveryPartnerId) {
         io.to(rooms.delivery(row.dispatchDeliveryPartnerId)).emit("order_deleted", payload);
@@ -3125,7 +3125,7 @@ export async function updateOrderStatusAdmin(orderId, orderStatus, note = "", ad
         note: updated.note || "",
         statusNote: note || "",
       };
-      io.to(rooms.user(updated.userId)).emit("order_status_update", payload);
+      io.to([rooms.user(updated.userId), rooms.admin()]).emit("order_status_update", payload);
       io.to(rooms.restaurant(updated.restaurantId)).emit("order_status_update", payload);
       if (row.dispatchDeliveryPartnerId) {
         io.to(rooms.delivery(row.dispatchDeliveryPartnerId)).emit("order_status_update", payload);
@@ -3229,7 +3229,7 @@ export async function markOrderDeliveredAdmin(orderId, adminId, note = "") {
         message: `Order #${orderLabel} marked as delivered by admin.`,
         title: "Order Delivered! 🎉",
       };
-      io.to(rooms.user(updated.userId)).emit("order_status_update", payload);
+      io.to([rooms.user(updated.userId), rooms.admin()]).emit("order_status_update", payload);
       io.to(rooms.restaurant(updated.restaurantId)).emit("order_status_update", payload);
       if (row.dispatchDeliveryPartnerId) {
         io.to(rooms.delivery(row.dispatchDeliveryPartnerId)).emit("order_status_update", payload);

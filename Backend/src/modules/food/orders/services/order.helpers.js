@@ -564,6 +564,14 @@ export async function notifyRestaurantNewOrder(orderDoc) {
         `[RestaurantOrders] Emitting new_order to ${rooms.restaurant(orderDoc.restaurantId)} for order ${orderDoc._id?.toString?.() || ''}`,
       );
       io.to(rooms.restaurant(orderDoc.restaurantId)).emit("new_order", payload);
+      // The admin Orders page rings on this. A slim payload: admins refetch the
+      // list, and the restaurant's finance view is not theirs to read here.
+      io.to(rooms.admin()).emit("admin_new_order", {
+        orderMongoId: payload.orderMongoId,
+        orderId: payload.orderId,
+        restaurantName: orderDoc.restaurantName || orderDoc.restaurant?.restaurantName || "",
+        orderStatus: orderDoc.orderStatus,
+      });
     }
 
     // Atomic claim: only the caller that flips restaurantNotifiedAt from null actually

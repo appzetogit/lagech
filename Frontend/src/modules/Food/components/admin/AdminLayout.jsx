@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, Suspense } from "react"
 import "./theme/admin-theme.css"
 import { Outlet, useLocation } from "react-router-dom"
 import { useFitTablesToViewport } from "./useFitTablesToViewport"
+import { useAdminOrderAlerts } from "./useAdminOrderAlerts"
 import AdminSidebar from "./AdminSidebar"
 import AdminNavbar from "./AdminNavbar"
 import { API_BASE_URL } from "@food/api/config"
@@ -70,6 +71,9 @@ export default function AdminLayout() {
   // Give every table on the page the height that is actually left below it,
   // rather than the one constant the stylesheet has to guess at.
   useFitTablesToViewport(mainContentRef, [location.pathname, isSidebarCollapsed]);
+
+  // New-order alerts everywhere except the Orders pages, which ring themselves.
+  useAdminOrderAlerts(location.pathname.includes("/orders/"));
 
   // Safely enforce light mode for the Admin panel to prevent User dark mode bleeding
   useEffect(() => {

@@ -168,7 +168,7 @@ async function deassignOrderForRedispatch({
             ...payload,
             dispatchStatus: 'unassigned',
         });
-        io.to(rooms.user(order.userId)).emit('order_status_update', {
+        io.to([rooms.user(order.userId), rooms.admin()]).emit('order_status_update', {
             ...payload,
             dispatchStatus: 'unassigned',
         });

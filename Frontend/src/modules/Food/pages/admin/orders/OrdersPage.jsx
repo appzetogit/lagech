@@ -932,16 +932,20 @@ export default function OrdersPage({ statusKey = "all" }) {
   }, [statusKey])
 
   useEffect(() => {
-    if (statusKey !== "all") return undefined
-
-    const backendUrl = API_BASE_URL.replace(/\/api\/?$/, "")
-    // Backend disconnected - do not open Socket.IO (new backend in progress)
-    if (!API_BASE_URL || !backendUrl || !backendUrl.startsWith("http")) {
+    // Socket.IO lives on the origin, not under /api/v1: a path here is read as
+    // a namespace the server does not have, and the socket never connects.
+    let backendUrl = ""
+    try {
+      backendUrl = new URL(API_BASE_URL, window.location.origin).origin
+    } catch {
       return undefined
     }
 
     const socket = io(backendUrl, {
       transports: ["websocket", "polling"],
+      // The server rejects a socket without a token (AUTH_MISSING). A function,
+      // so every reconnect sends the current, possibly refreshed, token.
+      auth: (cb) => cb({ token: localStorage.getItem("admin_accessToken") || "" }),
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,

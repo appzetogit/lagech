@@ -88,7 +88,7 @@ function emitOrderUpdate(order, deliveryPartnerId) {
       };
       io.to(rooms.delivery(deliveryPartnerId)).emit('order_status_update', payload);
       io.to(rooms.restaurant(order.restaurantId?.id ?? order.restaurantId)).emit('order_status_update', payload);
-      io.to(rooms.user(order.userId?.id ?? order.userId)).emit('order_status_update', payload);
+      io.to([rooms.user(order.userId?.id ?? order.userId), rooms.admin()]).emit('order_status_update', payload);
     }
 
     // Push only for the key delivery milestones.
@@ -596,7 +596,7 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
         };
         io.to(rooms.delivery(partnerId)).emit('order_status_update', payload);
         io.to(rooms.restaurant(row.restaurantId)).emit('order_status_update', payload);
-        io.to(rooms.user(row.userId)).emit('order_status_update', payload);
+        io.to([rooms.user(row.userId), rooms.admin()]).emit('order_status_update', payload);
 
         const claimedPayload = { orderId: id, orderMongoId: id, claimedBy: partnerId };
         for (const pid of losingPartnerIds) {
