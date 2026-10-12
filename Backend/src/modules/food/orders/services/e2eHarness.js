@@ -133,7 +133,8 @@ export async function createWorld({ patch, prefix = 'E2E' }) {
     const tag = uniqueTag(prefix);
     const created = { zones: [], restaurants: [], users: [], foods: [], categories: [], fees: [], partners: [], admins: [], offers: [] };
     const emitted = [];
-    const fakeIO = { to: (room) => ({ emit: (event, payload) => emitted.push({ room, event, payload, at: Date.now() }) }) };
+    // io.to() takes one room or an array of them, like Socket.IO's; one record per room.
+    const fakeIO = { to: (room) => ({ emit: (event, payload) => [].concat(room).forEach((r) => emitted.push({ room: r, event, payload, at: Date.now() })) }) };
     setIOForTests(fakeIO);
 
     const fake = makeFakeRazorpay(process.env.RAZORPAY_KEY_SECRET);

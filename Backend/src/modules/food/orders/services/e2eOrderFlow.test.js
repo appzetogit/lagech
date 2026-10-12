@@ -65,7 +65,9 @@ test('COD: browse, quote, place, restaurant accepts, rider delivers with OTP, mo
 
     // The restaurant: new_order socket once, the order in its list with its own earning.
     assert.equal(W.events({ room: W.rooms.restaurant(W.restaurant.id), event: 'new_order', orderId: id }).length, 1, 'new_order once');
-    const listed = (await W.restaurantList()).find((o) => (o._id || o.id) === id);
+    // The admin panel rings on its own event, to the admin room.
+    assert.equal(W.events({ room: W.rooms.admin(), event: 'admin_new_order', orderId: id }).length, 1, 'admin_new_order once');
+    const listed =(await W.restaurantList()).find((o) => (o._id || o.id) === id);
     assert.ok(listed, 'in the restaurant list');
     assert.equal(listed.finance.netPayout, 391, 'restaurant earns 460 - 15% commission');
     assert.equal(listed.finance.commission, 69);
@@ -107,6 +109,9 @@ test('COD: browse, quote, place, restaurant accepts, rider delivers with OTP, mo
     const toUser = statusesTo(W.rooms.user(user.id), id);
     for (const s of ['confirmed', 'preparing', 'picked_up', 'delivered']) assert.ok(toUser.includes(s), `user told ${s}: ${toUser}`);
     assert.equal(toUser.filter((s) => s === 'delivered').length, 1, 'delivered is announced once');
+    // The admin Orders page refreshes on the same stages.
+    const toAdmin = statusesTo(W.rooms.admin(), id);
+    for (const s of ['confirmed', 'preparing', 'picked_up', 'delivered']) assert.ok(toAdmin.includes(s), `admin told ${s}: ${toAdmin}`);
 
     // Notifications: the customer's "placed" once; the restaurant's new-order alert once.
     assert.equal((await W.inboxFor('USER', user.id, id)).filter((n) => n.category === 'order_created').length, 1);
@@ -171,6 +176,8 @@ test('online Razorpay + tip: hidden until paid, verified, delivered, tip all the
         const again = await W.http.post('/api/v1/food/orders/verify-payment', { token: user.token, body: { orderId: id, ...paid, order: undefined } });
         assert.equal(again.status, 200);
         assert.equal(W.events({ room: W.rooms.restaurant(W.restaurant.id), event: 'new_order', orderId: id }).length, 1, 'new_order once');
+        assert.equal(W.events({ room: W.rooms.admin(), event: 'admin_new_order', orderId: id }).length, 1,
+            'admin rings once, and only after payment');
         assert.equal((await prisma.foodTransaction.count({ where: { orderId: id } })), 1, 'one ledger row');
 
         await W.acceptAndAssign(id, rider);
