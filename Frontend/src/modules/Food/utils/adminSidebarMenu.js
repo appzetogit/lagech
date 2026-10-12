@@ -84,8 +84,11 @@ export const adminSidebarMenu = [
           { label: "Food Campaign", path: "/admin/food/campaigns/food" },
         ],
       },
-      { type: "link", label: "Banners", path: "/admin/food/hero-banner-management", icon: "Image" },
-      { type: "link", label: "Other Banners", path: "/admin/food/promotional-banner", icon: "Megaphone" },
+      // "Banners" is the home carousel the customer app shows. It used to point
+      // at the Explore More page, which left this one reachable only by URL.
+      { type: "link", label: "Banners", path: "/admin/food/banners", icon: "Image" },
+      { type: "link", label: "Home Promotion Banners", path: "/admin/food/promotional-banner", icon: "Megaphone" },
+      { type: "link", label: "Explore More", path: "/admin/food/hero-banner-management", icon: "Layers" },
       {
         type: "expandable",
         label: "Advertisement",

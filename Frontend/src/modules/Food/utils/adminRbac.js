@@ -131,6 +131,7 @@ const PATH_PREFIX_TO_SECTION = [
   // Firebase notification, offline payment, analytics script.
   { prefix: "/admin/food/3rd-party-configurations", section: "system_settings" },
   { prefix: "/admin/food/hero-banner-management", section: "banner_management" },
+  { prefix: "/admin/food/banners", section: "banner_management" },
   { prefix: "/admin/food/promotional-banner", section: "banner_management" },
   { prefix: "/admin/food/feature-settings", section: "system_settings" },
   { prefix: "/admin/food/power-scanning", section: "system_settings" },
@@ -237,7 +238,7 @@ export function findFirstAllowedAdminPath(adminUser) {
     support_management: "/admin/food/contact-messages",
     report_management: "/admin/food/transaction-report",
     transaction_management: "/admin/food/restaurant-withdraws",
-    banner_management: "/admin/food/hero-banner-management",
+    banner_management: "/admin/food/banners",
     pages_social_media: "/admin/food/pages-social-media/about",
     system_settings: "/admin/food/business-setup",
     sub_admin_management: "/admin/food/employees",
