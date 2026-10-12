@@ -709,9 +709,13 @@ export default function OrdersPage({ statusKey = "all" }) {
       let displayStatus = order.orderStatus
       if (backendStatus === "pending_payment") {
         displayStatus = "Pending Payment"
-      } else if (!backendStatus || backendStatus === "created" || backendStatus === "confirmed") {
+      } else if (!backendStatus || backendStatus === "created") {
         displayStatus = "Pending"
       } else if (
+        // Confirmed = the restaurant accepted it. Shown as Pending it kept Accept
+        // and Reject enabled, and Accept failed ("from 'confirmed' to
+        // 'confirmed'"). The server lists it under Processing too.
+        backendStatus === "confirmed" ||
         backendStatus === "preparing" ||
         backendStatus === "ready_for_pickup" ||
         backendStatus === "reached_pickup"
