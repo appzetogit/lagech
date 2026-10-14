@@ -295,8 +295,18 @@ const buildMessagePayload = (payload = {}, token) => {
         notification: {
             title: notification.title,
             body: notification.body,
-            icon: image || payload.icon || '/favicon.ico'
-        }
+            icon: image || payload.icon || '/favicon.ico',
+            // A browser admin's new-order alert behaves like the old panel's: it
+            // stays on a locked phone until tapped, vibrates hard, and re-alerts.
+            ...(data.type === 'admin_new_order'
+                ? {
+                    requireInteraction: true,
+                    renotify: true,
+                    tag: sanitizeString(payload.androidTag) || 'admin_new_order',
+                    vibrate: [500, 250, 500, 250, 500, 250, 800],
+                }
+                : {})
+        },
     };
 
     return message;
