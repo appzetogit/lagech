@@ -112,6 +112,9 @@ export const RESTAURANT_ROUTE_RULES = {
     'PATCH /availability': ['orders', 'store_setup'],
     'PATCH /takeaway-settings': ['store_setup'],
     'PATCH /packaging-settings': ['store_setup'],
+    // Notification Setup (the old panel's notification_setup module).
+    'GET /notification-settings': ['store_setup'],
+    'PATCH /notification-settings': ['store_setup'],
     'PATCH /dining-settings': ['store_setup'],
     'GET /outlet-timings': ANY,
     'PUT /outlet-timings': ['store_setup'],
