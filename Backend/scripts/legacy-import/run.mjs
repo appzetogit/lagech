@@ -51,7 +51,7 @@ const STEPS = [
     ['social-media', importSocialMedia],
     ['settings', importSettings],
 ];
-const FLAGS = new Set(['--sync', '--dry-run']);
+const FLAGS = new Set(['--sync', '--dry-run', '--old-prices-win']);
 
 /**
  * Outcomes per entity:
@@ -130,6 +130,9 @@ if (!requested.size || unknown.length || unknownFlags.length) {
 }
 const sync = flags.has('--sync');
 const dryRun = flags.has('--dry-run');
+// Sync only: a dish whose price the old system changed takes the old price,
+// even if it was edited here (owner's call for the catch-up before cutover).
+const oldPricesWin = flags.has('--old-prices-win');
 if (!process.env.LEGACY_MYSQL_URL) {
     console.error('LEGACY_MYSQL_URL is required (the MySQL database restored from the backup).');
     process.exit(1);
@@ -161,6 +164,7 @@ const affected = { restaurant: new Set(), rider: new Set() };
 const ctx = {
     sync,
     dryRun,
+    oldPricesWin,
     baseline,
     baselineRows: async (sql, params = []) => byId((await baseline.query(sql, params))[0]),
     /** A row of a kind this system owns now: report whether the old system changed it; never write. */

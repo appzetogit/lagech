@@ -26,6 +26,7 @@ import { prisma } from '../../../src/config/prisma.js';
 import { config } from '../../../src/config/env.js';
 import { buildPublicUrl } from '../../../src/services/storage.service.js';
 import { loadIdMap, recordId } from '../idMap.mjs';
+import { changedColumns } from '../sync.mjs';
 import { normalizeTags } from '../../../src/modules/food/shared/tags.util.js';
 
 const ENTITY = 'food';
@@ -112,6 +113,9 @@ const imageUrl = (file) => {
  * The old columns a dish is built from; a change in any is an old-side edit.
  * Running counters (avg_rating, rating_count, order_count) are not edits.
  */
+/** The old columns a dish's prices come from. */
+const PRICE_COLUMNS = ['price', 'discount', 'discount_type', 'food_variations'];
+
 const ITEM_COLUMNS = [
     'name', 'description', 'price', 'discount', 'discount_type', 'image', 'images', 'veg', 'status',
     'recommended', 'is_approved', 'category_id', 'category_ids', 'food_variations', 'store_id',
@@ -129,12 +133,20 @@ export async function importFoods(mysql, report, ctx = {}) {
     const ITEMS_SQL = 'SELECT * FROM items WHERE module_id = ? ORDER BY id';
     const [allItems] = await mysql.query(ITEMS_SQL, [foodModule.id]);
     let items = allItems;
+    // Dishes imported before whose price the old system changed, with
+    // --old-prices-win: only their prices (base, variants, option add-ons) move.
+    const repriceOnly = new Set();
     if (ctx.sync) {
         // Sync: dishes are the restaurants' and the new admin's now; only new
         // ones come across, and an old-side change is only reported.
         const baseline = await ctx.baselineRows(ITEMS_SQL, [foodModule.id]);
         items = allItems.filter((item) => {
             if (!idMap.has(String(item.id))) return true;
+            const before = baseline.get(String(item.id));
+            if (ctx.oldPricesWin && before && changedColumns(before, item, PRICE_COLUMNS).length) {
+                repriceOnly.add(String(item.id));
+                return true;
+            }
             ctx.leaveAlone(report, ENTITY, item, baseline, ITEM_COLUMNS);
             return false;
         });
@@ -219,11 +231,22 @@ export async function importFoods(mysql, report, ctx = {}) {
 
         const existingId = idMap.get(String(item.id));
         const exists = existingId && (await prisma.foodItem.count({ where: { id: existingId } })) > 0;
+        const reprice = repriceOnly.has(String(item.id));
+        if (reprice && !exists) {
+            report.skip(ENTITY, item.id, item.name, 'price changed in the old system, but the dish was deleted here');
+            continue;
+        }
 
         const foodId = await prisma.$transaction(async (tx) => {
-            const food = exists
-                ? await tx.foodItem.update({ where: { id: existingId }, data })
-                : await tx.foodItem.create({ data });
+            const food = reprice
+                ? await tx.foodItem.update({
+                    where: { id: existingId },
+                    data: { price: data.price, otherPrice: data.otherPrice },
+                    select: { id: true, name: true, foodType: true },
+                })
+                : exists
+                    ? await tx.foodItem.update({ where: { id: existingId }, data })
+                    : await tx.foodItem.create({ data });
 
             // Variants and imported add-ons are replaced wholesale on a re-run:
             // the old data is the source of truth until cut-over.
@@ -246,9 +269,9 @@ export async function importFoods(mysql, report, ctx = {}) {
                     // Named per item: the cart can resolve an add-on by name, and
                     // "Medium" on two pizzas at different prices must not collide.
                     const option = {
-                        name: `${value.label} · ${data.name}`,
+                        name: `${value.label} · ${food.name}`,
                         description: '',
-                        foodType: data.foodType,
+                        foodType: food.foodType,
                         price: applyDiscount(value.extra, item),
                         image: '',
                         images: [],
