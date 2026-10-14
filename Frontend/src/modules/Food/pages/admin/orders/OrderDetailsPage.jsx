@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
+import RiderLink from "@food/components/admin/customers/RiderLink"
 import { Loader } from "@googlemaps/js-api-loader"
 import { toast } from "sonner"
 import {
@@ -910,7 +911,7 @@ export default function OrderDetailsPage() {
                     <div className="flex items-center gap-3 rounded-lg bg-slate-50 p-3">
                       <Avatar src={rider.image} alt={rider.name} />
                       <div className="min-w-0 space-y-1">
-                        <p className="text-sm font-medium text-slate-800 break-words">{rider.name}</p>
+                        <RiderLink id={rider.id} className="block text-sm font-medium text-slate-800 break-words">{rider.name}</RiderLink>
                         <p className="flex items-center gap-2 text-xs text-slate-600">
                           <ShoppingBasket className="w-3.5 h-3.5" /> {rider.deliveredCount} Orders delivered
                         </p>

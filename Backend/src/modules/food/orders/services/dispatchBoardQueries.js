@@ -11,7 +11,7 @@ const ON_THE_WAY_STATUSES = ['confirmed', 'preparing', 'ready_for_pickup', 'reac
 const ORDER_SELECT = {
     id: true, orderId: true, orderStatus: true, dispatchStatus: true, paymentMethod: true, total: true,
     createdAt: true, dispatchAssignedAt: true, dispatchAcceptedAt: true, pickedUpAt: true,
-    customerName: true, customerPhone: true, addrStreet: true, addrCity: true, distanceKm: true,
+    userId: true, customerName: true, customerPhone: true, addrStreet: true, addrCity: true, distanceKm: true,
     restaurant: { select: { id: true, restaurantName: true, area: true, city: true } },
     deliveryPartner: { select: { id: true, name: true, phone: true } },
 };

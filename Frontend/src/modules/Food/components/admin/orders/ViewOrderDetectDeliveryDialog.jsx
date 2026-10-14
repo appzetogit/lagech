@@ -1,4 +1,7 @@
 import { X, Clock, CheckCircle, XCircle, User, Phone, Package, MapPin } from "@food/components/admin/theme/icons"
+import CustomerLink from "@food/components/admin/customers/CustomerLink"
+import RestaurantLink from "@food/components/admin/customers/RestaurantLink"
+import RiderLink from "@food/components/admin/customers/RiderLink"
 
 const getStatusColor = (status) => {
   const colors = {
@@ -64,7 +67,7 @@ export default function ViewOrderDetectDeliveryDialog({ isOpen, onOpenChange, or
               <div className="space-y-2">
                 <div>
                   <p className="text-xs text-slate-500">Name</p>
-                  <p className="text-sm font-medium text-slate-900">{order.userName}</p>
+                  <p className="text-sm font-medium text-slate-900"><CustomerLink id={order.customerId}>{order.userName}</CustomerLink></p>
                 </div>
                 <div>
                   <p className="text-xs text-slate-500">Phone Number</p>
@@ -84,7 +87,7 @@ export default function ViewOrderDetectDeliveryDialog({ isOpen, onOpenChange, or
               </h3>
               <div>
                 <p className="text-xs text-slate-500">Restaurant Name</p>
-                <p className="text-sm font-medium text-slate-900">{order.restaurantName}</p>
+                <p className="text-sm font-medium text-slate-900"><RestaurantLink id={order.restaurantId}>{order.restaurantName}</RestaurantLink></p>
               </div>
             </div>
 
@@ -100,7 +103,7 @@ export default function ViewOrderDetectDeliveryDialog({ isOpen, onOpenChange, or
                     <p className="text-xs text-slate-500">Name</p>
                     <p className="text-sm font-medium text-slate-900 flex items-center gap-1.5">
                       <User className="w-3.5 h-3.5" />
-                      {order.deliveryBoyName}
+                      <RiderLink id={order.deliveryBoyId}>{order.deliveryBoyName}</RiderLink>
                     </p>
                   </div>
                   <div>
