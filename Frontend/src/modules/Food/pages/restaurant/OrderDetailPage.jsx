@@ -26,6 +26,7 @@ import useRestaurantBackNavigation from "@food/hooks/useRestaurantBackNavigation
 import { getTimelineStatusLabel, getTimelineRoleLabel } from "@food/utils/orderStatus"
 import { getRestaurantCookingNote } from "@food/utils/orderCookingNote"
 import { printOrderInvoice } from "@food/utils/printInvoice"
+import { formatDate, formatDateTime, formatShortDateTime } from "@food/utils/dateTime"
 
 const formatMoney = (value) => `₹${Number(value || 0).toFixed(2)}`
 const toNumber = (value) => {
@@ -160,14 +161,7 @@ export default function OrderDetailPage({
 
   const items = order.items || []
   const status = order.orderStatus || order.status || "Created"
-  const createdAt = order.createdAt ? new Date(order.createdAt).toLocaleString('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true
-  }) : "Date not available"
+  const createdAt = formatDateTime(order.createdAt, "Date not available")
 
   const customerName = order.customerName || order.userId?.name || order.userId?.fullName || order.deliveryAddress?.fullName || order.deliveryAddress?.name || "Customer"
   const customerPhone = order.customerPhone || order.userId?.phone || order.deliveryAddress?.phone || "No phone provided"
@@ -357,7 +351,7 @@ export default function OrderDetailPage({
                 <div className={`w-2 h-2 rounded-full ${order.finance.isSettled ? 'bg-emerald-500' : 'bg-amber-500'}`} />
                 <span className="text-[10px] font-black uppercase tracking-[0.05em] text-gray-500">
                   {order.finance.isSettled
-                    ? `Settled${order.finance.settledAt ? ` on ${new Date(order.finance.settledAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''}`
+                    ? `Settled${order.finance.settledAt ? ` on ${formatDate(order.finance.settledAt)}` : ''}`
                     : 'Settlement Pending'}
                 </span>
               </div>
@@ -393,9 +387,7 @@ export default function OrderDetailPage({
                             {getTimelineStatusLabel(entry.to)}
                           </p>
                           <p className="text-[10px] font-bold text-gray-400 whitespace-nowrap">
-                            {entry.at
-                              ? new Date(entry.at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true })
-                              : ''}
+                            {formatShortDateTime(entry.at, '')}
                           </p>
                         </div>
                         {getTimelineRoleLabel(entry.byRole) && (

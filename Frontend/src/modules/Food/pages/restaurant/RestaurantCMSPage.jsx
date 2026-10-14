@@ -4,6 +4,7 @@ import { ArrowLeft, Lock, Loader2, Mail, Phone, MessageSquare, Clock, ShieldChec
 import { motion } from "framer-motion"
 import { Button } from "@food/components/ui/button"
 import api from "@food/api"
+import { formatDate } from "@food/utils/dateTime"
 
 export default function RestaurantCMSPage({ endpoint, title: defaultTitle, module = "RESTAURANT" }) {
   const navigate = useNavigate()
@@ -177,7 +178,7 @@ export default function RestaurantCMSPage({ endpoint, title: defaultTitle, modul
         </motion.div>
 
         <p className="text-center mt-10 text-[10px] text-gray-400 font-black uppercase tracking-[0.2em] leading-relaxed">
-          Last updated: {new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })} <br />
+          Last updated: {formatDate(new Date())} <br />
           © {new Date().getFullYear()} Lagech. All Rights Reserved.
         </p>
       </div>

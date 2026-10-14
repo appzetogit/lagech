@@ -5,6 +5,7 @@ import { ArrowLeft, AlertCircle, Upload, Loader2 } from "lucide-react"
 import { restaurantAPI, uploadAPI } from "@food/api"
 import { ImageSourcePicker } from "@food/components/ImageSourcePicker"
 import { isFlutterBridgeAvailable } from "@food/utils/imageUploadUtils"
+import { formatDateTime } from "@food/utils/dateTime"
 import { toast } from "sonner"
 
 const IFSC_REGEX = /^[A-Z]{4}0[A-Z0-9]{6}$/
@@ -34,19 +35,7 @@ export default function UpdateBankDetails() {
   const [isQrPickerOpen, setIsQrPickerOpen] = useState(false)
   const qrInputRef = useRef(null)
 
-  const formattedUpdatedAt = useMemo(() => {
-    if (!lastUpdated) return ""
-    const date = new Date(lastUpdated)
-    if (Number.isNaN(date.getTime())) return ""
-    return date.toLocaleString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: true,
-    })
-  }, [lastUpdated])
+  const formattedUpdatedAt = useMemo(() => formatDateTime(lastUpdated, ""), [lastUpdated])
 
   const validate = () => {
     const nextErrors = {}

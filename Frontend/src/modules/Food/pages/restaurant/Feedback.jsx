@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import { HelpCircle, Search, SlidersHorizontal, X, Loader2, Star } from "lucide-react"
 import BottomNavOrders from "@food/components/restaurant/BottomNavOrders"
 import { restaurantAPI } from "@food/api"
+import { formatDate as formatPanelDate } from "@food/utils/dateTime"
 
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
@@ -270,10 +271,7 @@ export default function Feedback() {
           .filter(order => normalizeOrderStatus(order) === 'delivered')
           .map((order, index) => {
             const orderDate = new Date(order.createdAt || order.deliveredAt || Date.now())
-            const day = orderDate.getDate()
-            const month = orderDate.toLocaleDateString('en-GB', { month: 'short' })
-            const year = orderDate.getFullYear()
-            const formattedDate = `${day} ${month}, ${year}`
+            const formattedDate = formatPanelDate(orderDate)
 
             const userName = order.userId?.name || order.customerName || 'Customer'
             const userImage = order.userId?.profileImage || `https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}&background=random`
@@ -552,7 +550,7 @@ export default function Feedback() {
                           {complaint.status || "open"}
                         </span>
                         <span className="text-[10px] text-gray-400 font-bold">
-                          {new Date(complaint.createdAt).toLocaleDateString()}
+                          {formatPanelDate(complaint.createdAt)}
                         </span>
                       </div>
 

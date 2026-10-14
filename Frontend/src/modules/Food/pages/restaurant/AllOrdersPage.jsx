@@ -18,6 +18,7 @@ import { useRestaurantNotifications } from "@food/hooks/useRestaurantNotificatio
 import { getRestaurantCookingNote } from "@food/utils/orderCookingNote"
 import OrderDetailPage from "@food/pages/restaurant/OrderDetailPage"
 import { restaurantLabel } from "@food/utils/entityLabels"
+import { formatDate, formatTime } from "@food/utils/dateTime"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -195,8 +196,8 @@ export default function AllOrdersPage() {
   // Transform API order to component format
   const transformOrder = useCallback((order) => {
     const createdAt = new Date(order.createdAt)
-    const date = createdAt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
-    const time = createdAt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
+    const date = formatDate(createdAt)
+    const time = formatTime(createdAt)
     
     // Format address (backend: deliveryAddress)
     const addr = order.deliveryAddress || order.address || null
