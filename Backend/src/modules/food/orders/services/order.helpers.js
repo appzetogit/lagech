@@ -4,6 +4,7 @@ import { logger } from '../../../../utils/logger.js';
 import { getBusinessSettings } from '../../shared/businessSettings.js';
 import { haversineKm as geoHaversineKm, parseGeoPoint } from '../../shared/geo.utils.js';
 import {
+  notifyAdminsSafely,
   notifyOwnersActionableAlert,
   sendNotificationToOwner,
   sendNotificationToOwners,
@@ -584,6 +585,28 @@ export async function notifyRestaurantNewOrder(orderDoc) {
       data: { restaurantNotifiedAt: new Date() },
     });
     if (claimed === 0) return;
+
+    // Admins get a browser push for every new order, as in the old panel, so a
+    // phone with the panel in the background or locked still alerts. Inside the
+    // claim above, so each order notifies them once.
+    {
+      const displayId = String(orderDoc.order_id || orderDoc._id || "");
+      const restaurantName = orderDoc.restaurantName || orderDoc.restaurant?.restaurantName || "";
+      const adminBody = [restaurantName, `Order #${displayId}`].filter(Boolean).join(" • ");
+      void notifyAdminsSafely({
+        title: "New order received",
+        body: adminBody,
+        androidTag: `admin_order_${displayId}`,
+        data: {
+          type: "admin_new_order",
+          title: "New order received",
+          body: adminBody,
+          orderId: displayId,
+          orderMongoId: String(orderDoc._id || orderDoc.id || ""),
+          link: "/admin/food/orders/all",
+        },
+      });
+    }
 
     const str = (v) => (v === undefined || v === null ? "" : String(v));
     const itemCount = Array.isArray(orderDoc.items)

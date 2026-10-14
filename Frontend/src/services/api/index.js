@@ -260,6 +260,15 @@ export const notificationAPI = {
 export const adminAPI = {
   getSidebarBadges: () =>
     apiClient.get("/food/admin/sidebar-badges", { contextModule: "admin" }),
+  /** Browser push for new-order alerts, like the old panel's web push. */
+  saveFcmToken: (token, platform = "web") => {
+    if (!token) return Promise.reject(new Error("FCM token is required"));
+    return apiClient.post(
+      "/fcm-tokens/save",
+      { token: String(token), platform },
+      { contextModule: "admin" },
+    );
+  },
   login: (email, password) => authService.adminLogin(email, password),
   /** POST /auth/admin/forgot-password/request-otp – only accepts registered admin email */
   requestForgotPasswordOtp: (email) =>

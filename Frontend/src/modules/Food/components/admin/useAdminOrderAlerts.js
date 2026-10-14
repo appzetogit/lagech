@@ -51,13 +51,9 @@ export function useAdminOrderAlerts(onOrdersPage) {
       } catch {
         // Autoplay blocked until the admin interacts with the page.
       }
-      try {
-        if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-          new Notification("New order received", { body, tag: `admin-order-${orderId || now}` })
-        }
-      } catch {
-        // Some browsers only allow notifications from a service worker.
-      }
+      // The system notification comes from the server's FCM push (service
+      // worker), which also reaches a phone with the panel in the background.
+      // `new Notification()` threw on Android Chrome anyway.
     }
 
     socket.on("admin_new_order", onNewOrder)

@@ -1,0 +1,12 @@
+{
+  "name": "Lagech Admin",
+  "short_name": "Lagech Admin",
+  "start_url": "/admin/food",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0f766e",
+  "icons": [
+    { "src": "/lagech-logo.png", "sizes": "any", "type": "image/png", "purpose": "any" }
+  ]
+}

@@ -47,6 +47,8 @@ function shouldIgnoreFcmRegistrationError(error) {
 }
 
 function normalizeModuleFromPath(pathname = window.location.pathname) {
+  // Admin first: admin pages such as /admin/food/restaurant/... contain "/restaurant".
+  if (pathname.startsWith("/admin")) return "admin";
   if (pathname.includes("/restaurant") && !pathname.includes("/restaurants")) return "restaurant";
   if (pathname.includes("/delivery")) return "delivery";
   if (pathname.includes("/admin")) return "admin";
@@ -55,7 +57,7 @@ function normalizeModuleFromPath(pathname = window.location.pathname) {
 
 function hasModuleSession(moduleName = normalizeModuleFromPath()) {
   if (typeof window === "undefined") return false;
-  if (!moduleName || moduleName === "admin") return false;
+  if (!moduleName) return false;
   return Boolean(localStorage.getItem(`${moduleName}_accessToken`));
 }
 
@@ -638,6 +640,10 @@ async function saveTokenByModule(moduleName, token, platform = "web") {
     await deliveryAPI.saveFcmToken(token, platform);
     return;
   }
+  if (moduleName === "admin") {
+    await adminAPI.saveFcmToken(token, platform);
+    return;
+  }
   if (moduleName === "user") {
     await userAPI.saveFcmToken(token, { platform });
   }
@@ -822,6 +828,9 @@ function showForegroundNotification(payload = {}) {
     pushDebugLog(PUSH_DEBUG_PREFIX, "Skipping foreground notification: module is not online", { moduleName });
     return;
   }
+  // An open admin panel already rings for new orders over the socket
+  // (useAdminOrderAlerts); the push is for when the panel is in the background.
+  if (moduleName === "admin" && payload?.data?.type === "admin_new_order") return;
   const notificationKey = getNotificationKey(payload);
   pushDebugLog(PUSH_DEBUG_PREFIX, "showForegroundNotification received", { notificationKey, payload });
   if (wasRecentlyHandled(notificationKey)) {
@@ -929,10 +938,6 @@ export function initPushNotificationClient() {
     soundEnabled: isPushSoundEnabled(),
   });
 
-  if (moduleName === "admin") {
-    return;
-  }
-
   if (!hasModuleSession(moduleName)) {
     pushDebugLog(PUSH_DEBUG_PREFIX, "Skipping push client init: module is logged out", { moduleName });
     void disablePushWhenLoggedOut();
@@ -968,7 +973,6 @@ async function attachForegroundListener(firebaseAppInstance) {
 
 export async function registerWebPushForCurrentModule(pathname = window.location.pathname, options = {}) {
   const moduleName = normalizeModuleFromPath(pathname);
-  if (moduleName === "admin") return;
 
   const accessToken = localStorage.getItem(`${moduleName}_accessToken`);
   if (!accessToken) {

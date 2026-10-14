@@ -5,6 +5,7 @@ import { useFitTablesToViewport } from "./useFitTablesToViewport"
 import { useAdminOrderAlerts } from "./useAdminOrderAlerts"
 import AdminSidebar from "./AdminSidebar"
 import AdminNavbar from "./AdminNavbar"
+import AdminPushPrompt from "./AdminPushPrompt"
 import { API_BASE_URL } from "@food/api/config"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
@@ -143,6 +144,7 @@ export default function AdminLayout() {
       `}>
         {/* Top Navbar */}
         <AdminNavbar onMenuClick={() => setSidebarOpen(!sidebarOpen)} />
+        <AdminPushPrompt />
 
         {/* Backend disconnected banner */}
         {!API_BASE_URL && (
