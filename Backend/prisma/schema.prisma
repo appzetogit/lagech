@@ -830,6 +830,7 @@ model FoodRestaurant {
   itemCommissions      FoodItemCommission[]
   supportTickets       FoodRestaurantSupportTicket[]
   withdrawals          FoodRestaurantWithdrawal[]
+  cashCollections      FoodRestaurantCashCollection[]
   advertisements       FoodAdvertisement[]
   reels                FoodReel[]
   subscriptionInvoices FoodSubscriptionInvoice[]
@@ -3092,6 +3093,35 @@ model FoodRestaurantWithdrawal {
   @@index([status])
   @@index([createdAt(sort: Desc)])
   @@map("food_restaurant_withdrawals")
+}
+
+/// Cash the admin collected from a restaurant: the old panel's "Collect Cash
+/// From Store". A restaurant whose withdrawals and subscription deductions
+/// outran its earnings (an order refunded after it was paid out, say) holds
+/// platform money; handing it back is recorded here and counts toward the
+/// restaurant's balance in restaurantFinance.getWalletSummaries, so the debt
+/// is cleared rather than swallowing the next earnings.
+model FoodRestaurantCashCollection {
+  id           String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  restaurantId String @db.VarChar(24)
+
+  amount        Decimal @db.Decimal(14, 2)
+  /// 'cash', 'bank_transfer', 'upi', 'cheque' or 'other'.
+  paymentMethod String  @default("cash") @db.VarChar(24)
+  reference     String?
+  note          String?
+  adminId       String? @db.VarChar(24)
+  /// Made once per form submit, so a double click records one collection.
+  requestKey    String? @db.VarChar(64)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant FoodRestaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@unique([restaurantId, requestKey])
+  @@index([restaurantId, createdAt(sort: Desc)])
+  @@map("food_restaurant_cash_collections")
 }
 
 model FoodDeliveryWithdrawal {

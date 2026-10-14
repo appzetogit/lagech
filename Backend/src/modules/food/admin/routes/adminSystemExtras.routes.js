@@ -25,6 +25,12 @@ router.get('/withdrawals/restaurant-payments', c.listRestaurantPayments);
 router.get('/withdrawals/restaurant-payments/payable/:restaurantId', c.getRestaurantPayable);
 router.post('/withdrawals/restaurant-payments', c.recordRestaurantPayment);
 
+// Restaurant details page: money cards and "Collect Cash From Store".
+router.get('/withdrawals/restaurant-cash/:restaurantId', c.getRestaurantWalletOverview);
+router.get('/withdrawals/restaurant-cash/:restaurantId/collections', c.listRestaurantCashCollections);
+router.get('/withdrawals/restaurant-cash/:restaurantId/earnings', c.getRestaurantEarnings);
+router.post('/withdrawals/restaurant-cash/:restaurantId/collect', c.collectCashFromRestaurant);
+
 // Reports.
 router.get('/reports/disbursements', c.getDisbursementReport);
 router.get('/reports/restaurant-earnings', c.getRestaurantEarningReport);
