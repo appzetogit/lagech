@@ -251,11 +251,14 @@ export async function getContactMessages(query = {}) {
         : [[], [], []];
 
     const authors = new Map();
-    for (const u of users) authors.set(u.id, { name: u.name, email: u.email, phone: u.phone });
+    // role says which account the admin screen opens for the author's name.
+    for (const u of users) authors.set(u.id, { name: u.name, email: u.email, phone: u.phone, role: 'USER' });
     for (const r of restaurants) {
-        authors.set(r.id, { name: r.restaurantName, email: r.ownerEmail, phone: r.ownerPhone });
+        authors.set(r.id, { name: r.restaurantName, email: r.ownerEmail, phone: r.ownerPhone, role: 'RESTAURANT' });
     }
-    for (const p of partners) authors.set(p.id, { name: p.name, email: p.email, phone: p.phone });
+    for (const p of partners) {
+        authors.set(p.id, { name: p.name, email: p.email, phone: p.phone, role: 'DELIVERY_PARTNER' });
+    }
 
     const reviews = list.map((doc) => {
         const author = authors.get(doc.userId) || {};
@@ -263,6 +266,8 @@ export async function getContactMessages(query = {}) {
             _id: doc.id,
             id: doc.id,
             customer: {
+                id: author.role ? doc.userId : null,
+                role: author.role || null,
                 name: author.name || 'Unknown',
                 email: author.email || 'N/A',
                 phone: author.phone || 'N/A',

@@ -17,6 +17,8 @@ import OfflinePaymentPanel from "./OfflinePaymentPanel"
 import { toast } from "sonner"
 import { printOrderInvoice } from "@food/utils/printInvoice"
 import CustomerLink, { customerIdOf } from "@food/components/admin/customers/CustomerLink"
+import RestaurantLink, { restaurantIdOf } from "@food/components/admin/customers/RestaurantLink"
+import RiderLink, { riderIdOf } from "@food/components/admin/customers/RiderLink"
 import { formatDateTime, formatShortDateTime } from "@food/utils/dateTime"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
@@ -390,7 +392,7 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order, onOrderCh
               <h3 className="text-sm font-semibold text-slate-700 mb-4">Restaurant Information</h3>
               <div className="space-y-1">
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Restaurant Name</p>
-                <p className="text-sm font-medium text-slate-900">{restaurantLabel(order.restaurant)}</p>
+                <p className="text-sm font-medium text-slate-900"><RestaurantLink id={restaurantIdOf(order)}>{restaurantLabel(order.restaurant)}</RestaurantLink></p>
               </div>
             </div>
           )}
@@ -525,7 +527,7 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order, onOrderCh
                 {order.deliveryPartnerName && (
                   <div className="space-y-1">
                     <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Name</p>
-                    <p className="text-sm font-medium text-slate-900">{order.deliveryPartnerName}</p>
+                    <p className="text-sm font-medium text-slate-900"><RiderLink id={riderIdOf(order)}>{order.deliveryPartnerName}</RiderLink></p>
                   </div>
                 )}
                 {order.deliveryPartnerPhone && (

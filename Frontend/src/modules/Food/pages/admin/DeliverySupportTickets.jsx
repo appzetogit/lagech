@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
 import { Textarea } from "@food/components/ui/textarea"
 import { formatDate as fmtDate, formatDateTime as fmtDateTime } from "@food/utils/dateTime"
+import RiderLink from "@food/components/admin/customers/RiderLink"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -279,9 +280,9 @@ export default function DeliverySupportTickets() {
                             <span className="text-sm font-medium text-gray-900 truncate">
                               {ticket.subject}
                             </span>
-                            <span className="text-xs text-gray-600">
+                            <RiderLink id={ticket.deliveryPartner?.name ? ticket.deliveryPartner?._id : null} className="text-xs text-gray-600">
                               {ticket.deliveryPartner?.name || 'N/A'}
-                            </span>
+                            </RiderLink>
                             {ticket.deliveryPartner?._id && (
                               <span className="text-xs text-gray-500">
                                 ID: DP-{String(ticket.deliveryPartner._id).slice(-8).toUpperCase()}
@@ -411,7 +412,11 @@ export default function DeliverySupportTickets() {
                 <div className="pl-4 space-y-3">
                   <div>
                     <p className="text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">Name</p>
-                    <p className="text-sm text-gray-900 font-semibold">{selectedTicket.deliveryPartner?.name || 'N/A'}</p>
+                    <p className="text-sm text-gray-900 font-semibold">
+                      <RiderLink id={selectedTicket.deliveryPartner?.name ? selectedTicket.deliveryPartner?._id : null}>
+                        {selectedTicket.deliveryPartner?.name || 'N/A'}
+                      </RiderLink>
+                    </p>
                   </div>
                   <div>
                     <p className="text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">Phone Number</p>

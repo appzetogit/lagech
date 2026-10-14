@@ -8,6 +8,7 @@ import { formatDateTime } from "@food/utils/dateTime"
 import ExportMenu from "@food/components/admin/ExportMenu"
 import { exportDate, exportMoney, fetchAllPages } from "@food/utils/listExport"
 import { daysAgo, isoDay, DisbursementTabs } from "./disbursementShared"
+import RiderLink from "@food/components/admin/customers/RiderLink"
 
 const STATUS = [
   ["", "All"],
@@ -196,15 +197,20 @@ export default function RiderDisbursementReport() {
                         {row.batchTitle && <div className="text-slate-400">{row.batchTitle}</div>}
                       </td>
                       <td className="px-4 py-3 text-sm">
-                        <button
-                          type="button"
-                          className="font-medium text-slate-900 hover:text-blue-700 hover:underline text-left"
-                          title="Show only this delivery man"
-                          onClick={() => { setRider({ id: row.deliveryPartnerId, name: row.deliveryName }); setTyped(""); setSearch(""); setPage(1) }}
-                        >
+                        <RiderLink id={row.deliveryPartnerId} className="font-medium text-slate-900">
                           {row.deliveryName}
-                        </button>
+                        </RiderLink>
                         {row.deliveryPhone && <div className="text-xs text-slate-500">{row.deliveryPhone}</div>}
+                        {row.deliveryPartnerId && (
+                          <button
+                            type="button"
+                            className="block text-xs text-blue-700 hover:underline text-left"
+                            title="Show only this delivery man"
+                            onClick={() => { setRider({ id: row.deliveryPartnerId, name: row.deliveryName }); setTyped(""); setSearch(""); setPage(1) }}
+                          >
+                            Only this delivery man
+                          </button>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">{fmt(row.createdAt)}</td>
                       <td className="px-4 py-3 text-sm text-right font-semibold">{rupees(row.amount)}</td>

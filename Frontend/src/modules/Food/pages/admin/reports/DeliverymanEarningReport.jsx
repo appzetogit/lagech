@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { Bike } from "@food/components/admin/theme/icons"
 import { adminRiderExtrasAPI } from "@food/api/adminRiderExtras"
+import RiderLink from "@food/components/admin/customers/RiderLink"
 import ReportShell, { rupees } from "./ReportShell"
 
 /** What each delivery man earned in a period. */
@@ -41,7 +42,7 @@ export default function DeliverymanEarningReport() {
         ["Total earned", rupees(d.totals.total), true],
       ]}
       columns={[
-        { key: "name", label: "Delivery man" },
+        { key: "name", label: "Delivery man", render: (r) => <RiderLink id={r.deliveryPartnerId}>{r.name}</RiderLink> },
         { key: "phone", label: "Phone" },
         { key: "deliveries", label: "Deliveries", align: "right" },
         { key: "earning", label: "Delivery earnings", align: "right", render: (r) => rupees(r.earning) },

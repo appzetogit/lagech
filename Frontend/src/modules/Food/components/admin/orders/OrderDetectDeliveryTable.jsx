@@ -1,5 +1,8 @@
 import { useState, useEffect, useMemo } from "react"
 import { Eye, Printer, ArrowUpDown, Phone, User } from "@food/components/admin/theme/icons"
+import CustomerLink from "@food/components/admin/customers/CustomerLink"
+import RestaurantLink from "@food/components/admin/customers/RestaurantLink"
+import RiderLink from "@food/components/admin/customers/RiderLink"
 
 const getStatusColor = (status) => {
   const colors = {
@@ -127,7 +130,7 @@ export default function OrderDetectDeliveryTable({ orders, visibleColumns, onVie
                     <div className="flex flex-col">
                       <div className="flex items-center gap-1.5 mb-1">
                         <User className="w-3.5 h-3.5 text-slate-500" />
-                        <span className="text-sm font-medium text-slate-700">{order.userName}</span>
+                        <CustomerLink id={order.customerId} className="text-sm font-medium text-slate-700">{order.userName}</CustomerLink>
                       </div>
                       <div className="flex items-center gap-1.5">
                         <Phone className="w-3.5 h-3.5 text-slate-500" />
@@ -138,7 +141,7 @@ export default function OrderDetectDeliveryTable({ orders, visibleColumns, onVie
                 )}
                 {visibleColumns.restaurantName && (
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <span className="text-sm font-medium text-slate-700">{order.restaurantName}</span>
+                    <RestaurantLink id={order.restaurantId} className="text-sm font-medium text-slate-700">{order.restaurantName}</RestaurantLink>
                   </td>
                 )}
                 {visibleColumns.deliveryBoy && (
@@ -147,7 +150,7 @@ export default function OrderDetectDeliveryTable({ orders, visibleColumns, onVie
                       <div className="flex flex-col">
                         <div className="flex items-center gap-1.5 mb-1">
                           <User className="w-3.5 h-3.5 text-slate-500" />
-                          <span className="text-sm font-medium text-slate-700">{order.deliveryBoyName}</span>
+                          <RiderLink id={order.deliveryBoyId} className="text-sm font-medium text-slate-700">{order.deliveryBoyName}</RiderLink>
                         </div>
                         <div className="flex items-center gap-1.5">
                           <Phone className="w-3.5 h-3.5 text-slate-500" />

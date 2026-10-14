@@ -8,6 +8,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@food/components/ui/pop
 import { getFoodDisplayOtherPrice, getFoodDisplayPrice, getFoodVariants } from "@food/utils/foodVariants"
 import { canCurrentAdminAction } from "@food/utils/adminRbac"
 import ExportMenu from "@food/components/admin/ExportMenu"
+import RestaurantLink from "@food/components/admin/customers/RestaurantLink"
 import { exportMoney, fetchAllPages } from "@food/utils/listExport"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
@@ -1051,7 +1052,7 @@ export default function FoodsList({ openAdd = false } = {}) {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex flex-col">
-                        <span className="text-sm font-medium text-slate-800">{food.restaurantName || "-"}</span>
+                        <RestaurantLink id={food.restaurantId} className="text-sm font-medium text-slate-800">{food.restaurantName || "-"}</RestaurantLink>
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -1170,7 +1171,7 @@ export default function FoodsList({ openAdd = false } = {}) {
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4 text-sm bg-slate-50 border border-slate-200 rounded-lg p-4">
-                <p><span className="font-semibold text-slate-700">Restaurant:</span> <span className="text-slate-900">{selectedFood.restaurantName || "-"}</span></p>
+                <p><span className="font-semibold text-slate-700">Restaurant:</span> <RestaurantLink id={selectedFood.restaurantId} className="text-slate-900">{selectedFood.restaurantName || "-"}</RestaurantLink></p>
                 <p><span className="font-semibold text-slate-700">Price:</span> <span className="text-slate-900">{selectedFood.variants?.length ? `Starting from \u20B9${selectedFood.price}` : `\u20B9${selectedFood.price}`}</span></p>
                 <p><span className="font-semibold text-slate-700">Category:</span> <span className="text-slate-900">{selectedFood.categoryName || "-"}</span></p>
                 <p><span className="font-semibold text-slate-700">Food Type:</span> <span className="text-slate-900">{selectedFood.foodType || "-"}</span></p>

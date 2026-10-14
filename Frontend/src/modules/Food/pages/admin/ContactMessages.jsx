@@ -19,10 +19,22 @@ import {
 import ExportMenu from "@food/components/admin/ExportMenu"
 import { fetchAllPages, exportDate } from "@food/utils/listExport"
 import { formatDateTime } from "@food/utils/dateTime"
+import CustomerLink from "@food/components/admin/customers/CustomerLink"
+import RestaurantLink from "@food/components/admin/customers/RestaurantLink"
+import RiderLink from "@food/components/admin/customers/RiderLink"
 
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
+
+/** Feedback comes from a customer, a restaurant or a rider; the name opens that account. */
+function AuthorName({ author, className = "" }) {
+  const name = author?.name || "N/A"
+  if (author?.role === "RESTAURANT") return <RestaurantLink id={author.id} className={className}>{name}</RestaurantLink>
+  if (author?.role === "DELIVERY_PARTNER") return <RiderLink id={author.id} className={className}>{name}</RiderLink>
+  if (author?.role === "USER") return <CustomerLink id={author.id} className={className}>{name}</CustomerLink>
+  return <span className={className}>{name}</span>
+}
 
 export default function ContactMessages() {
   const [searchQuery, setSearchQuery] = useState("")
@@ -290,7 +302,7 @@ export default function ContactMessages() {
                       </span>
                     </td>
                     <td className="px-6 py-4">
-                      <span className="text-sm font-medium text-slate-900">{feedback.customer?.name || 'N/A'}</span>
+                      <AuthorName author={feedback.customer} className="text-sm font-medium text-slate-900" />
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className="text-sm text-slate-700">{feedback.customer?.email || 'N/A'}</span>
@@ -373,7 +385,7 @@ export default function ContactMessages() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   <div className="space-y-1">
                     <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Customer Name</label>
-                    <p className="text-base font-semibold text-slate-900 dark:text-white">{selectedFeedback.customer?.name || 'N/A'}</p>
+                    <p className="text-base font-semibold text-slate-900 dark:text-white"><AuthorName author={selectedFeedback.customer} /></p>
                   </div>
                   <div className="space-y-1">
                     <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Email Address</label>

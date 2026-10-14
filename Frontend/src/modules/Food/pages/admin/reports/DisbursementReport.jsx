@@ -9,6 +9,7 @@ import ExportMenu from "@food/components/admin/ExportMenu"
 import { exportMoney, fetchAllPages } from "@food/utils/listExport"
 import { daysAgo, isoDay, DisbursementTabs } from "./disbursementShared"
 import RiderDisbursementReport from "./RiderDisbursementReport"
+import RestaurantLink from "@food/components/admin/customers/RestaurantLink"
 
 const STATUS = [
   ["", "All"],
@@ -178,7 +179,7 @@ function RestaurantDisbursementReport() {
                     <tbody className="divide-y divide-slate-100">
                       {rows.map((row) => (
                         <tr key={row.restaurantId} className="hover:bg-slate-50">
-                          <td className="px-4 py-3 text-sm font-medium text-slate-900">{row.restaurantName}</td>
+                          <td className="px-4 py-3 text-sm font-medium text-slate-900"><RestaurantLink id={row.restaurantId}>{row.restaurantName}</RestaurantLink></td>
                           <td className="px-4 py-3 text-sm text-right">{row.payouts}</td>
                           <td className="px-4 py-3 text-sm text-right font-semibold">{rupees(row.total)}</td>
                           <td className="px-4 py-3 text-sm text-right text-emerald-700">{rupees(row.paid)}</td>

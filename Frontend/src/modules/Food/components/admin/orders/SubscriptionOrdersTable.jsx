@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react"
 import CustomerLink, { customerIdOf } from "@food/components/admin/customers/CustomerLink"
+import RestaurantLink, { restaurantIdOf } from "@food/components/admin/customers/RestaurantLink"
 import { Eye, Printer, ArrowUpDown } from "@food/components/admin/theme/icons"
 import { restaurantLabel } from "@food/utils/entityLabels"
 
@@ -138,7 +139,7 @@ export default function SubscriptionOrdersTable({ orders, visibleColumns, onView
                 )}
                 {visibleColumns.restaurant && (
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <span className="text-sm font-medium text-slate-700">{restaurantLabel(order.restaurant)}</span>
+                    <RestaurantLink id={restaurantIdOf(order)} className="text-sm font-medium text-slate-700">{restaurantLabel(order.restaurant)}</RestaurantLink>
                   </td>
                 )}
                 {visibleColumns.customer && (

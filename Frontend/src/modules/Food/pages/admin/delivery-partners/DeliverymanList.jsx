@@ -1,4 +1,5 @@
-import { useState, useMemo, useEffect } from "react"
+import { useState, useMemo, useEffect, useRef } from "react"
+import { useSearchParams } from "react-router-dom"
 import { Search, Download, ChevronDown, Eye, User, Star, ArrowUpDown, Settings, FileText, FileSpreadsheet, Loader2, Check, Columns, ExternalLink, Calendar, MapPin, CreditCard, Mail, Phone, Bike, FileCheck, Pencil, Save, Trash2, X, AlertTriangle } from "@food/components/admin/theme/icons"
 import { adminAPI } from "@food/api"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
@@ -217,6 +218,30 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
       alert(err.response?.data?.message || "Failed to load details")
     } finally {
       setLoading(false)
+    }
+  }
+
+  // A rider name elsewhere in the panel links here as ?riderId=<id> (see
+  // RiderLink): open that partner's details once the list has loaded, so the
+  // wallet figures come along when the row is in it.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const deepLinkedRiderId = searchParams.get("riderId")
+  const openedRiderIdRef = useRef(null)
+  useEffect(() => {
+    if (!deepLinkedRiderId || loading || openedRiderIdRef.current === deepLinkedRiderId) return
+    openedRiderIdRef.current = deepLinkedRiderId
+    const row = deliverymen.find((dm) => String(dm._id) === deepLinkedRiderId)
+    handleView(row || { _id: deepLinkedRiderId })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinkedRiderId, loading, deliverymen])
+
+  const handleViewOpenChange = (open) => {
+    setIsViewOpen(open)
+    if (!open && searchParams.get("riderId")) {
+      const next = new URLSearchParams(searchParams)
+      next.delete("riderId")
+      openedRiderIdRef.current = null
+      setSearchParams(next, { replace: true })
     }
   }
 
@@ -872,7 +897,7 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
       </div>
 
       {/* View Details Dialog */}
-      <Dialog open={isViewOpen} onOpenChange={setIsViewOpen}>
+      <Dialog open={isViewOpen} onOpenChange={handleViewOpenChange}>
         <DialogContent className="max-w-3xl bg-white p-0 opacity-0 data-[state=open]:opacity-100 data-[state=closed]:opacity-0 transition-opacity duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 data-[state=open]:scale-100 data-[state=closed]:scale-100 max-h-[85vh] overflow-y-auto">
           <DialogHeader className="px-6 pt-6 pb-4 border-b border-slate-200">
             <DialogTitle className="text-xl font-bold text-slate-900">Delivery Partner Details</DialogTitle>
@@ -1259,7 +1284,7 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
           </div>
           <DialogFooter className="px-6 pb-6 border-t border-slate-200">
             <button
-              onClick={() => setIsViewOpen(false)}
+              onClick={() => handleViewOpenChange(false)}
               className="px-4 py-2 text-sm font-medium rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition-all"
             >
               Close

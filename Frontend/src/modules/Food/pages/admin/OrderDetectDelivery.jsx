@@ -8,6 +8,9 @@ import ViewOrderDetectDeliveryDialog from "@food/components/admin/orders/ViewOrd
 import SettingsDialog from "@food/components/admin/orders/SettingsDialog"
 import { useGenericTableManagement } from "@food/components/admin/orders/useGenericTableManagement"
 import { restaurantLabel } from "@food/utils/entityLabels"
+import { customerIdOf } from "@food/components/admin/customers/CustomerLink"
+import { restaurantIdOf } from "@food/components/admin/customers/RestaurantLink"
+import { riderIdOf } from "@food/components/admin/customers/RiderLink"
 import OrderDetectFilterPanel from "@food/components/admin/orders/OrderDetectFilterPanel"
 import { formatDate, formatDateTime, formatTime } from "@food/utils/dateTime"
 const debugLog = (...args) => {}
@@ -230,6 +233,9 @@ const transformOrder = (order, index) => {
   return {
     sl: index + 1,
     orderId: order.orderId,
+    customerId: customerIdOf(order),
+    restaurantId: restaurantIdOf(order),
+    deliveryBoyId: riderIdOf(order),
     userName: order.customerName || order.userName || user?.name || 'Unknown',
     userNumber: order.customerPhone || order.userNumber || user?.phone || order.deliveryAddress?.phone || 'N/A',
     restaurantName: order.restaurantName || restaurantLabel(order.restaurant) || restaurant?.restaurantName || 'Unknown Restaurant',

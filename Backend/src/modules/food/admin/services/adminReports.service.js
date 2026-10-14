@@ -46,7 +46,7 @@ export async function getExpenseReport(query = {}) {
 
     const rows = await prisma.$queryRaw`
         WITH per_order AS (
-            SELECT o.id, o."orderId", o."createdAt", r."restaurantName" AS restaurant,
+            SELECT o.id, o."orderId", o."createdAt", r."restaurantName" AS restaurant, r.id AS "restaurantId",
                    COALESCE(t."adminDiscountShare", 0) AS discount,
                    GREATEST(0, COALESCE(t."riderShare", o."riderEarning") - o."riderTip" - o."deliveryFee") AS "freeDelivery",
                    COALESCE((SELECT SUM(x.amount) FROM transactions x
@@ -90,6 +90,7 @@ export async function getExpenseReport(query = {}) {
         expenses: rows.map((row) => ({
             orderId: row.orderId,
             restaurant: row.restaurant,
+            restaurantId: row.restaurantId,
             createdAt: row.createdAt,
             discount: num(row.discount),
             freeDelivery: num(row.freeDelivery),
@@ -166,7 +167,7 @@ export async function getItemReport(query = {}) {
     const sort = query.sort === 'quantity' ? Prisma.sql`quantity DESC` : Prisma.sql`sales DESC`;
 
     const rows = await prisma.$queryRaw`
-        SELECT i.name, r."restaurantName" AS restaurant,
+        SELECT i.name, r."restaurantName" AS restaurant, MIN(r.id) AS "restaurantId",
                SUM(i.quantity)::int AS quantity,
                COUNT(DISTINCT o.id)::int AS orders,
                SUM(i.price * i.quantity) AS sales,
@@ -192,6 +193,7 @@ export async function getItemReport(query = {}) {
         items: rows.map((row) => ({
             name: row.name,
             restaurant: row.restaurant,
+            restaurantId: row.restaurantId,
             quantity: row.quantity,
             orders: row.orders,
             sales: num(row.sales),

@@ -27,6 +27,24 @@ import { Activity, ArrowUpRight, ShoppingBag, CreditCard, Truck, Receipt, Dollar
 import { adminAPI } from "@food/api"
 import DashboardInsights from "./dashboard/DashboardInsights"
 import DashboardSummary from "./dashboard/DashboardSummary"
+import CustomerLink from "@food/components/admin/customers/CustomerLink"
+import RestaurantLink from "@food/components/admin/customers/RestaurantLink"
+import RiderLink from "@food/components/admin/customers/RiderLink"
+
+const SIGNAL_LINKS = { restaurant: RestaurantLink, delivery: RiderLink, customer: CustomerLink }
+
+/** A live signal's detail line, with the account's name linked to that account. */
+function SignalDetail({ item }) {
+  const AccountLink = SIGNAL_LINKS[item.type]
+  const name = item.accountName
+  if (!AccountLink || !item.accountId || !name || !String(item.detail || "").startsWith(name)) return item.detail
+  return (
+    <>
+      <AccountLink id={item.accountId}>{name}</AccountLink>
+      {item.detail.slice(name.length)}
+    </>
+  )
+}
 const debugLog = () => {}
 const debugError = () => {}
 
@@ -515,7 +533,7 @@ export default function AdminHome() {
                             <p className="text-sm font-semibold text-neutral-900 truncate">{item.title}</p>
                             <span className="text-[10px] text-neutral-400 whitespace-nowrap">{item.time}</span>
                           </div>
-                          <p className="text-xs text-neutral-600 line-clamp-1">{item.detail}</p>
+                          <p className="text-xs text-neutral-600 line-clamp-1"><SignalDetail item={item} /></p>
                         </div>
                       </div>
                     )

@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { UtensilsCrossed } from "@food/components/admin/theme/icons"
 import { adminAPI } from "@food/api"
+import RestaurantLink from "@food/components/admin/customers/RestaurantLink"
 import ReportShell, { rupees } from "./ReportShell"
 
 /** What sold: each dish, how many and for how much. */
@@ -51,7 +52,7 @@ export default function ItemReport() {
       ]}
       columns={[
         { key: "name", label: "Dish" },
-        { key: "restaurant", label: "Restaurant" },
+        { key: "restaurant", label: "Restaurant", render: (r) => <RestaurantLink id={r.restaurantId}>{r.restaurant}</RestaurantLink> },
         { key: "quantity", label: "Quantity", align: "right" },
         { key: "orders", label: "Orders", align: "right" },
         { key: "averagePrice", label: "Avg price", align: "right", render: (r) => rupees(r.averagePrice) },

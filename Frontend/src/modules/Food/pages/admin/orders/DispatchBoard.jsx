@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react"
 import { Bike, Clock, Loader2, RefreshCw, Truck, UserCheck } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminAPI } from "@food/api"
+import CustomerLink from "@food/components/admin/customers/CustomerLink"
+import RestaurantLink from "@food/components/admin/customers/RestaurantLink"
+import RiderLink from "@food/components/admin/customers/RiderLink"
 
 const rupees = (value) => `₹${Number(value || 0).toLocaleString("en-IN")}`
 const REFRESH_MS = 20000
@@ -32,14 +35,14 @@ function OrderCard({ order, riders, onAssign, assigning }) {
       <div className="flex items-start justify-between gap-2">
         <div>
           <p className="text-sm font-bold text-slate-900">{order.orderId}</p>
-          <p className="text-xs text-slate-600">{order.restaurant}{order.restaurantArea ? ` · ${order.restaurantArea}` : ""}</p>
+          <p className="text-xs text-slate-600"><RestaurantLink id={order.restaurantId}>{order.restaurant}</RestaurantLink>{order.restaurantArea ? ` · ${order.restaurantArea}` : ""}</p>
         </div>
         <div className="text-right">
           <p className="text-sm font-semibold text-slate-900">{rupees(order.total)}</p>
           <p className={`text-[10px] font-bold uppercase ${cashOrder ? "text-amber-700" : "text-emerald-700"}`}>{cashOrder ? "Cash" : "Paid online"}</p>
         </div>
       </div>
-      <p className="text-xs text-slate-600 truncate" title={order.address}>{order.customer} · {order.address}</p>
+      <p className="text-xs text-slate-600 truncate" title={order.address}><CustomerLink id={order.customerId}>{order.customer}</CustomerLink> · {order.address}</p>
       <div className="flex items-center justify-between gap-2">
         <span className="rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">{STATUS[order.status] || order.status}</span>
         <span className="flex items-center gap-1">
@@ -50,7 +53,7 @@ function OrderCard({ order, riders, onAssign, assigning }) {
       {order.rider && (
         <p className="text-xs text-slate-700">
           <Bike className="inline w-3.5 h-3.5 mr-1 text-teal-700" />
-          {order.rider.name} · {order.rider.phone}
+          <RiderLink id={order.rider.id}>{order.rider.name}</RiderLink> · {order.rider.phone}
           {waiting && <span className="ml-1 text-amber-700">(offered, not accepted yet)</span>}
         </p>
       )}
@@ -154,7 +157,7 @@ export default function DispatchBoard() {
                 title={`${r.phone} · cash in hand ${rupees(r.cashInHand)}`}
                 className={`rounded-full px-2.5 py-1 text-xs font-medium ${r.cashSuspended ? "bg-rose-100 text-rose-700" : r.activeOrders ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}`}
               >
-                {r.name} · {r.cashSuspended ? "over cash limit" : r.activeOrders ? `${r.activeOrders} on trip` : "free"}
+                <RiderLink id={r.id}>{r.name}</RiderLink> · {r.cashSuspended ? "over cash limit" : r.activeOrders ? `${r.activeOrders} on trip` : "free"}
               </span>
             ))}
           </div>

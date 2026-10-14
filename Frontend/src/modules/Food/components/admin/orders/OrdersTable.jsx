@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo } from "react"
 import CustomerLink, { customerIdOf } from "@food/components/admin/customers/CustomerLink"
+import RestaurantLink, { restaurantIdOf } from "@food/components/admin/customers/RestaurantLink"
+import RiderLink, { riderIdOf } from "@food/components/admin/customers/RiderLink"
 import { Eye, Printer, ArrowUpDown, Loader2, Check, X, Trash2, RefreshCw, Volume2, PackageCheck } from "@food/components/admin/theme/icons"
 
 const getStatusColor = (orderStatus) => {
@@ -324,7 +326,7 @@ export default function OrdersTable({
                 )}
                 {visibleColumns.restaurant && (
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <span className="text-sm font-medium text-slate-700">{formatRestaurantName(order.restaurant)}</span>
+                    <RestaurantLink id={restaurantIdOf(order)} className="text-sm font-medium text-slate-700">{formatRestaurantName(order.restaurant)}</RestaurantLink>
                   </td>
                 )}
                 {visibleColumns.foodItems && (
@@ -452,9 +454,9 @@ export default function OrdersTable({
                   <td className="px-6 py-4 whitespace-nowrap">
                     {order.deliveryPartnerName ? (
                       <div className="flex flex-col">
-                        <span className="text-sm font-semibold text-slate-800">
+                        <RiderLink id={riderIdOf(order)} className="text-sm font-semibold text-slate-800">
                           {order.deliveryPartnerName}
-                        </span>
+                        </RiderLink>
                         <span className="mt-0.5 text-xs text-slate-500">
                           {order.deliveryPartnerPhone || "Phone not available"}
                         </span>

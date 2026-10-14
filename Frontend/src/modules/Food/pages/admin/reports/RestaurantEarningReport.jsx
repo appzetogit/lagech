@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { Store } from "@food/components/admin/theme/icons"
 import { adminSystemExtrasAPI } from "@food/api/adminSystemExtras"
+import RestaurantLink from "@food/components/admin/customers/RestaurantLink"
 import ReportShell, { rupees } from "./ReportShell"
 
 function SearchFilter({ onApply }) {
@@ -33,7 +34,7 @@ export default function RestaurantEarningReport() {
         ["Restaurants' share", rupees(d.totals.net), true],
       ]}
       columns={[
-        { key: "restaurant", label: "Restaurant" },
+        { key: "restaurant", label: "Restaurant", render: (r) => <RestaurantLink id={r.restaurantId}>{r.restaurant}</RestaurantLink> },
         { key: "orders", label: "Orders", align: "right" },
         { key: "grossSales", label: "Food sales", align: "right", render: (r) => rupees(r.grossSales) },
         { key: "commission", label: "Commission", align: "right", render: (r) => rupees(r.commission) },
