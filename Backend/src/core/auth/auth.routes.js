@@ -16,7 +16,8 @@ import {
     resetAdminPasswordWithOtpController,
     firebaseLoginUserController,
     firebaseLoginRestaurantController,
-    firebaseLoginDeliveryController
+    firebaseLoginDeliveryController,
+    restaurantEmployeeLoginController
 } from './auth.controller.js';
 import { authMiddleware, requireAdmin } from './auth.middleware.js';
 import {
@@ -55,6 +56,10 @@ router.post('/delivery/verify-otp', ...verifyLimiters, verifyDeliveryOtpControll
 router.post('/user/firebase-login', ...verifyLimiters, firebaseLoginUserController);
 router.post('/restaurant/firebase-login', ...verifyLimiters, firebaseLoginRestaurantController);
 router.post('/delivery/firebase-login', ...verifyLimiters, firebaseLoginDeliveryController);
+
+// Restaurant staff (Employees): email or phone + password. Their token is the
+// restaurant's, limited to their role's permissions.
+router.post('/restaurant-employee/login', ...verifyLimiters, restaurantEmployeeLoginController);
 
 // Admin login
 router.post('/admin/login', ...verifyLimiters, adminLoginController);

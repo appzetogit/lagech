@@ -2,6 +2,7 @@ import { verifyAccessToken } from './token.util.js';
 import { sendError } from '../../utils/response.js';
 import { prisma } from '../../config/prisma.js';
 import { isId } from '../../utils/helpers.js';
+import { sanitizeRestaurantPermissions } from './restaurantPermissions.js';
 
 export const requireAdmin = (req, res, next) => {
     if (req.user?.role !== 'ADMIN') {
@@ -21,6 +22,35 @@ const SESSION_SCOPED_MODELS = {
     USER: () => prisma.foodUser,
     RESTAURANT: () => prisma.foodRestaurant,
     DELIVERY_PARTNER: () => prisma.foodDeliveryPartner
+};
+
+const checkRestaurantEmployee = (req, res, next, decoded) => {
+    if (!isId(decoded.userId) || !isId(decoded.employeeId)) return sendError(res, 401, 'Invalid or expired token');
+    return prisma.foodRestaurantEmployee
+        .findUnique({
+            where: { id: decoded.employeeId },
+            select: {
+                restaurantId: true,
+                isActive: true,
+                tokenVersion: true,
+                role: { select: { permissions: true } },
+            },
+        })
+        .then((employee) => {
+            if (!employee || employee.restaurantId !== decoded.userId) return sendError(res, 401, 'Account not found');
+            if (!employee.isActive) return sendError(res, 401, 'Your employee account is deactivated');
+            if (decoded.tokenVersion !== undefined && Number(decoded.tokenVersion) !== (Number(employee.tokenVersion) || 0)) {
+                return sendError(
+                    res,
+                    401,
+                    'You have been signed out because this account was used on another device'
+                );
+            }
+            req.user.employeeId = decoded.employeeId;
+            req.user.permissions = sanitizeRestaurantPermissions(employee.role?.permissions);
+            return next();
+        })
+        .catch(() => sendError(res, 401, 'Authentication failed'));
 };
 
 export const authMiddleware = (req, res, next) => {
@@ -43,6 +73,13 @@ export const authMiddleware = (req, res, next) => {
         role: decoded.role,
         adminType: decoded.adminType
     };
+
+    // Restaurant staff: the session is the employee's, not the owner's (an
+    // owner signing in again must not sign their staff out), and their role is
+    // read fresh so an edit to it applies at once.
+    if (decoded.role === 'RESTAURANT' && decoded.employeeId !== undefined) {
+        return checkRestaurantEmployee(req, res, next, decoded);
+    }
 
     const delegate = SESSION_SCOPED_MODELS[decoded.role];
     if (!delegate) return next();
@@ -105,6 +142,11 @@ export const optionalAuth = (req, res, next) => {
             role: decoded.role,
             adminType: decoded.adminType
         };
+        // Never mistake restaurant staff for the owner, even unverified.
+        if (decoded.employeeId !== undefined) {
+            req.user.employeeId = decoded.employeeId;
+            req.user.permissions = sanitizeRestaurantPermissions(decoded.permissions);
+        }
         next();
     } catch (error) {
         // Silently ignore invalid tokens in optional auth

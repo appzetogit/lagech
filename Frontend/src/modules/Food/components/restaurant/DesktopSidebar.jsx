@@ -22,7 +22,11 @@ import {
   Compass,
   Wallet,
   CreditCard,
+  Users,
+  Shield,
 } from "lucide-react"
+import { canOpenRestaurantPath, getRestaurantStaffSession } from "@food/utils/restaurantPermissions"
+import { getCurrentUser } from "@food/utils/auth"
 import { restaurantAPI } from "@food/api"
 import { getCompanyName, getModuleLogoUrl, getCachedSettings, loadBusinessSettings } from "@food/utils/businessSettings"
 import { logoutRestaurantSession } from "@food/utils/restaurantLogout"
@@ -87,7 +91,20 @@ const sections = [
       { name: "Subscription", path: `${BASE}/subscription`, icon: CreditCard },
     ],
   },
+  {
+    title: "EMPLOYEES",
+    items: [
+      { name: "Employee roles", path: `${BASE}/employee-roles`, icon: Shield },
+      { name: "Employees", path: `${BASE}/employees`, icon: Users },
+    ],
+  },
 ]
+
+/** Sections and items this session may open (all of them for the owner). */
+const visibleSections = (session) =>
+  sections
+    .map((section) => ({ ...section, items: section.items.filter((item) => canOpenRestaurantPath(item.path, session)) }))
+    .filter((section) => section.items.length)
 
 function isItemActive(item, pathname, search) {
   const [itemPath, itemQuery = ""] = String(item.path || "").split("?")
@@ -199,13 +216,19 @@ export default function DesktopSidebar() {
     fetchRestaurantData()
   }, [])
 
+  const session = getRestaurantStaffSession()
+  const navSections = visibleSections(session)
+  // Staff see who they are signed in as, not the owner.
+  const employee = session.isEmployee ? getCurrentUser("restaurant")?.employee : null
   const restaurantName = restaurantData?.name || companyName || "Restaurant"
   const ownerName =
+    employee?.name ||
     restaurantData?.ownerName ||
     restaurantData?.owner?.name ||
     restaurantData?.name ||
     "Owner"
   const ownerImage =
+    employee?.image ||
     restaurantData?.profileImage?.url ||
     restaurantData?.ownerImage?.url ||
     restaurantData?.logo?.url ||
@@ -243,7 +266,7 @@ export default function DesktopSidebar() {
         className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 pb-4 space-y-6 custom-scrollbar"
         style={{ overscrollBehavior: "contain" }}
       >
-        {sections.map((section) => (
+        {navSections.map((section) => (
           <div key={section.title}>
             <h3 className="text-[11px] font-bold text-gray-400 mb-2 uppercase tracking-wider px-2">
               {section.title}
@@ -282,7 +305,7 @@ export default function DesktopSidebar() {
       <div className="p-4 bg-white border-t border-gray-100">
         <button
           type="button"
-          onClick={() => navigate(`${BASE}/outlet-info`)}
+          onClick={() => canOpenRestaurantPath(`${BASE}/outlet-info`, session) && navigate(`${BASE}/outlet-info`)}
           className="flex w-full items-center gap-3 rounded-xl bg-gray-50 p-2 mb-3 text-left transition-colors hover:bg-gray-100"
         >
           <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-green-600 text-sm font-bold text-white">
@@ -294,7 +317,9 @@ export default function DesktopSidebar() {
           </div>
           <div className="min-w-0 flex flex-col">
             <span className="truncate text-sm font-semibold text-gray-900">{ownerName}</span>
-            <span className="truncate text-xs text-gray-500">My profile</span>
+            <span className="truncate text-xs text-gray-500">
+              {employee ? `Staff${employee.roleName ? ` · ${employee.roleName}` : ""}` : "My profile"}
+            </span>
           </div>
         </button>
         <button

@@ -7,6 +7,7 @@ import {
   Wallet,
   Compass,
 } from "lucide-react"
+import { canOpenRestaurantPath } from "@food/utils/restaurantPermissions"
 
 const getOrdersTabs = (basePath = "/restaurant") => [
   { id: "orders", label: "Orders", icon: FileText, route: `${basePath}` },
@@ -31,7 +32,11 @@ function BottomNavOrders() {
       ? "/food/restaurant"
       : "/restaurant"
 
-  const tabs = useMemo(() => getOrdersTabs(basePath), [basePath])
+  // Restaurant staff get only the tabs their role opens (Explore always).
+  const tabs = useMemo(
+    () => getOrdersTabs(basePath).filter((tab) => tab.id === "explore" || canOpenRestaurantPath(tab.route)),
+    [basePath],
+  )
 
   const isInternalPage = pathname.includes("/create-offers")
   if (isInternalPage) {

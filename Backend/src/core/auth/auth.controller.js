@@ -36,6 +36,11 @@ import { validateAdminChangePasswordDto } from "../../dtos/auth/adminChangePassw
 import { validateAdminForgotPasswordRequestDto } from "../../dtos/auth/adminForgotPasswordRequest.dto.js";
 import { validateAdminForgotPasswordResetDto } from "../../dtos/auth/adminForgotPasswordReset.dto.js";
 import { sendResponse } from "../../utils/response.js";
+import {
+  getEmployeeProfile,
+  loginRestaurantEmployee,
+} from "../../modules/food/restaurant/services/restaurantEmployee.service.js";
+import { hasRestaurantPermission, redactPayoutDetails } from "./restaurantPermissions.js";
 
 export const requestUserOtpController = async (req, res, next) => {
   try {
@@ -181,10 +186,24 @@ export const logoutController = async (req, res, next) => {
   }
 };
 
+export const restaurantEmployeeLoginController = async (req, res, next) => {
+  try {
+    const result = await loginRestaurantEmployee(req.body || {});
+    return sendResponse(res, 200, "Login successful", result);
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const getMeController = async (req, res, next) => {
   try {
     const { userId, role } = req.user;
-    const result = await getProfile(userId, role);
+    let result = await getProfile(userId, role);
+    // Restaurant staff: the restaurant, plus who they are and what they may use.
+    if (req.user.employeeId && result) {
+      const employee = await getEmployeeProfile(req.user.employeeId);
+      result = { ...(hasRestaurantPermission(req.user, "wallet") ? result : redactPayoutDetails(result)), employee };
+    }
     return sendResponse(res, 200, "Profile retrieved successfully", result);
   } catch (error) {
     next(error);

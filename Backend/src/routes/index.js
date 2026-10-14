@@ -22,6 +22,7 @@ import webhookRoutes from '../core/payments/routes/webhook.routes.js'; // ✅ NE
 import searchRoutes from '../modules/food/search/routes/search.routes.js';
 import chatRoutes from '../modules/food/chat/routes/chat.routes.js';
 import { requireAdminPermission } from '../core/roles/adminPermission.middleware.js';
+import { requireRestaurantPermission } from '../core/auth/restaurantPermissions.js';
 import { getCashbackSettingsPublicController } from '../modules/food/user/controllers/cashback.controller.js';
 import { subscribeNewsletterController } from '../modules/food/user/controllers/customerRewards.controller.js';
 import { config } from '../config/env.js';
@@ -104,7 +105,8 @@ const chatAdminGate = (req, res, next) =>
         ? requireAdminPermission('customer_management', 'view')(req, res, next)
         : next();
 
-router.use('/v1/food/chat', authMiddleware, requireRoles('USER', 'RESTAURANT', 'DELIVERY_PARTNER', 'ADMIN'), chatAdminGate, chatRoutes);
+// Restaurant staff need the Chat permission.
+router.use('/v1/food/chat', authMiddleware, requireRoles('USER', 'RESTAURANT', 'DELIVERY_PARTNER', 'ADMIN'), chatAdminGate, requireRestaurantPermission('chat'), chatRoutes);
 router.use('/v1/food/orders', authMiddleware, requireRoles('USER'), orderUserRoutes);
 router.use('/v1/food/payments', authMiddleware, paymentRoutes);
 router.use('/v1/payments/webhook', webhookRoutes); // ✅ NEW: Public Webhook

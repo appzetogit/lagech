@@ -277,6 +277,19 @@ router.get(
     ]),
     adminController.getRestaurantAnalytics
 );
+// How many staff accounts (restaurant panel Employees) and roles it has.
+router.get(
+    '/restaurants/:id/employees-summary',
+    requireAnyAdminPermission([{ section: 'restaurant_management', action: 'view' }]),
+    async (req, res, next) => {
+        try {
+            const { countRestaurantEmployees } = await import('../../restaurant/services/restaurantEmployee.service.js');
+            res.status(200).json({ success: true, data: await countRestaurantEmployees(req.params.id) });
+        } catch (error) {
+            next(error);
+        }
+    }
+);
 router.get('/restaurants/:id/menu', adminController.getRestaurantMenuById);
 router.post('/restaurants', adminController.createRestaurant);
 router.patch('/restaurants/:id', adminController.updateRestaurantById);

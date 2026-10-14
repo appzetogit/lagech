@@ -18,6 +18,7 @@ import {
   upsertFirebaseDeviceToken,
 } from "../notifications/firebase.service.js";
 import { verifyFirebasePhoneIdToken } from "./firebasePhone.verifier.js";
+import { refreshEmployeeAccessToken } from "../../modules/food/restaurant/services/restaurantEmployee.service.js";
 
 const ROLES = {
   USER: "USER",
@@ -989,6 +990,11 @@ export const refreshAccessToken = async (token) => {
     payload = jwt.default.verify(token, config.jwtRefreshSecret);
   } catch {
     throw new AuthError("Invalid refresh token");
+  }
+
+  // Restaurant staff: their own session and their role as it is now.
+  if (payload?.role === "RESTAURANT" && payload.employeeId !== undefined) {
+    return { accessToken: await refreshEmployeeAccessToken(payload), refreshToken: token };
   }
 
   // If deactivated user, do not issue fresh access tokens (forces logout on client)

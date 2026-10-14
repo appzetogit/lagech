@@ -28,11 +28,13 @@ import { importNewsletter } from './steps/newsletter.mjs';
 import { importWithdrawalMethods } from './steps/withdrawalMethods.mjs';
 import { importSocialMedia } from './steps/socialMedia.mjs';
 import { importCoupons } from './steps/coupons.mjs';
+import { importEmployees } from './steps/employees.mjs';
 
 const STEPS = [
     ['zones', importZones],
     ['categories', importCategories],
     ['restaurants', importRestaurants],
+    ['employees', importEmployees],
     ['foods', importFoods],
     ['nutrition', importNutrition],
     ['customers', importCustomers],

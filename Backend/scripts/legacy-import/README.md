@@ -23,6 +23,7 @@ Steps run in this order whatever order they are named in.
 | `zones` | Delivery zones and their boundaries, the Cash On Delivery / Digital Payment switches and the default flag |
 | `categories` | Categories and sub-categories, with images |
 | `restaurants` | Restaurants, approval state, per-day hours, commission, logo and cover |
+| `employees` | Restaurant staff: `employee_roles` (modules mapped to the panel permission keys) and `vendor_employees` (name, email, phone, image from `legacy/vendor`, role, on/off). Password hashes are copied as they are (Laravel `$2y$` verifies), so staff keep their passwords. Run after `restaurants` |
 | `foods` | Dishes, variations as variants, other option groups as add-ons |
 | `nutrition` | Each dish's nutrition tags (`nutritions` / `item_nutrition`) and allergens (`allergies` / `item_allergy`, when present) |
 | `customers` | Customers (10-digit phones, as login matches) and addresses |
@@ -47,11 +48,11 @@ LEGACY_MYSQL_URL='mysql://legacy_ro:<pass>@127.0.0.1:3306/legacy_lagech' \
 DATABASE_URL='postgresql://<user>:<pass>@127.0.0.1:5432/<database>?schema=public' \
 UPLOAD_STORAGE_ROOT=/srv/lagech/uploads UPLOAD_BASE_URL=/uploads \
 REDIS_URL= NODE_ENV=development \
-node scripts/legacy-import/index.mjs zones categories restaurants foods nutrition customers riders \
+node scripts/legacy-import/index.mjs zones categories restaurants employees foods nutrition customers riders \
   payment-details orders balances ratings coupons settings
 ```
 
-Copy the old `storage/app/public/{category,product,store,profile,delivery-man}`
+Copy the old `storage/app/public/{category,product,store,profile,delivery-man,vendor}`
 folders into `$UPLOAD_STORAGE_ROOT/legacy/` first (stores' covers under
 `legacy/store/cover`), or images are reported missing and imported without.
 
@@ -68,7 +69,7 @@ newer one (`LEGACY_MYSQL_URL`) and the one the previous import read
 | New rows (not in `legacy.id_map`) | Imported exactly as the full import would, images included |
 | Orders imported before | Status, timestamps, payment status, cancellation, rider, ratings, and the ledger split that follows from them, when the old system changed them. Items, address and amounts never move. History and item ratings are replaced only if nobody edited them here |
 | Customers, riders imported before | Blanks filled; nothing set here is overwritten. Active/blocked (customers) and approval status (riders) follow the old system only while this system still has the value originally imported |
-| Restaurants, categories, dishes, nutrition, zones, coupons, banners, settings, social media, withdrawal methods, cancel reasons, ads/reels, addresses | Never modified. A change in the old system is counted as "left alone" |
+| Restaurants, categories, dishes, nutrition, zones, coupons, banners, settings, social media, withdrawal methods, cancel reasons, ads/reels, addresses, restaurant staff roles and employees | Never modified. A change in the old system is counted as "left alone" |
 | Money | Only ledger rows new since the last import (cash collections, rider withdrawals and payouts, admin payments of rider earnings (`provide_d_m_earnings`; an "adjustment" there settles earnings against cash, so it is also a cash deposit), restaurant withdrawals and payouts, order transactions), by legacy id. Opening-balance adjustments are never recomputed, so balances move by exactly those rows. A withdrawal imported before follows the old status only while untouched here |
 | Ratings | Recomputed for the restaurants and riders whose orders were added or changed |
 | Favourites | Only those added in the old system since the baseline copy, so one a customer removed here does not come back |
@@ -82,7 +83,7 @@ LEGACY_MYSQL_URL='mysql://legacy_ro:<pass>@127.0.0.1:3306/legacy_lagech_new' \
 LEGACY_BASELINE_MYSQL_URL='mysql://legacy_ro:<pass>@127.0.0.1:3306/legacy_lagech' \
 DATABASE_URL=... UPLOAD_STORAGE_ROOT=/srv/lagech/uploads UPLOAD_BASE_URL=/uploads \
 REDIS_URL= NODE_ENV=development \
-node scripts/legacy-import/index.mjs --sync --dry-run zones categories restaurants foods \
+node scripts/legacy-import/index.mjs --sync --dry-run zones categories restaurants employees foods \
   nutrition customers riders payment-details withdrawal-methods orders balances ratings \
   banners cancel-reasons promotions coupons favorites newsletter social-media settings
 ```

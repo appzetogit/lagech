@@ -1,14 +1,37 @@
 import { Suspense, lazy, useEffect } from "react"
-import { Routes, Route, Outlet } from "react-router-dom"
+import { Routes, Route, Outlet, Navigate, Link, useLocation } from "react-router-dom"
+import { ShieldOff } from "lucide-react"
 import ProtectedRoute from "@food/components/ProtectedRoute"
 import AuthRedirect from "@food/components/AuthRedirect"
 import Loader from "@food/components/Loader"
 import RestaurantLayout from "@food/components/restaurant/RestaurantLayout"
 import { applyModuleBranding, getCachedSettings, loadBusinessSettings } from "@food/utils/businessSettings"
+import { canOpenRestaurantPath, firstOpenRestaurantPath, getRestaurantStaffSession } from "@food/utils/restaurantPermissions"
+
+/**
+ * Restaurant staff see only the pages their role allows (the server refuses
+ * the rest anyway). The home page sends them to the first page they have.
+ */
+function StaffGate() {
+  const { pathname } = useLocation()
+  const session = getRestaurantStaffSession()
+  if (!session.isEmployee || canOpenRestaurantPath(pathname, session)) return <Outlet />
+  const home = firstOpenRestaurantPath(session)
+  const atHome = pathname.replace(/\/+$/, "") === "/food/restaurant"
+  if (atHome && home !== "/food/restaurant") return <Navigate to={home} replace />
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center px-6 py-20 text-center">
+      <ShieldOff className="mb-3 h-10 w-10 text-gray-400" />
+      <p className="text-lg font-bold text-gray-900">Not in your role</p>
+      <p className="mt-1 max-w-sm text-sm text-gray-500">Ask the restaurant owner to add this section to your employee role.</p>
+      <Link to={home} className="mt-5 rounded-full bg-gray-900 px-4 py-2 text-sm font-semibold text-white">Go to my pages</Link>
+    </div>
+  )
+}
 
 const LayoutWrapper = () => (
   <RestaurantLayout>
-    <Outlet />
+    <StaffGate />
   </RestaurantLayout>
 )
 
@@ -64,6 +87,10 @@ const Signup = lazy(() => import("@food/pages/restaurant/auth/Signup"))
 const ForgotPassword = lazy(() => import("@food/pages/restaurant/auth/ForgotPassword"))
 const VerificationPending = lazy(() => import("@food/pages/restaurant/auth/VerificationPending"))
 const Subscription = lazy(() => import("@food/pages/restaurant/Subscription"))
+const EmployeeLogin = lazy(() => import("@food/pages/restaurant/auth/EmployeeLogin"))
+const EmployeeRolesPage = lazy(() => import("@food/pages/restaurant/employees/EmployeeRolesPage"))
+const EmployeesPage = lazy(() => import("@food/pages/restaurant/employees/EmployeesPage"))
+const EmployeeFormPage = lazy(() => import("@food/pages/restaurant/employees/EmployeeFormPage"))
 
 export default function RestaurantRouter() {
   // Safely enforce light mode for the Restaurant app to prevent User dark mode bleeding
@@ -101,6 +128,7 @@ export default function RestaurantRouter() {
         <Route path="welcome" element={<AuthRedirect module="restaurant"><Welcome /></AuthRedirect>} />
         <Route path="login" element={<AuthRedirect module="restaurant"><Login /></AuthRedirect>} />
         <Route path="otp" element={<AuthRedirect module="restaurant"><OTP /></AuthRedirect>} />
+        <Route path="employee-login" element={<AuthRedirect module="restaurant"><EmployeeLogin /></AuthRedirect>} />
         <Route path="signup" element={<AuthRedirect module="restaurant"><Signup /></AuthRedirect>} />
         <Route path="forgot-password" element={<AuthRedirect module="restaurant"><ForgotPassword /></AuthRedirect>} />
         <Route path="pending-verification" element={<AuthRedirect module="restaurant"><VerificationPending /></AuthRedirect>} />
@@ -149,6 +177,10 @@ export default function RestaurantRouter() {
           <Route element={<ProtectedRoute requiredRole="restaurant" loginPath="/food/restaurant/login"><UpdateBankDetails /></ProtectedRoute>} path="update-bank-details" />
           <Route element={<ProtectedRoute requiredRole="restaurant" loginPath="/food/restaurant/login"><DiningReservations /></ProtectedRoute>} path="reservations" />
           <Route element={<ProtectedRoute requiredRole="restaurant" loginPath="/food/restaurant/login"><ZoneSetup /></ProtectedRoute>} path="zone-setup" />
+          <Route element={<ProtectedRoute requiredRole="restaurant" loginPath="/food/restaurant/login"><EmployeeRolesPage /></ProtectedRoute>} path="employee-roles" />
+          <Route element={<ProtectedRoute requiredRole="restaurant" loginPath="/food/restaurant/login"><EmployeeRolesPage /></ProtectedRoute>} path="employee-roles/:id" />
+          <Route element={<ProtectedRoute requiredRole="restaurant" loginPath="/food/restaurant/login"><EmployeesPage /></ProtectedRoute>} path="employees" />
+          <Route element={<ProtectedRoute requiredRole="restaurant" loginPath="/food/restaurant/login"><EmployeeFormPage /></ProtectedRoute>} path="employees/:id" />
         </Route>
 
         {/* CMS Content Routes (Stay public-accessible but inside router) */}

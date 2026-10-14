@@ -341,13 +341,35 @@ function StoreLocationCard({ restaurant }) {
   )
 }
 
-function OwnerCard({ restaurant }) {
+/** How many restaurant panel staff accounts the restaurant has (read-only). */
+function useEmployeesSummary(restaurantId) {
+  const [summary, setSummary] = useState(null)
+  useEffect(() => {
+    if (!restaurantId) return undefined
+    let alive = true
+    adminSystemExtrasAPI
+      .getRestaurantEmployeesSummary(restaurantId)
+      .then((res) => alive && setSummary(payload(res)))
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [restaurantId])
+  return summary
+}
+
+function OwnerCard({ restaurant, restaurantId }) {
+  const staff = useEmployeesSummary(restaurantId)
+  const staffText = staff
+    ? `${staff.employees || 0} employee(s), ${staff.active || 0} active · ${staff.roles || 0} role(s)`
+    : ""
   return (
     <Panel title="Owner Info" icon={User}>
       <div className="space-y-4">
         <InfoLine icon={User} tone="bg-teal-600" label="Name" value={restaurant?.ownerName} />
         <InfoLine icon={Phone} tone="bg-orange-500" label="Phone" value={restaurant?.ownerPhone} href={restaurant?.ownerPhone ? `tel:${restaurant.ownerPhone}` : ""} />
         <InfoLine icon={Mail} tone="bg-rose-500" label="Email" value={restaurant?.ownerEmail} href={restaurant?.ownerEmail ? `mailto:${restaurant.ownerEmail}` : ""} />
+        <InfoLine icon={User} tone="bg-slate-500" label="Panel staff" value={staffText} />
       </div>
     </Panel>
   )
@@ -394,7 +416,7 @@ export default function OverviewTab({ restaurantId, restaurant, analytics }) {
         <MoneyCards restaurantId={restaurantId} />
         <StoreLocationCard restaurant={restaurant} />
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <OwnerCard restaurant={restaurant} />
+          <OwnerCard restaurant={restaurant} restaurantId={restaurantId} />
           <BankCard restaurant={restaurant} />
         </div>
       </div>
