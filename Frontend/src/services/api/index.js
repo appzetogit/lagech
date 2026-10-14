@@ -943,6 +943,39 @@ export const adminAPI = {
       { items },
       { contextModule: "admin", ...(preview ? { params: { preview: 1 } } : {}) },
     ),
+  /**
+   * Order Details "Delivery Info" edit: { fullName, phone, street, additionalDetails, city, state, zipCode, label?, latitude, longitude }.
+   * { preview: true } checks the zone and returns the new distance and any fee-band warning without saving.
+   */
+  updateOrderDeliveryAddress: (orderId, address, { preview = false } = {}) =>
+    apiClient.patch(
+      `/food/admin/orders/${encodeURIComponent(String(orderId))}/delivery-address`,
+      address,
+      { contextModule: "admin", ...(preview ? { params: { preview: 1 } } : {}) },
+    ),
+  /** { note?, deliveryInstructions? } ("" clears). */
+  updateOrderNotes: (orderId, notes) =>
+    apiClient.patch(`/food/admin/orders/${encodeURIComponent(String(orderId))}/note`, notes, { contextModule: "admin" }),
+  setOrderCutlery: (orderId, sendCutlery) =>
+    apiClient.patch(
+      `/food/admin/orders/${encodeURIComponent(String(orderId))}/cutlery`,
+      { sendCutlery: Boolean(sendCutlery) },
+      { contextModule: "admin" },
+    ),
+  /** A scheduled order's new time (ISO string). */
+  rescheduleOrder: (orderId, scheduledAt) =>
+    apiClient.patch(
+      `/food/admin/orders/${encodeURIComponent(String(orderId))}/schedule`,
+      { scheduledAt },
+      { contextModule: "admin" },
+    ),
+  /** "Mark as paid / unpaid" for a cash order: { paid, note? }. */
+  setOrderPaymentStatus: (orderId, paid, note = "") =>
+    apiClient.patch(
+      `/food/admin/orders/${encodeURIComponent(String(orderId))}/payment-status`,
+      { paid: Boolean(paid), ...(note ? { note } : {}) },
+      { contextModule: "admin" },
+    ),
   /** Invoice data (JSON) or, with { format: "html", size: "thermal" | "a4" }, the printable page as text. */
   getOrderInvoice: (orderId, params = {}) =>
     apiClient.get(`/food/admin/orders/${encodeURIComponent(String(orderId))}/invoice`, {

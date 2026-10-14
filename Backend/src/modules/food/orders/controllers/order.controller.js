@@ -10,6 +10,14 @@ import {
     orderEditState,
     setOrderReferenceCode,
 } from '../services/adminOrderEdit.service.js';
+import {
+    rescheduleOrderAdmin,
+    setOrderCutleryAdmin,
+    setOrderPaymentStatusAdmin,
+    updateOrderDeliveryAddressAdmin,
+    updateOrderNotesAdmin,
+} from '../services/adminOrderInfoEdit.service.js';
+import { orderInfoEditState } from '../services/orderInfoEditRules.js';
 import { emailOrderPlaced } from '../../../../core/notifications/emailEvents.js';
 import {
     validateCalculateOrderDto,
@@ -418,7 +426,14 @@ async function adminOrderDetailsPayload(orderId) {
     const extras = await getAdminOrderDetailsExtras(order.id || order._id);
     // Whether the "Edit" button shows, and why not when it does not.
     const { editable, reason } = orderEditState(order);
-    const details = { ...extras, editable, editReason: reason, referenceCode: order.referenceCode || null };
+    const details = {
+        ...extras,
+        editable,
+        editReason: reason,
+        referenceCode: order.referenceCode || null,
+        // Delivery info, note, cutlery, schedule and payment status: what may change, and why not.
+        infoEdit: orderInfoEditState(order),
+    };
     const { items, lines, total, payment } = orderInvoiceService.buildInvoice(order, { copy: 'admin' });
     return { order, details, bill: { items, lines, total, payment } };
 }
@@ -440,6 +455,48 @@ export async function setOrderReferenceCodeAdminController(req, res, next) {
         next(err);
     }
 }
+
+const wantsPreview = (req) => ['1', 'true', 'yes'].includes(String(req.query?.preview || '').toLowerCase());
+
+/**
+ * The Order Details edits other than the items, each answered with the
+ * details page's payload (as the item edit is) plus the change itself.
+ */
+const infoEdit = (message, run) => async (req, res, next) => {
+    try {
+        const change = await run(req);
+        if (change?.preview) return sendResponse(res, 200, 'Preview', { change });
+        const payload = await adminOrderDetailsPayload(req.params.orderId);
+        return sendResponse(res, 200, message, { ...payload, change });
+    } catch (err) {
+        next(err);
+    }
+};
+
+/**
+ * PATCH /food/admin/orders/:orderId/delivery-address
+ * { fullName, phone, street, additionalDetails, city, state, zipCode, label?, latitude, longitude }
+ * With ?preview=1 nothing is saved: the zone check, the new distance and the
+ * fee-band warning come back.
+ */
+export const updateOrderDeliveryAddressAdminController = infoEdit('Delivery info updated', (req) =>
+    updateOrderDeliveryAddressAdmin(req.params.orderId, req.body, req.user?.userId, { preview: wantsPreview(req) }));
+
+/** PATCH /food/admin/orders/:orderId/note { note?, deliveryInstructions? } ("" clears). */
+export const updateOrderNotesAdminController = infoEdit('Order note updated', (req) =>
+    updateOrderNotesAdmin(req.params.orderId, req.body, req.user?.userId));
+
+/** PATCH /food/admin/orders/:orderId/cutlery { sendCutlery } */
+export const setOrderCutleryAdminController = infoEdit('Cutlery updated', (req) =>
+    setOrderCutleryAdmin(req.params.orderId, req.body?.sendCutlery, req.user?.userId));
+
+/** PATCH /food/admin/orders/:orderId/schedule { scheduledAt } */
+export const rescheduleOrderAdminController = infoEdit('Scheduled time updated', (req) =>
+    rescheduleOrderAdmin(req.params.orderId, req.body?.scheduledAt, req.user?.userId));
+
+/** PATCH /food/admin/orders/:orderId/payment-status { paid, note? } (cash orders only). */
+export const setOrderPaymentStatusAdminController = infoEdit('Payment status updated', (req) =>
+    setOrderPaymentStatusAdmin(req.params.orderId, req.body, req.user?.userId));
 
 /** GET /food/admin/orders/:orderId/menu -- the order's restaurant's dishes, for "Add item". */
 export async function getOrderEditMenuAdminController(req, res, next) {

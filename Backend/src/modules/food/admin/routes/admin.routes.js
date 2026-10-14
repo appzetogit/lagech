@@ -583,6 +583,13 @@ router.put(
     requireAdminPermission('order_management', 'edit'),
     orderController.editOrderItemsAdminController
 );
+// The rest of Order Details: delivery info, note, cutlery, schedule, payment status.
+const orderEdit = requireAdminPermission('order_management', 'edit');
+router.patch('/orders/:orderId/delivery-address', orderEdit, orderController.updateOrderDeliveryAddressAdminController);
+router.patch('/orders/:orderId/note', orderEdit, orderController.updateOrderNotesAdminController);
+router.patch('/orders/:orderId/cutlery', orderEdit, orderController.setOrderCutleryAdminController);
+router.patch('/orders/:orderId/schedule', orderEdit, orderController.rescheduleOrderAdminController);
+router.patch('/orders/:orderId/payment-status', orderEdit, orderController.setOrderPaymentStatusAdminController);
 // Printable invoice: JSON, or ?format=html (thermal 80 mm; &size=a4).
 router.get('/orders/:orderId/invoice', orderController.getOrderInvoiceAdminController);
 router.patch('/orders/:orderId/accept', orderController.acceptOrderAdminController);

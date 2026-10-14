@@ -24,6 +24,13 @@ import { printOrderInvoice } from "@food/utils/printInvoice"
 import CancelOrderDialog from "@food/components/admin/orders/CancelOrderDialog"
 import OfflinePaymentPanel from "@food/components/admin/orders/OfflinePaymentPanel"
 import EditOrderItemsDialog from "@food/components/admin/orders/EditOrderItemsDialog"
+import {
+  EditDeliveryInfoDialog,
+  EditOrderNoteDialog,
+  PaymentStatusDialog,
+  RescheduleOrderDialog,
+  formatTime12,
+} from "@food/components/admin/orders/EditOrderInfoDialogs"
 import bikeLogo from "@food/assets/bikelogo.png"
 
 /**
@@ -67,14 +74,34 @@ const rupee = (value) => {
   return `₹ ${Number.isInteger(v) ? v : v.toFixed(2)}`
 }
 
-/** "14 Oct 2026 03:50:pm" */
-const formatPlaced = (value) => {
-  const d = value ? new Date(value) : null
-  if (!d || Number.isNaN(d.getTime())) return ""
-  const date = d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
-  const time = d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true })
-  const [hm, ampm = ""] = time.split(" ")
-  return `${date} ${hm}:${ampm.toLowerCase()}`
+/** "14 Oct 2026, 03:50 PM" */
+const formatPlaced = formatTime12
+
+/** On/off switch, the admin panel's usual one. */
+function Switch({ checked, onChange, disabled, label }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onClick={onChange}
+      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${checked ? "bg-emerald-600" : "bg-slate-300"}`}
+    >
+      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${checked ? "translate-x-4" : "translate-x-0.5"}`} />
+    </button>
+  )
+}
+
+/** Small "Edit"/"Change" link-button next to a value. */
+function EditLink({ onClick, children = "Edit", title }) {
+  return (
+    <button type="button" onClick={onClick} title={title} className="inline-flex items-center gap-1 rounded border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-600 hover:bg-blue-100">
+      <Pencil className="w-3 h-3" /> {children}
+    </button>
+  )
 }
 
 const formatAddress = (a) => {
@@ -352,6 +379,12 @@ export default function OrderDetailsPage() {
   const [cancelOpen, setCancelOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [refOpen, setRefOpen] = useState(false)
+  const [deliveryOpen, setDeliveryOpen] = useState(false)
+  const [noteOpen, setNoteOpen] = useState(false)
+  const [scheduleOpen, setScheduleOpen] = useState(false)
+  // null, or the payment status being switched to (true = paid).
+  const [paymentTo, setPaymentTo] = useState(null)
+  const [cutleryBusy, setCutleryBusy] = useState(false)
 
   const load = useCallback(
     async (quiet = false) => {
@@ -424,6 +457,32 @@ export default function OrderDetailsPage() {
   const customer = details.customer
   const rider = details.deliveryPartner
   const lastLocation = details.lastLocation
+  // What else may change on the order (the server decides): delivery info,
+  // note, cutlery, schedule, payment status.
+  const infoEdit = details.infoEdit || {}
+  const can = (key) => Boolean(infoEdit[key]?.editable)
+  const payEdit = infoEdit.payment || {}
+  const isPaid = payment.statusLabel === "Paid"
+
+  /** An edit's response carries the fresh details payload; otherwise reload. */
+  const applyPayload = (payload) => {
+    if (payload?.order) setData({ order: payload.order, details: payload.details, bill: payload.bill })
+    else load(true)
+  }
+
+  const toggleCutlery = async () => {
+    if (cutleryBusy) return
+    setCutleryBusy(true)
+    try {
+      const res = await adminAPI.setOrderCutlery(id, !order.sendCutlery)
+      toast.success(order.sendCutlery ? "No cutlery for this order" : "Cutlery will be sent")
+      applyPayload(res?.data?.data)
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Could not change the cutlery")
+    } finally {
+      setCutleryBusy(false)
+    }
+  }
 
   const mapPoints = [
     restaurant?.location && { position: restaurant.location, label: restaurant.name || "Restaurant", letter: "R" },
@@ -598,25 +657,59 @@ export default function OrderDetailsPage() {
                   {metaRow("Order Type", <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-700">{isTakeaway ? "Takeaway" : "Delivery"}</span>)}
                   {metaRow(
                     "Payment Status",
-                    <span className={`font-semibold ${payment.statusLabel === "Paid" ? "text-emerald-600" : payment.statusLabel === "Refunded" ? "text-sky-600" : "text-rose-600"}`}>
-                      {payment.statusLabel || "Unpaid"}
+                    <span className="inline-flex items-center gap-2">
+                      <span className={`font-semibold ${isPaid ? "text-emerald-600" : payment.statusLabel === "Refunded" ? "text-sky-600" : "text-rose-600"}`}>
+                        {payment.statusLabel || "Unpaid"}
+                      </span>
+                      {/* 6amMart's paid/unpaid switch, for cash orders only */}
+                      {payEdit.applies && (
+                        <Switch
+                          checked={Boolean(payEdit.paid)}
+                          disabled={payEdit.paid ? !payEdit.canMarkUnpaid : !payEdit.canMarkPaid}
+                          label={payEdit.paid ? "Mark as unpaid" : "Mark as paid"}
+                          onChange={() => setPaymentTo(!payEdit.paid)}
+                        />
+                      )}
                     </span>,
+                  )}
+                  {payEdit.applies && payEdit.reason && (
+                    <p className="text-[11px] leading-snug text-slate-500 sm:ml-auto sm:max-w-xs">{payEdit.reason}</p>
+                  )}
+                  {payEdit.markedPaidByAdmin && (
+                    <p className="text-[11px] leading-snug text-emerald-700 sm:ml-auto sm:max-w-xs">Marked paid by the admin: the rider does not collect cash for it.</p>
                   )}
                   {metaRow(
                     "Cutlery",
-                    <span className={`rounded border px-2 py-0.5 text-xs ${order.sendCutlery ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-rose-200 bg-rose-50 text-rose-600"}`}>
-                      {order.sendCutlery ? "Yes" : "No"}
+                    <span className="inline-flex items-center gap-2">
+                      <span className={`rounded border px-2 py-0.5 text-xs ${order.sendCutlery ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-rose-200 bg-rose-50 text-rose-600"}`}>
+                        {order.sendCutlery ? "Yes" : "No"}
+                      </span>
+                      {can("cutlery") && (
+                        <Switch checked={Boolean(order.sendCutlery)} disabled={cutleryBusy} label={order.sendCutlery ? "Do not send cutlery" : "Send cutlery"} onChange={toggleCutlery} />
+                      )}
                     </span>,
                   )}
-                  {order.isScheduled && order.scheduledAt && metaRow("Scheduled At", <span className="text-slate-800">{formatPlaced(order.scheduledAt)}</span>)}
+                  {order.isScheduled && order.scheduledAt && metaRow(
+                    "Scheduled At",
+                    <span className="inline-flex flex-wrap items-center gap-2">
+                      <span className="text-slate-800">{formatPlaced(order.scheduledAt)}</span>
+                      {can("schedule") && <EditLink onClick={() => setScheduleOpen(true)}>Change</EditLink>}
+                    </span>,
+                  )}
                   {order.cancellationReason && metaRow("Cancel Reason", <span className="text-rose-600">{order.cancellationReason}</span>)}
                 </div>
               </div>
 
-              {(order.note || order.deliveryInstructions) && (
-                <div className="mt-4 rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
-                  {order.note && <p><span className="font-semibold">Order Note :</span> {order.note}</p>}
-                  {order.deliveryInstructions && <p className="mt-1"><span className="font-semibold">Delivery Instructions :</span> {order.deliveryInstructions}</p>}
+              {(order.note || order.deliveryInstructions || can("note")) && (
+                <div className="mt-4 flex items-start justify-between gap-3 rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
+                  <div className="min-w-0 break-words">
+                    {order.note && <p><span className="font-semibold">Order Note :</span> {order.note}</p>}
+                    {order.deliveryInstructions && <p className="mt-1"><span className="font-semibold">Delivery Instructions :</span> {order.deliveryInstructions}</p>}
+                    {!order.note && !order.deliveryInstructions && <p className="text-slate-500">No order note.</p>}
+                  </div>
+                  {can("note") && (
+                    <EditLink onClick={() => setNoteOpen(true)}>{order.note || order.deliveryInstructions ? "Edit" : "Add"}</EditLink>
+                  )}
                 </div>
               )}
 
@@ -631,19 +724,25 @@ export default function OrderDetailsPage() {
                 </div>
               )}
 
-              {/* Items; "Edit" while the order can still change (the server decides) */}
-              {details.editable && (
-                <div className="mt-5 flex justify-end">
+              {/* Items header; "Edit" while the order can still change (the server decides) */}
+              <div className="mt-5 flex flex-wrap items-center justify-between gap-2">
+                <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                  <Package className="w-4 h-4" /> Order Items
+                  <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-600">{items.length}</span>
+                </h3>
+                {details.editable ? (
                   <button
                     type="button"
                     onClick={() => setEditOpen(true)}
                     className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100"
                   >
-                    <Pencil className="w-3.5 h-3.5" /> Edit
+                    <Pencil className="w-3.5 h-3.5" /> Edit items
                   </button>
-                </div>
-              )}
-              <div className={`${details.editable ? "mt-3" : "mt-5"} -mx-4 overflow-x-auto sm:-mx-5`}>
+                ) : details.editReason ? (
+                  <span className="text-[11px] text-slate-500">{details.editReason}</span>
+                ) : null}
+              </div>
+              <div className="mt-3 -mx-4 overflow-x-auto sm:-mx-5">
                 <table className="w-full min-w-[480px] text-sm">
                   <thead>
                     <tr className="border-y border-slate-200 bg-slate-50 text-left">
@@ -809,9 +908,22 @@ export default function OrderDetailsPage() {
               )}
 
               <div className="mt-4">
-                <h4 className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-900">
-                  <User className="w-4 h-4" /> Delivery Info
-                </h4>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <h4 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                    <User className="w-4 h-4" /> Delivery Info
+                  </h4>
+                  {can("address") && (
+                    <button
+                      type="button"
+                      onClick={() => setDeliveryOpen(true)}
+                      title="Edit delivery info"
+                      aria-label="Edit delivery info"
+                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
                 {isTakeaway ? (
                   <p className="text-sm text-slate-600">Takeaway: the customer collects it from the store.</p>
                 ) : (
@@ -906,6 +1018,52 @@ export default function OrderDetailsPage() {
             setEditOpen(false)
             if (payload?.order) setData({ order: payload.order, details: payload.details, bill: payload.bill })
             else load(true)
+          }}
+        />
+      )}
+
+      {deliveryOpen && (
+        <EditDeliveryInfoDialog
+          order={order}
+          restaurantLocation={restaurant?.location ? { lat: restaurant.location.lat, lng: restaurant.location.lng } : null}
+          onClose={() => setDeliveryOpen(false)}
+          onSaved={(payload) => {
+            setDeliveryOpen(false)
+            applyPayload(payload)
+          }}
+        />
+      )}
+
+      {noteOpen && (
+        <EditOrderNoteDialog
+          order={order}
+          onClose={() => setNoteOpen(false)}
+          onSaved={(payload) => {
+            setNoteOpen(false)
+            applyPayload(payload)
+          }}
+        />
+      )}
+
+      {scheduleOpen && (
+        <RescheduleOrderDialog
+          order={order}
+          onClose={() => setScheduleOpen(false)}
+          onSaved={(payload) => {
+            setScheduleOpen(false)
+            applyPayload(payload)
+          }}
+        />
+      )}
+
+      {paymentTo !== null && (
+        <PaymentStatusDialog
+          order={order}
+          paid={paymentTo}
+          onClose={() => setPaymentTo(null)}
+          onSaved={(payload) => {
+            setPaymentTo(null)
+            applyPayload(payload)
           }}
         />
       )}
