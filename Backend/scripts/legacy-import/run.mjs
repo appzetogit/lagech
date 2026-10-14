@@ -30,6 +30,9 @@ import { importSocialMedia } from './steps/socialMedia.mjs';
 import { importCoupons } from './steps/coupons.mjs';
 import { importAdminStaff } from './steps/adminStaff.mjs';
 import { importChat } from './steps/chat.mjs';
+import { importNotificationMessages } from './steps/notificationMessages.mjs';
+import { importStoreNotificationSettings } from './steps/storeNotificationSettings.mjs';
+import { importFaqs } from './steps/faqs.mjs';
 
 const STEPS = [
     ['zones', importZones],
@@ -55,6 +58,9 @@ const STEPS = [
     ['admin-staff', importAdminStaff],
     // After customers, restaurants, riders, orders and admin-staff, whose ids it maps.
     ['chat', importChat],
+    ['faqs', importFaqs],
+    ['notification-messages', importNotificationMessages],
+    ['store-notification-settings', importStoreNotificationSettings],
     ['settings', importSettings],
 ];
 const FLAGS = new Set(['--sync', '--dry-run', '--old-prices-win']);

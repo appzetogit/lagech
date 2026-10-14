@@ -138,11 +138,11 @@ test('analytics stores only well-formed ids, and cannot be switched on blank', (
     assert.throws(() => cleanSettings('analytics_scripts', { googleTagManager: { enabled: true } }), /before switching it on/);
 });
 
-test('push messages: every message present, switches only where this page owns them', () => {
+test('push messages: every message present, each switchable but the delivery offer', () => {
     const clean = cleanSettings('push_messages', {
         messages: {
             customer_order_placed: { enabled: false, title: ' Hi ', body: 'Order {orderId}' },
-            // Switched on Notification Channels, so the switch here is ignored.
+            // Also switched (as a group) on Notification Channels; its own switch counts too.
             customer_order_confirmed: { enabled: false, title: 'Confirmed' },
             // The delivery offer is never switchable.
             rider_new_order: { enabled: false },
@@ -150,7 +150,7 @@ test('push messages: every message present, switches only where this page owns t
         },
     });
     assert.deepEqual(clean.messages.customer_order_placed, { enabled: false, title: 'Hi', body: 'Order {orderId}' });
-    assert.deepEqual(clean.messages.customer_order_confirmed, { enabled: true, title: 'Confirmed', body: '' });
+    assert.deepEqual(clean.messages.customer_order_confirmed, { enabled: false, title: 'Confirmed', body: '' });
     assert.equal(clean.messages.rider_new_order.enabled, true);
     assert.equal(clean.messages.bogus, undefined);
     assert.equal(clean.messages.customer_payment_failed.enabled, true);

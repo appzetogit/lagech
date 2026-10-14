@@ -121,6 +121,10 @@ export const emailAccountSuspension = (kind, before, suspended) =>
             eventKey: `${template}:${kind}:${before.id}:${at(before.updatedAt)}`,
             to: account.email,
             values: { userName: account.name, accountType: ACCOUNT_TYPES[kind] },
+            // The restaurant's own switch (Notification Setup: account block / unblock).
+            ...(kind === 'restaurant'
+                ? { restaurant: { id: before.id, event: suspended ? 'store_account_block' : 'store_account_unblock' } }
+                : {}),
         };
     });
 
@@ -156,6 +160,15 @@ export const emailWithdrawalDecision = (kind, withdrawalIds, { processedAt } = {
                     transactionId: w.transactionId || '-',
                     reason: w.rejectionReason || w.adminNote || 'Not given',
                 },
+                // The restaurant's own switch (Notification Setup: withdraw approve / rejection).
+                ...(kind === 'rider'
+                    ? {}
+                    : {
+                        restaurant: {
+                            id: w.restaurantId,
+                            event: w.status === 'approved' ? 'store_withdraw_approve' : 'store_withdraw_rejaction',
+                        },
+                    }),
             };
         });
     });

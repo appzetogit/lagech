@@ -39,6 +39,9 @@ Steps run in this order whatever order they are named in.
 | `social-media` | Social media links (name, link, on/off) |
 | `admin-staff` | Employee roles (`admin_roles`: old module names turned into sidebar pages and section permissions, full access; employee management and push notifications are never granted) and employees (`admins`) as sub-admins on their role, signing in with their old password (the PHP `$2y$` bcrypt hash, kept as is). An email that is already an admin here is only linked, never changed; the old Master admin role, and an old master admin who is not an admin here already, are not imported |
 | `chat` | Chat history (`conversations`, `messages`, through `user_infos`): customer, restaurant, rider and support threads, keyed as the chat service keys them (a support message about an order goes to that order's support thread); admin replies come from support, by the matching admin here or the super admin. Timestamps and seen flags kept; photos from `legacy/conversation` when copied there. Conversations whose other side was not imported are skipped and listed. Run after `customers restaurants riders orders admin-staff` |
+| `faqs` | FAQs (`f_a_q_s`): question, answer, on/off, old order; user_type customer / vendor / deliveryman becomes audience customer / restaurant / rider |
+| `notification-messages` | Order push message texts and on/off (`notification_messages`, food module) into Business Settings -> Push Notification. Only messages not edited here are filled |
+| `store-notification-settings` | Each restaurant's Notification Setup (`store_notification_settings`: mail / SMS / push per event). A restaurant's row already here is never overwritten (run after `restaurants`) |
 
 ## Running it
 
@@ -51,6 +54,8 @@ UPLOAD_STORAGE_ROOT=/srv/lagech/uploads UPLOAD_BASE_URL=/uploads \
 REDIS_URL= NODE_ENV=development \
 node scripts/legacy-import/index.mjs zones categories restaurants foods nutrition customers riders \
   payment-details orders balances ratings coupons admin-staff chat settings
+  payment-details orders balances ratings coupons faqs notification-messages \
+  store-notification-settings settings
 ```
 
 Copy the old `storage/app/public/{category,product,store,profile,delivery-man,conversation,admin}`
@@ -76,6 +81,8 @@ newer one (`LEGACY_MYSQL_URL`) and the one the previous import read
 | Admin roles, admins | Never modified once imported or linked; only new ones come across |
 | Chat | Only new messages. One imported before only has blanks filled (a seen flag set in the old app since, a photo copied across since); a message read here is never made unread |
 | Favourites | Only those added in the old system since the baseline copy, so one a customer removed here does not come back |
+| FAQs | New ones added at the end; ones imported before are never modified (a change is "left alone") |
+| Push messages, restaurants' Notification Setup | Filled where nothing was set here; one that still holds what the last import wrote follows the old system's change; anything edited here is "left alone" |
 
 Run all the steps together: later steps rely on what earlier ones brought in
 during the same run (new dishes get nutrition, new restaurants get payout
@@ -89,6 +96,8 @@ REDIS_URL= NODE_ENV=development \
 node scripts/legacy-import/index.mjs --sync --dry-run zones categories restaurants foods \
   nutrition customers riders payment-details withdrawal-methods orders balances ratings \
   banners cancel-reasons promotions coupons favorites newsletter social-media admin-staff chat settings
+  banners cancel-reasons promotions coupons favorites newsletter social-media faqs \
+  notification-messages store-notification-settings settings
 ```
 
 `--dry-run` runs everything inside one Postgres transaction and rolls it back:

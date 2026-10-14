@@ -8,6 +8,8 @@ import * as c from '../controllers/adminSystemExtras.controller.js';
 const router = express.Router();
 
 router.get('/social-media', c.publicSocialMedia);
+// Also at /v1/food/faqs (routes/index.js). ?audience=customer|restaurant|rider
+router.get('/faqs', c.publicFaqs);
 router.get('/app-settings', c.publicAppSettings);
 router.get('/landing', c.publicLanding);
 router.get('/page-meta', c.publicPageMeta);

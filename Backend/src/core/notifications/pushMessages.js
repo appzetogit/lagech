@@ -1,24 +1,28 @@
 import { logger } from '../../utils/logger.js';
 
 /**
- * The admin's own wording for the order pushes (System Settings -> 3rd Party &
- * Configurations -> Firebase notification), like the old 6amMart panel's
- * "push notification messages".
+ * The admin's own wording for the order pushes, like the old 6amMart panel's
+ * "push notification messages" (Business Settings -> Push Notification, and
+ * System Settings -> 3rd Party & Configurations -> Firebase notification; both
+ * pages edit this one document).
  *
  * Every push goes through sendNotificationToOwner, which hands its payload to
  * applyPushMessage() after the Notification Channels check. A push is matched
  * to a message here by the `data.type` (and `data.orderStatus`) the sending
  * code already puts on it and by who receives it. When the admin wrote a title
  * or body for that message, it replaces the code's wording, with placeholders
- * such as {orderId} filled from the order; when the admin left it blank, the
- * code's wording goes out unchanged.
+ * such as {orderId} or {storeName} filled from the order; when the admin left
+ * it blank, the code's wording (shown on the page as the default) goes out
+ * unchanged.
  *
- * Switching: a message whose event Notification Channels already switches
- * (order status, cancellations, refunds, rider progress, a restaurant's new
- * order) has its on/off THERE, not here -- one switch per event. Messages that
- * page cannot switch get their own switch here, except the delivery offer to
- * riders, which is never switchable because without it orders are not
- * delivered.
+ * Switching: like 6amMart, every message has its own on/off here, and a
+ * message switched off is not pushed (nor kept in the inbox). Notification
+ * Channels stays the master switch for a whole group of events (every order
+ * status push, say): a push goes out only when both are on. The delivery offer
+ * to riders is never switchable, because without it orders are not delivered.
+ *
+ * `legacy` is the 6amMart notification_messages key a message is imported
+ * from (scripts/legacy-import, step notification-messages).
  *
  * Fails open: if the settings or the order cannot be read, the push goes out
  * as the code wrote it.
@@ -28,23 +32,28 @@ export const AREA = 'push_messages';
 
 const CANCEL = 'cancel';
 
-/** Placeholders every order message can use. */
-const ORDER_VARS = ['orderId', 'restaurantName', 'customerName', 'userName', 'deliveryManName', 'orderAmount'];
+/** Placeholders every order message can use ({storeName} and {userName} as in 6amMart). */
+const ORDER_VARS = ['userName', 'customerName', 'orderId', 'storeName', 'restaurantName', 'deliveryManName', 'orderAmount'];
 
 /**
- * key, label, who gets it, how a push is recognised (any of `match`), and
- * `channel`: the Notification Channels event that switches it (null when this
- * page switches it), or `locked` when it cannot be switched at all.
+ * key, label, who gets it, how a push is recognised (any of `match`),
+ * `channel`: the Notification Channels event that is also a switch for it
+ * (null when only this page switches it), `locked` when it cannot be switched
+ * at all, and the code's own wording today (`defaultTitle` / `defaultBody`,
+ * shown on the page; the code may add details such as a refund amount).
  */
 export const PUSH_MESSAGES = [
     // Customer.
     {
         key: 'customer_order_placed',
-        label: 'Order placed',
+        label: 'Order placed (pending)',
         audience: 'Customer',
         owner: 'USER',
         match: [{ types: ['order_created'] }],
         channel: null,
+        legacy: 'order_pending_message',
+        defaultTitle: 'Order Confirmed! 🍔',
+        defaultBody: 'Your order #{orderId} from {storeName} has been placed successfully.',
     },
     {
         key: 'customer_order_confirmed',
@@ -53,6 +62,9 @@ export const PUSH_MESSAGES = [
         owner: 'USER',
         match: [{ types: ['order_status_update'], statuses: ['confirmed'] }],
         channel: 'order_status',
+        legacy: 'order_confirmation_msg',
+        defaultTitle: 'Order Accepted! 🧑‍🍳',
+        defaultBody: 'The order has been accepted and is starting to be prepared.',
     },
     {
         key: 'customer_order_processing',
@@ -61,6 +73,9 @@ export const PUSH_MESSAGES = [
         owner: 'USER',
         match: [{ types: ['order_status_update'], statuses: ['preparing'] }],
         channel: 'order_status',
+        legacy: 'order_processing_message',
+        defaultTitle: 'Food is being prepared! 🍳',
+        defaultBody: 'Your food is currently being prepared by the restaurant.',
     },
     {
         key: 'customer_order_ready',
@@ -69,6 +84,9 @@ export const PUSH_MESSAGES = [
         owner: 'USER',
         match: [{ types: ['order_status_update'], statuses: ['ready_for_pickup'] }],
         channel: 'order_status',
+        legacy: 'order_handover_message',
+        defaultTitle: 'Food is ready! 🛍️',
+        defaultBody: 'Your order is ready and waiting to be picked up.',
     },
     {
         key: 'customer_rider_assigned',
@@ -77,14 +95,20 @@ export const PUSH_MESSAGES = [
         owner: 'USER',
         match: [{ types: ['delivery_accepted'] }],
         channel: 'rider_progress',
+        legacy: 'delivery_boy_assign_message',
+        defaultTitle: 'Order {orderId} accepted',
+        defaultBody: 'A delivery partner has accepted your order.',
     },
     {
         key: 'customer_out_for_delivery',
-        label: 'Order out for delivery',
+        label: 'Order out for delivery (picked up)',
         audience: 'Customer',
         owner: 'USER',
         match: [{ types: ['order_status_update'], statuses: ['picked_up'] }],
         channel: 'order_status',
+        legacy: 'out_for_delivery_message',
+        defaultTitle: 'Order on the way!',
+        defaultBody: 'Partner has picked up your order #{orderId} and is heading your way.',
     },
     {
         key: 'customer_rider_nearby',
@@ -93,6 +117,8 @@ export const PUSH_MESSAGES = [
         owner: 'USER',
         match: [{ types: ['order_status_update'], statuses: ['reached_drop'] }],
         channel: 'order_status',
+        defaultTitle: 'Partner nearby!',
+        defaultBody: 'Your delivery partner has reached your location for order #{orderId}.',
     },
     {
         key: 'customer_order_delivered',
@@ -101,6 +127,9 @@ export const PUSH_MESSAGES = [
         owner: 'USER',
         match: [{ types: ['order_status_update'], statuses: ['delivered'] }],
         channel: 'order_status',
+        legacy: 'order_delivered_message',
+        defaultTitle: 'Order #{orderId} delivered!',
+        defaultBody: "Hope you enjoyed your meal! Don't forget to rate your experience.",
     },
     {
         key: 'customer_order_cancelled',
@@ -109,6 +138,9 @@ export const PUSH_MESSAGES = [
         owner: 'USER',
         match: [{ types: ['order_cancelled'] }, { types: ['order_status_update'], statuses: CANCEL }],
         channel: 'order_cancelled',
+        legacy: 'order_cancled_message',
+        defaultTitle: 'Order Cancelled ❌',
+        defaultBody: 'Order #{orderId} has been cancelled successfully.',
     },
     {
         key: 'customer_order_refunded',
@@ -117,6 +149,21 @@ export const PUSH_MESSAGES = [
         owner: 'USER',
         match: [{ types: ['refund_processed'] }],
         channel: 'refund',
+        legacy: 'order_refunded_message',
+        defaultTitle: 'Refund Processed! 💸',
+        defaultBody: 'Your refund for Order #{orderId} has been processed successfully.',
+    },
+    {
+        key: 'customer_refund_request_rejected',
+        label: 'Refund request canceled (declined)',
+        audience: 'Customer',
+        owner: 'USER',
+        match: [{ types: ['refund_request_rejected'] }],
+        channel: null,
+        legacy: 'refund_request_canceled',
+        defaultTitle: 'Refund request declined',
+        defaultBody: 'Your refund request for order #{orderId} was declined: {reason}',
+        extraVars: ['reason'],
     },
     {
         key: 'customer_payment_failed',
@@ -125,6 +172,8 @@ export const PUSH_MESSAGES = [
         owner: 'USER',
         match: [{ types: ['payment_failed'] }],
         channel: null,
+        defaultTitle: 'Payment failed',
+        defaultBody: 'The payment for order #{orderId} did not go through.',
     },
     // Restaurant.
     {
@@ -135,6 +184,8 @@ export const PUSH_MESSAGES = [
         match: [{ types: ['new_order', 'order_created'] }],
         channel: 'restaurant_new_order',
         extraVars: ['itemsList', 'itemCount', 'total', 'address'],
+        defaultTitle: 'New order received',
+        defaultBody: 'Order #{orderId}: {itemsList}',
     },
     {
         key: 'restaurant_order_cancelled',
@@ -143,6 +194,8 @@ export const PUSH_MESSAGES = [
         owner: 'RESTAURANT',
         match: [{ types: ['order_cancelled'] }, { types: ['order_status_update'], statuses: CANCEL }],
         channel: 'order_cancelled',
+        defaultTitle: 'Order Cancelled ❌',
+        defaultBody: 'Order #{orderId} has been cancelled.',
     },
     {
         key: 'restaurant_rider_assigned',
@@ -151,6 +204,8 @@ export const PUSH_MESSAGES = [
         owner: 'RESTAURANT',
         match: [{ types: ['delivery_accepted'] }],
         channel: 'rider_progress',
+        defaultTitle: 'Order {orderId} accepted',
+        defaultBody: 'A delivery partner has accepted your order.',
     },
     {
         key: 'restaurant_rider_arrived',
@@ -159,6 +214,8 @@ export const PUSH_MESSAGES = [
         owner: 'RESTAURANT',
         match: [{ types: ['rider_arrived'] }],
         channel: 'rider_progress',
+        defaultTitle: 'Rider arrived!',
+        defaultBody: '{deliveryManName} has arrived at {storeName} to pick up the order.',
     },
     {
         key: 'restaurant_order_picked_up',
@@ -167,6 +224,8 @@ export const PUSH_MESSAGES = [
         owner: 'RESTAURANT',
         match: [{ types: ['order_status_update'], statuses: ['picked_up'] }],
         channel: 'order_status',
+        defaultTitle: 'Order on the way!',
+        defaultBody: 'Partner has picked up order #{orderId}.',
     },
     {
         key: 'restaurant_order_delivered',
@@ -175,6 +234,8 @@ export const PUSH_MESSAGES = [
         owner: 'RESTAURANT',
         match: [{ types: ['order_status_update'], statuses: ['delivered'] }],
         channel: 'order_status',
+        defaultTitle: 'Order #{orderId} delivered!',
+        defaultBody: 'Order #{orderId} has been delivered.',
     },
     // Rider.
     {
@@ -186,6 +247,8 @@ export const PUSH_MESSAGES = [
         channel: null,
         locked: true,
         extraVars: ['riderEarning', 'tripDistanceKm', 'customerAddress', 'restaurantAddress'],
+        defaultTitle: 'New order available!',
+        defaultBody: 'Pickup: {storeName} / Drop: {customerAddress} / Earning: Rs.{riderEarning}',
     },
     {
         key: 'rider_order_assigned',
@@ -194,6 +257,8 @@ export const PUSH_MESSAGES = [
         owner: 'DELIVERY_PARTNER',
         match: [{ types: ['delivery_accepted'] }],
         channel: 'rider_progress',
+        defaultTitle: 'Order {orderId} accepted',
+        defaultBody: 'A delivery partner has accepted your order.',
     },
     {
         key: 'rider_order_picked_up',
@@ -202,6 +267,8 @@ export const PUSH_MESSAGES = [
         owner: 'DELIVERY_PARTNER',
         match: [{ types: ['order_status_update'], statuses: ['picked_up'] }],
         channel: 'order_status',
+        defaultTitle: 'Order picked up!',
+        defaultBody: 'You have picked up order #{orderId}. Proceed to the customer location.',
     },
     {
         key: 'rider_order_delivered',
@@ -210,6 +277,9 @@ export const PUSH_MESSAGES = [
         owner: 'DELIVERY_PARTNER',
         match: [{ types: ['order_completed'] }],
         channel: null,
+        legacy: 'delivery_boy_delivered_message',
+        defaultTitle: 'Delivery successful!',
+        defaultBody: 'Order #{orderId} has been successfully delivered.',
     },
     {
         key: 'rider_order_cancelled',
@@ -218,14 +288,21 @@ export const PUSH_MESSAGES = [
         owner: 'DELIVERY_PARTNER',
         match: [{ types: ['order_cancelled'] }, { types: ['order_status_update'], statuses: CANCEL }],
         channel: 'order_cancelled',
+        defaultTitle: 'Order Cancelled ❌',
+        defaultBody: 'Order #{orderId} has been cancelled.',
     },
 ];
 
-/** Whether this page carries the on/off switch for a message. */
-export const ownSwitch = (message) => Boolean(message) && !message.channel && !message.locked;
+/** Whether a message can be switched off: all but the delivery offer. */
+export const ownSwitch = (message) => Boolean(message) && !message.locked;
 
 /** The placeholders a message's text may use. */
 export const placeholdersFor = (message) => [...ORDER_VARS, ...(message?.extraVars || [])];
+
+/** 6amMart notification_messages key -> the message here it becomes. */
+export const LEGACY_PUSH_MESSAGE_KEYS = Object.fromEntries(
+    PUSH_MESSAGES.filter((message) => message.legacy).map((message) => [message.legacy, message.key]),
+);
 
 /** What the admin page renders: the messages without the matching rules. */
 export const PUSH_MESSAGE_CATALOG = PUSH_MESSAGES.map((message) => ({
@@ -233,8 +310,12 @@ export const PUSH_MESSAGE_CATALOG = PUSH_MESSAGES.map((message) => ({
     label: message.label,
     audience: message.audience,
     switchable: ownSwitch(message),
-    switchedOn: message.channel ? 'notification_channels' : message.locked ? 'never' : 'here',
+    switchedOn: message.locked ? 'never' : 'here',
+    // The Notification Channels event that is the master switch for it.
     channel: message.channel,
+    legacyKey: message.legacy || null,
+    defaultTitle: message.defaultTitle || '',
+    defaultBody: message.defaultBody || '',
     placeholders: placeholdersFor(message),
 }));
 
@@ -250,6 +331,56 @@ export function normalizePushMessages(value = {}) {
         messages[message.key] = { enabled, title: text(saved.title, 120), body: text(saved.body, 500) };
     }
     return { messages };
+}
+
+/** An old message text as it is stored here: single spaces, trimmed, bounded. */
+const legacyText = (value) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, 500);
+
+/** One wanted entry per old key, from 6amMart notification_messages rows (last row wins). */
+const wantedFromLegacy = (rows = []) => {
+    const wanted = new Map();
+    for (const row of rows || []) {
+        const legacyKey = String(row?.key || '').trim();
+        if (!legacyKey) continue;
+        wanted.set(legacyKey, { body: legacyText(row.message), enabled: Number(row.status) !== 0 });
+    }
+    return wanted;
+};
+
+/**
+ * The old panel's message texts and switches folded into the stored value.
+ * Only a message nobody has edited here is filled (no title, no body, still
+ * on). A message that still holds exactly what an earlier import wrote (the
+ * `baselineRows`, on a sync) follows the old system's change; anything else
+ * set here is left alone. Pure.
+ *
+ * @returns {{ value, outcomes: { legacyKey, key, outcome, reason? }[] }}
+ *   outcome: created | updated | unchanged | protected | skipped
+ */
+export function mergeLegacyPushMessages(current = {}, rows = [], { baselineRows = null } = {}) {
+    const value = normalizePushMessages(current);
+    const baseline = baselineRows ? wantedFromLegacy(baselineRows) : null;
+    const outcomes = [];
+    for (const [legacyKey, wanted] of wantedFromLegacy(rows)) {
+        const key = LEGACY_PUSH_MESSAGE_KEYS[legacyKey];
+        if (!key) {
+            outcomes.push({ legacyKey, key: null, outcome: 'skipped', reason: 'no message here for it' });
+            continue;
+        }
+        const entry = value.messages[key];
+        const holds = (w) => Boolean(w) && !entry.title && entry.body === w.body && entry.enabled === w.enabled;
+        const untouched = !entry.title && !entry.body && entry.enabled !== false;
+        let outcome;
+        if (holds(wanted)) outcome = 'unchanged';
+        else if (untouched) outcome = wanted.body || !wanted.enabled ? 'created' : 'unchanged';
+        else if (baseline && holds(baseline.get(legacyKey))) outcome = 'updated';
+        else outcome = 'protected';
+        if (outcome === 'created' || outcome === 'updated') {
+            value.messages[key] = { enabled: wanted.enabled, title: '', body: wanted.body };
+        }
+        outcomes.push({ legacyKey, key, outcome });
+    }
+    return { value, outcomes };
 }
 
 /** Which message a push is, from its data and who receives it; null if none. Pure. */
@@ -360,10 +491,12 @@ async function varsForPayload(payload) {
         });
         if (!order) return vars;
         const customerName = order.customerName || order.user?.name || '';
+        const restaurantName = order.restaurant?.restaurantName || '';
         return {
             ...vars,
             orderId: order.order_id || order.id,
-            restaurantName: order.restaurant?.restaurantName || '',
+            restaurantName,
+            storeName: restaurantName,
             customerName,
             userName: customerName,
             deliveryManName: order.deliveryPartner?.name || data.partnerName || '',

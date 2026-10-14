@@ -3,6 +3,7 @@ import { logger } from '../../utils/logger.js';
 import { EMAIL_TEMPLATES } from '../../utils/emailTemplates.js';
 import { composeStoredEmail, getTransporter, fromHeader } from '../../utils/email.js';
 import { EMAIL_SETTINGS_KEY, cleanEmail, isSwitchable, normalizeEmailSettings } from './emailSettings.js';
+import { isRestaurantNotificationOn } from './restaurantNotificationSettings.js';
 
 /**
  * Transactional emails (registration decisions, withdrawals, refunds, orders,
@@ -13,7 +14,9 @@ import { EMAIL_SETTINGS_KEY, cleanEmail, isSwitchable, normalizeEmailSettings } 
  *  - queueEmail() returns at once and never throws. The work runs on a later
  *    tick; nothing it does can block, slow or fail the caller's action.
  *  - Nothing is sent when Mail Config is off or incomplete, when the email is
- *    switched off on Email Templates, or when there is no valid recipient.
+ *    switched off on Email Templates, when the restaurant it goes to switched
+ *    that event's mail off (Notification Setup), or when there is no valid
+ *    recipient.
  *  - Each event is sent once: its eventKey is claimed in food_email_send_logs
  *    (unique) before sending. A retry, a double click or a second server finds
  *    the key taken. A failed send may be claimed again, up to MAX_ATTEMPTS.
@@ -92,12 +95,17 @@ const finish = (eventKey, status, error = '') =>
  * Send one event email now. Returns what happened ('sent', 'duplicate',
  * 'failed' or 'skipped:<why>'); throws nothing a caller has to handle.
  */
-export async function deliverEmail({ template, eventKey, to, values = {} }) {
+export async function deliverEmail({ template, eventKey, to, values = {}, restaurant = null }) {
     if (!EMAIL_TEMPLATES[template]) return 'skipped:unknown_template';
     if (!eventKey) return 'skipped:no_event_key';
 
     const settings = await readEmailSettings();
     if (isSwitchable(template) && settings.switches[template] === false) return 'skipped:switched_off';
+    // An email to a restaurant names its Notification Setup event
+    // ({ id, event }); the restaurant may have switched that event's mail off.
+    if (restaurant?.id && restaurant?.event && !(await isRestaurantNotificationOn(restaurant.id, restaurant.event, 'mail'))) {
+        return 'skipped:restaurant_off';
+    }
 
     const recipients = to === 'admins'
         ? await adminRecipients(settings)

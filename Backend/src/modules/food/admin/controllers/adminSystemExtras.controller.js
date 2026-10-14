@@ -7,6 +7,7 @@ import * as reports from '../services/adminMoneyReports.service.js';
 import * as emailTemplates from '../services/emailTemplates.service.js';
 import * as extras from '../services/adminSystemExtras.service.js';
 import * as gallery from '../services/adminGallery.service.js';
+import * as faqs from '../services/faq.service.js';
 import {
     validate,
     withdrawalMethodSchema,
@@ -113,6 +114,14 @@ export const updateSocialLink = handle(200, 'Social media link saved', (req) =>
     extras.updateSocialLink(req.params.id, validate(socialLinkSchema, req.body)));
 export const deleteSocialLink = handle(200, 'Social media link deleted', (req) => extras.deleteSocialLink(req.params.id));
 
+// ─── FAQs (admin) ────────────────────────────────────────────────────────────
+
+export const listFaqs = handle(200, 'FAQs', (req) => faqs.listFaqs(req.query || {}));
+export const createFaq = handle(201, 'FAQ added', (req) => faqs.createFaq(req.body || {}));
+export const updateFaq = handle(200, 'FAQ saved', (req) => faqs.updateFaq(req.params.id, req.body || {}));
+export const deleteFaq = handle(200, 'FAQ deleted', (req) => faqs.deleteFaq(req.params.id));
+export const reorderFaqs = handle(200, 'FAQ order saved', (req) => faqs.reorderFaqs(req.body || {}));
+
 // ─── Gallery (admin) ─────────────────────────────────────────────────────────
 
 export const listGalleryFiles = handle(200, 'Files', (req) => gallery.listGalleryFiles(req.query || {}));
@@ -124,6 +133,7 @@ export const deleteGalleryFile = handle(200, 'File deleted', (req) => gallery.de
 // ─── Public ──────────────────────────────────────────────────────────────────
 
 export const publicSocialMedia = handle(200, 'Social media', () => extras.getPublicSocialMedia());
+export const publicFaqs = handle(200, 'FAQs', (req) => faqs.getPublicFaqs(req.query || {}));
 export const publicAppSettings = handle(200, 'App settings', () => extras.getPublicAppSettings());
 export const publicLanding = handle(200, 'Landing page', () => extras.getPublicLanding());
 export const publicPageMeta = handle(200, 'Page meta data', () => extras.getPublicPageMeta());

@@ -490,6 +490,8 @@ export async function rejectRefundRequest(id, adminId, body = {}) {
             orderId: String(displayId(updated.order)),
             orderRowId: updated.orderId,
             refundRequestId: updated.id,
+            // {reason} in the admin's wording (Push Notification messages).
+            reason: note,
         },
     });
     emailRefundDecision(updated.id);

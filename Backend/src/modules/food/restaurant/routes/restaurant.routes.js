@@ -188,6 +188,25 @@ router.patch('/dining-settings', authMiddleware, requireRestaurant, async (req, 
     next();
 }, updateCurrentRestaurantDiningSettingsController);
 
+// Notification Setup (old store panel): mail / SMS / push per event.
+router.get('/notification-settings', authMiddleware, requireRestaurant, async (req, res, next) => {
+    try {
+        const { getRestaurantNotificationSettings } = await import('../../../../core/notifications/restaurantNotificationSettings.js');
+        res.status(200).json({ success: true, data: await getRestaurantNotificationSettings(req.user?.userId) });
+    } catch (error) {
+        next(error);
+    }
+});
+// Body: { key, channel: 'mail' | 'sms' | 'push', status: 'active' | 'inactive' } (or enabled: true/false).
+router.patch('/notification-settings', authMiddleware, requireRestaurant, async (req, res, next) => {
+    try {
+        const { updateRestaurantNotificationSetting } = await import('../../../../core/notifications/restaurantNotificationSettings.js');
+        const data = await updateRestaurantNotificationSetting(req.user?.userId, req.body || {});
+        res.status(200).json({ success: true, message: 'Notification setting saved', data });
+    } catch (error) {
+        next(error);
+    }
+});
 router.get('/outlet-timings', authMiddleware, requireRestaurant, getCurrentRestaurantOutletTimingsController);
 router.put('/outlet-timings', authMiddleware, requireRestaurant, upsertCurrentRestaurantOutletTimingsController);
 router.get('/finance', authMiddleware, requireRestaurant, getRestaurantFinanceController);
