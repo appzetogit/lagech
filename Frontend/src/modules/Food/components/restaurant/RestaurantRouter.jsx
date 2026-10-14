@@ -43,6 +43,7 @@ const HubFinance = lazy(() => import("@food/pages/restaurant/HubFinance"))
 const FinanceDetailsPage = lazy(() => import("@food/pages/restaurant/FinanceDetailsPage"))
 const WithdrawalHistoryPage = lazy(() => import("@food/pages/restaurant/WithdrawalHistoryPage"))
 const DisbursementsPage = lazy(() => import("@food/pages/restaurant/DisbursementsPage"))
+const NotificationSetup = lazy(() => import("@food/pages/restaurant/NotificationSetup"))
 const AdvertisePage = lazy(() => import("@food/pages/restaurant/AdvertisePage"))
 const PhoneNumbersPage = lazy(() => import("@food/pages/restaurant/PhoneNumbersPage"))
 const DownloadReport = lazy(() => import("@food/pages/restaurant/DownloadReport"))
@@ -141,6 +142,7 @@ export default function RestaurantRouter() {
           <Route element={<ProtectedRoute requiredRole="restaurant" loginPath="/food/restaurant/login"><Subscription /></ProtectedRoute>} path="subscription" />
           <Route element={<ProtectedRoute requiredRole="restaurant" loginPath="/food/restaurant/login"><WithdrawalHistoryPage /></ProtectedRoute>} path="withdrawal-history" />
           <Route element={<ProtectedRoute requiredRole="restaurant" loginPath="/food/restaurant/login"><DisbursementsPage /></ProtectedRoute>} path="disbursements" />
+          <Route element={<ProtectedRoute requiredRole="restaurant" loginPath="/food/restaurant/login"><NotificationSetup /></ProtectedRoute>} path="notification-setup" />
           <Route element={<ProtectedRoute requiredRole="restaurant" loginPath="/food/restaurant/login"><AdvertisePage /></ProtectedRoute>} path="advertise" />
           <Route element={<ProtectedRoute requiredRole="restaurant" loginPath="/food/restaurant/login"><FinanceDetailsPage /></ProtectedRoute>} path="finance-details" />
           <Route element={<ProtectedRoute requiredRole="restaurant" loginPath="/food/restaurant/login"><PhoneNumbersPage /></ProtectedRoute>} path="phone" />

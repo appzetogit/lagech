@@ -459,6 +459,7 @@ export const adminSidebarMenu = [
         ],
       },
       { type: "link", label: "Social Media", path: "/admin/food/pages-social-media/social-media", icon: "Globe" },
+      { type: "link", label: "FAQ", path: "/admin/food/pages-social-media/faq", icon: "FileText" },
     ],
   },
 ];

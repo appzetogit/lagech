@@ -77,10 +77,16 @@ test('the admin text replaces the code text; blanks keep it; a switched-off mess
     const off = normalizePushMessages({ messages: { customer_order_placed: { enabled: false } } });
     assert.equal(applyPushMessageSettings(payload, message, off, {}).skip, true);
 
-    // A message switched on Notification Channels is never skipped here.
+    // Like 6amMart, an order status message has its own switch too
+    // (Notification Channels stays the master switch for the group).
     const status = { data: { type: 'order_status_update', orderStatus: 'confirmed' } };
     const statusOff = normalizePushMessages({ messages: { customer_order_confirmed: { enabled: false } } });
-    assert.equal(applyPushMessageSettings(status, messageForPush(status.data, 'USER'), statusOff, {}).skip, undefined);
+    assert.equal(applyPushMessageSettings(status, messageForPush(status.data, 'USER'), statusOff, {}).skip, true);
+
+    // The delivery offer can never be switched off.
+    const offer = { data: { type: 'new_order' } };
+    const offerOff = normalizePushMessages({ messages: { rider_new_order: { enabled: false } } });
+    assert.equal(applyPushMessageSettings(offer, messageForPush(offer.data, 'DELIVERY_PARTNER'), offerOff, {}).skip, undefined);
 });
 
 // ─── Against the database ────────────────────────────────────────────────────

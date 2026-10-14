@@ -52,6 +52,13 @@ export const adminSystemExtrasAPI = {
   updateSocialLink: (id, body) => apiClient.patch(`${A}/social-media/${id}`, body, admin),
   deleteSocialLink: (id) => apiClient.delete(`${A}/social-media/${id}`, admin),
 
+  // FAQs
+  getFaqs: (params = {}) => apiClient.get(`${A}/faqs`, { params, ...admin }),
+  createFaq: (body) => apiClient.post(`${A}/faqs`, body, admin),
+  updateFaq: (id, body) => apiClient.patch(`${A}/faqs/${id}`, body, admin),
+  deleteFaq: (id) => apiClient.delete(`${A}/faqs/${id}`, admin),
+  reorderFaqs: (ids) => apiClient.put(`${A}/faqs/reorder`, { ids }, admin),
+
   // Gallery
   getGalleryFiles: (params = {}) => apiClient.get(`${A}/gallery`, { params, ...admin }),
   getGalleryFileUsage: (path) => apiClient.get(`${A}/gallery/usage`, { params: { path }, ...admin }),

@@ -28,6 +28,9 @@ import { importNewsletter } from './steps/newsletter.mjs';
 import { importWithdrawalMethods } from './steps/withdrawalMethods.mjs';
 import { importSocialMedia } from './steps/socialMedia.mjs';
 import { importCoupons } from './steps/coupons.mjs';
+import { importNotificationMessages } from './steps/notificationMessages.mjs';
+import { importStoreNotificationSettings } from './steps/storeNotificationSettings.mjs';
+import { importFaqs } from './steps/faqs.mjs';
 
 const STEPS = [
     ['zones', importZones],
@@ -49,6 +52,9 @@ const STEPS = [
     ['favorites', importFavorites],
     ['newsletter', importNewsletter],
     ['social-media', importSocialMedia],
+    ['faqs', importFaqs],
+    ['notification-messages', importNotificationMessages],
+    ['store-notification-settings', importStoreNotificationSettings],
     ['settings', importSettings],
 ];
 const FLAGS = new Set(['--sync', '--dry-run', '--old-prices-win']);

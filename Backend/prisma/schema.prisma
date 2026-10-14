@@ -845,6 +845,7 @@ model FoodRestaurant {
   offers               FoodOffer[]
   campaignEntries      FoodCampaignRestaurant[]
   itemCampaigns        FoodItemCampaign[]
+  notificationSettings FoodRestaurantNotificationSetting[]
 
   @@unique([restaurantNameNormalized, ownerPhoneLast10])
   @@index([ownerPhone])
@@ -4095,6 +4096,47 @@ model FoodSocialMediaLink {
 
   @@index([isActive, sortOrder])
   @@map("food_social_media_links")
+}
+
+/// Admin-managed FAQs (old 6amMart f_a_q_s), shown on the customer help page
+/// and by GET /food/faqs. audience: 'customer' | 'restaurant' | 'rider', or
+/// null for everyone.
+model FoodFaq {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  question  String  @db.VarChar(255)
+  answer    String
+  audience  String? @db.VarChar(16)
+  isActive  Boolean @default(true)
+  sortOrder Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, sortOrder])
+  @@map("food_faqs")
+}
+
+/// A restaurant's own choice per notification event and channel (old 6amMart
+/// store "Notification Setup", store_notification_settings). No row means the
+/// event's defaults. Each status is 'active' or 'inactive'; a channel the
+/// event does not offer is 'disable' (restaurantNotificationSettings.js).
+model FoodRestaurantNotificationSetting {
+  id           String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  restaurantId String @db.VarChar(24)
+  key          String @db.VarChar(64)
+
+  mailStatus String @default("active") @db.VarChar(10)
+  smsStatus  String @default("disable") @db.VarChar(10)
+  pushStatus String @default("active") @db.VarChar(10)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant FoodRestaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@unique([restaurantId, key])
+  @@map("food_restaurant_notification_settings")
 }
 
 /// One JSON document per settings area: 'page_meta', 'app_settings',

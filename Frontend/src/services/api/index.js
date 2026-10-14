@@ -1559,6 +1559,12 @@ export const restaurantAPI = {
   /** This restaurant's daily payout lines (old store panel: Disbursement). */
   getDisbursements: (params = {}) =>
     apiClient.get("/food/restaurant/disbursements", { params, contextModule: "restaurant" }),
+  /** Notification Setup (old store panel): mail / SMS / push per event. */
+  getNotificationSettings: () =>
+    apiClient.get("/food/restaurant/notification-settings", { contextModule: "restaurant" }),
+  /** body: { key, channel: "mail" | "sms" | "push", status: "active" | "inactive" } */
+  updateNotificationSetting: (body) =>
+    apiClient.patch("/food/restaurant/notification-settings", body, { contextModule: "restaurant" }),
   /** Advertisement requests: sent here, decided by the admin. */
   getMyAdvertisements: () => apiClient.get("/food/restaurant/advertisements", { contextModule: "restaurant" }),
   requestAdvertisement: (body) => apiClient.post("/food/restaurant/advertisements", body, { contextModule: "restaurant" }),

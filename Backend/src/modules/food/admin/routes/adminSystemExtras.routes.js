@@ -10,7 +10,7 @@ import thirdPartyRoutes from './adminThirdParty.routes.js';
  * every path here is already checked against the section resolveSectionFromRequest
  * maps it to: /withdrawals -> transaction_management, /reports ->
  * report_management, /email-templates, /system-settings and /gallery ->
- * system_settings, /social-media -> pages_social_media.
+ * system_settings, /social-media and /faqs -> pages_social_media.
  */
 const router = express.Router();
 
@@ -59,6 +59,13 @@ router.get('/social-media', c.listSocialLinks);
 router.post('/social-media', c.createSocialLink);
 router.patch('/social-media/:id', c.updateSocialLink);
 router.delete('/social-media/:id', c.deleteSocialLink);
+
+// FAQs (old panel's FAQ list). Reorder body: { ids: [...] } in the new order.
+router.get('/faqs', c.listFaqs);
+router.post('/faqs', c.createFaq);
+router.put('/faqs/reorder', c.reorderFaqs);
+router.patch('/faqs/:id', c.updateFaq);
+router.delete('/faqs/:id', c.deleteFaq);
 
 // Gallery.
 router.get('/gallery', c.listGalleryFiles);

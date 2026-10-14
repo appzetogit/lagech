@@ -1,6 +1,7 @@
 import { useSearchParams } from "react-router-dom"
 import { Settings } from "@food/components/admin/theme/icons"
 import { PageFrame } from "../../system/SettingsUi"
+import { PushMessagesEditor } from "../../system/FirebaseNotification"
 import {
   BusinessInfoTab,
   DeliverymanTab,
@@ -31,6 +32,8 @@ const TABS = [
   { key: "priority", label: "Priority Setup" },
   { key: "disbursement", label: "Disbursement" },
   { key: "automated-message", label: "Automated Message" },
+  // The old panel's Notification tab: the order push messages.
+  { key: "push-notification", label: "Push Notification" },
 ]
 
 export default function BusinessSettingsTabs({ companyInfo }) {
@@ -77,6 +80,7 @@ export default function BusinessSettingsTabs({ companyInfo }) {
       {active === "priority" && <PriorityTab />}
       {active === "disbursement" && <DisbursementTab />}
       {active === "automated-message" && <AutomatedMessageTab />}
+      {active === "push-notification" && <PushMessagesEditor />}
     </PageFrame>
   )
 }

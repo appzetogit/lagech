@@ -127,6 +127,7 @@ const DeliverymanEarningReport = lazy(() => import("@food/pages/admin/reports/De
 const RestaurantPayments = lazy(() => import("@food/pages/admin/transactions/RestaurantPayments"));
 const RestaurantEarningReport = lazy(() => import("@food/pages/admin/reports/RestaurantEarningReport"));
 const SocialMedia = lazy(() => import("@food/pages/admin/system/SocialMedia"));
+const FaqManager = lazy(() => import("@food/pages/admin/system/FaqManager"));
 // Employee Management
 const EmployeeRole = lazy(() => import("@food/pages/admin/employees/EmployeeRole"));
 const AddEmployee = lazy(() => import("@food/pages/admin/employees/AddEmployee"));
@@ -425,6 +426,7 @@ export default function AdminRouter() {
             <Route path="restaurant-payments" element={<RestaurantPayments />} />
             <Route path="restaurant-earning-report" element={<RestaurantEarningReport />} />
             <Route path="pages-social-media/social-media" element={<SocialMedia />} />
+            <Route path="pages-social-media/faq" element={<FaqManager />} />
             
             <Route path="employee-role" element={<EmployeeRole />} />
             <Route path="employees" element={<EmployeeList />} />

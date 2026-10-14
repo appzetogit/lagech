@@ -28,6 +28,7 @@ import { config } from '../config/env.js';
 import { getRateLimitSummary } from '../middleware/rateLimit.js';
 import { getRestaurantReviews } from '../modules/food/restaurant/services/restaurantReviews.service.js';
 import systemExtrasPublicRoutes from '../modules/food/admin/routes/systemExtrasPublic.routes.js';
+import { publicFaqs } from '../modules/food/admin/controllers/adminSystemExtras.controller.js';
 
 const router = express.Router();
 
@@ -48,6 +49,9 @@ router.use('/v1/food/auth', authRoutes);
 router.use('/v1/auth', authRoutes);
 router.use('/v1/food/delivery', deliveryRoutes);
 router.use('/v1/food/restaurant', restaurantRoutes);
+// Public FAQs for the help pages and the apps: ?audience=customer|restaurant|rider
+// (also /v1/food/public/faqs). Cached in the service for a minute.
+router.get('/v1/food/faqs', publicFaqs);
 // Landing & hero-banners for Food user app (paths start with /food/hero-banners/...)
 router.use('/v1/food', landingRoutes);
 router.use('/v1/food/search', searchRoutes);

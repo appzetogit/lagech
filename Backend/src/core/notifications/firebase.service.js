@@ -7,6 +7,7 @@ import { logger } from '../../utils/logger.js';
 import { isMobilePlatform, normalizePlatform } from '../../utils/platform.js';
 import { isPushAllowed } from './notificationChannels.js';
 import { applyPushMessage } from './pushMessages.js';
+import { isRestaurantPushAllowed } from './restaurantNotificationSettings.js';
 import { recordPushInInbox } from './notification.service.js';
 
 const FIREBASE_MESSAGING_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging';
@@ -590,6 +591,11 @@ export const sendNotificationToOwner = async ({ ownerType, ownerId, payload, pla
     // An event the admin switched off on Notification Channels is not pushed.
     if (!(await isPushAllowed(payload, ownerType))) {
         return { successCount: 0, failureCount: 0, results: [], skipped: 'channel_off' };
+    }
+    // A restaurant that switched this event's push off on its Notification
+    // Setup page (old store_notification_settings) is not pushed.
+    if (String(ownerType || '').toUpperCase() === 'RESTAURANT' && !(await isRestaurantPushAllowed(ownerId, payload))) {
+        return { successCount: 0, failureCount: 0, results: [], skipped: 'restaurant_off' };
     }
     // The admin's own wording for this message (Firebase notification page),
     // or nothing at all when the admin switched it off there.

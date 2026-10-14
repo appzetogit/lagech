@@ -1,6 +1,7 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import SupportChat from "@food/components/shared/SupportChat"
+import { publicGetOnce } from "@food/api"
 import {
   Search,
   HelpCircle,
@@ -190,8 +191,40 @@ export default function Help() {
   const [searchQuery, setSearchQuery] = useState("")
   const [expandedCategory, setExpandedCategory] = useState(null)
   const [expandedQuestion, setExpandedQuestion] = useState(null)
+  const [faqs, setFaqs] = useState([])
 
-  const filteredCategories = helpCategories.filter(category =>
+  // The admin's FAQs (Pages & Social Media -> FAQ), shown first and open.
+  useEffect(() => {
+    let alive = true
+    publicGetOnce("/food/faqs", { params: { audience: "customer" } })
+      .then((res) => {
+        const list = res?.data?.data?.faqs || []
+        if (!alive || !list.length) return
+        setFaqs(list)
+        setExpandedCategory((current) => current ?? "faq")
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  const categories = faqs.length
+    ? [
+        {
+          id: "faq",
+          title: "Frequently asked questions",
+          icon: HelpCircle,
+          color: "text-[#EB590E]",
+          bgColor: "bg-orange-50",
+          description: "Answers to what customers ask us most",
+          topics: faqs.map(({ question, answer }) => ({ question, answer })),
+        },
+        ...helpCategories,
+      ]
+    : helpCategories
+
+  const filteredCategories = categories.filter(category =>
     category.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
     category.topics.some(topic =>
       topic.question.toLowerCase().includes(searchQuery.toLowerCase()) ||

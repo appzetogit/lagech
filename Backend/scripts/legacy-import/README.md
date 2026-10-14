@@ -37,6 +37,9 @@ Steps run in this order whatever order they are named in.
 | `newsletter` | Newsletter subscribers (Subscribed Mail List), emails lower-cased |
 | `settings` | Restaurant subscriptions off (old system was commission-only); rider cash limit |
 | `social-media` | Social media links (name, link, on/off) |
+| `faqs` | FAQs (`f_a_q_s`): question, answer, on/off, old order; user_type customer / vendor / deliveryman becomes audience customer / restaurant / rider |
+| `notification-messages` | Order push message texts and on/off (`notification_messages`, food module) into Business Settings -> Push Notification. Only messages not edited here are filled |
+| `store-notification-settings` | Each restaurant's Notification Setup (`store_notification_settings`: mail / SMS / push per event). A restaurant's row already here is never overwritten (run after `restaurants`) |
 
 ## Running it
 
@@ -48,7 +51,8 @@ DATABASE_URL='postgresql://<user>:<pass>@127.0.0.1:5432/<database>?schema=public
 UPLOAD_STORAGE_ROOT=/srv/lagech/uploads UPLOAD_BASE_URL=/uploads \
 REDIS_URL= NODE_ENV=development \
 node scripts/legacy-import/index.mjs zones categories restaurants foods nutrition customers riders \
-  payment-details orders balances ratings coupons settings
+  payment-details orders balances ratings coupons faqs notification-messages \
+  store-notification-settings settings
 ```
 
 Copy the old `storage/app/public/{category,product,store,profile,delivery-man}`
@@ -72,6 +76,8 @@ newer one (`LEGACY_MYSQL_URL`) and the one the previous import read
 | Money | Only ledger rows new since the last import (cash collections, rider withdrawals and payouts, admin payments of rider earnings (`provide_d_m_earnings`; an "adjustment" there settles earnings against cash, so it is also a cash deposit), restaurant withdrawals and payouts, order transactions), by legacy id. Opening-balance adjustments are never recomputed, so balances move by exactly those rows. A withdrawal imported before follows the old status only while untouched here |
 | Ratings | Recomputed for the restaurants and riders whose orders were added or changed |
 | Favourites | Only those added in the old system since the baseline copy, so one a customer removed here does not come back |
+| FAQs | New ones added at the end; ones imported before are never modified (a change is "left alone") |
+| Push messages, restaurants' Notification Setup | Filled where nothing was set here; one that still holds what the last import wrote follows the old system's change; anything edited here is "left alone" |
 
 Run all the steps together: later steps rely on what earlier ones brought in
 during the same run (new dishes get nutrition, new restaurants get payout
@@ -84,7 +90,8 @@ DATABASE_URL=... UPLOAD_STORAGE_ROOT=/srv/lagech/uploads UPLOAD_BASE_URL=/upload
 REDIS_URL= NODE_ENV=development \
 node scripts/legacy-import/index.mjs --sync --dry-run zones categories restaurants foods \
   nutrition customers riders payment-details withdrawal-methods orders balances ratings \
-  banners cancel-reasons promotions coupons favorites newsletter social-media settings
+  banners cancel-reasons promotions coupons favorites newsletter social-media faqs \
+  notification-messages store-notification-settings settings
 ```
 
 `--dry-run` runs everything inside one Postgres transaction and rolls it back:
