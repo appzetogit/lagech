@@ -170,26 +170,29 @@ test('the list, the details and the restaurant see the same lines and totals', a
     const { payouts } = await getPayoutBatch(batch.id);
     const lineA = payouts.find((p) => p.restaurantId === a.id);
     const lineB = payouts.find((p) => p.restaurantId === b.id);
+    // A run covers every restaurant with money due, earlier tests' too.
+    const others = payouts.filter((p) => p.restaurantId !== a.id && p.restaurantId !== b.id);
+    const othersAmount = others.reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
     // The old panel's words work for the bulk action too.
     assert.equal((await decidePayouts(batch.id, { ids: [lineA.id], status: 'completed', transactionId: 'UTR-9' })).updated, 1);
 
     const detail = await getPayoutBatch(batch.id);
     assert.deepEqual(detail.summary.completed, { count: 1, amount: 800 });
-    assert.deepEqual(detail.summary.pending, { count: 1, amount: 200 });
+    assert.deepEqual(detail.summary.pending, { count: 1 + others.length, amount: 200 + othersAmount });
     assert.equal(detail.batch.status, 'partially_completed');
     const pendingOnly = await getPayoutBatch(batch.id, { status: 'pending' });
-    assert.deepEqual(pendingOnly.payouts.map((p) => p.id), [lineB.id]);
-    assert.equal(pendingOnly.payouts[0].disbursementStatus, 'pending');
+    assert.deepEqual(pendingOnly.payouts.map((p) => p.id).sort(), [lineB.id, ...others.map((p) => p.id)].sort());
+    assert.ok(pendingOnly.payouts.every((p) => p.disbursementStatus === 'pending'));
 
     // The list, narrowed to the Indian day the batch was made and its number.
     const day = new Date(new Date(batch.createdAt).getTime() + 330 * 60 * 1000).toISOString().slice(0, 10);
     const list = await listPayoutBatches({ from: day, to: day, search: `#${batch.number}` });
     assert.deepEqual(list.batches.map((x) => x.id), [batch.id]);
     assert.equal(list.batches[0].paidAmount, 800);
-    assert.equal(list.batches[0].pendingAmount, 200);
+    assert.equal(list.batches[0].pendingAmount, 200 + othersAmount);
     assert.equal(list.summary.count, 1);
-    assert.equal(list.summary.totalAmount, 1000);
+    assert.equal(list.summary.totalAmount, 1000 + othersAmount);
     assert.deepEqual(list.summary.completed, { count: 1, amount: 800 });
     assert.equal((await listPayoutBatches({ from: day, to: day, status: 'completed', search: `${batch.number}` })).batches.length, 0);
 
