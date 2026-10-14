@@ -5,3 +5,6 @@ temp_interactive_push.bat
 
 # Local copy of the deployed nginx site config — not part of the app.
 suvio-api.conf
+
+# Private server access & status notes (never commit)
+SERVER_NOTES.md
