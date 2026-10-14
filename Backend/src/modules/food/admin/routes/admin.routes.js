@@ -570,6 +570,19 @@ router.get('/orders/dispatch-board', adminController.getDispatchBoard);
 router.get('/orders/:orderId', orderController.getOrderByIdAdminController);
 // The full-page Order Details: the order plus counts, neighbours and the rider's last location.
 router.get('/orders/:orderId/details', orderController.getOrderDetailsAdminController);
+// Order Details "Reference Code" and "Edit" (items), as on the old panel.
+// Under /orders, so order_management guards them (view for the menu, edit for the writes).
+router.patch(
+    '/orders/:orderId/reference-code',
+    requireAdminPermission('order_management', 'edit'),
+    orderController.setOrderReferenceCodeAdminController
+);
+router.get('/orders/:orderId/menu', orderController.getOrderEditMenuAdminController);
+router.put(
+    '/orders/:orderId/items',
+    requireAdminPermission('order_management', 'edit'),
+    orderController.editOrderItemsAdminController
+);
 // Printable invoice: JSON, or ?format=html (thermal 80 mm; &size=a4).
 router.get('/orders/:orderId/invoice', orderController.getOrderInvoiceAdminController);
 router.patch('/orders/:orderId/accept', orderController.acceptOrderAdminController);

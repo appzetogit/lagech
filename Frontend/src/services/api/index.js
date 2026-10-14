@@ -921,6 +921,28 @@ export const adminAPI = {
     apiClient.get(`/food/admin/orders/${encodeURIComponent(String(orderId))}/details`, {
       contextModule: "admin",
     }),
+  /** Order Details "Reference Code": { referenceCode } ("" clears it). */
+  setOrderReferenceCode: (orderId, referenceCode) =>
+    apiClient.patch(
+      `/food/admin/orders/${encodeURIComponent(String(orderId))}/reference-code`,
+      { referenceCode: referenceCode ?? "" },
+      { contextModule: "admin" },
+    ),
+  /** The order's restaurant's dishes (sizes + add-on groups), for the edit screen's "Add item". */
+  getOrderEditMenu: (orderId) =>
+    apiClient.get(`/food/admin/orders/${encodeURIComponent(String(orderId))}/menu`, {
+      contextModule: "admin",
+    }),
+  /**
+   * Order Details "Edit": items = [{ itemId, variantId?, quantity, addons?, notes?, campaignId? }].
+   * { preview: true } returns the new amounts without saving.
+   */
+  editOrderItems: (orderId, items, { preview = false } = {}) =>
+    apiClient.put(
+      `/food/admin/orders/${encodeURIComponent(String(orderId))}/items`,
+      { items },
+      { contextModule: "admin", ...(preview ? { params: { preview: 1 } } : {}) },
+    ),
   /** Invoice data (JSON) or, with { format: "html", size: "thermal" | "a4" }, the printable page as text. */
   getOrderInvoice: (orderId, params = {}) =>
     apiClient.get(`/food/admin/orders/${encodeURIComponent(String(orderId))}/invoice`, {

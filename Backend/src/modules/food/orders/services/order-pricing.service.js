@@ -437,26 +437,50 @@ async function resolveDeliveryAddress(userId, dto) {
  * counter, so a cancelled order or a failed payment gives the use back.
  */
 export async function applyCouponCode(code, ctx = {}) {
-  const offer = await prisma.foodOffer.findUnique({ where: { couponCode: String(code) } });
-  if (!offer) return { ...evaluateCoupon(null, ctx), offer: null };
+  const found = await prisma.foodOffer.findUnique({ where: { couponCode: String(code) } });
+  if (!found) return { ...evaluateCoupon(null, ctx), offer: null };
+
+  // Re-pricing an existing order (the admin's edit): that order is neither a
+  // "prior order" nor another use of its own coupon, and its use is already
+  // counted in usedCount.
+  const editing = ctx.editingOrder?.id ? ctx.editingOrder : null;
+  const notThisOrder = editing ? { id: { not: String(editing.id) } } : {};
+  const offer = editing && editing.couponId === found.id
+    ? { ...found, usedCount: Math.max(0, Number(found.usedCount || 0) - 1) }
+    : found;
 
   const userId = isId(ctx.userId) ? String(ctx.userId) : null;
   let priorOrders = 0;
   let userUses = 0;
   if (userId && requiresFirstOrder(offer)) {
-    priorOrders = await prisma.foodOrder.count({ where: { userId, ...USED_ORDER_WHERE } });
+    priorOrders = await prisma.foodOrder.count({ where: { userId, ...USED_ORDER_WHERE, ...notThisOrder } });
   }
   if (userId && Number(offer.perUserLimit) > 0) {
     userUses = await prisma.foodOrder.count({
-      where: { userId, couponId: offer.id, ...USED_ORDER_WHERE },
+      where: { userId, couponId: offer.id, ...USED_ORDER_WHERE, ...notThisOrder },
     });
   }
 
-  return { ...evaluateCoupon(offer, { ...ctx, priorOrders, userUses }), offer };
+  return { ...evaluateCoupon(offer, { ...ctx, priorOrders, userUses }), offer: found };
 }
 
+/**
+ * @param {object} [options]
+ * @param {Date}    [options.at]          the time the order is for
+ * @param {object}  [options.restaurant]  already loaded (loadRestaurantForOrdering)
+ * @param {boolean} [options.skipAvailabilityCheck]
+ * @param {number|null} [options.distanceKm] re-pricing an existing order: its
+ *        recorded trip distance -- no Directions call and no radius check, the
+ *        trip was accepted already
+ * @param {number}  [options.fixedDeliveryFee] re-pricing: the delivery fee the
+ *        order was charged, kept instead of the bands' (waivers still apply)
+ * @param {{ id: string, couponId?: string|null }} [options.editingOrder]
+ *        re-pricing: the order itself, left out of the first-order and coupon-use counts
+ */
 export async function calculateOrderPricing(userId, dto, options = {}) {
   const at = options.at instanceof Date ? options.at : new Date();
+  const repricing = Object.prototype.hasOwnProperty.call(options, 'distanceKm');
+  const editingOrder = options.editingOrder?.id ? options.editingOrder : null;
   const restaurant =
     options.restaurant || (await loadRestaurantForOrdering(dto.restaurantId));
 
@@ -514,7 +538,12 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
   const riderTip = cleanRiderTip(dto.riderTip ?? dto.tip, { tipsEnabled: riderRules.tipsEnabled, orderType });
 
   // A takeaway is collected at the restaurant: no trip, so no distance and no fee.
-  let distanceKm = isTakeaway ? null : await getDeliveryDistanceKm(restaurant, deliveryAddress);
+  const knownKm = Number(options.distanceKm);
+  let distanceKm = isTakeaway
+    ? null
+    : repricing
+      ? (options.distanceKm != null && Number.isFinite(knownKm) ? knownKm : null)
+      : await getDeliveryDistanceKm(restaurant, deliveryAddress);
   const straightLineKm = isTakeaway ? null : calculateDistanceKm(restaurant, deliveryAddress);
 
   // Nothing stopped a customer ordering from a restaurant on the other side of
@@ -526,7 +555,7 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
   // no coordinates): an unknown distance is not evidence of a long one, and
   // blocking on it would break carts that are simply not ready to be priced.
   const radiusKm = serviceableRadiusKm(feeSettings);
-  if (Number.isFinite(distanceKm) && radiusKm != null && distanceKm > radiusKm) {
+  if (!repricing && Number.isFinite(distanceKm) && radiusKm != null && distanceKm > radiusKm) {
     throw new ValidationError(
       `${restaurant.restaurantName || 'This restaurant'} is ${distanceKm.toFixed(
         1,
@@ -534,9 +563,17 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
     );
   }
 
+  const fixedFee = Number(options.fixedDeliveryFee);
   const deliveryFeeResult = isTakeaway
     ? { deliveryFee: 0, distanceKm: null, source: 'takeaway', breakdown: null }
-    : resolveUserDeliveryFee(feeSettings, { subtotal, distanceKm });
+    : options.fixedDeliveryFee != null && Number.isFinite(fixedFee) && fixedFee >= 0
+      ? {
+          deliveryFee: fixedFee,
+          distanceKm: Number.isFinite(distanceKm) ? Number(distanceKm.toFixed(2)) : null,
+          source: 'as_charged',
+          breakdown: null,
+        }
+      : resolveUserDeliveryFee(feeSettings, { subtotal, distanceKm });
   const originalDeliveryFee = round2(deliveryFeeResult.deliveryFee);
   distanceKm = deliveryFeeResult.distanceKm ?? distanceKm;
 
@@ -556,6 +593,7 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
         deliveryFeeGst: originalDeliveryFeeGst,
         // A scheduled order is checked against the time it is for.
         now: at > new Date() ? at : new Date(),
+        editingOrder,
       })
     : null;
 
@@ -578,7 +616,13 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
   const ncRule = customerRules.newCustomerDiscount;
   if (ncRule.enabled && isId(userId) && !(couponDiscount > 0)) {
     const [priorOrders, user] = await Promise.all([
-      prisma.foodOrder.count({ where: { userId: String(userId), ...USED_ORDER_WHERE } }),
+      prisma.foodOrder.count({
+        where: {
+          userId: String(userId),
+          ...USED_ORDER_WHERE,
+          ...(editingOrder ? { id: { not: String(editingOrder.id) } } : {}),
+        },
+      }),
       prisma.foodUser.findUnique({ where: { id: String(userId) }, select: { createdAt: true } }),
     ]);
     firstOrderDiscount = newCustomerDiscount(ncRule, {
@@ -719,4 +763,57 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
       },
     },
   };
+}
+
+/**
+ * calculateOrderPricing's `pricing` → the order's pricing columns (the nested
+ * shape fromOrder writes). Shared by order placement and the admin's edit, so
+ * an edited order is stored exactly as a placed one is.
+ */
+export function orderPricingColumns(pricing = {}, requestedMode = 'basic') {
+  // As placement always stored it: a null distance reads as 0 here.
+  const km = (value) => (Number.isFinite(Number(value)) ? Number(value) : null);
+  return {
+    subtotal: Number(pricing.subtotal) || 0,
+    tax: Number(pricing.tax) || 0,
+    packagingFee: Number(pricing.packagingFee) || 0,
+    deliveryFee: Number(pricing.deliveryFee) || 0,
+    deliveryFeeGst: Number(pricing.deliveryFeeGst) || 0,
+    platformFee: Number(pricing.platformFee) || 0,
+    quickDeliveryFee: Number(pricing.quickDeliveryFee) || 0,
+    additionalCharge: Number(pricing.additionalCharge) || 0,
+    additionalChargeName: String(pricing.additionalChargeName || '').slice(0, 60),
+    deliveryMode: pricing.deliveryMode === 'quick' || requestedMode === 'quick' ? 'quick' : 'basic',
+    discount: Number(pricing.discount) || 0,
+    couponCode: pricing.couponCode ? String(pricing.couponCode).trim().toUpperCase() : null,
+    couponId: pricing.couponId || null,
+    couponDeliveryWaiver: Number(pricing.deliveryFeeWaived) || 0,
+    freeDeliveryWaiver: Number(pricing.freeDeliveryWaived) || 0,
+    newCustomerDiscount: Number(pricing.newCustomerDiscount) || 0,
+    riderTip: Number(pricing.riderTip) || 0,
+    campaignDiscount: Number(pricing.campaignDiscount) || 0,
+    total: Number(pricing.total) || 0,
+    currency: String(pricing.currency || 'INR'),
+    distanceKm: km(pricing.distanceKm),
+    roadDistanceKm: km(pricing.roadDistanceKm),
+  };
+}
+
+/** Resolved cart lines (calculateOrderPricing's `items`) → food_order_items rows. */
+export function orderItemRows(items = []) {
+  return items.map((item) => ({
+    itemId: String(item.itemId),
+    name: item.name,
+    variantId: item.variantId || '',
+    variantName: item.variantName || '',
+    variantPrice: Number(item.variantPrice) || 0,
+    price: Number(item.price) || 0,
+    otherPrice: Number(item.otherPrice) || 0,
+    quantity: Number(item.quantity) || 1,
+    isVeg: Boolean(item.isVeg),
+    image: item.image || '',
+    notes: item.notes || '',
+    addons: item.addons || [],
+    itemCampaignId: item.itemCampaignId || null,
+  }));
 }

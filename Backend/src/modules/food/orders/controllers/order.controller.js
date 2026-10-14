@@ -4,6 +4,12 @@ import * as orderService from '../services/order.service.js';
 import * as foodOrderPaymentService from '../services/foodOrderPayment.service.js';
 import * as orderInvoiceService from '../services/orderInvoice.service.js';
 import { getAdminOrderDetailsExtras } from '../services/adminOrderDetails.service.js';
+import {
+    editOrderItemsAdmin,
+    getOrderEditMenu,
+    orderEditState,
+    setOrderReferenceCode,
+} from '../services/adminOrderEdit.service.js';
 import { emailOrderPlaced } from '../../../../core/notifications/emailEvents.js';
 import {
     validateCalculateOrderDto,
@@ -407,12 +413,56 @@ export async function getOrderByIdAdminController(req, res, next) {
  * `bill` is the printed receipt's items and lines, so the page and the receipt
  * never disagree on a number.
  */
+async function adminOrderDetailsPayload(orderId) {
+    const order = await orderService.getOrderById(orderId, { admin: true });
+    const extras = await getAdminOrderDetailsExtras(order.id || order._id);
+    // Whether the "Edit" button shows, and why not when it does not.
+    const { editable, reason } = orderEditState(order);
+    const details = { ...extras, editable, editReason: reason, referenceCode: order.referenceCode || null };
+    const { items, lines, total, payment } = orderInvoiceService.buildInvoice(order, { copy: 'admin' });
+    return { order, details, bill: { items, lines, total, payment } };
+}
+
 export async function getOrderDetailsAdminController(req, res, next) {
     try {
-        const order = await orderService.getOrderById(req.params.orderId, { admin: true });
-        const details = await getAdminOrderDetailsExtras(order.id || order._id);
-        const { items, lines, total, payment } = orderInvoiceService.buildInvoice(order, { copy: 'admin' });
-        return sendResponse(res, 200, 'Order retrieved', { order, details, bill: { items, lines, total, payment } });
+        return sendResponse(res, 200, 'Order retrieved', await adminOrderDetailsPayload(req.params.orderId));
+    } catch (err) {
+        next(err);
+    }
+}
+
+/** PATCH /food/admin/orders/:orderId/reference-code { referenceCode } ("" clears it). */
+export async function setOrderReferenceCodeAdminController(req, res, next) {
+    try {
+        const result = await setOrderReferenceCode(req.params.orderId, req.body?.referenceCode, req.user?.userId);
+        return sendResponse(res, 200, result.referenceCode ? 'Reference code saved' : 'Reference code removed', result);
+    } catch (err) {
+        next(err);
+    }
+}
+
+/** GET /food/admin/orders/:orderId/menu -- the order's restaurant's dishes, for "Add item". */
+export async function getOrderEditMenuAdminController(req, res, next) {
+    try {
+        return sendResponse(res, 200, 'Menu retrieved', await getOrderEditMenu(req.params.orderId));
+    } catch (err) {
+        next(err);
+    }
+}
+
+/**
+ * PUT /food/admin/orders/:orderId/items { items: [{ itemId|foodId, variantId?, quantity, addons? }] }
+ * With ?preview=1 nothing is saved: the new amounts come back for the edit
+ * screen. Otherwise the order is re-priced and saved, and the details page's
+ * payload comes back with the edit's summary.
+ */
+export async function editOrderItemsAdminController(req, res, next) {
+    try {
+        const preview = ['1', 'true', 'yes'].includes(String(req.query?.preview || '').toLowerCase());
+        const edit = await editOrderItemsAdmin(req.params.orderId, req.body?.items, req.user?.userId, { preview });
+        if (preview) return sendResponse(res, 200, 'Preview', { edit });
+        const payload = await adminOrderDetailsPayload(req.params.orderId);
+        return sendResponse(res, 200, 'Order updated', { ...payload, edit });
     } catch (err) {
         next(err);
     }

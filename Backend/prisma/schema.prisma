@@ -1382,6 +1382,10 @@ model FoodOrder {
   /// Offline payment: the method (snapshotted), what the customer filled in,
   /// and the admin's verification. Null for every other method.
   offlinePayment    Json?
+  /// The admin's payment reference for the order (Order Details "Reference
+  /// Code", as in 6amMart): e.g. the UPI / bank transaction ref of a cash or
+  /// offline payment. Free text, set and cleared by the admin only.
+  referenceCode     String?            @db.VarChar(100)
   refundStatus      OrderRefundStatus  @default(none)
   refundAmount      Decimal            @default(0) @db.Decimal(14, 2)
   refundId          String             @default("")

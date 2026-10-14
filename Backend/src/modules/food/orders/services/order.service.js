@@ -23,6 +23,8 @@ import {
   loadActiveFeeSettings,
   loadRestaurantForOrdering,
   assertRestaurantOpenForOrdering,
+  orderPricingColumns,
+  orderItemRows,
 } from './order-pricing.service.js';
 import { normalizeDeliveryAddress } from '../../shared/geo.utils.js';
 import { resolveOrderZoneId, assertZoneAllowsPayment } from '../../shared/zonePayment.js';
@@ -781,39 +783,7 @@ export async function createOrder(userId, dto) {
     }
 
     const resolvedItems = pricingResult.items || [];
-    const normalizedPricing = {
-      subtotal: Number(pricingResult.pricing?.subtotal) || 0,
-      tax: Number(pricingResult.pricing?.tax) || 0,
-      packagingFee: Number(pricingResult.pricing?.packagingFee) || 0,
-      deliveryFee: Number(pricingResult.pricing?.deliveryFee) || 0,
-      deliveryFeeGst: Number(pricingResult.pricing?.deliveryFeeGst) || 0,
-      platformFee: Number(pricingResult.pricing?.platformFee) || 0,
-      quickDeliveryFee: Number(pricingResult.pricing?.quickDeliveryFee) || 0,
-      additionalCharge: Number(pricingResult.pricing?.additionalCharge) || 0,
-      additionalChargeName: String(pricingResult.pricing?.additionalChargeName || "").slice(0, 60),
-      deliveryMode:
-        pricingResult.pricing?.deliveryMode === "quick" || dto.deliveryMode === "quick"
-          ? "quick"
-          : "basic",
-      discount: Number(pricingResult.pricing?.discount) || 0,
-      couponCode: pricingResult.pricing?.couponCode
-        ? String(pricingResult.pricing.couponCode).trim().toUpperCase()
-        : null,
-      couponId: pricingResult.pricing?.couponId || null,
-      couponDeliveryWaiver: Number(pricingResult.pricing?.deliveryFeeWaived) || 0,
-      freeDeliveryWaiver: Number(pricingResult.pricing?.freeDeliveryWaived) || 0,
-      newCustomerDiscount: Number(pricingResult.pricing?.newCustomerDiscount) || 0,
-      riderTip: Number(pricingResult.pricing?.riderTip) || 0,
-      campaignDiscount: Number(pricingResult.pricing?.campaignDiscount) || 0,
-      total: Number(pricingResult.pricing?.total) || 0,
-      currency: String(pricingResult.pricing?.currency || "INR"),
-      distanceKm: Number.isFinite(Number(pricingResult.pricing?.distanceKm))
-        ? Number(pricingResult.pricing.distanceKm)
-        : null,
-      roadDistanceKm: Number.isFinite(Number(pricingResult.pricing?.roadDistanceKm))
-        ? Number(pricingResult.pricing.roadDistanceKm)
-        : null,
-    };
+    const normalizedPricing = orderPricingColumns(pricingResult.pricing || {}, dto.deliveryMode);
 
     if (!Number.isFinite(normalizedPricing.total) || normalizedPricing.total <= 0) {
       throw new ValidationError("Order total must be greater than zero");
@@ -929,23 +899,7 @@ export async function createOrder(userId, dto) {
       platformProfit: Number(platformProfit) || 0,
       ...(offlinePayment ? { offlinePayment } : {}),
       ...(partialPlan ? { walletAmount: partialWalletAmount } : {}),
-      items: {
-        create: resolvedItems.map((item) => ({
-          itemId: String(item.itemId),
-          name: item.name,
-          variantId: item.variantId || '',
-          variantName: item.variantName || '',
-          variantPrice: Number(item.variantPrice) || 0,
-          price: Number(item.price) || 0,
-          otherPrice: Number(item.otherPrice) || 0,
-          quantity: Number(item.quantity) || 1,
-          isVeg: Boolean(item.isVeg),
-          image: item.image || '',
-          notes: item.notes || '',
-          addons: item.addons || [],
-          itemCampaignId: item.itemCampaignId || null,
-        })),
-      },
+      items: { create: orderItemRows(resolvedItems) },
       statusHistory: {
         create: [{
           at: new Date(),

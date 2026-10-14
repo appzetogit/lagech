@@ -216,11 +216,11 @@ export async function getRestaurantCommissionSnapshot(orderDoc) {
 }
 
 /**
- * Creates the initial 'pending' transaction when an order is created.
+ * The per-order split -- restaurant net, platform net, rider share, discount
+ * attribution -- from an order's stored amounts. Used when the transaction is
+ * created and again when an admin edit changes those amounts.
  */
-export async function createInitialTransaction(order) {
-  if (!order) return null;
-
+export async function computeTransactionSplit(order) {
   const { commissionAmount = 0 } = await getRestaurantCommissionSnapshot(order).catch(() => ({
     commissionAmount: 0,
   }));
@@ -282,6 +282,70 @@ export async function createInitialTransaction(order) {
   restaurantNet = Math.round((Number(restaurantNet) || 0) * 100) / 100;
   platformNetProfit = Math.round((Number(platformNetProfit) || 0) * 100) / 100;
 
+  return {
+    subtotal,
+    tax,
+    packagingFee,
+    deliveryFee,
+    deliveryFeeGst,
+    platformFee,
+    restaurantCommission,
+    discount,
+    couponCode: couponCode ? String(couponCode).toUpperCase() : null,
+    total: totalCustomerPaid,
+    currency: String(order.currency || 'INR'),
+
+    totalCustomerPaid,
+    restaurantShare: Math.max(0, restaurantNet),
+    commissionAmount: restaurantCommission,
+    riderShare,
+    riderTip,
+    platformNetProfit,
+    taxAmount: tax,
+    adminDiscountShare,
+    restaurantDiscountShare,
+    discountAdminBearPercentage,
+    discountRestaurantBearPercentage,
+  };
+}
+
+/**
+ * Rewrites an existing transaction's amounts and split after the order's
+ * amounts changed (the admin's item edit), with a history row saying so.
+ * `split` is computeTransactionSplit's result. Pass `db` to enlist it in the
+ * caller's database transaction. Returns false when the order has none yet.
+ */
+export async function resyncTransactionSplit(orderId, split, { amountDue, note = '', byRole = 'ADMIN', byId = null } = {}, db = prisma) {
+  const existing = await db.foodTransaction.findUnique({ where: { orderId: String(orderId) }, select: { id: true } });
+  if (!existing) return false;
+  await db.foodTransaction.update({
+    where: { id: existing.id },
+    data: {
+      ...split,
+      ...(amountDue != null ? { amountDue: Number(amountDue) || 0 } : {}),
+      history: {
+        create: [{
+          kind: 'order_edited',
+          amount: split.totalCustomerPaid,
+          at: new Date(),
+          note: note || 'Order amounts changed',
+          recordedByRole: byRole,
+          recordedById: byId ? String(byId) : null,
+        }],
+      },
+    },
+  });
+  return true;
+}
+
+/**
+ * Creates the initial 'pending' transaction when an order is created.
+ */
+export async function createInitialTransaction(order) {
+  if (!order) return null;
+
+  const split = await computeTransactionSplit(order);
+  const totalCustomerPaid = split.totalCustomerPaid;
   const orderId = String(order.id);
 
   const transaction = await prisma.foodTransaction.create({
@@ -303,29 +367,7 @@ export async function createInitialTransaction(order) {
       razorpaySignature: order.razorpaySignature || null,
       qr: order.qr || undefined,
 
-      subtotal,
-      tax,
-      packagingFee,
-      deliveryFee,
-      deliveryFeeGst,
-      platformFee,
-      restaurantCommission,
-      discount,
-      couponCode: couponCode ? String(couponCode).toUpperCase() : null,
-      total: totalCustomerPaid,
-      currency: String(order.currency || 'INR'),
-
-      totalCustomerPaid,
-      restaurantShare: Math.max(0, restaurantNet),
-      commissionAmount: restaurantCommission,
-      riderShare,
-      riderTip,
-      platformNetProfit,
-      taxAmount: tax,
-      adminDiscountShare,
-      restaurantDiscountShare,
-      discountAdminBearPercentage,
-      discountRestaurantBearPercentage,
+      ...split,
 
       history: {
         create: [

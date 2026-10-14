@@ -11,6 +11,7 @@ import {
   MapPin,
   Package,
   Phone,
+  Pencil,
   Printer,
   ShoppingBasket,
   Store,
@@ -22,6 +23,7 @@ import { getGoogleMapsApiKey } from "@food/utils/googleMapsApiKey"
 import { printOrderInvoice } from "@food/utils/printInvoice"
 import CancelOrderDialog from "@food/components/admin/orders/CancelOrderDialog"
 import OfflinePaymentPanel from "@food/components/admin/orders/OfflinePaymentPanel"
+import EditOrderItemsDialog from "@food/components/admin/orders/EditOrderItemsDialog"
 import bikeLogo from "@food/assets/bikelogo.png"
 
 /**
@@ -93,12 +95,72 @@ const fromGeo = (point) => {
 
 const mapsLink = ({ lat, lng }) => `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`
 
-/** The customer's payment reference, when the order carries one. */
+/** The payment's own reference, when the order carries one: what the customer typed for an offline payment, or Razorpay's id. */
 function referenceOf(order) {
   const fields = Array.isArray(order?.offlinePayment?.fields) ? order.offlinePayment.fields : []
   const ref = fields.find((f) => /ref|transaction|txn|utr/i.test(`${f.key} ${f.label}`))
-  if (ref?.value) return String(ref.value)
-  return order?.payment?.razorpay?.paymentId || ""
+  if (ref?.value) return { label: "Customer ref", value: String(ref.value) }
+  const paymentId = order?.payment?.razorpay?.paymentId
+  return paymentId ? { label: "Razorpay", value: String(paymentId) } : null
+}
+
+/** Order Details "Reference Code": the admin's own payment reference for the order. */
+function ReferenceCodeDialog({ orderId, displayId, current, onClose, onSaved }) {
+  const [value, setValue] = useState(current || "")
+  const [saving, setSaving] = useState(false)
+
+  const submit = async (code) => {
+    setSaving(true)
+    try {
+      const res = await adminAPI.setOrderReferenceCode(orderId, code)
+      const saved = res?.data?.data?.referenceCode ?? null
+      toast.success(saved ? "Reference code saved" : "Reference code removed")
+      onSaved(saved)
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Could not save the reference code")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && !saving && onClose()}>
+      <DialogContent className="max-w-md w-[calc(100vw-32px)] bg-white">
+        <DialogHeader>
+          <DialogTitle>Reference code</DialogTitle>
+          <DialogDescription>Order #{displayId}. For example the UPI or bank transaction reference of the payment.</DialogDescription>
+        </DialogHeader>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (!saving) submit(value.trim())
+          }}
+          className="space-y-3"
+        >
+          <input
+            autoFocus
+            value={value}
+            maxLength={100}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder="Reference code"
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          />
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
+            {current ? (
+              <button type="button" disabled={saving} onClick={() => submit("")} className="rounded-lg border border-rose-200 px-4 py-2 text-sm text-rose-600 disabled:opacity-50">Remove</button>
+            ) : <span />}
+            <div className="flex flex-col-reverse gap-2 sm:flex-row">
+              <button type="button" onClick={onClose} disabled={saving} className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-700">Cancel</button>
+              <button type="submit" disabled={saving || !value.trim() || value.trim() === (current || "")} className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+                {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+                Save
+              </button>
+            </div>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
 }
 
 function Avatar({ src, alt, rounded = "rounded-full" }) {
@@ -288,6 +350,8 @@ export default function OrderDetailsPage() {
   const [mapOpen, setMapOpen] = useState(false)
   const [assignOpen, setAssignOpen] = useState(false)
   const [cancelOpen, setCancelOpen] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
+  const [refOpen, setRefOpen] = useState(false)
 
   const load = useCallback(
     async (quiet = false) => {
@@ -352,7 +416,8 @@ export default function OrderDetailsPage() {
   const items = Array.isArray(bill.items) ? bill.items : []
   const lines = Array.isArray(bill.lines) ? bill.lines : []
   const payment = bill.payment || {}
-  const reference = referenceOf(order)
+  const paymentRef = referenceOf(order)
+  const referenceCode = details.referenceCode ?? order.referenceCode ?? null
   const address = order.deliveryAddress || {}
   const dropPoint = fromGeo(address.location)
   const restaurant = details.restaurant
@@ -519,7 +584,17 @@ export default function OrderDetailsPage() {
                   </div>
                   {metaRow("Status", <span className={`rounded border px-2 py-0.5 text-xs font-medium ${stepMeta.badge}`}>{stepMeta.label}</span>)}
                   {metaRow("Payment Method", <span className="text-slate-800">{payment.methodLabel || "—"}</span>)}
-                  {metaRow("Reference Code", <span className="text-slate-800 break-all">{reference || "—"}</span>)}
+                  {metaRow(
+                    "Reference Code",
+                    <span className="inline-flex flex-wrap items-center gap-2">
+                      {referenceCode && <span className="text-slate-800 break-all">{referenceCode}</span>}
+                      <button type="button" onClick={() => setRefOpen(true)} className="rounded border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-600 hover:bg-blue-100">
+                        {referenceCode ? "Edit" : "Add"}
+                      </button>
+                    </span>,
+                  )}
+                  {paymentRef && paymentRef.value !== referenceCode &&
+                    metaRow(paymentRef.label, <span className="text-xs text-slate-700 break-all">{paymentRef.value}</span>)}
                   {metaRow("Order Type", <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-700">{isTakeaway ? "Takeaway" : "Delivery"}</span>)}
                   {metaRow(
                     "Payment Status",
@@ -556,8 +631,19 @@ export default function OrderDetailsPage() {
                 </div>
               )}
 
-              {/* Items */}
-              <div className="mt-5 -mx-4 overflow-x-auto sm:-mx-5">
+              {/* Items; "Edit" while the order can still change (the server decides) */}
+              {details.editable && (
+                <div className="mt-5 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setEditOpen(true)}
+                    className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+                  >
+                    <Pencil className="w-3.5 h-3.5" /> Edit
+                  </button>
+                </div>
+              )}
+              <div className={`${details.editable ? "mt-3" : "mt-5"} -mx-4 overflow-x-auto sm:-mx-5`}>
                 <table className="w-full min-w-[480px] text-sm">
                   <thead>
                     <tr className="border-y border-slate-200 bg-slate-50 text-left">
@@ -807,6 +893,31 @@ export default function OrderDetailsPage() {
           onClose={() => setAssignOpen(false)}
           onAssigned={() => {
             setAssignOpen(false)
+            load(true)
+          }}
+        />
+      )}
+
+      {editOpen && (
+        <EditOrderItemsDialog
+          order={order}
+          onClose={() => setEditOpen(false)}
+          onSaved={(payload) => {
+            setEditOpen(false)
+            if (payload?.order) setData({ order: payload.order, details: payload.details, bill: payload.bill })
+            else load(true)
+          }}
+        />
+      )}
+
+      {refOpen && (
+        <ReferenceCodeDialog
+          orderId={id}
+          displayId={order.orderId}
+          current={referenceCode}
+          onClose={() => setRefOpen(false)}
+          onSaved={() => {
+            setRefOpen(false)
             load(true)
           }}
         />
