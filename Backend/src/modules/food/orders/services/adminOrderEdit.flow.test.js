@@ -59,6 +59,12 @@ const details = async (id) => {
 const editItems = (id, items, { preview = false } = {}) =>
     W.admin('PUT', `/orders/${id}/items${preview ? '?preview=1' : ''}`, { items });
 
+
+/** The harness's admin (W.admin is its request helper, so the row is looked up). */
+const adminIdOf = async () => (await prisma.foodAdmin.findFirst({
+    where: { email: `${W.tag.toLowerCase()}@admin.test` }, select: { id: true },
+})).id;
+
 test('COD order: preview changes nothing, save re-prices and re-splits the order', async () => {
     const user = await W.makeUser();
     const placed = await W.place(user, { paymentMethod: 'cash' });
@@ -110,7 +116,8 @@ test('COD order: preview changes nothing, save re-prices and re-splits the order
     assert.equal(money(tx.restaurantShare), 272, 'restaurant earns 320 - 48');
     assert.equal(money(tx.platformNetProfit), 63.4);
     assert.equal(money(tx.amountDue), 371.4);
-    assert.ok(tx.history.some((h) => h.kind === 'order_edited' && h.recordedById === W.admin.id));
+    const adminId = await adminIdOf();
+    assert.ok(tx.history.some((h) => h.kind === 'order_edited' && h.recordedById === adminId));
     assert.equal(
         money(Number(tx.restaurantShare) + Number(tx.platformNetProfit) + Number(tx.riderShare) + Number(row.tax)),
         money(row.total),
@@ -120,7 +127,7 @@ test('COD order: preview changes nothing, save re-prices and re-splits the order
     const edit = row.statusHistory.find((h) => /Items edited by admin/.test(h.note));
     assert.ok(edit, 'the edit is in the history');
     assert.equal(edit.byRole, 'ADMIN');
-    assert.equal(edit.byId, W.admin.id);
+    assert.equal(edit.byId, await adminIdOf());
     assert.match(edit.note, /518\.4.*371\.4/);
 
     assert.ok(W.events({ room: W.rooms.user(user.id), event: 'order_status_update', orderId: id }).some((e) => e.payload.orderUpdated));

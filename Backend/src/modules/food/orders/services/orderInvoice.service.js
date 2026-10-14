@@ -266,11 +266,7 @@ export function buildInvoice(order, { copy = 'customer', business = {}, finance 
         items,
         lines,
         total,
-        payment: {
-            ...paymentBlock(order, total),
-            // The admin's own payment reference (Order Details); not on the printed bill.
-            ...(copy === 'admin' ? { referenceCode: text(order.referenceCode) || null } : {}),
-        },
+        payment: paymentBlock(order, total),
         note: text(order.note),
         deliveryInstructions: text(order.deliveryInstructions),
         business: {
