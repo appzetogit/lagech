@@ -2,6 +2,7 @@ import { sendResponse, sendError } from '../../../../utils/response.js';
 import { isId } from '../../../../utils/helpers.js';
 import * as methods from '../services/withdrawalMethods.service.js';
 import * as payments from '../services/adminRestaurantPayments.service.js';
+import * as restaurantCash from '../services/adminRestaurantCash.service.js';
 import * as reports from '../services/adminMoneyReports.service.js';
 import * as emailTemplates from '../services/emailTemplates.service.js';
 import * as extras from '../services/adminSystemExtras.service.js';
@@ -67,6 +68,17 @@ export const recordRestaurantPayment = handle(201, 'Payment recorded', (req) => 
     const body = validate(restaurantPaymentSchema, req.body);
     return payments.recordRestaurantPayment(body.restaurantId, body, adminId(req));
 });
+
+// ─── Restaurant cash (admin restaurant details page) ─────────────────────────
+
+export const getRestaurantWalletOverview = handle(200, 'Restaurant wallet', (req) =>
+    restaurantCash.getRestaurantWalletOverview(req.params.restaurantId));
+export const getRestaurantEarnings = handle(200, 'Restaurant earnings', (req) =>
+    restaurantCash.getRestaurantEarnings(req.params.restaurantId, req.query || {}));
+export const listRestaurantCashCollections = handle(200, 'Cash collections', (req) =>
+    restaurantCash.listRestaurantCashCollections(req.params.restaurantId, req.query || {}));
+export const collectCashFromRestaurant = handle(201, 'Cash collected', (req) =>
+    restaurantCash.collectCashFromRestaurant(req.params.restaurantId, req.body || {}, adminId(req)));
 
 // ─── Reports (admin) ─────────────────────────────────────────────────────────
 

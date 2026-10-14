@@ -128,6 +128,8 @@ export async function getRestaurantReviews(query = {}) {
     const skip = (page - 1) * limit;
 
     const where = { restaurantRating: { not: null } };
+    // The restaurant details page's Reviews tab.
+    if (isId(query.restaurantId)) where.restaurantId = String(query.restaurantId);
 
     if (query.search && String(query.search).trim()) {
         const contains = { contains: String(query.search).trim(), mode: 'insensitive' };

@@ -20,6 +20,16 @@ export const adminSystemExtrasAPI = {
     apiClient.get(`${A}/withdrawals/restaurant-payments/payable/${restaurantId}`, admin),
   recordRestaurantPayment: (body) => apiClient.post(`${A}/withdrawals/restaurant-payments`, body, admin),
 
+  // Restaurant details page: money cards and "Collect Cash From Store"
+  getRestaurantWalletOverview: (restaurantId) =>
+    apiClient.get(`${A}/withdrawals/restaurant-cash/${restaurantId}`, admin),
+  getRestaurantCashCollections: (restaurantId, params = {}) =>
+    apiClient.get(`${A}/withdrawals/restaurant-cash/${restaurantId}/collections`, { params, ...admin }),
+  getRestaurantEarnings: (restaurantId, params = {}) =>
+    apiClient.get(`${A}/withdrawals/restaurant-cash/${restaurantId}/earnings`, { params, ...admin }),
+  collectCashFromRestaurant: (restaurantId, body) =>
+    apiClient.post(`${A}/withdrawals/restaurant-cash/${restaurantId}/collect`, body, admin),
+
   // Reports
   getDisbursementReport: (params = {}) => apiClient.get(`${A}/reports/disbursements`, { params, ...admin }),
   getRestaurantEarningReport: (params = {}) => apiClient.get(`${A}/reports/restaurant-earnings`, { params, ...admin }),

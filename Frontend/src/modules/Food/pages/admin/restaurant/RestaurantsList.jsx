@@ -702,7 +702,13 @@ export default function RestaurantsList() {
     setLocationSuggestions([])
   }
 
-  // Handle view restaurant details
+  // The full-page details (Overview, Orders, Items, ... tabs).
+  const openDetailsPage = (restaurant) => {
+    const restaurantId = restaurant?._id || restaurant?.id
+    if (restaurantId) navigate(`/admin/food/restaurants/view/${encodeURIComponent(String(restaurantId))}`)
+  }
+
+  // Quick view / edit modal; also opened by ?restaurantId= links.
   const handleViewDetails = async (restaurant) => {
     setIsEditingDetails(false)
     setProfileImageFile(null)
@@ -1519,7 +1525,7 @@ export default function RestaurantsList() {
                           <div className="flex items-center gap-3">
                             <div 
                               className="w-10 h-10 rounded-full overflow-hidden bg-slate-100 flex items-center justify-center shrink-0 cursor-pointer hover:opacity-80 transition-all border border-slate-100"
-                              onClick={() => handleViewDetails(restaurant)}
+                              onClick={() => openDetailsPage(restaurant)}
                             >
                               <img
                                 src={restaurant.logo}
@@ -1533,7 +1539,7 @@ export default function RestaurantsList() {
                             <div className="flex flex-col">
                               <span 
                                 className="text-sm font-medium text-slate-900 cursor-pointer hover:text-blue-600 transition-colors"
-                                onClick={() => handleViewDetails(restaurant)}
+                                onClick={() => openDetailsPage(restaurant)}
                               >
                                 {restaurant.name}
                               </span>
@@ -1584,11 +1590,18 @@ export default function RestaurantsList() {
                         <td className="px-6 py-4 whitespace-nowrap text-center">
                           <div className="flex items-center justify-center gap-2">
                             <button
-                              onClick={() => handleViewDetails(restaurant)}
+                              onClick={() => openDetailsPage(restaurant)}
                               className="p-1.5 rounded text-blue-600 hover:bg-blue-50 transition-colors"
                               title="View Details"
                             >
                               <Eye className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleViewDetails(restaurant)}
+                              className="p-1.5 rounded text-slate-600 hover:bg-slate-100 transition-colors"
+                              title="Quick edit details and location"
+                            >
+                              <Settings className="w-4 h-4" />
                             </button>
                             <button
                               onClick={() => handleBanRestaurant(restaurant)}

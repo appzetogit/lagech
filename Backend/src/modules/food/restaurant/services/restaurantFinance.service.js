@@ -146,7 +146,7 @@ async function sumByRestaurant(delegate, where, column) {
  * The wallet figures for a page of restaurants: what they have earned, what
  * they have taken, and how much of the rest is locked against unpaid dues.
  *
- * Five grouped queries for the whole page, whatever its size. `db` exists so a
+ * Six grouped queries for the whole page, whatever its size. `db` exists so a
  * test can pass a counting client and prove that — see
  * adminSubscriptionBilling.test.js. The admin invoice
  * table used to call getRestaurantFinance() once per row — each of which read
@@ -161,7 +161,7 @@ export async function getWalletSummaries(restaurantIds = [], { db = prisma, earn
     const subscriptionEnabled = await isFeatureEnabled(FEATURE_KEYS.RESTAURANT_SUBSCRIPTION, true);
     const scoped = { restaurantId: { in: ids } };
 
-    const [earned, earnedByCutoff, withdrawn, deducted, locked] = await Promise.all([
+    const [earned, earnedByCutoff, withdrawn, deducted, locked, collected] = await Promise.all([
         earnedTotalsByRestaurant(ids, { db }),
         // Only asked for by the payout run, which holds back recent earnings.
         earnedBefore ? earnedTotalsByRestaurant(ids, { db, to: earnedBefore }) : null,
@@ -184,15 +184,24 @@ export async function getWalletSummaries(restaurantIds = [], { db = prisma, earn
                 'outstandingAmount',
             )
             : new Map(),
+        // Cash an overdrawn restaurant handed back to the admin. Only ever
+        // collected up to what it owed (adminRestaurantCash), so it settles a
+        // debt and never lifts the balance above zero on its own.
+        sumByRestaurant(db.foodRestaurantCashCollection, scoped, 'amount'),
     ]);
 
     return new Map(ids.map((id) => {
         const totals = earned.get(id) || ZERO_TOTALS;
         const totalWithdrawn = num(withdrawn.get(id));
         const lockedAmount = Math.max(0, num(locked.get(id)));
+        const totalCashCollected = num(collected.get(id));
+
+        // Earnings less what was taken, plus what was handed back. Below zero
+        // means the restaurant holds platform money: shown as cash owed.
+        const position = totals.payout + totalCashCollected - totalWithdrawn - num(deducted.get(id));
 
         // The full balance stays visible; only withdrawal is limited by the lock.
-        const walletBalance = Math.max(0, totals.payout - totalWithdrawn - num(deducted.get(id)));
+        const walletBalance = Math.max(0, position);
         const netAvailable = Math.max(0, walletBalance - lockedAmount);
 
         const summary = {
@@ -202,6 +211,8 @@ export async function getWalletSummaries(restaurantIds = [], { db = prisma, earn
             walletBalance,
             netAvailable,
             lockedAmount,
+            totalCashCollected,
+            cashOwed: Math.max(0, Math.round(-position * 100) / 100),
         };
         if (earnedByCutoff) {
             // What could be paid if only earnings from before the cut-off
@@ -210,7 +221,7 @@ export async function getWalletSummaries(restaurantIds = [], { db = prisma, earn
             const payoutByCutoff = (earnedByCutoff.get(id) || ZERO_TOTALS).payout;
             summary.availableBeforeCutoff = Math.max(0, Math.min(
                 netAvailable,
-                payoutByCutoff - totalWithdrawn - num(deducted.get(id)) - lockedAmount,
+                payoutByCutoff + totalCashCollected - totalWithdrawn - num(deducted.get(id)) - lockedAmount,
             ));
         }
         return [id, summary];
