@@ -2861,10 +2861,14 @@ model FoodSubscriptionBillingRun {
 model FoodRestaurantPayoutBatch {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 
-  /// Human number, "Payout #1001".
+  /// Human number, "Disbursement #1001".
   number Int @unique @default(autoincrement())
+  /// A disbursement brought over from the previous system keeps its number
+  /// there ("Disbursement # 1117"); null for runs made here.
+  legacyNumber Int? @unique
   /// The IST calendar day this run belongs to, 'YYYY-MM-DD'. Unique, so the
-  /// job cannot pay the same day twice however often it wakes up.
+  /// job cannot pay the same day twice however often it wakes up. 'L1117'
+  /// for a disbursement brought over from the previous system.
   runDate String @unique @db.VarChar(10)
   /// Earnings from orders placed before this moment were included.
   cutoffAt DateTime
@@ -2874,7 +2878,7 @@ model FoodRestaurantPayoutBatch {
   restaurantCount Int               @default(0)
   /// Restaurants owed money but left out, with why: [{ restaurantId, name, amount, reason }].
   skipped         Json              @default("[]")
-  /// 'schedule' or the id of the admin who ran it by hand.
+  /// 'schedule', 'legacy' (previous system) or the id of the admin who ran it by hand.
   triggeredBy     String            @default("schedule") @db.VarChar(32)
 
   createdAt DateTime @default(now())
@@ -2898,7 +2902,7 @@ model FoodRestaurantPayoutSettings {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 
   isEnabled   Boolean @default(true)
-  /// 'daily' or 'weekly'.
+  /// 'daily', 'weekly' or 'monthly' (on the 1st).
   frequency   String  @default("daily") @db.VarChar(16)
   /// For weekly: 0 = Sunday .. 6 = Saturday.
   weekday     Int     @default(6)

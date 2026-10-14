@@ -4,6 +4,7 @@ import {
     createWithdrawalRequest,
     listMyWithdrawals,
 } from '../services/restaurantWithdrawal.service.js';
+import { listRestaurantDisbursements } from '../services/restaurantPayout.service.js';
 
 export const createWithdrawalRequestController = async (req, res, next) => {
     try {
@@ -24,6 +25,19 @@ export const listMyWithdrawalsController = async (req, res, next) => {
 
         const withdrawals = await listMyWithdrawals(restaurantId);
         return sendResponse(res, 200, 'Withdrawals fetched successfully', withdrawals);
+    } catch (error) {
+        next(error);
+    }
+};
+
+/** The old store panel's "Disbursement" page: this restaurant's payout lines. */
+export const listMyDisbursementsController = async (req, res, next) => {
+    try {
+        const restaurantId = req.user?.userId;
+        if (!isId(restaurantId)) return sendError(res, 401, 'Restaurant authentication required');
+
+        const data = await listRestaurantDisbursements(restaurantId, req.query || {});
+        return sendResponse(res, 200, 'Disbursements fetched successfully', data);
     } catch (error) {
         next(error);
     }

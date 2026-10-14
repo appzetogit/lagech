@@ -1791,7 +1791,7 @@ export async function generateRestaurantPayoutsNow(req, res, next) {
         if (!result.created) {
             return res.status(409).json({ success: false, message: `Not generated: ${result.reason}` });
         }
-        sendOk(res, result, `Payout #${result.batch.number} created for ${result.batch.restaurantCount} restaurant(s)`, 201);
+        sendOk(res, result, `${result.batch.title} created for ${result.batch.restaurantCount} restaurant(s)`, 201);
     } catch (error) {
         next(error);
     }

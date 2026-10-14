@@ -281,7 +281,7 @@ export async function getDisbursementReport(query = {}) {
         rows: rows.slice((page - 1) * limit, page * limit),
         batches: batches.map((b) => ({
             id: b.id,
-            title: `Payout #${b.number}`,
+            title: `Disbursement #${b.legacyNumber ?? b.number}`,
             runDate: b.runDate,
             status: b.status,
             restaurantCount: b.restaurantCount,

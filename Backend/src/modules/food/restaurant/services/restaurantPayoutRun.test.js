@@ -7,6 +7,8 @@ import {
     decidePayouts,
     generateRestaurantPayouts,
     getPayoutBatch,
+    listPayoutBatches,
+    listRestaurantDisbursements,
 } from './restaurantPayout.service.js';
 import { createWithdrawalRequest } from './restaurantWithdrawal.service.js';
 import { getWalletSummaries } from './restaurantFinance.service.js';
@@ -153,4 +155,73 @@ test('paying and cancelling lines moves the batch, and a cancelled line frees th
     if (rest.length) await decidePayouts(batch.id, { ids: rest, status: 'approved' });
     current = (await getPayoutBatch(batch.id)).batch;
     assert.equal(current.status, 'partially_completed', 'paid and cancelled lines together');
+});
+
+test('the list, the details and the restaurant see the same lines and totals', async () => {
+    const a = await makeRestaurant(bank);
+    const b = await makeRestaurant({ upiId: 'b@upi' });
+    await makeOrder(a, 800, daysBefore(4));
+    await makeOrder(b, 200, daysBefore(4));
+
+    const runAt = new Date(RUN_AT.getTime() + 2 * 24 * 60 * 60 * 1000);
+    const { batch } = await generateRestaurantPayouts({ now: runAt, force: true });
+    created.batches.push(batch.id);
+    assert.match(batch.title, /^Disbursement #\d+$/, 'named as the old panel named it');
+    const { payouts } = await getPayoutBatch(batch.id);
+    const lineA = payouts.find((p) => p.restaurantId === a.id);
+    const lineB = payouts.find((p) => p.restaurantId === b.id);
+
+    // The old panel's words work for the bulk action too.
+    assert.equal((await decidePayouts(batch.id, { ids: [lineA.id], status: 'completed', transactionId: 'UTR-9' })).updated, 1);
+
+    const detail = await getPayoutBatch(batch.id);
+    assert.deepEqual(detail.summary.completed, { count: 1, amount: 800 });
+    assert.deepEqual(detail.summary.pending, { count: 1, amount: 200 });
+    assert.equal(detail.batch.status, 'partially_completed');
+    const pendingOnly = await getPayoutBatch(batch.id, { status: 'pending' });
+    assert.deepEqual(pendingOnly.payouts.map((p) => p.id), [lineB.id]);
+    assert.equal(pendingOnly.payouts[0].disbursementStatus, 'pending');
+
+    // The list, narrowed to the Indian day the batch was made and its number.
+    const day = new Date(new Date(batch.createdAt).getTime() + 330 * 60 * 1000).toISOString().slice(0, 10);
+    const list = await listPayoutBatches({ from: day, to: day, search: `#${batch.number}` });
+    assert.deepEqual(list.batches.map((x) => x.id), [batch.id]);
+    assert.equal(list.batches[0].paidAmount, 800);
+    assert.equal(list.batches[0].pendingAmount, 200);
+    assert.equal(list.summary.count, 1);
+    assert.equal(list.summary.totalAmount, 1000);
+    assert.deepEqual(list.summary.completed, { count: 1, amount: 800 });
+    assert.equal((await listPayoutBatches({ from: day, to: day, status: 'completed', search: `${batch.number}` })).batches.length, 0);
+
+    // The restaurant's own view.
+    const mine = await listRestaurantDisbursements(a.id);
+    const own = mine.disbursements.find((d) => d.batchId === batch.id);
+    assert.equal(own.title, batch.title);
+    assert.equal(own.disbursementStatus, 'completed');
+    assert.equal(own.transactionId, 'UTR-9');
+    assert.equal(own.restaurantName, undefined, 'a restaurant is not shown its own name back');
+    assert.deepEqual((await listRestaurantDisbursements(b.id, { status: 'completed' })).disbursements, []);
+    assert.equal((await listRestaurantDisbursements(b.id)).summary.pending.amount, 200);
+
+    // Cancelling gives the money back to withdraw; completing took it for good.
+    await decidePayouts(batch.id, { ids: [lineB.id], status: 'canceled' });
+    assert.equal((await getWalletSummaries([b.id])).get(b.id).netAvailable, 200);
+    assert.equal((await getWalletSummaries([a.id])).get(a.id).netAvailable, 0);
+    assert.equal((await getPayoutBatch(batch.id)).batch.status, 'partially_completed');
+});
+
+test('a disbursement brought over from the previous system keeps its number', async () => {
+    const legacyNumber = 900000 + Math.floor(Math.random() * 99999);
+    const row = await prisma.foodRestaurantPayoutBatch.create({
+        data: {
+            legacyNumber, runDate: `L${legacyNumber}`, cutoffAt: RUN_AT, triggeredBy: 'legacy',
+            restaurantCount: 1, totalAmount: 50, status: 'pending',
+        },
+    });
+    created.batches.push(row.id);
+    const { batch } = await getPayoutBatch(row.id);
+    assert.equal(batch.title, `Disbursement #${legacyNumber}`);
+    assert.equal(batch.isLegacy, true);
+    const found = await listPayoutBatches({ search: String(legacyNumber) });
+    assert.deepEqual(found.batches.map((x) => x.id), [row.id]);
 });

@@ -459,6 +459,13 @@ export function PriorityTab() {
 const admin = { contextModule: "admin" }
 const PAYOUT_SETTINGS = "/food/admin/withdrawals/restaurant-payouts/settings"
 
+/** "03:05" -> "3:05 AM". */
+const twelveHour = (hhmm) => {
+  const [h, m] = String(hhmm || "").split(":").map(Number)
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return hhmm
+  return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`
+}
+
 /** Restaurant payouts keep their own settings (the daily payout run). */
 function RestaurantPayoutCard() {
   const [value, setValue] = useState(null)
@@ -487,19 +494,28 @@ function RestaurantPayoutCard() {
       setSaving(false)
     }
   }
-  if (!value) return <Card title="Restaurants"><Loading /></Card>
+  if (!value) return <Card title="Store (restaurant) disbursement"><Loading /></Card>
   return (
-    <Card title="Restaurants" description="Each run writes one payout line per restaurant owed at least the minimum; the admin pays each line and marks it paid. Once per day; Generate now on the restaurant payouts page still works.">
-      <SwitchRow label="Automated restaurant disbursement" checked={value.isEnabled} onChange={(x) => set("isEnabled", x)} />
-      <div className="grid gap-4 sm:grid-cols-2 mt-3">
-        <Field label="Frequency">
+    <Card
+      title="Store (restaurant) disbursement"
+      description="Each run writes one disbursement with a line per restaurant owed at least the minimum, paid to the restaurant's payout method; the admin pays each line and marks it completed, or cancels it. Lines are on Restaurant Disbursement."
+    >
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Disbursement type" hint={value.isEnabled ? "Created by the system on the schedule below." : "Only created when you press Generate now on Restaurant Disbursement."}>
+          <select className={inputClass} value={value.isEnabled ? "automated" : "manual"} onChange={(e) => set("isEnabled", e.target.value === "automated")}>
+            <option value="automated">Automated</option>
+            <option value="manual">Manual</option>
+          </select>
+        </Field>
+        <Field label="Disbursement time period">
           <select className={inputClass} value={value.frequency} onChange={(e) => set("frequency", e.target.value)}>
             <option value="daily">Daily</option>
             <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly (on the 1st)</option>
           </select>
         </Field>
         {value.frequency === "weekly" && (
-          <Field label="Day">
+          <Field label="Week start">
             <select className={inputClass} value={value.weekday} onChange={(e) => set("weekday", Number(e.target.value))}>
               {["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map((d, i) => (
                 <option key={d} value={i}>{d}</option>
@@ -507,11 +523,11 @@ function RestaurantPayoutCard() {
             </select>
           </Field>
         )}
-        <Field label="Time (India)">
+        <Field label="Create time (India)" hint={value.runTime ? `Runs at ${twelveHour(value.runTime)} IST.` : undefined}>
           <input type="time" className={inputClass} value={value.runTime} onChange={(e) => set("runTime", e.target.value)} />
         </Field>
-        <NumberField label="Minimum amount (₹)" value={value.minAmount} onChange={(x) => set("minAmount", x)} min={1} step="0.01" />
-        <NumberField label="Waiting time" hint="Orders from the last days are held back until the next run." value={value.waitingDays} onChange={(x) => set("waitingDays", x)} max={30} suffix="days" />
+        <NumberField label="Minimum amount to disburse (₹)" value={value.minAmount} onChange={(x) => set("minAmount", x)} min={1} step="0.01" />
+        <NumberField label="Waiting time" hint="Earnings on orders from the last days are held back until a later run, so a late refund is settled first." value={value.waitingDays} onChange={(x) => set("waitingDays", x)} max={30} suffix="days" />
       </div>
       <div className="mt-4 flex justify-end">
         <SaveButton saving={saving} onClick={save} />
@@ -534,7 +550,7 @@ export function DisbursementTab() {
               <Field label="Frequency" hint="Daily.">
                 <input className={`${inputClass} bg-slate-50`} value="Daily" disabled />
               </Field>
-              <Field label="Time (India)">
+              <Field label="Time (India)" hint={rider.runTime ? `Runs at ${twelveHour(rider.runTime)} IST.` : undefined}>
                 <input type="time" className={inputClass} value={rider.runTime} onChange={(e) => area.set(["rider", "runTime"], e.target.value)} />
               </Field>
               <NumberField label="Minimum amount (₹)" value={rider.minAmount} onChange={(x) => area.set(["rider", "minAmount"], x)} min={1} step="0.01" />

@@ -98,11 +98,14 @@ The summary has, per entity, add / update / unchanged / left alone /
 skipped, the columns behind every update and every "left alone", and a wallet
 table: each rider's cash in hand and withdrawable and each restaurant's
 balance, before and after here, against the old wallet at the baseline copy
-and now. "Moved here" and "moved old" should match. The known reason they do not: the
-old system's daily restaurant payouts that are scheduled but not paid
-(`disbursement_details` pending). The old balance already excludes them; here
-they arrive once paid and a later sync brings them in (column "old unpaid").
-Anything left under "unexplained" is worth a look before a real run.
+and now. "Moved here" and "moved old" should match. The old system's daily
+restaurant payouts that are scheduled but not paid (`disbursement_details`
+pending, in the old wallet's `pending_withdraw`) come over as pending lines of
+their old "Disbursement #" batch, not as paid: they hold the money back here the
+same way, and the admin completes or cancels them on Restaurant Disbursement.
+When the old admin completes one later, the sync moves that same line to paid
+rather than adding a second payout. Anything left under "unexplained" is worth
+a look before a real run.
 
 Running a sync twice writes nothing the second time. After a real sync, use
 the copy it read as the baseline for the next one: rows it imported are not in

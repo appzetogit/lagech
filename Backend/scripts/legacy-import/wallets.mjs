@@ -84,14 +84,9 @@ export async function walletsOld(mysql) {
             pocket: money(Number(w.total_earning) - Number(w.total_withdrawn) - Number(w.pending_withdraw)),
         });
     }
-    // Daily payouts the old system has scheduled but not yet paid. Its balance
-    // already leaves them out (pending_withdraw); here they are not ledger rows
-    // until the old system completes them and a later sync brings them in.
-    const [pendingPayouts] = await mysql.query(`
-        SELECT store_id, SUM(disbursement_amount) AS amount FROM disbursement_details
-         WHERE status = 'pending' AND store_id IS NOT NULL GROUP BY store_id`);
-    const pendingByStore = new Map(pendingPayouts.map((row) => [String(row.store_id), money(row.amount)]));
-
+    // Daily payouts the old system has scheduled but not yet paid are in its
+    // pending_withdraw, and come over as pending payout lines, which hold the
+    // money back here the same way -- so both sides already leave them out.
     const restaurants = new Map();
     for (const w of storeWallets) {
         const storeId = storeByVendor.get(String(w.vendor_id)) || '';
@@ -100,7 +95,6 @@ export async function walletsOld(mysql) {
         restaurants.set(id, {
             balance: money((Number(w.total_earning) - Number(w.total_withdrawn)
                 - Number(w.pending_withdraw) - Number(w.collected_cash))),
-            pendingPayouts: pendingByStore.get(storeId) || 0,
         });
     }
     return { riders, restaurants };
@@ -144,8 +138,7 @@ export function walletRows({ before, after, oldBase, oldNow }) {
     const storeName = (id) => after.restaurants.get(id)?.name || id;
     add('rider', 'cash in hand', riderIds, (w, id) => w.riders.get(id)?.cash, riderName);
     add('rider', 'withdrawable', riderIds, (w, id) => w.riders.get(id)?.pocket, riderName);
-    add('restaurant', 'balance', storeIds, (w, id) => w.restaurants.get(id)?.balance, storeName,
-        (w, id) => w.restaurants.get(id)?.pendingPayouts);
+    add('restaurant', 'balance', storeIds, (w, id) => w.restaurants.get(id)?.balance, storeName);
     return rows.sort((x, y) => Math.abs(y.unexplained ?? y.movedHere) - Math.abs(x.unexplained ?? x.movedHere));
 }
 
@@ -155,9 +148,9 @@ export function printWallets(allRows, { dryRun }) {
     const line = (r) => console.log(`   ${`${r.kind} ${r.name}`.slice(0, 36).padEnd(36)} ${r.measure.padEnd(13)}${[r.before, r.after, r.movedHere, r.oldBase, r.oldNow, r.movedOld, r.gap, r.pendingMoved, r.unexplained, r.afterVsOld].map(fmt).join('')}`);
     const rows = allRows.filter((r) => r.moved);
     console.log(`\n── wallets: here before → after${dryRun ? ' (would be)' : ''}, against the old system's wallet at the baseline copy → now ──`);
-    console.log('   "moved here" should equal "moved old"; "gap" is the difference. "old unpaid" is the change in daily payouts the old');
-    console.log('   system has scheduled but not paid (its balance already excludes them; here they arrive once paid), and "unexplained"');
-    console.log('   is the gap without them. "after−old" is where the two systems disagree after the sync. Restaurant balances are');
+    console.log('   "moved here" should equal "moved old"; "gap" is the difference. Daily payouts the old system scheduled but has not');
+    console.log('   paid come over as pending payout lines, so both sides already leave them out ("old unpaid" stays 0); "unexplained"');
+    console.log('   is the gap. "after−old" is where the two systems disagree after the sync. Restaurant balances are');
     console.log('   not floored at 0 on either side (the app shows a negative one as 0). "—": no wallet on that side.');
     if (!rows.length) console.log('   no balance moved in either system');
     else header();

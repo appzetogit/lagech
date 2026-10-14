@@ -11,6 +11,8 @@ import {
  */
 
 const LIMIT = 15
+// The old panel's words for a disbursement line.
+const LINE_WORDS = { pending: "Pending", approved: "Completed", rejected: "Canceled" }
 const tone = (status) => {
   const s = String(status || "").toLowerCase()
   return s === "approved" ? "green" : s === "rejected" ? "red" : "amber"
@@ -82,7 +84,7 @@ export default function DisbursementsTab({ restaurantId }) {
                   <td className={`${td} whitespace-nowrap font-semibold`}>{rupees(row.amount)}</td>
                   <td className={td}>{titleCase(row.bankDetails?.payoutMethod?.methodName || row.paymentMethod)}</td>
                   <td className={`${td} text-xs`}>{row.transactionId || "-"}</td>
-                  <td className={td}><Pill tone={tone(row.status)}>{titleCase(row.status)}</Pill></td>
+                  <td className={td}><Pill tone={tone(row.status)}>{LINE_WORDS[String(row.status || "").toLowerCase()] || titleCase(row.status)}</Pill></td>
                   <td className={`${td} whitespace-nowrap text-xs`}>{formatDateTime(row.processedAt)}</td>
                 </tr>
               ))}

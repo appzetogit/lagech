@@ -64,6 +64,11 @@ export async function listMyWithdrawals(restaurantId) {
     const rows = await prisma.foodRestaurantWithdrawal.findMany({
         where: { restaurantId },
         orderBy: { createdAt: 'desc' },
+        include: { batch: { select: { number: true, legacyNumber: true } } },
     });
-    return rows.map(serialize);
+    // A payout line says which run made it: "Disbursement #1117".
+    return rows.map(({ batch, ...w }) => ({
+        ...serialize(w),
+        disbursementTitle: batch ? `Disbursement #${batch.legacyNumber ?? batch.number}` : null,
+    }));
 }

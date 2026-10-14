@@ -35,7 +35,8 @@ import {
 import { listOwnReviewsController, replyToReviewController } from '../controllers/restaurantReviews.controller.js';
 import {
     createWithdrawalRequestController,
-    listMyWithdrawalsController
+    listMyWithdrawalsController,
+    listMyDisbursementsController
 } from '../controllers/withdrawal.controller.js';
 import { restaurantPayout } from '../../admin/controllers/adminSystemExtras.controller.js';
 import {
@@ -189,6 +190,8 @@ router.put('/outlet-timings', authMiddleware, requireRestaurant, upsertCurrentRe
 router.get('/finance', authMiddleware, requireRestaurant, getRestaurantFinanceController);
 router.post('/withdraw', authMiddleware, requireRestaurant, createWithdrawalRequestController);
 router.get('/withdrawals', authMiddleware, requireRestaurant, listMyWithdrawalsController);
+// The daily payout lines made for this restaurant (old store panel: Disbursement).
+router.get('/disbursements', authMiddleware, requireRestaurant, listMyDisbursementsController);
 // Payout methods the admin accepts, and the one this restaurant chose.
 router.get('/payout-methods', authMiddleware, requireRestaurant, restaurantPayout.listMethods);
 router.get('/payout-details', authMiddleware, requireRestaurant, restaurantPayout.getDetails);
