@@ -101,7 +101,7 @@ export async function getAdminOrderDetailsExtras(orderId) {
             ? prisma.foodOrder.count({ where: { dispatchDeliveryPartnerId: partnerId, orderStatus: 'delivered' } })
             : 0,
         // Every step with its time, as the customer's order screen shows it.
-        prisma.foodOrderStatusHistory.findMany({
+        prisma.orderStatusHistory.findMany({
             where: { orderId: row.id },
             orderBy: { at: 'asc' },
             select: { at: true, byRole: true, from: true, to: true, note: true },
