@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react"
+import CustomerLink, { customerIdOf } from "@food/components/admin/customers/CustomerLink"
 import { Eye, Printer, ArrowUpDown, Loader2, Check, X, Trash2, RefreshCw, Volume2, PackageCheck } from "@food/components/admin/theme/icons"
 
 const getStatusColor = (orderStatus) => {
@@ -310,7 +311,7 @@ export default function OrdersTable({
                 {visibleColumns.customer && (
                   <td className="px-6 py-4">
                     <div className="flex flex-col">
-                      <span className="text-sm font-medium text-slate-700">{order.customerName}</span>
+                      <CustomerLink id={customerIdOf(order)} className="text-sm font-medium text-slate-700">{order.customerName}</CustomerLink>
                       <span className="text-xs text-slate-500 mt-0.5">{order.customerPhone}</span>
                     </div>
                   </td>

@@ -1,13 +1,13 @@
 import { useState, useEffect } from "react"
-import { useSearchParams } from "react-router-dom"
-import { Search, Download, ChevronDown, ChevronLeft, ChevronRight, Calendar, Eye, FileDown, FileSpreadsheet, FileText, X, Mail, Phone, MapPin, Package, IndianRupee, Calendar as CalendarIcon, User, CheckCircle, XCircle } from "@food/components/admin/theme/icons"
+import { useNavigate, useSearchParams } from "react-router-dom"
+import { Search, ChevronLeft, ChevronRight, Eye, FileText } from "@food/components/admin/theme/icons"
+import CustomerLink, { customerPath } from "@food/components/admin/customers/CustomerLink"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { exportCustomersToPDF } from "@food/components/admin/customers/customersExportUtils"
 import ExportMenu from "@food/components/admin/ExportMenu"
 import { fetchAllPages, exportDate, exportMoney } from "@food/utils/listExport"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@food/components/ui/dialog"
 import { usePaginationParams } from "@food/hooks/usePaginationParams"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
@@ -44,10 +44,7 @@ export default function Customers() {
   // page size stops being a constant nobody can see.
   const { page, limit: pageSize, setPage, setLimit: setPageSize, limitOptions } =
     usePaginationParams({ defaultLimit: PAGE_SIZE })
-  const [selectedCustomer, setSelectedCustomer] = useState(null)
-  const [userDetails, setUserDetails] = useState(null)
-  const [loadingDetails, setLoadingDetails] = useState(false)
-  const [showUserDetails, setShowUserDetails] = useState(false)
+  const navigate = useNavigate()
   // Two copies on purpose. The controls edit `draft`; only Apply Filters copies
   // it into `filters`, which is what the fetch below watches.
   //
@@ -163,9 +160,10 @@ export default function Customers() {
   const [searchParams] = useSearchParams()
   const userIdFromUrl = searchParams.get("userId")
 
+  // Old links to ?userId= opened the details modal; that is a page now.
   useEffect(() => {
     if (userIdFromUrl) {
-      handleViewDetails(userIdFromUrl)
+      navigate(customerPath(userIdFromUrl), { replace: true })
     }
   }, [userIdFromUrl])
 
@@ -195,28 +193,9 @@ export default function Customers() {
     }
   }
 
-  const handleViewDetails = async (customerId) => {
-    try {
-      setLoadingDetails(true)
-      setShowUserDetails(true)
-      setSelectedCustomer(customerId)
-
-      const response = await adminAPI.getCustomerById(customerId)
-      const data = response?.data?.data || response?.data
-
-      if (data?.user) {
-        setUserDetails(data.user)
-      } else {
-        toast.error('Failed to load user details')
-        setShowUserDetails(false)
-      }
-    } catch (error) {
-      debugError('Error fetching user details:', error)
-      toast.error('Failed to load user details')
-      setShowUserDetails(false)
-    } finally {
-      setLoadingDetails(false)
-    }
+  // The old panel's customer view is a full page, not a modal.
+  const handleViewDetails = (customerId) => {
+    if (customerId) navigate(customerPath(customerId))
   }
 
   // Every customer matching the applied search and filters, not just this page.
@@ -496,12 +475,12 @@ export default function Customers() {
                               <span className="text-xs font-semibold">{getInitials(customer.name)}</span>
                             )}
                           </div>
-                          <span 
-                            className="text-sm font-medium text-slate-900 cursor-pointer hover:text-blue-600 transition-colors"
-                            onClick={() => handleViewDetails(customer._id || customer.id || customer.sl)}
+                          <CustomerLink
+                            id={customer._id || customer.id}
+                            className="text-sm font-medium text-slate-900 transition-colors"
                           >
                             {customer.name}
-                          </span>
+                          </CustomerLink>
                         </div>
                       </td>
                       <td className="px-6 py-4">
@@ -575,177 +554,6 @@ export default function Customers() {
           ) : null}
         </div>
       </div>
-
-      {/* User Details Modal */}
-      <Dialog open={showUserDetails} onOpenChange={setShowUserDetails}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto mx-auto p-0 gap-0">
-          <DialogHeader className="px-6 pt-6 pb-4 border-b border-slate-200">
-            <DialogTitle className="pr-12 text-xl font-bold text-slate-900">User Details</DialogTitle>
-          </DialogHeader>
-
-          {loadingDetails ? (
-            <div className="px-6 py-8 text-center">
-              <div className="text-sm text-slate-500">Loading user details...</div>
-            </div>
-          ) : userDetails ? (
-            <div className="space-y-4 px-6 py-5">
-              {/* Profile Section */}
-              <div className="bg-slate-50 rounded-xl p-4 sm:p-5">
-                <div className="flex flex-col sm:flex-row sm:items-start gap-4">
-                  <div className="w-16 h-16 rounded-full bg-slate-200 flex items-center justify-center flex-shrink-0">
-                    {userDetails.profileImage ? (
-                      <img src={userDetails.profileImage} alt={userDetails.name} className="w-full h-full rounded-full object-cover" />
-                    ) : (
-                      <User className="w-8 h-8 text-slate-400" />
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex flex-wrap items-center gap-2 mb-2">
-                      <h3 className="text-lg font-bold text-slate-900">{userDetails.name}</h3>
-                      {userDetails.isActive ? (
-                        <span className="px-2 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700 flex items-center gap-1">
-                          <CheckCircle className="w-3 h-3" />
-                          Active
-                        </span>
-                      ) : (
-                        <span className="px-2 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700 flex items-center gap-1">
-                          <XCircle className="w-3 h-3" />
-                          Inactive
-                        </span>
-                      )}
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
-                      <div className="flex items-center gap-2 text-sm text-slate-600 min-w-0">
-                        <Mail className="w-4 h-4" />
-                        <span className="truncate">{userDetails.email}</span>
-                      </div>
-                      <div className="flex items-center gap-2 text-sm text-slate-600 min-w-0">
-                        <Phone className="w-4 h-4" />
-                        <span>{userDetails.phone}</span>
-                        {userDetails.phoneVerified && (
-                          <CheckCircle className="w-3 h-3 text-green-600" />
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 text-sm text-slate-600">
-                        <CalendarIcon className="w-4 h-4" />
-                        <span>Joined: {formatDateTime(userDetails.joiningDate)}</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Statistics Section */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div className="bg-blue-50 rounded-lg p-3">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Package className="w-4 h-4 text-blue-600" />
-                    <span className="text-xs font-semibold text-slate-700">Total Orders</span>
-                  </div>
-                  <p className="text-xl font-bold text-blue-600">{userDetails.totalOrders || 0}</p>
-                </div>
-                <div className="bg-green-50 rounded-lg p-3">
-                  <div className="flex items-center gap-2 mb-1">
-                    <IndianRupee className="w-4 h-4 text-green-600" />
-                    <span className="text-xs font-semibold text-slate-700">Total Spent</span>
-                  </div>
-                  <p className="text-xl font-bold text-green-600">
-                    Rs. {(userDetails.totalOrderAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </p>
-                </div>
-                <div className="bg-purple-50 rounded-lg p-3">
-                  <div className="flex items-center gap-2 mb-1">
-                    <CalendarIcon className="w-4 h-4 text-purple-600" />
-                    <span className="text-xs font-semibold text-slate-700">Member Since</span>
-                  </div>
-                  <p className="text-base font-bold text-purple-600">{formatDateTime(userDetails.joiningDate)}</p>
-                </div>
-              </div>
-
-              {/* Addresses Section */}
-              {userDetails.addresses && userDetails.addresses.length > 0 && (
-                <div>
-                  <h4 className="text-base font-bold text-slate-900 mb-2 flex items-center gap-2">
-                    <MapPin className="w-4 h-4" />
-                    Addresses
-                  </h4>
-                  <div className="space-y-2">
-                    {userDetails.addresses.map((address, index) => (
-                      <div key={index} className="bg-slate-50 rounded-lg p-3 border border-slate-200">
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-sm font-semibold text-slate-700">{address.label || 'Address'}</span>
-                          {address.isDefault && (
-                            <span className="px-2 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
-                              Default
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-sm text-slate-600">
-                          {address.street}
-                          {address.additionalDetails && `, ${address.additionalDetails}`}
-                          {address.city && `, ${address.city}`}
-                          {address.state && `, ${address.state}`}
-                          {address.zipCode && ` - ${address.zipCode}`}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Recent Orders Section */}
-              {userDetails.orders && userDetails.orders.length > 0 && (
-                <div>
-                  <h4 className="text-base font-bold text-slate-900 mb-2 flex items-center gap-2">
-                    <Package className="w-4 h-4" />
-                    Recent Orders
-                  </h4>
-                  <div className="space-y-2">
-                    {userDetails.orders.slice(0, 5).map((order, index) => (
-                      <div key={index} className="bg-slate-50 rounded-lg p-3 border border-slate-200 flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-semibold text-slate-900">{order.orderId}</p>
-                          <p className="text-xs text-slate-600">{order.restaurantName}</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-sm font-semibold text-slate-900">Rs. {(order.total || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                          <p className="text-xs text-slate-600 capitalize">{order.status}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Additional Info */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {userDetails.gender && (
-                  <div className="bg-slate-50 rounded-lg p-3">
-                    <p className="text-xs font-semibold text-slate-700 mb-1">Gender</p>
-                    <p className="text-sm text-slate-600 capitalize">{userDetails.gender}</p>
-                  </div>
-                )}
-                {userDetails.dateOfBirth && (
-                  <div className="bg-slate-50 rounded-lg p-3">
-                    <p className="text-xs font-semibold text-slate-700 mb-1">Date of Birth</p>
-                    <p className="text-sm text-slate-600">
-                      {new Date(userDetails.dateOfBirth).toLocaleDateString('en-GB', {
-                        day: 'numeric',
-                        month: 'short',
-                        year: 'numeric'
-                      })}
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className="py-8 text-center">
-              <div className="text-sm text-slate-500">No user details available</div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }

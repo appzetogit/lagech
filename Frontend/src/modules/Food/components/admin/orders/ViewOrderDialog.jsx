@@ -16,6 +16,7 @@ import { restaurantLabel } from "@food/utils/entityLabels"
 import OfflinePaymentPanel from "./OfflinePaymentPanel"
 import { toast } from "sonner"
 import { printOrderInvoice } from "@food/utils/printInvoice"
+import CustomerLink, { customerIdOf } from "@food/components/admin/customers/CustomerLink"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -369,7 +370,9 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order, onOrderCh
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-1">
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Customer Name</p>
-                <p className="text-sm font-medium text-slate-900">{order.customerName || "N/A"}</p>
+                <p className="text-sm font-medium text-slate-900">
+                  <CustomerLink id={customerIdOf(order)}>{order.customerName || "N/A"}</CustomerLink>
+                </p>
               </div>
               {order.customerPhone && (
                 <div className="space-y-1">

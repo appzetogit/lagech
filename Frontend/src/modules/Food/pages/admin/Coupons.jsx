@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 import {
   Download,
@@ -314,6 +315,42 @@ export default function Coupons() {
       })
       .catch(() => setZones([]))
   }, [])
+
+  // Customer Details > Create coupon lands here with ?customerId=: start a new
+  // coupon for just that customer, as the old panel did.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const presetCustomerId = searchParams.get("customerId")
+  useEffect(() => {
+    if (!presetCustomerId) return
+    let cancelled = false
+    adminAPI
+      .getCustomerById(presetCustomerId)
+      .then((res) => {
+        const c = res?.data?.data?.customer || res?.data?.data?.user
+        if (cancelled || !c) return
+        setEditingId(null)
+        setForm({ ...emptyForm(), allCustomers: false, customers: [{ id: c.id, name: c.name || "", phone: c.phone || "" }] })
+        formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+      })
+      .catch((err) => {
+        if (!cancelled) toast.error(errorMessage(err, "Could not load the customer"))
+      })
+      .finally(() => {
+        // Applied once, so a reload does not prefill the form again.
+        if (cancelled) return
+        setSearchParams(
+          (params) => {
+            const next = new URLSearchParams(params)
+            next.delete("customerId")
+            return next
+          },
+          { replace: true },
+        )
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [presetCustomerId, setSearchParams])
 
   useEffect(() => {
     const close = (e) => {

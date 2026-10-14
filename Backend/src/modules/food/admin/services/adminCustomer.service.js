@@ -171,22 +171,125 @@ export async function getCustomers(query = {}) {
     return { customers, total, page, limit };
 }
 
+/**
+ * An order still waiting on its online payment was never placed, as far as the
+ * customer or the restaurant can tell, so the customer page leaves it out.
+ */
+const PLACED_ORDER = { orderStatus: { not: 'pending_payment' } };
+
+const serializeAddress = (a) => ({
+    id: a.id,
+    label: a.label,
+    street: a.street,
+    additionalDetails: a.additionalDetails || '',
+    city: a.city,
+    state: a.state,
+    zipCode: a.zipCode || '',
+    phone: a.phone || '',
+    latitude: a.latitude,
+    longitude: a.longitude,
+    isDefault: a.isDefault === true,
+});
+
 export async function getCustomerById(id) {
     if (!isId(id)) return null;
 
     const user = await prisma.foodUser.findUnique({
         where: { id: String(id) },
-        select: CUSTOMER_SELECT,
+        select: { ...CUSTOMER_SELECT, gender: true, dateOfBirth: true },
     });
     if (!user) return null;
 
-    const stats = (await deliveredStatsFor([user.id])).get(user.id);
+    // The old panel's Customer Details cards: every placed order and what it
+    // came to (not only the delivered ones the list counts), the wallet
+    // balance and the loyalty points held right now.
+    const [stats, placed, addresses, wallet, loyalty] = await Promise.all([
+        deliveredStatsFor([user.id]).then((byId) => byId.get(user.id)),
+        prisma.foodOrder.aggregate({
+            where: { userId: user.id, ...PLACED_ORDER },
+            _count: { _all: true },
+            _sum: { total: true },
+        }),
+        prisma.userAddress.findMany({
+            where: { userId: user.id },
+            orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
+        }),
+        prisma.wallet.findUnique({
+            where: { entityType_entityId: { entityType: 'user', entityId: user.id } },
+            select: { balance: true },
+        }),
+        prisma.foodLoyaltyPointAccount.findUnique({
+            where: { userId: user.id },
+            select: { points: true },
+        }),
+    ]);
 
     return {
         ...serializeCustomer(user, stats),
         // The detail screen reads totalOrders; the list reads totalOrder.
         totalOrders: stats?.totalOrder || 0,
+        gender: user.gender && user.gender !== 'unset' ? user.gender : '',
+        dateOfBirth: user.dateOfBirth,
         updatedAt: user.updatedAt,
+        addresses: addresses.map(serializeAddress),
+        walletBalance: Number(wallet?.balance || 0),
+        loyaltyPoint: loyalty?.points || 0,
+        placedOrderCount: placed._count._all,
+        placedOrderAmount: Number(placed._sum.total || 0),
+    };
+}
+
+/**
+ * One customer's orders, newest first, for the Customer Details order list.
+ * `search` matches the display order id (FOD-...) or the internal id.
+ *
+ * @returns {Promise<null|{orders: object[], pagination: object}>} null when the customer does not exist
+ */
+export async function getCustomerOrders(id, query = {}) {
+    if (!isId(id)) return null;
+    const user = await prisma.foodUser.findUnique({ where: { id: String(id) }, select: { id: true } });
+    if (!user) return null;
+
+    const limit = Math.min(Math.max(parseInt(query.limit, 10) || 10, 1), 500);
+    const page = Math.max(parseInt(query.page, 10) || 1, 1);
+
+    const where = { userId: user.id, ...PLACED_ORDER };
+    const q = String(query.search || '').trim().slice(0, 64);
+    if (q) {
+        const contains = { contains: q, mode: 'insensitive' };
+        where.OR = [{ order_id: contains }, { orderId: contains }, { id: q }];
+    }
+
+    const [rows, total] = await Promise.all([
+        prisma.foodOrder.findMany({
+            where,
+            orderBy: { createdAt: 'desc' },
+            skip: (page - 1) * limit,
+            take: limit,
+            select: {
+                id: true, order_id: true, orderId: true, total: true,
+                orderStatus: true, paymentStatus: true, paymentMethod: true,
+                orderType: true, createdAt: true, restaurantId: true,
+                restaurant: { select: { restaurantName: true } },
+            },
+        }),
+        prisma.foodOrder.count({ where }),
+    ]);
+
+    return {
+        orders: rows.map((o) => ({
+            id: o.id,
+            orderId: o.order_id || o.orderId || o.id,
+            total: Number(o.total || 0),
+            orderStatus: o.orderStatus,
+            paymentStatus: o.paymentStatus,
+            paymentMethod: o.paymentMethod,
+            orderType: o.orderType,
+            restaurantId: o.restaurantId,
+            restaurantName: o.restaurant?.restaurantName || '',
+            createdAt: o.createdAt,
+        })),
+        pagination: { page, limit, total, pages: Math.ceil(total / limit) },
     };
 }
 

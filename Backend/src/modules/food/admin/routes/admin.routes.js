@@ -198,6 +198,8 @@ router.get(
     adminController.getCustomers
 );
 router.get('/customers/:id', adminController.getCustomerById);
+// Customer Details > Order List (customer_management view, via the mapping above).
+router.get('/customers/:id/orders', adminController.getCustomerOrders);
 router.patch('/customers/:id/status', adminController.updateCustomerStatus);
 
 // ----- Safety / Emergency Reports -----
