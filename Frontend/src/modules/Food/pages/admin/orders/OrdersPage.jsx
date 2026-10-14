@@ -80,6 +80,11 @@ const OFFLINE_TABS = [
   ["denied", "Denied"],
 ]
 
+
+// New-order sound, toast and system notification come from the panel-wide
+// useAdminOrderAlerts; this page only refreshes its list.
+const PANEL_ALARM = true
+
 export default function OrdersPage({ statusKey = "all" }) {
   const config = statusConfig[statusKey] || statusConfig["all"]
   const [orders, setOrders] = useState([])
@@ -198,6 +203,9 @@ export default function OrdersPage({ statusKey = "all" }) {
   }, [resolveAudioSource])
 
   const playDefaultRing = useCallback(() => {
+    // The panel-wide alarm (useAdminOrderAlerts) rings for new orders on this
+    // page too, in a loop that survives a locked phone; this page stays quiet.
+    if (PANEL_ALARM) return
     playDeliveryStyleBuzz().then((played) => {
       if (played) return
 
@@ -273,6 +281,7 @@ export default function OrdersPage({ statusKey = "all" }) {
   }, [])
 
   const startAlertLoop = useCallback(() => {
+    if (PANEL_ALARM) return
     stopAlertLoop()
     alertLoopStartedAtRef.current = Date.now()
 
@@ -290,6 +299,7 @@ export default function OrdersPage({ statusKey = "all" }) {
   }, [playDefaultRing, stopAlertLoop])
 
   const showBrowserNotification = useCallback(async (title, body, tag) => {
+    if (PANEL_ALARM) return
     if (typeof window === "undefined" || typeof Notification === "undefined") return
     if (Notification.permission !== "granted") return
 
@@ -563,7 +573,7 @@ export default function OrdersPage({ statusKey = "all" }) {
                 `admin-order-poll-${Date.now()}`,
               )
             }
-            toast.info("New order received")
+            if (!PANEL_ALARM) toast.info("New order received")
             if (apiPageRef.current === 1) {
               setTotalOrdersCount(getTotalCountFromResponse(response) ?? nextOrders.length)
               setApiTotalPages(getTotalPagesFromResponse(response))
@@ -961,7 +971,7 @@ export default function OrdersPage({ statusKey = "all" }) {
         activeOrderAlertRef.current = payload || { orderId: "socket-new-order" }
         playDefaultRing()
         startAlertLoop()
-        toast.info("New order received")
+        if (!PANEL_ALARM) toast.info("New order received")
         showBrowserNotification(
           "New order received",
           "A new order arrived",
@@ -984,7 +994,7 @@ export default function OrdersPage({ statusKey = "all" }) {
       activeOrderAlertRef.current = payload || { orderId }
       playDefaultRing()
       startAlertLoop()
-      toast.info(title, { description: body })
+      if (!PANEL_ALARM) toast.info(title, { description: body })
       showBrowserNotification(title, body, `admin-order-${orderId}`)
       fetchOrdersRef.current({ silent: true, withRingCheck: false, force: true })
     }

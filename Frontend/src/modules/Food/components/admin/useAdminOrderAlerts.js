@@ -15,9 +15,8 @@ const POLL_MS = 20 * 1000
 /**
  * New-order alerts on every admin page.
  *
- * The Orders page has its own socket with the full alarm loop and list
- * refresh, so this stays quiet there (`onOrdersPage`) and only covers the rest
- * of the panel -- an admin sitting on the dashboard used to hear nothing.
+ * The single ringer for the whole panel, the Orders pages included (they only
+ * refresh their list). `onOrdersPage` true would silence it.
  *
  * A new order rings in a loop until the admin taps the page or the alert (or
  * two minutes pass). An audio element already playing keeps playing on a
@@ -100,6 +99,12 @@ export function useAdminOrderAlerts(onOrdersPage) {
       startAlarm()
     }
     socket.on("admin_new_order", alertFor)
+    // Accepted or cancelled elsewhere: nothing left to ring for.
+    const onStatus = (payload = {}) => {
+      const status = String(payload.orderStatus || payload.status || "").toLowerCase()
+      if (status && status !== "created" && status !== "pending") stopAlarm()
+    }
+    socket.on("order_status_update", onStatus)
 
     // Fallback: the newest order, compared with the last one seen.
     let newestId = null
@@ -140,6 +145,7 @@ export function useAdminOrderAlerts(onOrdersPage) {
     return () => {
       stopAuthRetry()
       socket.off("admin_new_order", alertFor)
+      socket.off("order_status_update", onStatus)
       socket.disconnect()
       clearInterval(pollTimer)
       document.removeEventListener("visibilitychange", onVisible)

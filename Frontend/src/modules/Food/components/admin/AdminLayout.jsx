@@ -73,8 +73,8 @@ export default function AdminLayout() {
   // rather than the one constant the stylesheet has to guess at.
   useFitTablesToViewport(mainContentRef, [location.pathname, isSidebarCollapsed]);
 
-  // New-order alerts everywhere except the Orders pages, which ring themselves.
-  useAdminOrderAlerts(location.pathname.includes("/orders/"));
+  // New-order alarm on every admin page, the Orders pages included.
+  useAdminOrderAlerts(false);
 
   // Safely enforce light mode for the Admin panel to prevent User dark mode bleeding
   useEffect(() => {
