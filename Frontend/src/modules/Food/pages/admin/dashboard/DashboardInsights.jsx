@@ -3,6 +3,9 @@ import { useNavigate } from "react-router-dom"
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { Loader2 } from "@food/components/admin/theme/icons"
 import { adminAPI } from "@food/api"
+import { customerPath } from "@food/components/admin/customers/CustomerLink"
+import { restaurantPath } from "@food/components/admin/customers/RestaurantLink"
+import { riderPath } from "@food/components/admin/customers/RiderLink"
 
 const rupees = (n) => `₹${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`
 const count = (n) => Number(n || 0).toLocaleString("en-IN")
@@ -148,7 +151,7 @@ export default function DashboardInsights({ zoneId, period }) {
   ]
   const splitTotal = split.reduce((sum, s) => sum + (s.value || 0), 0)
   const earnings = data.earnings.map((m) => ({ ...m, label: monthLabel(m.month) }))
-  const openRestaurant = (row) => navigate(`/admin/food/restaurants/edit/${row.id}`)
+  const openRestaurant = (row) => navigate(restaurantPath(row.id))
   const openFood = () => navigate("/admin/food/foods")
 
   return (
@@ -282,7 +285,7 @@ export default function DashboardInsights({ zoneId, period }) {
           <PersonGrid
             rows={data.topRiders || []}
             glyph="user"
-            onOpen={() => navigate("/admin/food/delivery-partners")}
+            onOpen={(r) => navigate(r.id ? riderPath(r.id) : "/admin/food/delivery-partners")}
             line={(r) => `Orders : ${count(r.orders)}`}
           />
         </Panel>
@@ -291,7 +294,7 @@ export default function DashboardInsights({ zoneId, period }) {
           <PersonGrid
             rows={data.topCustomers || []}
             glyph="user"
-            onOpen={() => navigate("/admin/food/customers")}
+            onOpen={(c) => navigate(c.id ? customerPath(c.id) : "/admin/food/customers")}
             line={(c) => `Orders : ${count(c.orders)}`}
           />
         </Panel>

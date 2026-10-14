@@ -4,6 +4,7 @@ import { toast } from "sonner"
 import { adminAPI } from "@food/api"
 import { adminCatalogExtrasAPI, errorMessage, loadRestaurantOptions } from "@food/api/adminCatalogExtras"
 import ExportMenu from "@food/components/admin/ExportMenu"
+import RestaurantLink from "@food/components/admin/customers/RestaurantLink"
 import { exportDate, exportMoney } from "@food/utils/listExport"
 import { ImageUpload, STATE_BADGE, STATE_LABEL, STATE_TABS, formatWhen, fromLocalInput, toLocalInput } from "./campaignShared"
 
@@ -249,7 +250,7 @@ export default function FoodCampaign() {
                         </div>
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-slate-700">{c.restaurantName}</td>
+                    <td className="px-4 py-3 text-slate-700"><RestaurantLink id={c.restaurantId}>{c.restaurantName}</RestaurantLink></td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       <span className="font-semibold text-slate-800">₹{c.finalPrice}</span>
                       {c.discount > 0 && <span className="ml-1.5 text-xs text-slate-400 line-through">₹{c.price}</span>}

@@ -11,6 +11,8 @@ import {
 import { toast } from "sonner";
 import { adminAPI } from "@food/api";
 import { formatDateTime } from "@food/utils/dateTime";
+import RestaurantLink from "@food/components/admin/customers/RestaurantLink";
+import RiderLink from "@food/components/admin/customers/RiderLink";
 
 const statusClass = {
   open: "bg-orange-100 text-orange-700",
@@ -226,7 +228,13 @@ export default function OrderReassignmentRequests() {
                               Delivery partner
                             </p>
                             <p className="text-sm font-semibold text-slate-900">
-                              {request.deliveryPartner?.name || "N/A"}
+                              {request.deliveryPartner?.name ? (
+                                <RiderLink id={request.deliveryPartnerId || request.deliveryPartner?.id}>
+                                  {request.deliveryPartner.name}
+                                </RiderLink>
+                              ) : (
+                                "N/A"
+                              )}
                             </p>
                             <p className="text-xs text-slate-500">
                               {request.deliveryPartner?.phone || "N/A"}
@@ -240,9 +248,13 @@ export default function OrderReassignmentRequests() {
                               Restaurant
                             </p>
                             <p className="text-sm font-semibold text-slate-900">
-                              {request.restaurant?.restaurantName ||
-                                request.restaurant?.name ||
-                                "N/A"}
+                              {request.restaurant?.restaurantName || request.restaurant?.name ? (
+                                <RestaurantLink id={request.restaurantId || request.restaurant?.id}>
+                                  {request.restaurant.restaurantName || request.restaurant.name}
+                                </RestaurantLink>
+                              ) : (
+                                "N/A"
+                              )}
                             </p>
                             <p className="text-xs text-slate-500">
                               Order status:{" "}

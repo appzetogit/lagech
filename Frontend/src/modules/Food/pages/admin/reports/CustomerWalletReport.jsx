@@ -6,6 +6,7 @@ import { exportReportsToCSV, exportReportsToExcel, exportReportsToPDF, exportRep
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
 import { formatDateTime } from "@food/utils/dateTime"
+import CustomerLink, { customerIdOf } from "@food/components/admin/customers/CustomerLink"
 
 // Import icons from Dashboard-icons
 import debitIcon from "@food/assets/Dashboard-icons/image2.png"
@@ -395,12 +396,9 @@ export default function CustomerWalletReport() {
                         <span className="text-xs text-slate-700 font-mono break-all">{transaction.transactionId}</span>
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
-                        <a
-                          href={`#customer-${transaction.customer}`}
-                          className="text-xs text-blue-600 hover:text-blue-800 hover:underline"
-                        >
+                        <CustomerLink id={customerIdOf(transaction)} className="text-xs text-blue-600 hover:text-blue-800">
                           {transaction.customer}
-                        </a>
+                        </CustomerLink>
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         <span className="text-xs font-medium text-slate-900">{transaction.credit}</span>

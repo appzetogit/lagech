@@ -198,12 +198,12 @@ export async function getDashboardStats(query = {}) {
         prisma.foodRestaurant.findMany({
             where: { ...restaurantWhere, status: 'pending' },
             orderBy: { createdAt: 'desc' }, take: 5,
-            select: { restaurantName: true, createdAt: true },
+            select: { id: true, restaurantName: true, createdAt: true },
         }),
         prisma.foodDeliveryPartner.findMany({
             where: { status: 'pending' },
             orderBy: { createdAt: 'desc' }, take: 5,
-            select: { name: true, createdAt: true },
+            select: { id: true, name: true, createdAt: true },
         }),
         prisma.foodOrder.findMany({
             where: { ...orderWhere, orderStatus: { in: PENDING_ORDER_STATUSES } },
@@ -228,19 +228,23 @@ export async function getDashboardStats(query = {}) {
             }).then((rows) => rows.map((r) => ({ ...r.user, createdAt: r.createdAt })))
             : prisma.foodUser.findMany({
                 orderBy: { createdAt: 'desc' }, take: 5,
-                select: { name: true, createdAt: true },
+                select: { id: true, name: true, createdAt: true },
             }),
     ]);
 
-    const signal = (type, title, detail, timestamp) => ({
+    // `account` (the restaurant, rider or customer the signal is about) lets
+    // the dashboard link the name to that account.
+    const signal = (type, title, detail, timestamp, account) => ({
         type, title, detail, time: formatTimeAgo(timestamp), timestamp,
+        ...(account?.id ? { accountId: account.id, accountName: account.name || '' } : {}),
     });
 
     const liveSignals = [
         ...recentPendingRestaurants.map((r) =>
-            signal('restaurant', 'New Restaurant Request', `${r.restaurantName} is waiting for approval`, r.createdAt)),
+            signal('restaurant', 'New Restaurant Request', `${r.restaurantName} is waiting for approval`, r.createdAt,
+                { id: r.id, name: r.restaurantName })),
         ...recentPendingDelivery.map((d) =>
-            signal('delivery', 'New Delivery Partner', `${d.name} requested to join`, d.createdAt)),
+            signal('delivery', 'New Delivery Partner', `${d.name} requested to join`, d.createdAt, d)),
         ...recentPendingOrders.map((o) =>
             signal('order_pending', 'New Order Received', `Order #${o.orderId} is pending`, o.createdAt)),
         ...recentDeliveredOrders.map((o) =>
@@ -248,7 +252,7 @@ export async function getDashboardStats(query = {}) {
         ...recentCancelledOrders.map((o) =>
             signal('order_cancelled', 'Order Cancelled', `Order #${o.orderId} was cancelled`, o.updatedAt)),
         ...recentCustomers.map((c) =>
-            signal('customer', 'New Customer', `${c.name} just registered`, c.createdAt)),
+            signal('customer', 'New Customer', `${c.name} just registered`, c.createdAt, c)),
     ]
         .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
         .slice(0, 15);

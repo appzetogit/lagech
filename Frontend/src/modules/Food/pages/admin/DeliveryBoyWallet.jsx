@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react"
 import { Search, PiggyBank, Loader2, Package, X } from "@food/components/admin/theme/icons"
 import { adminAPI } from "@food/api"
+import RiderLink from "@food/components/admin/customers/RiderLink"
 import { toast } from "sonner"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
@@ -254,7 +255,7 @@ export default function DeliveryBoyWallet() {
                       <tr key={w.walletId || w.deliveryId} className="hover:bg-slate-50 transition-colors">
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-700">{(page - 1) * limit + i + 1}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-700">
-                          {w.name || "—"}
+                          <RiderLink id={w.deliveryId}>{w.name || "—"}</RiderLink>
                           {w.cashSuspended ? (
                             <span
                               className="ml-2 rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-red-700"

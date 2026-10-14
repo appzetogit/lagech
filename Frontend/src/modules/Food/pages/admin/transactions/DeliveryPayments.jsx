@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { Loader2, Plus, Search, Send, X } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminRiderExtrasAPI } from "@food/api/adminRiderExtras"
+import RiderLink from "@food/components/admin/customers/RiderLink"
 import { formatCurrency, formatDate } from "./DeliveryDisbursements"
 import ExportMenu from "@food/components/admin/ExportMenu"
 import { exportDate, exportMoney, fetchAllPages } from "@food/utils/listExport"
@@ -317,7 +318,7 @@ export default function DeliveryPayments() {
                     <tr key={p.id} className="hover:bg-slate-50 align-top">
                       <td className="px-4 py-3 text-sm text-slate-700 whitespace-nowrap">{formatDate(p.createdAt)}</td>
                       <td className="px-4 py-3 text-sm">
-                        <p className="font-semibold text-slate-800">{p.deliveryName}</p>
+                        <p><RiderLink id={p.deliveryPartnerId} className="font-semibold text-slate-800">{p.deliveryName}</RiderLink></p>
                         <p className="text-xs text-slate-500">{p.deliveryPhone}</p>
                       </td>
                       <td className="px-4 py-3 text-sm font-semibold text-slate-900 whitespace-nowrap">{formatCurrency(p.amount)}</td>

@@ -3,6 +3,7 @@ import { Search, ArrowUpDown, Settings, Folder, ChevronDown, Eye, Trash2, AlertT
 import { toast } from "sonner"
 import { adminAPI } from "@food/api"
 import { formatDateTime } from "@food/utils/dateTime"
+import CustomerLink, { customerIdOf } from "@food/components/admin/customers/CustomerLink"
 import {
   Dialog,
   DialogContent,
@@ -323,7 +324,7 @@ export default function SafetyEmergencyReports() {
                       </span>
                     </td>
                     <td className="px-6 py-4">
-                      <span className="text-sm font-medium text-slate-900">{report.userName}</span>
+                      <CustomerLink id={customerIdOf(report)} className="text-sm font-medium text-slate-900">{report.userName}</CustomerLink>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className="text-sm text-slate-700">{report.userEmail}</span>
@@ -465,7 +466,9 @@ export default function SafetyEmergencyReports() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   <div className="space-y-1">
                     <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">User Name</label>
-                    <p className="text-base font-semibold text-slate-900 dark:text-white">{selectedReport.userName || 'N/A'}</p>
+                    <p className="text-base font-semibold text-slate-900 dark:text-white">{selectedReport.userName ? (
+                      <CustomerLink id={customerIdOf(selectedReport)}>{selectedReport.userName}</CustomerLink>
+                    ) : 'N/A'}</p>
                   </div>
                   <div className="space-y-1">
                     <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Email Address</label>

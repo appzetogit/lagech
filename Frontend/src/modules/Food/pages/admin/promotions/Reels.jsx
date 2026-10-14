@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { Camera, Eye, Heart, Loader2, Plus, Store, X } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminAPI, uploadAPI } from "@food/api"
+import RestaurantLink, { restaurantIdOf } from "@food/components/admin/customers/RestaurantLink"
 
 const iso = (d) => (d ? new Date(d).toISOString().slice(0, 10) : "")
 const BADGE = {
@@ -177,7 +178,7 @@ export default function Reels({ openNew = false } = {}) {
                   <video src={reel.videoUrl} poster={reel.thumbnail || undefined} className="aspect-[9/16] w-full bg-black object-cover" controls preload="metadata" />
                   <div className="p-2.5 space-y-1.5">
                     <div className="flex items-center justify-between gap-2">
-                      <p className="text-xs font-semibold text-slate-800 truncate">{reel.restaurantName}</p>
+                      <RestaurantLink id={restaurantIdOf(reel)} className="block text-xs font-semibold text-slate-800 truncate">{reel.restaurantName}</RestaurantLink>
                       <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${BADGE[reel.state] || ""}`}>{reel.state}</span>
                     </div>
                     {reel.description && <p className="text-xs text-slate-600 line-clamp-2">{reel.description}</p>}

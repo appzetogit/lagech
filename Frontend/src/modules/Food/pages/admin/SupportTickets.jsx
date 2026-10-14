@@ -23,6 +23,8 @@ import {
 } from "@food/components/ui/dialog"
 import { Textarea } from "@food/components/ui/textarea"
 import { formatDateTime as fmtDateTime } from "@food/utils/dateTime"
+import CustomerLink from "@food/components/admin/customers/CustomerLink"
+import RestaurantLink from "@food/components/admin/customers/RestaurantLink"
 
 const PAGE_SIZE = 20
 
@@ -155,6 +157,19 @@ export default function SupportTickets({ preset = null, title = "Support Tickets
     if (name && city) return `${name} (${city})`
     if (name) return name
     return "-"
+  }
+
+  // The labels, opening the customer's / restaurant's account.
+  const renderUser = (ticket) => {
+    const label = getUserLabel(ticket)
+    if (ticket.source === "restaurant" || label === "-") return label
+    return <CustomerLink id={ticket.userId || ticket.user?._id}>{label}</CustomerLink>
+  }
+
+  const renderRestaurant = (ticket) => {
+    const label = getRestaurantLabel(ticket)
+    if (label === "-") return label
+    return <RestaurantLink id={ticket.restaurantId || ticket.restaurant?._id}>{label}</RestaurantLink>
   }
 
   const getTypeLabel = (ticket) => {
@@ -504,11 +519,11 @@ export default function SupportTickets({ preset = null, title = "Support Tickets
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
                         <div>
                           <p className="text-xs uppercase tracking-wide text-slate-400">User</p>
-                          <p className="text-slate-700 mt-1">{getUserLabel(ticket)}</p>
+                          <p className="text-slate-700 mt-1">{renderUser(ticket)}</p>
                         </div>
                         <div>
                           <p className="text-xs uppercase tracking-wide text-slate-400">Restaurant</p>
-                          <p className="text-slate-700 mt-1">{getRestaurantLabel(ticket)}</p>
+                          <p className="text-slate-700 mt-1">{renderRestaurant(ticket)}</p>
                         </div>
                         <div>
                           <p className="text-xs uppercase tracking-wide text-slate-400">Created</p>
@@ -686,11 +701,11 @@ export default function SupportTickets({ preset = null, title = "Support Tickets
                   <div className="pl-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <p className="text-xs font-medium text-slate-500 mb-1 uppercase tracking-wide">User</p>
-                      <p className="text-sm text-slate-900 font-semibold">{getUserLabel(selectedTicket)}</p>
+                      <p className="text-sm text-slate-900 font-semibold">{renderUser(selectedTicket)}</p>
                     </div>
                     <div>
                       <p className="text-xs font-medium text-slate-500 mb-1 uppercase tracking-wide">Restaurant</p>
-                      <p className="text-sm text-slate-900 font-semibold">{getRestaurantLabel(selectedTicket)}</p>
+                      <p className="text-sm text-slate-900 font-semibold">{renderRestaurant(selectedTicket)}</p>
                     </div>
                   </div>
                 </div>

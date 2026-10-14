@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react"
 import { Search, Wallet, Eye, CheckCircle, XCircle, Loader2, Package, QrCode } from "@food/components/admin/theme/icons"
 import { adminAPI } from "@food/api"
+import RiderLink, { riderIdOf } from "@food/components/admin/customers/RiderLink"
 import ExportMenu from "@food/components/admin/ExportMenu"
 import { exportDate, exportMoney, fetchAllPages } from "@food/utils/listExport"
 import { formatDateTime } from "@food/utils/dateTime"
@@ -273,7 +274,7 @@ export default function DeliveryWithdrawal() {
                       <tr key={req.id} className="hover:bg-slate-50 transition-colors">
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-700">{index + 1}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-700">{formatCurrency(req.amount)}</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-700">{req.deliveryName || "N/A"}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-700"><RiderLink id={riderIdOf(req)}>{req.deliveryName || "N/A"}</RiderLink></td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-700">{req.deliveryIdString || "N/A"}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-700">{formatDate(req.requestedAt || req.createdAt)}</td>
                         <td className="px-6 py-4 whitespace-nowrap">
@@ -342,7 +343,7 @@ export default function DeliveryWithdrawal() {
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-slate-500 uppercase">Delivery boy</label>
-                  <p className="text-sm font-medium text-slate-900 mt-1">{selectedRequest.deliveryName || "N/A"}</p>
+                  <p className="text-sm font-medium text-slate-900 mt-1"><RiderLink id={riderIdOf(selectedRequest)}>{selectedRequest.deliveryName || "N/A"}</RiderLink></p>
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-slate-500 uppercase">Delivery ID</label>

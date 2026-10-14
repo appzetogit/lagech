@@ -3,6 +3,7 @@ import { Loader2, Plus, Search, Send, X } from "@food/components/admin/theme/ico
 import { toast } from "sonner"
 import { adminAPI } from "@food/api"
 import { adminSystemExtrasAPI } from "@food/api/adminSystemExtras"
+import RestaurantLink from "@food/components/admin/customers/RestaurantLink"
 import { PageFrame, Card, Field, Loading, inputClass, errorMessage, formatDateTime } from "../system/SettingsUi"
 import { rupees } from "../reports/ReportShell"
 import ExportMenu from "@food/components/admin/ExportMenu"
@@ -287,7 +288,7 @@ export default function RestaurantPayments() {
                 {rows.map((row) => (
                   <tr key={row.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">{formatDateTime(row.paidAt)}</td>
-                    <td className="px-4 py-3 text-sm font-medium text-slate-900">{row.restaurantName}</td>
+                    <td className="px-4 py-3 text-sm font-medium text-slate-900"><RestaurantLink id={row.restaurantId}>{row.restaurantName}</RestaurantLink></td>
                     <td className="px-4 py-3 text-sm font-semibold text-slate-900 text-right whitespace-nowrap">{rupees(row.amount)}</td>
                     <td className="px-4 py-3 text-sm text-slate-600">{methodLabel(row.method)}</td>
                     <td className="px-4 py-3 text-sm text-slate-600">{row.reference || "—"}</td>

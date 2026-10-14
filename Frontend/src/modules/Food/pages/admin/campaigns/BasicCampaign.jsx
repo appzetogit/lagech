@@ -4,6 +4,7 @@ import { toast } from "sonner"
 import { adminAPI } from "@food/api"
 import { adminCatalogExtrasAPI, errorMessage, loadRestaurantOptions } from "@food/api/adminCatalogExtras"
 import ExportMenu from "@food/components/admin/ExportMenu"
+import RestaurantLink from "@food/components/admin/customers/RestaurantLink"
 import { exportDate } from "@food/utils/listExport"
 import { ImageUpload, STATE_BADGE, STATE_LABEL, STATE_TABS, formatWhen, fromLocalInput, toLocalInput } from "./campaignShared"
 
@@ -163,7 +164,7 @@ function Participants({ campaign, restaurants, onClose, onChanged }) {
           <ul className="divide-y divide-slate-100">
             {list.map((r) => (
               <li key={r.id} className="flex items-center justify-between gap-3 py-2">
-                <span className="text-sm text-slate-800">{r.name}</span>
+                <RestaurantLink id={r.id} className="text-sm text-slate-800">{r.name}</RestaurantLink>
                 <button type="button" disabled={busy === r.id} onClick={() => leave(r.id)} className="text-xs text-rose-600 hover:underline">Remove</button>
               </li>
             ))}

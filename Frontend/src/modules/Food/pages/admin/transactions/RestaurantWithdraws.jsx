@@ -4,6 +4,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
 import { exportTransactionsToPDF } from "@food/components/admin/transactions/transactionsExportUtils"
 import { adminAPI } from "@food/api"
+import RestaurantLink, { restaurantIdOf } from "@food/components/admin/customers/RestaurantLink"
 import ExportMenu from "@food/components/admin/ExportMenu"
 import { exportDate, exportMoney, fetchAllPages } from "@food/utils/listExport"
 import { toast } from "sonner"
@@ -371,7 +372,7 @@ export default function RestaurantWithdraws() {
                           </span>
                         </td>}
                         {visibleColumns.restaurant && <td className="px-6 py-4 whitespace-nowrap">
-                          <span className="text-sm font-medium text-slate-700">{withdraw.restaurantName || 'N/A'}</span>
+                          <RestaurantLink id={restaurantIdOf(withdraw)} className="text-sm font-medium text-slate-700">{withdraw.restaurantName || 'N/A'}</RestaurantLink>
                           {withdraw.source === 'disbursement' && (
                             <span className="ml-2 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-blue-700" title="Created by the daily payout run">
                               Daily payout
@@ -452,7 +453,7 @@ export default function RestaurantWithdraws() {
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-slate-500 uppercase">Restaurant Name</label>
-                  <p className="text-sm font-medium text-slate-900 mt-1">{selectedWithdraw.restaurantName || 'N/A'}</p>
+                  <p className="text-sm font-medium text-slate-900 mt-1"><RestaurantLink id={restaurantIdOf(selectedWithdraw)}>{selectedWithdraw.restaurantName || 'N/A'}</RestaurantLink></p>
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-slate-500 uppercase">Restaurant ID</label>

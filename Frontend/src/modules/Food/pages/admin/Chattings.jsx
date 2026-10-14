@@ -5,6 +5,9 @@ import { toast } from "sonner"
 import { chatAPI } from "@food/api"
 import { useChatSocket } from "@food/hooks/useChatSocket"
 import { formatShortDateTime } from "@food/utils/dateTime"
+import CustomerLink from "@food/components/admin/customers/CustomerLink"
+import RestaurantLink from "@food/components/admin/customers/RestaurantLink"
+import RiderLink from "@food/components/admin/customers/RiderLink"
 
 /**
  * The support inbox.
@@ -58,6 +61,15 @@ const initialsOf = (name) =>
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase() || "")
     .join("") || "?"
+
+/** The other party's name, opening their account. peer.id is the id for peer.role. */
+function PeerName({ peer }) {
+  const name = peer?.name || "Unknown"
+  if (peer?.role === "USER") return <CustomerLink id={peer.id}>{name}</CustomerLink>
+  if (peer?.role === "RESTAURANT") return <RestaurantLink id={peer.id}>{name}</RestaurantLink>
+  if (peer?.role === "DELIVERY_PARTNER") return <RiderLink id={peer.id}>{name}</RiderLink>
+  return name
+}
 
 export default function Chattings() {
   const [activeTab, setActiveTab] = useState("USER")
@@ -436,7 +448,7 @@ export default function Chattings() {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center justify-between gap-2 mb-0.5">
                               <h3 className="text-sm font-semibold text-slate-900 truncate">
-                                {conversation.peer?.name || "Unknown"}
+                                <PeerName peer={conversation.peer} />
                               </h3>
                               <span className="text-xs text-slate-500 flex-shrink-0">
                                 {timeAgo(conversation.lastAt || conversation.createdAt)}
@@ -491,7 +503,7 @@ export default function Chattings() {
                       </div>
                       <div className="min-w-0">
                         <h2 className="text-base font-semibold text-slate-900 truncate">
-                          {selected.peer?.name || "Unknown"}
+                          <PeerName peer={selected.peer} />
                         </h2>
                         <p className="text-sm text-slate-500 truncate">
                           {/* A customer can have several threads once they ask

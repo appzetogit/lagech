@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { Loader2, Megaphone, Plus, X } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminAPI, uploadAPI } from "@food/api"
+import RestaurantLink, { restaurantIdOf } from "@food/components/admin/customers/RestaurantLink"
 
 const STATES = [
   ["all", "All"],
@@ -269,7 +270,7 @@ export default function Advertisements({ initialState = "all", openNew = false }
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         <p className="text-sm font-bold text-slate-900">{ad.title}</p>
-                        <p className="text-xs text-slate-600">{ad.restaurantName} · {ad.type === "video" ? "Video" : "Card"}{ad.createdBy === "restaurant" ? " · requested" : ""}</p>
+                        <p className="text-xs text-slate-600"><RestaurantLink id={restaurantIdOf(ad)}>{ad.restaurantName}</RestaurantLink> ·{ad.type === "video" ? "Video" : "Card"}{ad.createdBy === "restaurant" ? " · requested" : ""}</p>
                       </div>
                       <span className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-bold uppercase ${BADGE[ad.state] || ""}`}>{ad.state}</span>
                     </div>

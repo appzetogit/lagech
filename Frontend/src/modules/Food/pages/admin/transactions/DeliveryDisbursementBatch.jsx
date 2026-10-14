@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom"
 import { ArrowLeft, CheckCircle2, Copy, Loader2, Search, XCircle } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminRiderExtrasAPI } from "@food/api/adminRiderExtras"
+import RiderLink from "@food/components/admin/customers/RiderLink"
 import { DISBURSEMENT_STATUS, formatCurrency, formatDate } from "./DeliveryDisbursements"
 
 const LINE_STATUS = {
@@ -180,7 +181,7 @@ export default function DeliveryDisbursementBatch() {
               <ul className="mt-1 text-sm text-red-700 list-disc pl-5">
                 {batch.skipped.map((s) => (
                   <li key={s.deliveryPartnerId}>
-                    {s.name}: {formatCurrency(s.amount)} ({s.reason})
+                    <RiderLink id={s.deliveryPartnerId}>{s.name}</RiderLink>: {formatCurrency(s.amount)} ({s.reason})
                   </li>
                 ))}
               </ul>
@@ -273,7 +274,7 @@ export default function DeliveryDisbursementBatch() {
                           />
                         </td>
                         <td className="px-4 py-4 text-sm">
-                          <p className="font-semibold text-slate-800">{line.deliveryName}</p>
+                          <p><RiderLink id={line.deliveryPartnerId} className="font-semibold text-slate-800">{line.deliveryName}</RiderLink></p>
                           <p className="text-xs text-slate-500">{line.deliveryPhone}</p>
                         </td>
                         <td className="px-4 py-4 text-sm font-semibold text-slate-900 whitespace-nowrap">{formatCurrency(line.amount)}</td>

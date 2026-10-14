@@ -1,5 +1,6 @@
 import { Receipt } from "@food/components/admin/theme/icons"
 import { adminAPI } from "@food/api"
+import RestaurantLink from "@food/components/admin/customers/RestaurantLink"
 import ReportShell, { rupees } from "./ReportShell"
 import { formatDateTime } from "@food/utils/dateTime"
 
@@ -23,7 +24,7 @@ export default function ExpenseReport() {
       ]}
       columns={[
         { key: "orderId", label: "Order" },
-        { key: "restaurant", label: "Restaurant" },
+        { key: "restaurant", label: "Restaurant", render: (r) => <RestaurantLink id={r.restaurantId}>{r.restaurant}</RestaurantLink> },
         { key: "createdAt", label: "Date", render: (r) => when(r.createdAt), csv: (r) => when(r.createdAt) },
         { key: "discount", label: "Discount share", align: "right", render: (r) => rupees(r.discount) },
         { key: "freeDelivery", label: "Free delivery", align: "right", render: (r) => rupees(r.freeDelivery) },

@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom"
 import { ArrowLeft, CheckCircle2, Loader2, Search, XCircle } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminAPI } from "@food/api"
+import RestaurantLink from "@food/components/admin/customers/RestaurantLink"
 import ExportMenu from "@food/components/admin/ExportMenu"
 import { exportDate, exportMoney } from "@food/utils/listExport"
 import {
@@ -164,7 +165,7 @@ export default function RestaurantPayoutBatch() {
               <ul className="mt-1 text-sm text-red-700 list-disc pl-5">
                 {batch.skipped.map((s) => (
                   <li key={s.restaurantId}>
-                    {s.name}: {formatCurrency(s.amount)} — {s.reason}
+                    <RestaurantLink id={s.restaurantId}>{s.name}</RestaurantLink>: {formatCurrency(s.amount)} — {s.reason}
                   </li>
                 ))}
               </ul>
@@ -263,7 +264,7 @@ export default function RestaurantPayoutBatch() {
                         />
                         <div className="min-w-0 flex-1">
                           <div className="flex items-start justify-between gap-2">
-                            <p className="text-sm font-semibold text-slate-800 break-words">{line.restaurantName}</p>
+                            <RestaurantLink id={line.restaurantId} className="text-sm font-semibold text-slate-800 break-words">{line.restaurantName}</RestaurantLink>
                             <StatusBadge map={LINE_STATUS} status={line.status} />
                           </div>
                           <p className="text-xs text-slate-500">{[line.ownerName, line.ownerPhone].filter(Boolean).join(" · ")}</p>

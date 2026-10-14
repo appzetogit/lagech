@@ -1,6 +1,7 @@
 ﻿import { useState, useEffect } from "react"
 import { Search, Receipt, Loader2, Package } from "@food/components/admin/theme/icons"
 import { adminAPI } from "@food/api"
+import RiderLink from "@food/components/admin/customers/RiderLink"
 import { toast } from "sonner"
 import ExportMenu from "@food/components/admin/ExportMenu"
 import { exportDate, exportMoney, fetchAllPages } from "@food/utils/listExport"
@@ -172,7 +173,7 @@ export default function CashLimitSettlement() {
                           {formatDate(tx.createdAt)}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-700">
-                          {tx.deliveryName || "—"}
+                          <RiderLink id={tx.deliveryId}>{tx.deliveryName || "—"}</RiderLink>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">
                           {tx.deliveryIdString || "—"}

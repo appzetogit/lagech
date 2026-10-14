@@ -15,6 +15,7 @@ import {
 } from "@food/components/admin/theme/icons"
 import { adminAPI } from "@food/api"
 import { loadRestaurantOptions } from "@food/api/adminCatalogExtras"
+import RestaurantLink from "@food/components/admin/customers/RestaurantLink"
 import { Card, Field, PageFrame, Switch, errorMessage, inputClass } from "./system/SettingsUi"
 
 /**
@@ -697,7 +698,16 @@ export default function Coupons() {
                     <td className="px-3 py-3 text-slate-500">{i + 1}</td>
                     <td className="px-3 py-3">
                       <p className="max-w-[14rem] truncate font-medium text-slate-800" title={c.title}>{c.title || "-"}</p>
-                      {c.couponType === "store_wise" && <p className="max-w-[14rem] truncate text-xs text-slate-500" title={c.restaurantName}>{c.restaurantName}</p>}
+                      {c.couponType === "store_wise" && <p className="max-w-[14rem] truncate text-xs text-slate-500" title={c.restaurantName}>
+                          {(c.restaurants || []).some((r) => r.name)
+                            ? c.restaurants.filter((r) => r.name).map((r, idx) => (
+                                <span key={r.id}>
+                                  {idx > 0 && ", "}
+                                  <RestaurantLink id={r.id}>{r.name}</RestaurantLink>
+                                </span>
+                              ))
+                            : c.restaurantName}
+                        </p>}
                       {c.couponType === "zone_wise" && <p className="max-w-[14rem] truncate text-xs text-slate-500">{(c.zones || []).map((z) => z.name).filter(Boolean).join(", ")}</p>}
                       {c.customerScope === "specific" && <p className="text-xs text-slate-500">{c.customerCount} customer{c.customerCount === 1 ? "" : "s"}</p>}
                       {c.createdByRole === "RESTAURANT" && <p className="text-xs text-slate-500">By restaurant</p>}

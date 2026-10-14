@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { Receipt } from "@food/components/admin/theme/icons"
 import { adminSystemExtrasAPI } from "@food/api/adminSystemExtras"
+import RestaurantLink from "@food/components/admin/customers/RestaurantLink"
 import ReportShell, { rupees } from "./ReportShell"
 
 function SearchFilter({ onApply }) {
@@ -33,7 +34,7 @@ export default function RestaurantVATReport() {
         ["Total GST", rupees(d.totals.totalTax), true],
       ]}
       columns={[
-        { key: "restaurant", label: "Restaurant" },
+        { key: "restaurant", label: "Restaurant", render: (r) => <RestaurantLink id={r.restaurantId}>{r.restaurant}</RestaurantLink> },
         { key: "gstNumber", label: "GSTIN", render: (r) => r.gstNumber || "—" },
         { key: "orders", label: "Orders", align: "right" },
         { key: "taxable", label: "Taxable value", align: "right", render: (r) => rupees(r.taxable) },
