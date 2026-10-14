@@ -24,6 +24,8 @@ import {
 } from "@food/components/ui/dialog"
 import { Textarea } from "@food/components/ui/textarea"
 import { formatDateTime as fmtDateTime } from "@food/utils/dateTime"
+import CustomerLink, { customerIdOf } from "@food/components/admin/customers/CustomerLink"
+import RestaurantLink, { restaurantIdOf } from "@food/components/admin/customers/RestaurantLink"
 
 const PAGE_SIZE = 20
 
@@ -125,8 +127,12 @@ export default function RestaurantComplaints() {
   const showingFrom = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1
   const showingTo = Math.min(page * PAGE_SIZE, total)
 
+  // The API sends the ids as plain strings and the records under `user` /
+  // `restaurant`; the populated-id shape is still read for older payloads.
+  const objectOf = (...values) => values.find((v) => v && typeof v === "object") || {}
+
   const getCustomerLabel = (complaint) => {
-    const user = complaint.userId || {}
+    const user = objectOf(complaint.user, complaint.userId)
     const name = user.name || ""
     const phone = user.phone || ""
     if (name && phone) return `${name} (${phone})`
@@ -136,12 +142,22 @@ export default function RestaurantComplaints() {
   }
 
   const getRestaurantLabel = (complaint) => {
-    const restaurant = complaint.restaurantId || {}
+    const restaurant = objectOf(complaint.restaurant, complaint.restaurantId)
     const name = restaurant.restaurantName || ""
     const city = restaurant.city || restaurant.area || ""
     if (name && city) return `${name} (${city})`
     if (name) return name
     return "-"
+  }
+
+  const renderCustomer = (complaint) => {
+    const label = getCustomerLabel(complaint)
+    return label === "-" ? label : <CustomerLink id={customerIdOf(complaint)}>{label}</CustomerLink>
+  }
+
+  const renderRestaurant = (complaint) => {
+    const label = getRestaurantLabel(complaint)
+    return label === "-" ? label : <RestaurantLink id={restaurantIdOf(complaint)}>{label}</RestaurantLink>
   }
 
   const getOrderLabel = (complaint) => {
@@ -454,14 +470,14 @@ export default function RestaurantComplaints() {
                             <p className="text-xs uppercase tracking-wide text-slate-400">Customer</p>
                             <p className="text-slate-700 mt-1 flex items-center gap-1">
                               <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                              {getCustomerLabel(complaint)}
+                              {renderCustomer(complaint)}
                             </p>
                           </div>
                           <div>
                             <p className="text-xs uppercase tracking-wide text-slate-400">Restaurant</p>
                             <p className="text-slate-700 mt-1 flex items-center gap-1">
                               <Store className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                              {getRestaurantLabel(complaint)}
+                              {renderRestaurant(complaint)}
                             </p>
                           </div>
                           <div>
@@ -596,11 +612,11 @@ export default function RestaurantComplaints() {
                   <div className="pl-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <p className="text-xs font-medium text-slate-500 mb-1 uppercase tracking-wide">Customer</p>
-                      <p className="text-sm text-slate-900 font-semibold">{getCustomerLabel(selectedComplaint)}</p>
+                      <p className="text-sm text-slate-900 font-semibold">{renderCustomer(selectedComplaint)}</p>
                     </div>
                     <div>
                       <p className="text-xs font-medium text-slate-500 mb-1 uppercase tracking-wide">Restaurant</p>
-                      <p className="text-sm text-slate-900 font-semibold">{getRestaurantLabel(selectedComplaint)}</p>
+                      <p className="text-sm text-slate-900 font-semibold">{renderRestaurant(selectedComplaint)}</p>
                     </div>
                   </div>
                 </div>
