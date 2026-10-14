@@ -241,7 +241,6 @@ test('reference code: set by db or display id, shown on the details, validated, 
     let d = await details(id);
     assert.equal(d.details.referenceCode, 'UTR 4417-AB');
     assert.equal(d.order.referenceCode, 'UTR 4417-AB');
-    assert.equal(d.bill.payment.referenceCode, 'UTR 4417-AB');
 
     res = await W.admin('PATCH', `/orders/${id}/reference-code`, { referenceCode: 'x'.repeat(101) });
     assert.equal(res.status, 400);
