@@ -11,6 +11,7 @@ const AUTH = {
   ADMIN_LOGIN: "/food/auth/admin/login",
   RESTAURANT_REQUEST_OTP: "/food/auth/restaurant/request-otp",
   RESTAURANT_VERIFY_OTP: "/food/auth/restaurant/verify-otp",
+  RESTAURANT_EMPLOYEE_LOGIN: "/food/auth/restaurant-employee/login",
   DELIVERY_REQUEST_OTP: "/food/auth/delivery/request-otp",
   DELIVERY_VERIFY_OTP: "/food/auth/delivery/verify-otp",
   REFRESH_TOKEN: "/food/auth/refresh-token",
@@ -187,6 +188,22 @@ export function verifyRestaurantOtp(phone, otp, fcmToken = null, platform = "web
     otp: otpStr,
     ...(fcmToken ? { fcmToken, platform } : {}),
   });
+}
+
+/**
+ * Restaurant staff (Employees) sign-in: email or phone + password. Returns the
+ * same shape as the owner's OTP login ({ accessToken, refreshToken, user }),
+ * plus `employee`.
+ */
+export function restaurantEmployeeLogin(identifier, password) {
+  const id = String(identifier ?? "").trim();
+  if (!id) return Promise.reject(new Error("Email or phone is required"));
+  const passwordStr = String(password ?? "");
+  if (!passwordStr) return Promise.reject(new Error("Password is required"));
+  const body = id.includes("@")
+    ? { email: id.toLowerCase(), password: passwordStr }
+    : { phone: normalizePhone(id), password: passwordStr };
+  return apiClient.post(AUTH.RESTAURANT_EMPLOYEE_LOGIN, body);
 }
 
 /**

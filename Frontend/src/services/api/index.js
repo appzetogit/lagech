@@ -1524,6 +1524,24 @@ export const restaurantAPI = {
     return authService.verifyRestaurantOtp(phone, otp, fcmToken, platform);
   },
   getMe: () => authService.getMe("restaurant"),
+  /** Staff sign-in: email or phone + password (Employees). */
+  employeeLogin: (identifier, password) => authService.restaurantEmployeeLogin(identifier, password),
+  /** Employee Role + Employees (old store panel). Owners, or staff with the employees permission. */
+  getEmployeePermissionCatalog: () =>
+    apiClient.get("/food/restaurant/employee-roles/permissions", { contextModule: "restaurant" }),
+  getEmployeeRoles: () => apiClient.get("/food/restaurant/employee-roles", { contextModule: "restaurant" }),
+  createEmployeeRole: (body) => apiClient.post("/food/restaurant/employee-roles", body, { contextModule: "restaurant" }),
+  updateEmployeeRole: (id, body) =>
+    apiClient.patch(`/food/restaurant/employee-roles/${String(id)}`, body, { contextModule: "restaurant" }),
+  deleteEmployeeRole: (id) => apiClient.delete(`/food/restaurant/employee-roles/${String(id)}`, { contextModule: "restaurant" }),
+  getEmployees: (params = {}) => apiClient.get("/food/restaurant/employees", { params, contextModule: "restaurant" }),
+  getEmployee: (id) => apiClient.get(`/food/restaurant/employees/${String(id)}`, { contextModule: "restaurant" }),
+  createEmployee: (body) => apiClient.post("/food/restaurant/employees", body, { contextModule: "restaurant" }),
+  updateEmployee: (id, body) =>
+    apiClient.patch(`/food/restaurant/employees/${String(id)}`, body, { contextModule: "restaurant" }),
+  setEmployeeStatus: (id, isActive) =>
+    apiClient.patch(`/food/restaurant/employees/${String(id)}/status`, { isActive }, { contextModule: "restaurant" }),
+  deleteEmployee: (id) => apiClient.delete(`/food/restaurant/employees/${String(id)}`, { contextModule: "restaurant" }),
   /** Restaurant dashboard: always fetch fresh profile data. */
   getCurrentRestaurant: () =>
     apiClient.get("/food/restaurant/current", { contextModule: "restaurant" }),

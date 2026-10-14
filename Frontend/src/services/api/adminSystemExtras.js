@@ -8,6 +8,9 @@ const admin = { contextModule: "admin" }
 const A = "/food/admin"
 
 export const adminSystemExtrasAPI = {
+  // Restaurant panel staff accounts (read-only count)
+  getRestaurantEmployeesSummary: (restaurantId) =>
+    apiClient.get(`${A}/restaurants/${String(restaurantId)}/employees-summary`, admin),
   // Withdrawal methods
   getWithdrawalMethods: (params = {}) => apiClient.get(`${A}/withdrawals/methods`, { params, ...admin }),
   createWithdrawalMethod: (body) => apiClient.post(`${A}/withdrawals/methods`, body, admin),

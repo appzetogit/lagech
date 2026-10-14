@@ -831,6 +831,8 @@ model FoodRestaurant {
   supportTickets       FoodRestaurantSupportTicket[]
   withdrawals          FoodRestaurantWithdrawal[]
   cashCollections      FoodRestaurantCashCollection[]
+  employeeRoles        FoodRestaurantRole[]
+  employees            FoodRestaurantEmployee[]
   advertisements       FoodAdvertisement[]
   reels                FoodReel[]
   subscriptionInvoices FoodSubscriptionInvoice[]
@@ -3131,6 +3133,64 @@ model FoodRestaurantCashCollection {
   @@unique([restaurantId, requestKey])
   @@index([restaurantId, createdAt(sort: Desc)])
   @@map("food_restaurant_cash_collections")
+}
+
+/// A restaurant's own staff role (the old store panel's Employee Role): a name
+/// and the panel sections staff on it may use. Keys are RESTAURANT_PERMISSIONS
+/// in core/auth/restaurantPermissions.js; editing a role changes every
+/// employee on it at their next request.
+model FoodRestaurantRole {
+  id           String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  restaurantId String @db.VarChar(24)
+
+  name        String
+  permissions String[] @default([])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant FoodRestaurant           @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  employees  FoodRestaurantEmployee[]
+
+  @@unique([restaurantId, name])
+  @@map("food_restaurant_roles")
+}
+
+/// Staff who sign in to the restaurant panel with their own email or phone and
+/// password (the old store panel's Employees). Their token is the restaurant's
+/// (role RESTAURANT) plus employeeId, and every request is limited to their
+/// role's permissions.
+model FoodRestaurantEmployee {
+  id           String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  restaurantId String @db.VarChar(24)
+  roleId       String @db.VarChar(24)
+
+  firstName   String
+  lastName    String  @default("")
+  /// Lower-cased; the sign-in name, so unique across all restaurants.
+  email       String  @unique
+  phone       String  @default("") @db.VarChar(20)
+  /// Last ten digits of phone, which phone sign-in matches.
+  phoneLast10 String  @default("") @db.VarChar(10)
+  image       String  @default("")
+  /// bcrypt hash. Hashes imported from the old system ($2y$) verify as they are.
+  password    String
+  isActive    Boolean @default(true)
+
+  /// Bumped on each sign-in and on a password change, like a restaurant's own.
+  tokenVersion Int       @default(0)
+  lastLoginAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant FoodRestaurant     @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  role       FoodRestaurantRole @relation(fields: [roleId], references: [id], onDelete: NoAction)
+
+  @@index([restaurantId])
+  @@index([roleId])
+  @@index([phoneLast10])
+  @@map("food_restaurant_employees")
 }
 
 model FoodDeliveryWithdrawal {

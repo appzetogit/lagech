@@ -33,11 +33,13 @@ import { importChat } from './steps/chat.mjs';
 import { importNotificationMessages } from './steps/notificationMessages.mjs';
 import { importStoreNotificationSettings } from './steps/storeNotificationSettings.mjs';
 import { importFaqs } from './steps/faqs.mjs';
+import { importEmployees } from './steps/employees.mjs';
 
 const STEPS = [
     ['zones', importZones],
     ['categories', importCategories],
     ['restaurants', importRestaurants],
+    ['employees', importEmployees],
     ['foods', importFoods],
     ['nutrition', importNutrition],
     ['customers', importCustomers],

@@ -76,6 +76,20 @@ import {
 } from '../controllers/bulkUpload.controller.js';
 import * as orderController from '../../orders/controllers/order.controller.js';
 import { authMiddleware, optionalAuth } from '../../../../core/auth/auth.middleware.js';
+import { restaurantRouteGate } from '../../../../core/auth/restaurantPermissions.js';
+import {
+    listPermissionCatalogController,
+    listRolesController,
+    createRoleController,
+    updateRoleController,
+    deleteRoleController,
+    listEmployeesController,
+    getEmployeeController,
+    createEmployeeController,
+    updateEmployeeController,
+    setEmployeeStatusController,
+    deleteEmployeeController
+} from '../controllers/restaurantEmployee.controller.js';
 import { sendError } from '../../../../utils/response.js';
 import { getRestaurantFinanceController } from '../controllers/restaurantFinance.controller.js';
 import {
@@ -94,11 +108,16 @@ import { cacheResponse, invalidateCache } from '../../../../middleware/cache.js'
 
 const router = express.Router();
 
+/**
+ * The restaurant itself, or one of its employees within their role: every
+ * protected route below is listed in RESTAURANT_ROUTE_RULES, and one that is
+ * not is closed to staff. Owner tokens pass as before.
+ */
 const requireRestaurant = (req, res, next) => {
     if (req.user?.role !== 'RESTAURANT') {
         return sendError(res, 403, 'Restaurant access required');
     }
-    next();
+    return restaurantRouteGate(req, res, next);
 };
 
 const uploadFields = upload.fields([
@@ -359,5 +378,19 @@ router.get('/my-offers', authMiddleware, requireRestaurant, listRestaurantOffers
 router.post('/my-offers', authMiddleware, requireRestaurant, createRestaurantOfferController);
 router.patch('/my-offers/:id/status', authMiddleware, requireRestaurant, updateRestaurantOfferStatusController);
 router.delete('/my-offers/:id', authMiddleware, requireRestaurant, deleteRestaurantOfferController);
+
+// Staff (old store panel: Employee Role, Employees). Staff with `employees`
+// can manage them too, but only within the permissions they hold.
+router.get('/employee-roles/permissions', authMiddleware, requireRestaurant, listPermissionCatalogController);
+router.get('/employee-roles', authMiddleware, requireRestaurant, listRolesController);
+router.post('/employee-roles', authMiddleware, requireRestaurant, createRoleController);
+router.patch('/employee-roles/:id', authMiddleware, requireRestaurant, updateRoleController);
+router.delete('/employee-roles/:id', authMiddleware, requireRestaurant, deleteRoleController);
+router.get('/employees', authMiddleware, requireRestaurant, listEmployeesController);
+router.post('/employees', authMiddleware, requireRestaurant, createEmployeeController);
+router.get('/employees/:id', authMiddleware, requireRestaurant, getEmployeeController);
+router.patch('/employees/:id', authMiddleware, requireRestaurant, updateEmployeeController);
+router.patch('/employees/:id/status', authMiddleware, requireRestaurant, setEmployeeStatusController);
+router.delete('/employees/:id', authMiddleware, requireRestaurant, deleteEmployeeController);
 
 export default router;

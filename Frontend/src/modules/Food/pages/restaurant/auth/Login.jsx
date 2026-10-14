@@ -227,6 +227,12 @@ export default function RestaurantLogin() {
             </div>
 
             <footer className="mt-5 space-y-2 text-center">
+              <p className="text-sm text-gray-500">
+                Restaurant staff?{" "}
+                <Link to="/food/restaurant/employee-login" className="font-semibold" style={{ color: THEME }}>
+                  Employee sign in
+                </Link>
+              </p>
               <p className="text-xs text-gray-400">
                 Secure partner login &middot; {companyName}
               </p>

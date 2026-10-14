@@ -57,6 +57,20 @@ or the number is not `+91`; `429` rate limited (failed attempts only, same limit
 
 `POST /food/auth/refresh-token`, `POST /food/auth/logout`, `GET /food/auth/me` behave as in the user app.
 
+### `POST /food/auth/restaurant-employee/login` — staff (Employees) sign-in
+```json
+{ "email": "staff@example.com", "password": "…" }
+```
+or `{ "phone": "9876543210", "password": "…" }` (or `{ "identifier": "<email or phone>", "password": "…" }`).
+→ `{ accessToken, refreshToken, user, employee: { id, name, email, phone, image, roleName, permissions }, needsRegistration: false }`.
+The token is the restaurant's (`role: RESTAURANT`, `userId` = the restaurant) plus `employeeId` and `permissions`, so every
+restaurant endpoint works with it, limited to the role: anything outside it answers **403** with a readable `message`
+(hide those screens using `permissions`). Keys: `dashboard orders foods categories campaigns coupons advertisements reviews
+wallet withdraws store_setup chat reports employees`. Bank/UPI fields are left out of responses unless the role has `wallet`.
+Staff sessions are single-device per employee; the owner signing in does not sign staff out. `401` wrong credentials,
+switched-off employee, or a restaurant not approved. `GET /food/auth/me` adds `employee`. Owners manage staff at
+`/food/restaurant/employee-roles` and `/food/restaurant/employees` (GET/POST, PATCH/DELETE `/:id`, PATCH `/employees/:id/status`).
+
 ---
 
 ## 2. Onboarding (no auth)

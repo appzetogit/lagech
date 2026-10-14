@@ -30,7 +30,10 @@ import {
   MapPin,
   LogOut,
   Trash2,
+  Shield,
+  Users,
 } from "lucide-react"
+import { canOpenRestaurantPath, getRestaurantStaffSession } from "@food/utils/restaurantPermissions"
 import { Card, CardContent } from "@food/components/ui/card"
 import { DateRangeCalendar } from "@food/components/ui/date-range-calendar"
 import { getCurrentUser } from "@food/utils/auth"
@@ -403,7 +406,8 @@ export default function ExploreMore() {
       }
     }
 
-    fetchWallet()
+    // Staff cannot delete the account, and only finance staff may read the wallet.
+    if (!getRestaurantStaffSession().isEmployee) fetchWallet()
   }, [])
 
   // Format address from location object
@@ -696,14 +700,23 @@ export default function ExploreMore() {
     { id: 3, label: "Bank details", icon: Building2, route: "/food/restaurant/update-bank-details" },
   ]
 
-  // All sections with their items
+  const employeeItems = [
+    { id: 1, label: "Employee roles", icon: Shield, route: "/food/restaurant/employee-roles" },
+    { id: 2, label: "Employees", icon: Users, route: "/food/restaurant/employees" },
+  ]
+
+  // All sections with their items; restaurant staff see only what their role allows.
+  const staffSession = getRestaurantStaffSession()
   const allSections = [
     { title: "Manage outlet", items: manageOutletItems, key: "manage-outlet" },
     { title: "Settings", items: settingsItems, key: "settings" },
     { title: "Orders", items: ordersItems, key: "orders" },
     { title: "Help", items: helpItems, key: "help" },
     { title: "Finance", items: accountingItems, key: "accounting" },
+    { title: "Employees", items: employeeItems, key: "employees" },
   ]
+    .map((section) => ({ ...section, items: section.items.filter((item) => canOpenRestaurantPath(item.route, staffSession)) }))
+    .filter((section) => section.items.length > 0)
 
   // Filter logic
   const getFilteredSections = () => {
@@ -931,7 +944,7 @@ export default function ExploreMore() {
           <ChevronRight className="relative w-5 h-5 text-red-300 shrink-0 transition-transform group-hover:translate-x-1" />
         </motion.button>
 
-        <motion.button
+        {!staffSession.isEmployee && <motion.button
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.55, duration: 0.25 }}
@@ -949,7 +962,7 @@ export default function ExploreMore() {
             </div>
           </div>
           <ChevronRight className="relative w-5 h-5 text-red-300 shrink-0 transition-transform group-hover:translate-x-1" />
-        </motion.button>
+        </motion.button>}
         </div>
       </div>
 
@@ -1234,14 +1247,16 @@ export default function ExploreMore() {
                   {isLoggingOut ? "Logging out..." : "Logout from all devices"}
                 </button>
 
-                {/* Delete Account Button */}
-                <button
-                  onClick={() => setDeleteModalOpen(true)}
-                  className="w-full flex items-center justify-center gap-2 text-red-500 hover:text-red-700 font-bold py-3 text-sm transition-all hover:bg-red-50 rounded-lg mt-1"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  <span>Delete Account</span>
-                </button>
+                {/* Delete Account Button (the owner only) */}
+                {!staffSession.isEmployee && (
+                  <button
+                    onClick={() => setDeleteModalOpen(true)}
+                    className="w-full flex items-center justify-center gap-2 text-red-500 hover:text-red-700 font-bold py-3 text-sm transition-all hover:bg-red-50 rounded-lg mt-1"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>Delete Account</span>
+                  </button>
+                )}
               </div>
 
               {/* Footer Links */}

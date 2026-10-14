@@ -1,6 +1,7 @@
 import express from 'express';
 
 import { requireRoles } from '../roles/role.middleware.js';
+import { requireRestaurantPermission } from '../auth/restaurantPermissions.js';
 import {
     getPaymentHistoryController,
     getOrderTransactionsController,
@@ -41,7 +42,7 @@ router.get('/wallet/balance', requireRoles('USER'), getUserWalletBalanceControll
 router.get('/wallet/transactions', requireRoles('USER'), getUserWalletTransactionsController);
 
 // ─── A restaurant's wallet: its own, or any for an admin. The controller scopes it. ───
-router.get('/restaurant/:restaurantId/wallet', requireRoles('RESTAURANT', 'ADMIN'), getRestaurantWalletController);
+router.get('/restaurant/:restaurantId/wallet', requireRoles('RESTAURANT', 'ADMIN'), requireRestaurantPermission('wallet'), getRestaurantWalletController);
 
 // ─── A rider's wallet, likewise ───
 router.get('/delivery/:deliveryPartnerId/wallet', requireRoles('DELIVERY_PARTNER', 'ADMIN'), getDeliveryWalletController);
