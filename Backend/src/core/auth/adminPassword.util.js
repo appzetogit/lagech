@@ -23,5 +23,16 @@ export const hashAdminPassword = (plain) => bcrypt.hash(String(plain), config.bc
  */
 export const compareAdminPassword = async (candidate, hash) => {
     if (!candidate || !hash) return false;
-    return bcrypt.compare(String(candidate), String(hash));
+    return bcrypt.compare(String(candidate), normalizeBcryptPrefix(hash));
+};
+
+/**
+ * Admins imported from the old PHP panel keep the hash PHP wrote, which starts
+ * "$2y$". That is the same algorithm as "$2b$" -- PHP only named its fixed
+ * implementation differently -- so only the label is changed, and only that
+ * exact prefix: every other hash is compared exactly as stored.
+ */
+export const normalizeBcryptPrefix = (hash) => {
+    const value = String(hash);
+    return value.startsWith('$2y$') ? `$2b$${value.slice(4)}` : value;
 };

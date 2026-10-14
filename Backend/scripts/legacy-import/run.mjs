@@ -28,6 +28,8 @@ import { importNewsletter } from './steps/newsletter.mjs';
 import { importWithdrawalMethods } from './steps/withdrawalMethods.mjs';
 import { importSocialMedia } from './steps/socialMedia.mjs';
 import { importCoupons } from './steps/coupons.mjs';
+import { importAdminStaff } from './steps/adminStaff.mjs';
+import { importChat } from './steps/chat.mjs';
 
 const STEPS = [
     ['zones', importZones],
@@ -49,6 +51,10 @@ const STEPS = [
     ['favorites', importFavorites],
     ['newsletter', importNewsletter],
     ['social-media', importSocialMedia],
+    // Before chat: support replies are attributed to the admin who sent them.
+    ['admin-staff', importAdminStaff],
+    // After customers, restaurants, riders, orders and admin-staff, whose ids it maps.
+    ['chat', importChat],
     ['settings', importSettings],
 ];
 const FLAGS = new Set(['--sync', '--dry-run', '--old-prices-win']);

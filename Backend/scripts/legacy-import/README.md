@@ -37,6 +37,8 @@ Steps run in this order whatever order they are named in.
 | `newsletter` | Newsletter subscribers (Subscribed Mail List), emails lower-cased |
 | `settings` | Restaurant subscriptions off (old system was commission-only); rider cash limit |
 | `social-media` | Social media links (name, link, on/off) |
+| `admin-staff` | Employee roles (`admin_roles`: old module names turned into sidebar pages and section permissions, full access; employee management and push notifications are never granted) and employees (`admins`) as sub-admins on their role, signing in with their old password (the PHP `$2y$` bcrypt hash, kept as is). An email that is already an admin here is only linked, never changed; the old Master admin role, and an old master admin who is not an admin here already, are not imported |
+| `chat` | Chat history (`conversations`, `messages`, through `user_infos`): customer, restaurant, rider and support threads, keyed as the chat service keys them (a support message about an order goes to that order's support thread); admin replies come from support, by the matching admin here or the super admin. Timestamps and seen flags kept; photos from `legacy/conversation` when copied there. Conversations whose other side was not imported are skipped and listed. Run after `customers restaurants riders orders admin-staff` |
 
 ## Running it
 
@@ -48,10 +50,10 @@ DATABASE_URL='postgresql://<user>:<pass>@127.0.0.1:5432/<database>?schema=public
 UPLOAD_STORAGE_ROOT=/srv/lagech/uploads UPLOAD_BASE_URL=/uploads \
 REDIS_URL= NODE_ENV=development \
 node scripts/legacy-import/index.mjs zones categories restaurants foods nutrition customers riders \
-  payment-details orders balances ratings coupons settings
+  payment-details orders balances ratings coupons admin-staff chat settings
 ```
 
-Copy the old `storage/app/public/{category,product,store,profile,delivery-man}`
+Copy the old `storage/app/public/{category,product,store,profile,delivery-man,conversation,admin}`
 folders into `$UPLOAD_STORAGE_ROOT/legacy/` first (stores' covers under
 `legacy/store/cover`), or images are reported missing and imported without.
 
@@ -71,6 +73,8 @@ newer one (`LEGACY_MYSQL_URL`) and the one the previous import read
 | Restaurants, categories, dishes, nutrition, zones, coupons, banners, settings, social media, withdrawal methods, cancel reasons, ads/reels, addresses | Never modified. A change in the old system is counted as "left alone" |
 | Money | Only ledger rows new since the last import (cash collections, rider withdrawals and payouts, admin payments of rider earnings (`provide_d_m_earnings`; an "adjustment" there settles earnings against cash, so it is also a cash deposit), restaurant withdrawals and payouts, order transactions), by legacy id. Opening-balance adjustments are never recomputed, so balances move by exactly those rows. A withdrawal imported before follows the old status only while untouched here |
 | Ratings | Recomputed for the restaurants and riders whose orders were added or changed |
+| Admin roles, admins | Never modified once imported or linked; only new ones come across |
+| Chat | Only new messages. One imported before only has blanks filled (a seen flag set in the old app since, a photo copied across since); a message read here is never made unread |
 | Favourites | Only those added in the old system since the baseline copy, so one a customer removed here does not come back |
 
 Run all the steps together: later steps rely on what earlier ones brought in
@@ -84,7 +88,7 @@ DATABASE_URL=... UPLOAD_STORAGE_ROOT=/srv/lagech/uploads UPLOAD_BASE_URL=/upload
 REDIS_URL= NODE_ENV=development \
 node scripts/legacy-import/index.mjs --sync --dry-run zones categories restaurants foods \
   nutrition customers riders payment-details withdrawal-methods orders balances ratings \
-  banners cancel-reasons promotions coupons favorites newsletter social-media settings
+  banners cancel-reasons promotions coupons favorites newsletter social-media admin-staff chat settings
 ```
 
 `--dry-run` runs everything inside one Postgres transaction and rolls it back:
