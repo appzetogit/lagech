@@ -72,7 +72,7 @@ export async function getAdminOrderDetailsExtras(orderId) {
     if (!row) throw new NotFoundError('Order not found');
 
     const partnerId = row.dispatchDeliveryPartnerId;
-    const [nav, user, userOrders, restaurant, restaurantOrders, partner, partnerDelivered] = await Promise.all([
+    const [nav, user, userOrders, restaurant, restaurantOrders, partner, partnerDelivered, history] = await Promise.all([
         neighbours(row),
         prisma.foodUser.findUnique({
             where: { id: row.userId },
@@ -100,6 +100,12 @@ export async function getAdminOrderDetailsExtras(orderId) {
         partnerId
             ? prisma.foodOrder.count({ where: { dispatchDeliveryPartnerId: partnerId, orderStatus: 'delivered' } })
             : 0,
+        // Every step with its time, as the customer's order screen shows it.
+        prisma.foodOrderStatusHistory.findMany({
+            where: { orderId: row.id },
+            orderBy: { at: 'asc' },
+            select: { at: true, byRole: true, from: true, to: true, note: true },
+        }),
     ]);
 
     return {
@@ -131,5 +137,6 @@ export async function getAdminOrderDetailsExtras(orderId) {
             }
             : null,
         lastLocation: partner ? pickLastLocation(partner, row) : null,
+        timeline: history.map((h) => ({ at: h.at, by: h.byRole || 'SYSTEM', from: h.from || '', to: h.to || '', note: h.note || '' })),
     };
 }

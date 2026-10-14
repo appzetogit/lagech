@@ -203,6 +203,53 @@ function Avatar({ src, alt, rounded = "rounded-full" }) {
   return <img src={src} alt={alt} onError={() => setBroken(true)} className={`h-16 w-16 shrink-0 object-cover ${rounded} border border-slate-200`} />
 }
 
+/** The order's steps with their times, as the customer's order screen shows them. */
+const TIMELINE_LABELS = {
+  created: "Order placed",
+  confirmed: "Confirmed by restaurant",
+  preparing: "Preparing food",
+  ready_for_pickup: "Food is ready",
+  dispatchable: "Looking for a rider",
+  accepted: "Rider accepted",
+  unassigned: "Rider removed",
+  en_route_to_pickup: "Rider going to restaurant",
+  reached_pickup: "Rider at restaurant",
+  picked_up: "Order picked up",
+  reached_drop: "Rider at customer's door",
+  delivered: "Delivered",
+  cancelled_by_user: "Cancelled by customer",
+  cancelled_by_restaurant: "Cancelled by restaurant",
+  cancelled_by_admin: "Cancelled by admin",
+  pending_payment: "Waiting for payment",
+}
+const TIMELINE_BY = { SYSTEM: "System", USER: "Customer", RESTAURANT: "Restaurant", DELIVERY_PARTNER: "Rider", ADMIN: "Admin" }
+
+function StatusTimeline({ entries }) {
+  const list = Array.isArray(entries) ? entries : []
+  if (!list.length) return <p className="text-sm text-slate-500">No status changes recorded yet.</p>
+  return (
+    <ol className="relative space-y-3 border-l-2 border-slate-200 pl-4">
+      {list.map((e, i) => {
+        const label = TIMELINE_LABELS[e.to] || (e.to ? e.to.replace(/_/g, " ") : e.note || "Update")
+        const last = i === list.length - 1
+        return (
+          <li key={`${e.at}-${i}`} className="relative">
+            <span className={`absolute -left-[23px] top-1 h-3 w-3 rounded-full border-2 border-white ${last ? "bg-emerald-600" : "bg-slate-400"}`} />
+            <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+              <span className={`text-sm ${last ? "font-semibold text-slate-900" : "text-slate-800"}`}>{label}</span>
+              <span className="text-xs text-slate-500 whitespace-nowrap">{formatDateTime(e.at, "")}</span>
+            </div>
+            <p className="text-xs text-slate-500">
+              {TIMELINE_BY[e.by] || e.by}
+              {e.note && TIMELINE_LABELS[e.to] !== e.note ? ` · ${e.note}` : ""}
+            </p>
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
+
 function Card({ title, icon: Icon, action, children }) {
   return (
     <div className="rounded-xl bg-white border border-slate-200 shadow-sm p-4 sm:p-5">
@@ -840,6 +887,10 @@ export default function OrderDetailsPage() {
               {!isTerminal && (
                 <p className="mt-2 text-[11px] text-slate-500">Processing, ready and on-the-way steps are set by the restaurant and the deliveryman.</p>
               )}
+            </Card>
+
+            <Card title="Order Status" icon={Package}>
+              <StatusTimeline entries={details.timeline} />
             </Card>
 
             {!isTakeaway && (
