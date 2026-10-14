@@ -5,6 +5,7 @@ import {
 import { Link } from "react-router-dom"
 import { toast } from "sonner"
 import { adminAPI } from "@food/api"
+import { formatDate, formatDateTime } from "@food/utils/dateTime"
 
 /**
  * What the platform owes each restaurant and rider for a period, and paying it.
@@ -369,14 +370,14 @@ export default function BalanceSheet() {
                     {history.map((h) => (
                       <tr key={h.id}>
                         <td className="px-4 py-3 text-sm text-slate-700">
-                          {h.periodStart ? new Date(h.periodStart).toLocaleDateString() : "—"} –{" "}
-                          {h.periodEnd ? new Date(h.periodEnd).toLocaleDateString() : "—"}
+                          {formatDate(h.periodStart, "—")} –{" "}
+                          {formatDate(h.periodEnd, "—")}
                         </td>
                         <td className="px-4 py-3 text-right text-sm font-semibold text-slate-900">{money(h.amount)}</td>
                         <td className="px-4 py-3 text-right text-sm text-slate-700">{h.transactionsSettled ?? "—"}</td>
                         <td className="px-4 py-3 text-sm text-slate-600">{h.payoutRef || "—"}</td>
                         <td className="px-4 py-3 text-sm text-slate-600">
-                          {h.processedAt ? new Date(h.processedAt).toLocaleString() : "—"}
+                          {formatDateTime(h.processedAt, "—")}
                         </td>
                       </tr>
                     ))}

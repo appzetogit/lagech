@@ -4,6 +4,7 @@ import { emptyCollectCashTransactions } from "@food/utils/adminFallbackData"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter as DialogFooterComponent } from "@food/components/ui/dialog"
 import { exportTransactionsToCSV, exportTransactionsToExcel, exportTransactionsToPDF, exportTransactionsToJSON } from "@food/components/admin/transactions/transactionsExportUtils"
+import { formatDateTime } from "@food/utils/dateTime"
 
 export default function CollectCash() {
   const [formData, setFormData] = useState({
@@ -77,7 +78,7 @@ export default function CollectCash() {
         sl: transactions.length + 1,
         collectedFrom: formData.type === "Restaurant" ? "Hungry Puppets" : formData.deliveryman === "jhon-doe" ? "Jhon Doe" : "Leslie Alexander",
         userType: formData.type,
-        collectedAt: new Date().toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }),
+        collectedAt: formatDateTime(new Date()),
         collectedAmount: parseFloat(formData.amount),
         paymentMethod: formData.method,
         reference: formData.reference || "N/A",

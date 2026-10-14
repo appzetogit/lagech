@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { BellRing, Loader2, Search, Send, Trash2, Upload, RefreshCw, Download, ChevronDown, X } from "@food/components/admin/theme/icons";
 import api, { adminAPI, uploadAPI } from "@food/api";
 import { resolveMediaUrl } from "../../../../../shared/utils/mediaUrl.js";
+import { formatDate, formatDateTime } from "@food/utils/dateTime";
 
 const ADMIN = { contextModule: "admin" };
 
@@ -18,8 +19,8 @@ const exportHistory = (rows, kind) => {
     item.targetCount || 0,
     item.isActive === false ? "Inactive" : "Active",
     item.sendCount || 1,
-    item.createdAt ? new Date(item.createdAt).toISOString() : "",
-    item.lastSentAt ? new Date(item.lastSentAt).toISOString() : "",
+    formatDateTime(item.createdAt, ""),
+    formatDateTime(item.lastSentAt, ""),
   ]);
   const csv = kind === "csv";
   const cell = (value) => {
@@ -69,18 +70,7 @@ const normalizeRecipients = (response, ownerType, mapper) =>
     .map((item) => mapper(item, ownerType))
     .filter((item) => item.ownerId);
 
-const toDateLabel = (value) => {
-  const date = value ? new Date(value) : null;
-  if (!date || Number.isNaN(date.getTime())) return "N/A";
-  return date.toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true,
-  });
-};
+const toDateLabel = (value) => formatDateTime(value, "N/A");
 
 export default function NotificationBroadcast() {
   const [form, setForm] = useState({
@@ -521,7 +511,7 @@ export default function NotificationBroadcast() {
                           className="rounded-full border border-amber-300 bg-white px-2.5 py-1 text-xs text-slate-700"
                           title={
                             customer.lastOrderAt
-                              ? `Last ordered ${new Date(customer.lastOrderAt).toLocaleDateString()}`
+                              ? `Last ordered ${formatDate(customer.lastOrderAt)}`
                               : "Has never ordered"
                           }
                         >

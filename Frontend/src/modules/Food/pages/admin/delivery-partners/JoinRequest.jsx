@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from "react"
 import { Search, Filter, Eye, Check, X, Package, ArrowUpDown, FileText, FileSpreadsheet, Loader2, Download, ExternalLink, Calendar, MapPin, CreditCard, User, Mail, Phone, Bike, FileCheck } from "@food/components/admin/theme/icons"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
+import { formatDate } from "@food/utils/dateTime"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
 import { zoneLabel } from "@food/utils/entityLabels"
 import ExportMenu from "@food/components/admin/ExportMenu"
@@ -658,7 +659,7 @@ export default function JoinRequest() {
                           <Calendar className="w-3 h-3" /> Date of Birth
                         </label>
                         <p className="text-sm text-slate-900 mt-1">
-                          {new Date(viewDetails.dateOfBirth).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          {formatDate(viewDetails.dateOfBirth)}
                         </p>
                       </div>
                     )}
@@ -822,7 +823,7 @@ export default function JoinRequest() {
                             )}
                             {viewDetails.documents.drivingLicense.expiryDate && (
                               <p className="text-xs text-slate-500 mb-1">
-                                Expiry: {new Date(viewDetails.documents.drivingLicense.expiryDate).toLocaleDateString('en-GB')}
+                                Expiry: {formatDate(viewDetails.documents.drivingLicense.expiryDate)}
                               </p>
                             )}
                             {viewDetails.documents.drivingLicense.document && (
@@ -921,7 +922,7 @@ export default function JoinRequest() {
                     <div>
                       <label className="text-xs font-semibold text-slate-500 uppercase">Joined Date</label>
                       <p className="text-sm text-slate-900 mt-1">
-                        {new Date(viewDetails.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        {formatDate(viewDetails.createdAt)}
                       </p>
                     </div>
                   )}
@@ -929,7 +930,7 @@ export default function JoinRequest() {
                     <div>
                       <label className="text-xs font-semibold text-slate-500 uppercase">Verified At</label>
                       <p className="text-sm text-slate-900 mt-1">
-                        {new Date(viewDetails.verifiedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        {formatDate(viewDetails.verifiedAt)}
                       </p>
                     </div>
                   )}

@@ -4,6 +4,7 @@ import { adminAPI } from "@food/api"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
 import { toast } from "sonner"
+import { formatDate } from "@food/utils/dateTime"
 import { zoneLabel } from "@food/utils/entityLabels"
 import DeliveryDutyLog from "@food/components/admin/DeliveryDutyLog"
 import ExportMenu from "@food/components/admin/ExportMenu"
@@ -942,7 +943,7 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
                           <Calendar className="w-3 h-3" /> Date of Birth
                         </label>
                         <p className="text-sm text-slate-900 mt-1">
-                          {new Date(viewDetails.dateOfBirth).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          {formatDate(viewDetails.dateOfBirth)}
                         </p>
                       </div>
                     )}
@@ -1143,7 +1144,7 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
                             )}
                             {viewDetails.documents.drivingLicense.expiryDate && (
                               <p className="text-xs text-slate-500 mb-1">
-                                Expiry: {new Date(viewDetails.documents.drivingLicense.expiryDate).toLocaleDateString('en-GB')}
+                                Expiry: {formatDate(viewDetails.documents.drivingLicense.expiryDate)}
                               </p>
                             )}
                             {viewDetails.documents.drivingLicense.document && (
@@ -1242,7 +1243,7 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
                     <div>
                       <label className="text-xs font-semibold text-slate-500 uppercase">Joined Date</label>
                       <p className="text-sm text-slate-900 mt-1">
-                        {new Date(viewDetails.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        {formatDate(viewDetails.createdAt)}
                       </p>
                     </div>
                   )}

@@ -1,4 +1,5 @@
 import { zoneLabel } from "@food/utils/entityLabels"
+import { formatDateTime } from "@food/utils/dateTime"
 // Export utility functions for restaurants
 export const exportRestaurantsToExcel = (restaurants, filename = "restaurants") => {
   const headers = [
@@ -123,7 +124,7 @@ export const exportRestaurantsToPDF = (restaurants, filename = "restaurants") =>
       </head>
       <body>
         <h1>Restaurants List</h1>
-        <p>Generated on: ${new Date().toLocaleString()}</p>
+        <p>Generated on: ${formatDateTime(new Date())}</p>
         <table>
           <thead>
             <tr>

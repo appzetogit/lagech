@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@food/componen
 import { exportBonusToExcel, exportBonusToPDF } from "@food/components/admin/deliveryman/deliverymanExportUtils"
 import { adminAPI } from "@food/api"
 import { API_BASE_URL } from "@food/api/config"
+import { formatDateTime } from "@food/utils/dateTime"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -21,7 +22,7 @@ const formatBonusAmount = (transaction) => {
   
   // Clean the bonus string - remove superscript characters
   let cleaned = transaction.bonus.toString()
-    .replace(/¹/g, '') // Remove superscript 1
+    .replace(/ï¿½/g, '') // Remove superscript 1
     .replace(/[\u2070-\u207F\u2080-\u208F]/g, '') // Remove all superscript characters
     .trim()
   
@@ -85,13 +86,7 @@ export default function DeliverymanBonus() {
           // Format transactions for display
           const formatted = response.data.data.transactions.map((t, index) => ({
             ...t,
-            createdAt: new Date(t.createdAt).toLocaleString('en-IN', {
-              day: '2-digit',
-              month: 'short',
-              year: 'numeric',
-              hour: '2-digit',
-              minute: '2-digit'
-            })
+            createdAt: formatDateTime(t.createdAt)
           }))
           setTransactions(formatted)
         }
@@ -181,13 +176,7 @@ export default function DeliverymanBonus() {
         if (transactionsResponse?.data?.data?.transactions) {
           const formatted = transactionsResponse.data.data.transactions.map((t, index) => ({
             ...t,
-            createdAt: new Date(t.createdAt).toLocaleString('en-IN', {
-              day: '2-digit',
-              month: 'short',
-              year: 'numeric',
-              hour: '2-digit',
-              minute: '2-digit'
-            })
+            createdAt: formatDateTime(t.createdAt)
           }))
           setTransactions(formatted)
         }

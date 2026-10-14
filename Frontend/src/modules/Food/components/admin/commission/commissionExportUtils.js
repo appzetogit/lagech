@@ -1,4 +1,5 @@
 // Export utility functions for commission rules
+import { formatDateTime } from "@food/utils/dateTime"
 export const exportCommissionToCSV = (commissions, filename = "delivery-boy-commission") => {
   const headers = ["SI", "Name", "Min Distance (km)", "Max Distance (km)", "Commission Per Km (₹)", "Base Payout (₹)", "Status"]
   const rows = commissions.map((commission) => [
@@ -74,7 +75,7 @@ export const exportCommissionToPDF = (commissions, filename = "delivery-boy-comm
     </head>
     <body>
       <h1>Delivery Boy Commission Report</h1>
-      <p>Generated on: ${new Date().toLocaleString()}</p>
+      <p>Generated on: ${formatDateTime(new Date())}</p>
       <table>
         <thead>
           <tr>

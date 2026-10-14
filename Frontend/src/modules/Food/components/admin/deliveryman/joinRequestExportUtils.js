@@ -1,4 +1,5 @@
 import { zoneLabel } from "@food/utils/entityLabels"
+import { formatDateTime } from "@food/utils/dateTime"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -84,13 +85,7 @@ export const exportJoinRequestsToPDF = (requests, filename = "join_requests") =>
         
         // Add export info
         doc.setFontSize(10)
-        const exportDate = new Date().toLocaleDateString('en-GB', {
-          day: 'numeric',
-          month: 'short',
-          year: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit'
-        })
+        const exportDate = formatDateTime(new Date())
         doc.text(`Exported on: ${exportDate} | Total Records: ${requests.length}`, 14, 22)
 
         // Prepare table data

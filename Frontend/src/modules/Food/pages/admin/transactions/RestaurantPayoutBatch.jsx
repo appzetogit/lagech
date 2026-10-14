@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom"
 import { ArrowLeft, CheckCircle2, Copy, Loader2, Search, XCircle } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminAPI } from "@food/api"
+import { formatDateTime } from "@food/utils/dateTime"
 import { BATCH_STATUS } from "./RestaurantPayouts"
 
 const formatCurrency = (amount) =>
@@ -149,7 +150,7 @@ export default function RestaurantPayoutBatch() {
           </div>
           <p className="text-sm text-slate-600 mt-1">
             Earnings from orders placed before{" "}
-            {new Date(batch.cutoffAt).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+            {formatDateTime(batch.cutoffAt)}
           </p>
           <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-4">
             {[

@@ -1,4 +1,5 @@
 // Export utility functions for disbursements
+import { formatDateTime } from "@food/utils/dateTime"
 export const exportDisbursementsToCSV = (disbursements, filename = "disbursements") => {
   const headers = ["ID", "Status", "Total Amount", "Created At"]
   const rows = disbursements.map((disbursement) => [
@@ -68,7 +69,7 @@ export const exportDisbursementsToPDF = (disbursements, filename = "disbursement
     </head>
     <body>
       <h1>Disbursements Report</h1>
-      <p>Generated on: ${new Date().toLocaleString()}</p>
+      <p>Generated on: ${formatDateTime(new Date())}</p>
       <table>
         <thead>
           <tr>

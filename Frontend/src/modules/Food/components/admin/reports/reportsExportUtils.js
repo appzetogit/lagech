@@ -1,4 +1,5 @@
 import { restaurantLabel } from "@food/utils/entityLabels"
+import { formatDateTime } from "@food/utils/dateTime"
 // Export utility functions for reports
 export const exportReportsToCSV = (data, headers, filename = "report") => {
   const rows = data.map((item, index) => {
@@ -92,7 +93,7 @@ export const exportReportsToPDF = (data, headers, filename = "report", title = "
     </head>
     <body>
       <h1>${title}</h1>
-      <p>Generated on: ${new Date().toLocaleString()}</p>
+      <p>Generated on: ${formatDateTime(new Date())}</p>
       <table>
         <thead>
           <tr>
@@ -240,7 +241,7 @@ export const exportTransactionReportToPDF = (transactions, filename = "transacti
     </head>
     <body>
       <h1>Transaction Report</h1>
-      <p>Generated on: ${new Date().toLocaleString()}</p>
+      <p>Generated on: ${formatDateTime(new Date())}</p>
       <table>
         <thead>
           <tr>

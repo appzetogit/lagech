@@ -1,4 +1,5 @@
 import { zoneLabel } from "@food/utils/entityLabels"
+import { formatDateTime } from "@food/utils/dateTime"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -87,13 +88,7 @@ export const exportDeliverymenToPDF = (deliverymen, filename = "deliverymen") =>
         
         // Add export info
         doc.setFontSize(10)
-        const exportDate = new Date().toLocaleDateString('en-GB', {
-          day: 'numeric',
-          month: 'short',
-          year: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit'
-        })
+        const exportDate = formatDateTime(new Date())
         doc.text(`Exported on: ${exportDate} | Total Records: ${deliverymen.length}`, 14, 22)
 
         // Prepare table data
@@ -251,7 +246,7 @@ export const exportReviewsToPDF = (reviews, filename = "deliveryman_reviews", op
     </head>
     <body>
       <h1>${reportTitle}</h1>
-      <p>Generated on: ${new Date().toLocaleString()}</p>
+      <p>Generated on: ${formatDateTime(new Date())}</p>
       <table>
         <thead>
           <tr>
@@ -437,13 +432,7 @@ export const exportBonusToPDF = (transactions, filename = "deliveryman_bonus") =
         
         // Add export info
         doc.setFontSize(10)
-        const exportDate = new Date().toLocaleDateString('en-GB', {
-          day: 'numeric',
-          month: 'short',
-          year: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit'
-        })
+        const exportDate = formatDateTime(new Date())
         doc.text(`Exported on: ${exportDate} | Total Records: ${transactions.length}`, 14, 22)
 
         // Prepare table data - ensure bonus is properly formatted

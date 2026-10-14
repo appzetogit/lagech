@@ -7,6 +7,7 @@ import { adminAPI } from "@food/api"
 import ExportMenu from "@food/components/admin/ExportMenu"
 import { exportDate, exportMoney, fetchAllPages } from "@food/utils/listExport"
 import { toast } from "sonner"
+import { formatDateTime } from "@food/utils/dateTime"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -164,19 +165,7 @@ export default function RestaurantWithdraws() {
 
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A'
-    try {
-      const date = new Date(dateString)
-      return date.toLocaleString('en-IN', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true
-      })
-    } catch (e) {
-      return dateString
-    }
+    return formatDateTime(dateString, dateString)
   }
 
   const formatCurrency = (amount) => {

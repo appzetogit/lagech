@@ -4,6 +4,7 @@ import { Loader } from "@googlemaps/js-api-loader"
 import { adminAPI } from "@food/api"
 import { subscribeAllDeliveryLocations } from "@food/realtimeTracking"
 import { getGoogleMapsApiKey } from "@food/utils/googleMapsApiKey"
+import { formatDateTime } from "@food/utils/dateTime"
 
 const debugError = () => {}
 
@@ -38,10 +39,7 @@ const formatLastSeen = (timestamp) => {
   if (!timestamp) return "No live update yet"
   const date = new Date(Number(timestamp))
   if (Number.isNaN(date.getTime())) return "No live update yet"
-  return date.toLocaleString("en-IN", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  })
+  return formatDateTime(date)
 }
 
 const getLocationFromPayload = (payload) => {

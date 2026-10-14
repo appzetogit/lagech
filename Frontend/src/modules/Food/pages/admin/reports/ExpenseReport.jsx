@@ -1,9 +1,9 @@
 import { Receipt } from "@food/components/admin/theme/icons"
 import { adminAPI } from "@food/api"
 import ReportShell, { rupees } from "./ReportShell"
+import { formatDateTime } from "@food/utils/dateTime"
 
-const when = (d) =>
-  new Date(d).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
+const when = (d) => formatDateTime(d)
 
 /** What the platform paid out of its own pocket on delivered orders. */
 export default function ExpenseReport() {

@@ -6,6 +6,7 @@ import { adminAPI } from "@food/api"
 import { toast } from "sonner"
 import { exportReportsToPDF, exportReportsToJSON } from "@food/components/admin/reports/reportsExportUtils"
 import { exportDate, exportRows, fetchAllPages } from "@food/utils/listExport"
+import { formatDateTime } from "@food/utils/dateTime"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -207,7 +208,7 @@ export default function FeedbackExperienceReport() {
       rating: fb.rating,
       experience: normalizeExperienceScaleText(fb.experience || 'N/A'),
       module: fb.module || 'N/A',
-      createdAt: new Date(fb.createdAt).toLocaleString(),
+      createdAt: formatDateTime(fb.createdAt),
     }))
     switch (format) {
       case "pdf": exportReportsToPDF(exportData, headers, "feedback_experience_report", "Feedback Experience Report"); break;
@@ -556,7 +557,7 @@ export default function FeedbackExperienceReport() {
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap">
                           <span className="text-xs text-slate-700">
-                            {new Date(feedback.createdAt).toLocaleDateString()} {new Date(feedback.createdAt).toLocaleTimeString()}
+                            {formatDateTime(feedback.createdAt)}
                           </span>
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap">
@@ -613,7 +614,7 @@ export default function FeedbackExperienceReport() {
                   <div>
                     <label className="text-sm font-semibold text-slate-700 mb-1 block">Date</label>
                     <p className="text-sm text-slate-900 mt-1">
-                      {new Date(selectedFeedback.createdAt).toLocaleString()}
+                      {formatDateTime(selectedFeedback.createdAt)}
                     </p>
                   </div>
                 </div>

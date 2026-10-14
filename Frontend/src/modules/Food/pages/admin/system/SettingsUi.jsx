@@ -3,6 +3,7 @@ import { Loader2 } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminSystemExtrasAPI } from "@food/api/adminSystemExtras"
 import { uploadAPI } from "@food/api"
+import { formatDateTime as formatPanelDateTime } from "@food/utils/dateTime"
 
 /**
  * Building blocks shared by the system settings pages: the page frame, cards,
@@ -186,5 +187,4 @@ export function setIn(obj, path, next) {
   return base
 }
 
-export const formatDateTime = (value) =>
-  value ? new Date(value).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : ""
+export const formatDateTime = (value) => formatPanelDateTime(value, "")

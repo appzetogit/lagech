@@ -1,4 +1,5 @@
 // Export utility functions for transaction management
+import { formatDateTime } from "@food/utils/dateTime";
 
 export const exportTransactionsToCSV = (transactions, headers, filename = "transactions") => {
   const csvContent = [
@@ -83,14 +84,7 @@ export const exportTransactionsToPDF = async (transactions, headers, filename = 
     format: 'a4'
   })
 
-  const reportDate = new Date().toLocaleString('en-IN', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true
-  })
+  const reportDate = formatDateTime(new Date())
 
   // Title
   doc.setFontSize(16)

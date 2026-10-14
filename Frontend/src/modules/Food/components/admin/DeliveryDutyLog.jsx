@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { Clock, Loader2, Radio, AlertTriangle } from "@food/components/admin/theme/icons"
 import { adminAPI } from "@food/api"
+import { formatShortDateTime } from "@food/utils/dateTime"
 
 /**
  * A rider's shift history: when they went online, when they went offline, and
@@ -11,15 +12,7 @@ import { adminAPI } from "@food/api"
  * to answer "when was this rider actually working".
  */
 
-const fmtTime = (value) =>
-    value
-        ? new Date(value).toLocaleString(undefined, {
-              day: "2-digit",
-              month: "short",
-              hour: "2-digit",
-              minute: "2-digit",
-          })
-        : "—"
+const fmtTime = (value) => formatShortDateTime(value, "—")
 
 const fmtDuration = (minutes) => {
     const total = Math.max(0, Number(minutes) || 0)

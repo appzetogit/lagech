@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { exportReportsToCSV, exportReportsToExcel, exportReportsToPDF, exportReportsToJSON } from "@food/components/admin/reports/reportsExportUtils"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
+import { formatDateTime } from "@food/utils/dateTime"
 
 // Import icons from Dashboard-icons
 import debitIcon from "@food/assets/Dashboard-icons/image2.png"
@@ -419,7 +420,7 @@ export default function CustomerWalletReport() {
                         <span className="text-xs text-slate-700">{transaction.reference}</span>
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
-                        <span className="text-xs text-slate-700">{transaction.createdAt}</span>
+                        <span className="text-xs text-slate-700">{formatDateTime(transaction.createdAt, transaction.createdAt || "-")}</span>
                       </td>
                     </tr>
                   ))

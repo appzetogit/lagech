@@ -1,4 +1,5 @@
 // Export utility functions for campaigns
+import { formatDateTime } from "@food/utils/dateTime"
 export const exportCampaignsToCSV = (campaigns, filename = "campaigns", isFoodCampaign = false) => {
   let headers, rows
   
@@ -131,7 +132,7 @@ export const exportCampaignsToPDF = (campaigns, filename = "campaigns", isFoodCa
       </head>
       <body>
         <h1>${filename}</h1>
-        <p>Generated on: ${new Date().toLocaleString()}</p>
+        <p>Generated on: ${formatDateTime(new Date())}</p>
         <table>
           <thead>
             <tr>
