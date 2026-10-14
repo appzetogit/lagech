@@ -25,6 +25,7 @@ import CancelOrderDialog from "@food/components/admin/orders/CancelOrderDialog"
 import OfflinePaymentPanel from "@food/components/admin/orders/OfflinePaymentPanel"
 import EditOrderItemsDialog from "@food/components/admin/orders/EditOrderItemsDialog"
 import bikeLogo from "@food/assets/bikelogo.png"
+import { formatDateTime } from "@food/utils/dateTime"
 
 /**
  * Admin Order Details, as the old panel's /admin/order/details/{id}: the order
@@ -67,15 +68,8 @@ const rupee = (value) => {
   return `₹ ${Number.isInteger(v) ? v : v.toFixed(2)}`
 }
 
-/** "14 Oct 2026 03:50:pm" */
-const formatPlaced = (value) => {
-  const d = value ? new Date(value) : null
-  if (!d || Number.isNaN(d.getTime())) return ""
-  const date = d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
-  const time = d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true })
-  const [hm, ampm = ""] = time.split(" ")
-  return `${date} ${hm}:${ampm.toLowerCase()}`
-}
+/** "14 Oct 2026, 03:50 PM" */
+const formatPlaced = (value) => formatDateTime(value, "")
 
 const formatAddress = (a) => {
   if (!a) return ""

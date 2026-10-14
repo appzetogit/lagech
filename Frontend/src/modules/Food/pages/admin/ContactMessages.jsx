@@ -18,6 +18,7 @@ import {
 } from "@food/components/ui/dropdown-menu"
 import ExportMenu from "@food/components/admin/ExportMenu"
 import { fetchAllPages, exportDate } from "@food/utils/listExport"
+import { formatDateTime } from "@food/utils/dateTime"
 
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
@@ -425,13 +426,7 @@ export default function ContactMessages() {
                 <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-4 border border-slate-200 dark:border-slate-700">
                   <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider block mb-2">Submitted At</label>
                   <p className="text-sm font-semibold text-slate-900 dark:text-white">
-                    {selectedFeedback.submittedAt ? new Date(selectedFeedback.submittedAt).toLocaleString('en-US', {
-                      year: 'numeric',
-                      month: 'long',
-                      day: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit'
-                    }) : 'N/A'}
+                    {formatDateTime(selectedFeedback.submittedAt, 'N/A')}
                   </p>
                 </div>
               </div>

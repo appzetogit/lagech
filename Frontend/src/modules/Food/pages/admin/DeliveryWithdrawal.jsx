@@ -3,6 +3,7 @@ import { Search, Wallet, Eye, CheckCircle, XCircle, Loader2, Package, QrCode } f
 import { adminAPI } from "@food/api"
 import ExportMenu from "@food/components/admin/ExportMenu"
 import { exportDate, exportMoney, fetchAllPages } from "@food/utils/listExport"
+import { formatDateTime } from "@food/utils/dateTime"
 import { toast } from "sonner"
 import {
   Dialog,
@@ -169,21 +170,7 @@ export default function DeliveryWithdrawal() {
     }
   }
 
-  const formatDate = (dateString) => {
-    if (!dateString) return "N/A"
-    try {
-      return new Date(dateString).toLocaleString("en-IN", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
-      })
-    } catch {
-      return String(dateString)
-    }
-  }
+  const formatDate = (dateString) => formatDateTime(dateString, "N/A")
 
   const formatCurrency = (amount) => {
     if (amount == null) return "\u20B90.00"

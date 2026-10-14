@@ -21,6 +21,7 @@ import { OrdersDashboardSkeleton } from "@food/components/ui/loading-skeletons"
 import { useDelayedLoading } from "@food/hooks/useDelayedLoading"
 import alertSound from "@food/assets/audio/alert.mp3"
 import originalSound from "@food/assets/audio/original.mp3"
+import { formatDate, formatTime } from "@food/utils/dateTime"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -575,9 +576,9 @@ export default function OrdersPage({ statusKey = "all" }) {
             }
             if (!PANEL_ALARM) toast.info("New order received")
             if (apiPageRef.current === 1) {
-              setTotalOrdersCount(getTotalCountFromResponse(response) ?? nextOrders.length)
-              setApiTotalPages(getTotalPagesFromResponse(response))
-              setOrders(nextOrders)
+              // Reload the whole first page (newest first) so the new order
+              // lands on top; the ring check only read the latest 15 rows.
+              queueMicrotask(() => fetchOrdersRef.current({ silent: true, withRingCheck: false, force: true }))
             } else {
               setTotalOrdersCount((prev) => prev + 1)
             }
@@ -657,20 +658,9 @@ export default function OrdersPage({ statusKey = "all" }) {
         createdAtCandidate && !Number.isNaN(createdAtCandidate.getTime())
           ? createdAtCandidate
           : null
-      const date = createdAt
-        ? createdAt.toLocaleDateString("en-GB", {
-            day: "2-digit",
-            month: "short",
-            year: "numeric",
-          }).toUpperCase()
-        : ""
-      const time = createdAt
-        ? createdAt.toLocaleTimeString("en-US", {
-            hour: "2-digit",
-            minute: "2-digit",
-            hour12: true,
-          }).toUpperCase()
-        : ""
+      // India time on a 12-hour clock, as the old panel: "14 OCT 2026", "03:50 PM".
+      const date = formatDate(createdAt, "").toUpperCase()
+      const time = formatTime(createdAt, "")
 
       const pricing = order.pricing || {}
       const subtotal = Number(pricing.subtotal || 0)

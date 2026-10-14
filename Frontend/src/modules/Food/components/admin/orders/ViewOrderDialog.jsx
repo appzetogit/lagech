@@ -17,6 +17,7 @@ import OfflinePaymentPanel from "./OfflinePaymentPanel"
 import { toast } from "sonner"
 import { printOrderInvoice } from "@food/utils/printInvoice"
 import CustomerLink, { customerIdOf } from "@food/components/admin/customers/CustomerLink"
+import { formatDateTime, formatShortDateTime } from "@food/utils/dateTime"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -268,13 +269,7 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order, onOrderCh
                     Delivered At
                   </p>
                   <p className="text-sm font-medium text-slate-900">
-                    {new Date(order.deliveredAt).toLocaleString('en-GB', { 
-                      day: '2-digit', 
-                      month: 'short', 
-                      year: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit'
-                    }).toUpperCase()}
+                    {formatDateTime(order.deliveredAt)}
                   </p>
                 </div>
               )}
@@ -298,13 +293,7 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order, onOrderCh
                   )}
                   {order.cancelledAt && (
                     <p className="text-xs text-slate-500 mt-1">
-                      Cancelled: {new Date(order.cancelledAt).toLocaleString('en-GB', { 
-                        day: '2-digit', 
-                        month: 'short', 
-                        year: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit'
-                      }).toUpperCase()}
+                      Cancelled: {formatDateTime(order.cancelledAt)}
                     </p>
                   )}
                 </div>
@@ -342,7 +331,7 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order, onOrderCh
                     Scheduled For
                   </p>
                   <p className="text-sm font-medium text-slate-900">
-                    {new Date(order.scheduledAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "numeric", minute: "2-digit", hour12: true })}
+                    {formatDateTime(order.scheduledAt)}
                   </p>
                 </div>
               )}
@@ -719,7 +708,7 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order, onOrderCh
                   <div className="flex justify-between text-sm">
                     <span className="text-slate-600">Processed At</span>
                     <span className="font-medium text-slate-900">
-                      {new Date(refundInfo.processedAt).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                      {formatDateTime(refundInfo.processedAt)}
                     </span>
                   </div>
                 )}
@@ -752,9 +741,7 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order, onOrderCh
                               {getTimelineStatusLabel(entry.to)}
                             </p>
                             <p className="text-xs text-slate-500 whitespace-nowrap">
-                              {entry.at
-                                ? new Date(entry.at).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })
-                                : ""}
+                              {formatShortDateTime(entry.at, "")}
                             </p>
                           </div>
                           {getTimelineRoleLabel(entry.byRole) && (
@@ -793,9 +780,7 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order, onOrderCh
                           <p className="text-sm font-semibold text-slate-900">{formatDialogMoney(event.amount)}</p>
                         )}
                         <p className="text-xs text-slate-500">
-                          {event.at
-                            ? new Date(event.at).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })
-                            : ""}
+                          {formatShortDateTime(event.at, "")}
                         </p>
                       </div>
                     </div>

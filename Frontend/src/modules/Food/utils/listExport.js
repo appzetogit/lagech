@@ -15,10 +15,12 @@
  * holds every matching row, not just the page on screen.
  */
 
+import { formatDate, formatDateTime } from "./dateTime.js"
+
 const cellValue = (column, row, index) => {
   const raw = typeof column.value === "function" ? column.value(row, index) : row?.[column.key]
   if (raw === null || raw === undefined) return ""
-  if (raw instanceof Date) return Number.isNaN(raw.getTime()) ? "" : raw.toLocaleString("en-IN")
+  if (raw instanceof Date) return formatDateTime(raw, "")
   if (typeof raw === "boolean") return raw ? "Yes" : "No"
   if (typeof raw === "number") return Number.isFinite(raw) ? raw : ""
   if (typeof raw === "object") return raw.name || raw.label || raw.title || ""
@@ -267,17 +269,12 @@ export async function fetchAllPages(fetchPage, pick, { pageSize = 200, maxRows =
   return all.slice(0, maxRows)
 }
 
-/** Dates as the old panel printed them: 06 Oct 2026, 02:15 pm. */
+/** Dates as the old panel printed them: 06 Oct 2026, 02:15 PM. */
 export const exportDate = (value, withTime = true) => {
   if (!value) return ""
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return String(value)
-  return d.toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    ...(withTime ? { hour: "2-digit", minute: "2-digit" } : {}),
-  })
+  return withTime ? formatDateTime(d) : formatDate(d)
 }
 
 /** A money amount as a plain number with two decimals (sums in Excel). */

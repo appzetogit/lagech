@@ -5,6 +5,7 @@ import { fromRestaurantLocation, toRestaurant } from '../../restaurant/restauran
 import { detachRestaurantHistory } from '../../restaurant/services/restaurantDeletion.helpers.js';
 import { logger } from '../../../../utils/logger.js';
 import { emailRestaurantDecision, emailAccountSuspension } from '../../../../core/notifications/emailEvents.js';
+import { DISABLED_BY_ADMIN } from './restaurantListing.js';
 
 /**
  * Restaurant approval and lifecycle, extracted from admin.service.js.
@@ -49,7 +50,14 @@ export async function getPendingRestaurants() {
     const restaurants = await prisma.foodRestaurant.findMany({
         where: {
             OR: [
-                { status: { in: ['pending', 'rejected'] } },
+                { status: 'pending' },
+                // A rejected join request -- not a trading restaurant the admin
+                // switched off, which stays on the Restaurants list instead.
+                // (Spelled out: a bare `not` would also drop a null reason.)
+                {
+                    status: 'rejected',
+                    OR: [{ rejectionReason: null }, { rejectionReason: { not: DISABLED_BY_ADMIN } }],
+                },
                 // An approved restaurant asking to move is also waiting on an
                 // admin, and belongs in the same queue.
                 { locationUpdateStatus: 'pending' },
@@ -94,10 +102,16 @@ export async function updateRestaurantStatus(id, body = {}) {
     if (!status) status = parseBooleanLike(raw, 'status') ? 'approved' : 'rejected';
 
     const data = { status };
-    if (status === 'approved') data.approvedAt = new Date();
+    if (status === 'approved') {
+        data.approvedAt = new Date();
+        // As approveRestaurant does: switched back on, it is no longer
+        // "Disabled by admin", and must not read as a rejected join request.
+        data.rejectedAt = null;
+        data.rejectionReason = '';
+    }
     if (status === 'rejected') {
         data.rejectedAt = new Date();
-        data.rejectionReason = 'Disabled by admin';
+        data.rejectionReason = DISABLED_BY_ADMIN;
     }
 
     const before = await prisma.foodRestaurant.findUnique({
@@ -111,7 +125,7 @@ export async function updateRestaurantStatus(id, body = {}) {
     // suspension -- or, for one never approved, is its approval.
     if (before && before.status !== status) {
         if (status === 'rejected' && before.status === 'approved') emailAccountSuspension('restaurant', before, true);
-        else if (status === 'approved' && before.rejectionReason === 'Disabled by admin') emailAccountSuspension('restaurant', before, false);
+        else if (status === 'approved' && before.rejectionReason === DISABLED_BY_ADMIN) emailAccountSuspension('restaurant', before, false);
         else if (status === 'approved') emailRestaurantDecision(before, true);
     }
 

@@ -9,6 +9,7 @@ import { fetchAllPages, exportDate, exportMoney } from "@food/utils/listExport"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
 import { usePaginationParams } from "@food/hooks/usePaginationParams"
+import { formatDateTime } from "@food/utils/dateTime"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -88,25 +89,6 @@ export default function Customers() {
   // Whether the button would actually change anything, so it can say so.
   const hasPendingChanges =
     JSON.stringify(draft) !== JSON.stringify(filters) || searchInput.trim() !== searchQuery
-
-  const formatDateTime = (value) => {
-    if (!value) return "-"
-    try {
-      const d = new Date(value)
-      if (Number.isNaN(d.getTime())) return String(value)
-      const day = String(d.getDate()).padStart(2, "0")
-      const month = d.toLocaleString("en-GB", { month: "short" })
-      const year = d.getFullYear()
-      const time = d.toLocaleString("en-GB", {
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
-      })
-      return `${day} ${month} ${year}, ${time}`
-    } catch {
-      return String(value)
-    }
-  }
 
   // Fetch customers from API
   useEffect(() => {

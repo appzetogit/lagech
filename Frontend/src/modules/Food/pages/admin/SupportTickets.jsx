@@ -22,6 +22,7 @@ import {
   DialogFooter,
 } from "@food/components/ui/dialog"
 import { Textarea } from "@food/components/ui/textarea"
+import { formatDateTime as fmtDateTime } from "@food/utils/dateTime"
 
 const PAGE_SIZE = 20
 
@@ -88,14 +89,7 @@ function formatStatusLabel(status) {
 }
 
 function formatDateTime(value) {
-  if (!value) return "N/A"
-  return new Date(value).toLocaleString("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  })
+  return fmtDateTime(value, "N/A")
 }
 
 /**

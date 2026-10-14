@@ -16,6 +16,7 @@ import { toast } from "sonner"
 import { adminCatalogExtrasAPI } from "@food/api/adminCatalogExtras"
 import ExportMenu from "@food/components/admin/ExportMenu"
 import { exportDate, fetchAllPages } from "@food/utils/listExport"
+import { formatDateTime } from "@food/utils/dateTime"
 import { ShieldCheck } from "@food/components/admin/theme/icons"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
@@ -79,7 +80,7 @@ const RESTAURANT_EXPORT_COLUMNS = [
   { label: "Zone", value: (r) => r.zone },
   { label: "Rating", value: (r) => Number(r.rating) || 0 },
   { label: "Featured", value: (r) => (r.originalData?.isFeatured ? "Yes" : "No") },
-  { label: "Status", value: (r) => approvalStatusLabel(r.approvalStatus) },
+  { label: "Status", value: (r) => (r.isActive ? "Active" : "Inactive") },
   { label: "Position in app", value: (r) => r.originalData?.displayPosition ?? "" },
   { label: "Joined", value: (r) => exportDate(r.originalData?.createdAt, false) },
 ]
@@ -297,7 +298,7 @@ export default function RestaurantsList() {
         setLoading(true)
         setError(null)
 
-        const response = await adminAPI.getApprovedRestaurants({
+        const response = await adminAPI.getListedRestaurants({
           page,
           limit: PAGE_SIZE,
           ...(debouncedSearchQuery && { search: debouncedSearchQuery }),
@@ -1148,32 +1149,37 @@ export default function RestaurantsList() {
       try {
         await adminAPI.updateRestaurantStatus(restaurantId, newStatus)
 
-        // Update local state on success
+        // Update local state on success. Switched off, the restaurant stays
+        // listed with its switch off (status rejected, "Disabled by admin");
+        // switched on, it is approved again.
+        const nextApproval = newStatus ? "approved" : "rejected"
         setRestaurants(prevRestaurants =>
           prevRestaurants.map(r =>
             r.id === restaurant.id || r._id === restaurant._id
-              ? { ...r, isActive: newStatus }
+              ? {
+                ...r,
+                isActive: newStatus,
+                approvalStatus: nextApproval,
+                originalData: { ...(r.originalData || {}), status: nextApproval },
+              }
               : r
           )
         )
+        if (restaurant.isActive !== newStatus) {
+          setRestaurantStats((prev) => ({
+            ...prev,
+            active: Math.max(0, prev.active + (newStatus ? 1 : -1)),
+            inactive: Math.max(0, prev.inactive + (newStatus ? -1 : 1)),
+          }))
+        }
 
         // Close dialog
         setBanConfirmDialog(null)
-
-        // Show success message
-        debugLog(`Restaurant ${isBanning ? 'banned' : 'unbanned'} successfully`)
+        toast.success(newStatus ? "Restaurant switched on" : "Restaurant switched off")
       } catch (apiErr) {
         debugError("API Error:", apiErr)
-        // If API fails, still update locally for better UX
-        setRestaurants(prevRestaurants =>
-          prevRestaurants.map(r =>
-            r.id === restaurant.id || r._id === restaurant._id
-              ? { ...r, isActive: newStatus }
-              : r
-          )
-        )
         setBanConfirmDialog(null)
-        alert(`Restaurant ${isBanning ? 'banned' : 'unbanned'} locally. Please check backend connection.`)
+        toast.error(apiErr?.response?.data?.message || "Couldn't update the restaurant's status")
       }
 
     } catch (err) {
@@ -1250,7 +1256,7 @@ export default function RestaurantsList() {
   const loadAllRestaurantsForExport = async () => {
     const rows = await fetchAllPages(
       ({ page: p, limit }) =>
-        adminAPI.getApprovedRestaurants({
+        adminAPI.getListedRestaurants({
           page: p,
           limit,
           ...(debouncedSearchQuery && { search: debouncedSearchQuery }),
@@ -1572,14 +1578,20 @@ export default function RestaurantsList() {
                           />
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex flex-col gap-1">
-                            <span className={`inline-flex w-fit items-center rounded-full px-2.5 py-1 text-xs font-semibold ${approvalStatusBadgeClass(restaurant.approvalStatus)}`}>
-                              {approvalStatusLabel(restaurant.approvalStatus)}
-                            </span>
-                            <span className="text-[11px] text-slate-500">
-                              Outlet: {restaurant.isActive ? "Active" : "Inactive"}
-                            </span>
-                          </div>
+                          {/* The old panel's status switch: off is a restaurant the
+                              admin switched off, still listed. Turning it on
+                              re-approves it, through the same confirm. */}
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={restaurant.isActive}
+                            aria-label="Status"
+                            title={restaurant.isActive ? "Active: switch off" : "Inactive: switch on"}
+                            onClick={() => handleBanRestaurant(restaurant)}
+                            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${restaurant.isActive ? "bg-blue-600" : "bg-slate-300"}`}
+                          >
+                            <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${restaurant.isActive ? "translate-x-5" : "translate-x-0.5"}`} />
+                          </button>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <DisplayPositionInput
@@ -2360,13 +2372,7 @@ export default function RestaurantsList() {
                             <div>
                               <p className="text-xs text-slate-500 mb-1">Registration Date & Time</p>
                               <p className="font-medium text-slate-900">
-                                {new Date(r.createdAt).toLocaleString('en-IN', {
-                                  year: 'numeric',
-                                  month: 'long',
-                                  day: 'numeric',
-                                  hour: '2-digit',
-                                  minute: '2-digit'
-                                })}
+                                {formatDateTime(r.createdAt)}
                               </p>
                             </div>
                           </div>
@@ -2377,13 +2383,7 @@ export default function RestaurantsList() {
                             <div>
                               <p className="text-xs text-slate-500 mb-1">Last Updated</p>
                               <p className="font-medium text-slate-900">
-                                {new Date(r.updatedAt).toLocaleString('en-IN', {
-                                  year: 'numeric',
-                                  month: 'long',
-                                  day: 'numeric',
-                                  hour: '2-digit',
-                                  minute: '2-digit'
-                                })}
+                                {formatDateTime(r.updatedAt)}
                               </p>
                             </div>
                           </div>

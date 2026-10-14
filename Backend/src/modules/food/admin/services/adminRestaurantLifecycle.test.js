@@ -137,6 +137,9 @@ test('the queue holds registrations and moves alike', async () => {
         zoneId: zone.id,
     });
     const settled = await makeRestaurant({ status: 'approved' });
+    const turnedDown = await makeRestaurant({ status: 'rejected', rejectionReason: 'Licence expired' });
+    const noReason = await makeRestaurant({ status: 'rejected', rejectionReason: null });
+    const switchedOff = await makeRestaurant({ status: 'rejected', rejectionReason: 'Disabled by admin' });
 
     const queue = await getPendingRestaurants();
     const ids = new Set(queue.map((r) => r.id));
@@ -144,6 +147,10 @@ test('the queue holds registrations and moves alike', async () => {
     assert.ok(ids.has(waiting.id), 'a new registration');
     assert.ok(ids.has(moving.id), 'an approved restaurant asking to move');
     assert.ok(!ids.has(settled.id), 'nothing outstanding');
+    assert.ok(ids.has(turnedDown.id), 'a rejected join request');
+    assert.ok(ids.has(noReason.id), 'a rejected join request without a reason');
+    // Switched off by an admin, it is on the Restaurants list, not a request.
+    assert.ok(!ids.has(switchedOff.id), 'a restaurant switched off');
 
     // The queue shows the zone names, not ids.
     const movingRow = queue.find((r) => r.id === moving.id);
@@ -164,6 +171,9 @@ test('status accepts a name or a boolean-ish toggle', async () => {
 
     const on = await updateRestaurantStatus(restaurant.id, { isActive: true });
     assert.equal(on.status, 'approved');
+    // Back on, it no longer carries the switch-off.
+    assert.equal(on.rejectionReason, '');
+    assert.equal(on.rejectedAt ?? null, null);
 
     await assert.rejects(
         () => updateRestaurantStatus(restaurant.id, { status: 'maybe' }),

@@ -9,6 +9,7 @@ import SettingsDialog from "@food/components/admin/orders/SettingsDialog"
 import { useGenericTableManagement } from "@food/components/admin/orders/useGenericTableManagement"
 import { restaurantLabel } from "@food/utils/entityLabels"
 import OrderDetectFilterPanel from "@food/components/admin/orders/OrderDetectFilterPanel"
+import { formatDate, formatDateTime, formatTime } from "@food/utils/dateTime"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -77,18 +78,7 @@ const buildStatusHistory = (order) => {
   const status = getOrderStatus(order)
 
   // Format timestamp helper
-  const formatTimestamp = (date) => {
-    if (!date) return null
-    const d = new Date(date)
-    return d.toLocaleString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true
-    })
-  }
+  const formatTimestamp = (date) => formatDateTime(date, null)
 
   // Ordered - always first
   history.push({
@@ -231,17 +221,8 @@ const transformOrder = (order, index) => {
     deliveryPartnerPhone: deliveryBoyNumber,
   }
 
-  const orderDate = new Date(order.createdAt)
-  const dateStr = orderDate.toLocaleDateString('en-GB', { 
-    day: '2-digit', 
-    month: 'short', 
-    year: 'numeric' 
-  }).toUpperCase()
-  const timeStr = orderDate.toLocaleTimeString('en-US', { 
-    hour: '2-digit', 
-    minute: '2-digit',
-    hour12: true 
-  }).toUpperCase()
+  const dateStr = formatDate(order.createdAt, "").toUpperCase()
+  const timeStr = formatTime(order.createdAt, "")
 
   const displayStatus = mapOrderStatus(normalizedOrder)
   const statusHistory = buildStatusHistory(normalizedOrder)

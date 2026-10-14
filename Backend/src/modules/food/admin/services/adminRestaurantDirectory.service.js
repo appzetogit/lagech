@@ -3,6 +3,7 @@ import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { toRestaurant } from '../../restaurant/restaurant.mapper.js';
 import { getRestaurantMenu } from '../../restaurant/services/restaurantMenu.service.js';
+import { restaurantStatusWhere } from './restaurantListing.js';
 
 /**
  * The admin restaurant directory, extracted from admin.service.js.
@@ -59,8 +60,11 @@ export async function getRestaurants(query = {}) {
     const sortBy = String(query.sortBy || 'created-desc').trim();
     const includeStats = query.includeStats === 'true' || query.includeStats === true;
 
-    const where = {};
-    if (['pending', 'approved', 'rejected'].includes(status)) where.status = status;
+    // Every condition goes into AND: the 'listed' status and the search are
+    // both ORs, and one would silently replace the other on a plain object.
+    const AND = [];
+    const statusWhere = restaurantStatusWhere(status);
+    if (statusWhere) AND.push(statusWhere);
 
     if (search) {
         const contains = { contains: search, mode: 'insensitive' };
@@ -85,11 +89,12 @@ export async function getRestaurants(query = {}) {
             or.push({ ownerPhoneDigits: { contains: phoneDigits } });
         }
 
-        where.OR = or;
+        AND.push({ OR: or });
     }
 
     const active = activeFilter(query.isActive);
-    if (active) Object.assign(where, active);
+    if (active) AND.push(active);
+    const where = AND.length ? { AND } : {};
 
     const orderBy = {
         'created-desc': { createdAt: 'desc' },
@@ -128,7 +133,7 @@ export async function getRestaurants(query = {}) {
     if (includeStats) {
         // Scoped to the status filter, but not to the search — the header
         // counts describe the whole set the admin is filtering within.
-        const statsWhere = ['pending', 'approved', 'rejected'].includes(status) ? { status } : {};
+        const statsWhere = statusWhere || {};
 
         const [statsTotal, statsActive] = await Promise.all([
             prisma.foodRestaurant.count({ where: statsWhere }),

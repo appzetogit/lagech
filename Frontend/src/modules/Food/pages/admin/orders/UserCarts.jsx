@@ -18,26 +18,10 @@ import { Input } from "@food/components/ui/input"
 import { resolveDeliveryFeeGst, formatDeliveryFeeBreakdownSubtext, getDeliveryFeeTotal } from "@food/utils/deliveryFeeDisplay"
 import { getCartCompareItemTotal } from "@food/utils/foodVariants"
 import { DualMoney } from "@food/components/user/FoodPriceDisplay"
+import { formatShortDateTime } from "@food/utils/dateTime"
 
 const PAGE_SIZE = 20
 const RUPEE = "\u20B9"
-
-const formatShortDateTime = (value) => {
-  if (!value) return "-"
-  try {
-    const date = new Date(value)
-    if (Number.isNaN(date.getTime())) return String(value)
-    return date.toLocaleString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: true,
-    })
-  } catch {
-    return String(value)
-  }
-}
 
 const ROW_GRID =
   "grid grid-cols-[28px_minmax(0,1.15fr)_minmax(0,1fr)_minmax(0,1.2fr)_36px_72px_minmax(0,0.95fr)_76px] gap-2 items-center"

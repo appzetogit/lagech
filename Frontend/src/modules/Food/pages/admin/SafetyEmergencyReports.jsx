@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react"
 import { Search, ArrowUpDown, Settings, Folder, ChevronDown, Eye, Trash2, AlertTriangle, Loader2 } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminAPI } from "@food/api"
+import { formatDateTime } from "@food/utils/dateTime"
 import {
   Dialog,
   DialogContent,
@@ -508,13 +509,7 @@ export default function SafetyEmergencyReports() {
               <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-4 border border-slate-200 dark:border-slate-700">
                 <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider block mb-2">Reported At</label>
                 <p className="text-sm font-semibold text-slate-900 dark:text-white">
-                  {new Date(selectedReport.createdAt).toLocaleString('en-US', {
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                  })}
+                  {formatDateTime(selectedReport.createdAt)}
                 </p>
               </div>
 
@@ -533,13 +528,7 @@ export default function SafetyEmergencyReports() {
                   <div className="mt-4 flex flex-wrap gap-4 text-xs text-slate-500 dark:text-slate-400">
                     {selectedReport.respondedAt && (
                       <span>
-                        Responded on: {new Date(selectedReport.respondedAt).toLocaleString('en-US', {
-                          year: 'numeric',
-                          month: 'long',
-                          day: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        })}
+                        Responded on: {formatDateTime(selectedReport.respondedAt)}
                       </span>
                     )}
                     {selectedReport.respondedBy?.name && (
