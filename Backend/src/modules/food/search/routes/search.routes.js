@@ -8,7 +8,9 @@ const router = express.Router();
  * Unified Search Endpoint
  * GET /api/v1/food/search/unified
  */
-router.get('/unified', cacheResponse(120, 'search_unified', { browserTtlSeconds: 30 }), searchController);
+// 60s: results put closed restaurants last, and opening hours pass by the clock
+// without any write that could invalidate the cache.
+router.get('/unified', cacheResponse(60,'search_unified', { browserTtlSeconds: 30 }), searchController);
 
 /**
  * Admin Categories Only Endpoint (to avoid restaurant-created ones as requested)

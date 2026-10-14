@@ -130,7 +130,10 @@ router.post(
 );
 
 // Public: approved restaurants list (for user app)
-router.get('/restaurants', cacheResponse(300, 'restaurants'), listApprovedRestaurantsController);
+// 60s, not 300: the list puts closed restaurants last, and a restaurant opens or
+// closes by the clock (outlet timings) with no write to invalidate the cache.
+// The online/offline toggle and timing edits still invalidate it immediately.
+router.get('/restaurants', cacheResponse(60, 'restaurants'), listApprovedRestaurantsController);
 router.get('/restaurants/:id', cacheResponse(600, 'restaurant_detail'), getApprovedRestaurantController);
 router.get('/restaurants/:id/menu', cacheResponse(600, 'restaurant_menu'), getPublicRestaurantMenuController);
 router.get('/public/foods', cacheResponse(300, 'public_foods'), listPublicFoodsController);

@@ -15,7 +15,11 @@ import { fromRestaurantLocation, toRestaurant } from '../restaurant.mapper.js';
 import { attachOutletTimingsToRestaurants } from './outletTimings.service.js';
 import { detachRestaurantHistory } from './restaurantDeletion.helpers.js';
 import { USED_ORDER_WHERE } from '../../orders/services/couponRules.js';
-import { getRestaurantOperationalStatus } from '../helpers/restaurantAvailability.helper.js';
+import {
+    getRestaurantOperationalStatus,
+    isRestaurantOpenForListing,
+    sortOpenRestaurantsFirst,
+} from '../helpers/restaurantAvailability.helper.js';
 import {
     calculateDistanceKm,
     normalizeRestaurantLocation,
@@ -1766,6 +1770,9 @@ const PUBLIC_CARD_SELECT = {
     addressLine1: true, addressLine2: true, state: true, pincode: true, landmark: true,
 };
 
+/** Upper bound on the rows one public listing reads before paging in memory. */
+const PUBLIC_LIST_MAX_ROWS = 2000;
+
 /** Up to ten recommended dishes per restaurant, in one query for the whole page. */
 const attachRecommendedItems = async (restaurants) => {
     const ids = restaurants.map((r) => r.id).filter(Boolean);
@@ -1919,12 +1926,24 @@ export const listApprovedRestaurants = async (query = {}) => {
     // coordinates yet is not silently dropped from the default listing.
     const wantsGeo = radiusKm !== null || sortBy === 'nearest';
 
-    const finish = async (rows, total) => {
+    // `sorted` is the whole candidate list in the section's order. Closed
+    // restaurants (offline toggle or outside outlet timings) sink below the
+    // open ones before the page is cut, so page 2 never holds an open
+    // restaurant that page 1 should have shown. Timings are attached to the
+    // whole list because they decide the order; the per-card extras only to
+    // the page.
+    const finish = async (sorted, total = sorted.length) => {
+        const now = new Date();
+        const withTimings = await attachOutletTimingsToRestaurants(sorted);
+        const ordered = sortOpenRestaurantsFirst(withTimings, now);
+        const rows = ordered.slice(skip, skip + limit).map((r) => ({
+            ...r,
+            isOpen: isRestaurantOpenForListing(r, now),
+        }));
         const withRecommended = await attachRecommendedItems(rows);
         const withOffers = await attachPublicOffersToRestaurants(withRecommended);
-        const withTimings = await attachOutletTimingsToRestaurants(withOffers);
         return {
-            restaurants: withTimings.map((r) => normalizePublicRestaurantGeo(r, lat, lng)),
+            restaurants: withOffers.map((r) => normalizePublicRestaurantGeo(r, lat, lng)),
             total,
             page,
             limit,
@@ -1976,10 +1995,11 @@ export const listApprovedRestaurants = async (query = {}) => {
                 ? (a, b) => a.recommendedSortOrder - b.recommendedSortOrder || byDistance(a, b)
                 : byPosition));
 
-        return finish(sorted.slice(skip, skip + limit), sorted.length);
+        return finish(sorted);
     }
 
-    // Non-geo path: the database sorts and paginates.
+    // Non-geo path: the database sorts; the page is cut in finish(), after
+    // closed restaurants have moved to the end.
     const orderBy =
         {
             rating: [{ rating: 'desc' }, { createdAt: 'desc' }],
@@ -1993,13 +2013,16 @@ export const listApprovedRestaurants = async (query = {}) => {
             ? [{ recommendedSortOrder: 'asc' }, { createdAt: 'desc' }]
             : [{ displayPosition: { sort: 'asc', nulls: 'last' } }, { createdAt: 'desc' }]);
 
+    // ponytail: open-first cannot be pushed down to SQL (it depends on outlet
+    // timings in the restaurant's local time), so the whole filtered set is
+    // fetched and paged in memory, like the radius path. A city is tens of
+    // restaurants; the cap only guards against a runaway query.
     const [rows, total] = await Promise.all([
         prisma.foodRestaurant.findMany({
             where,
             select: PUBLIC_CARD_SELECT,
             orderBy,
-            skip,
-            take: limit,
+            take: PUBLIC_LIST_MAX_ROWS,
         }),
         prisma.foodRestaurant.count({ where }),
     ]);

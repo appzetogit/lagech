@@ -5,6 +5,11 @@ import { isId } from '../../../../utils/helpers.js';
 import { toRestaurant } from '../../restaurant/restaurant.mapper.js';
 import { restaurantIdsMatchingCuisine } from '../../shared/restaurantQuery.util.js';
 import { resolveListingZone } from '../../shared/zone.service.js';
+import { attachOutletTimingsToRestaurants } from '../../restaurant/services/outletTimings.service.js';
+import {
+    isRestaurantOpenForListing,
+    sortOpenRestaurantsFirst,
+} from '../../restaurant/helpers/restaurantAvailability.helper.js';
 
 /** Columns the search cards need, plus the address columns toRestaurant() rebuilds `location` from. */
 const RESTAURANT_SEARCH_SELECT = {
@@ -13,6 +18,8 @@ const RESTAURANT_SEARCH_SELECT = {
     estimatedDeliveryTime: true, estimatedDeliveryTimeMinutes: true,
     offer: true, featuredDish: true, featuredPrice: true,
     rating: true, totalRatings: true, isAcceptingOrders: true,
+    // Fallback hours for the open/closed check when outlet timings are missing.
+    openingTime: true, closingTime: true, openDays: true,
     status: true, pureVegRestaurant: true, createdAt: true,
     zoneId: true, area: true, city: true,
     latitude: true, longitude: true, formattedAddress: true,
@@ -220,11 +227,19 @@ export const searchUnified = async (query = {}, options = {}) => {
             .sort((a, b) => (a.distanceScore || 999) - (b.distanceScore || 999));
     }
 
+    // Closed restaurants (offline, or outside outlet timings) go below the open
+    // ones, each group keeping the order above, before the page is cut.
+    const now = new Date();
+    results = sortOpenRestaurantsFirst(await attachOutletTimingsToRestaurants(results), now);
+
     const finalResult = {
         success: true,
         data: {
             // toRestaurant rebuilds the nested `location` the cards read.
-            restaurants: results.slice(skip, skip + limitNumber).map(toRestaurant),
+            restaurants: results.slice(skip, skip + limitNumber).map((restaurant) => ({
+                ...toRestaurant(restaurant),
+                isOpen: isRestaurantOpenForListing(restaurant, now),
+            })),
             total: results.length,
             page: pageNumber,
             limit: limitNumber,

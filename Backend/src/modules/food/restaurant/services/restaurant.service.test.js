@@ -16,6 +16,7 @@ import {
     getCurrentRestaurantProfile,
     deleteCurrentRestaurantAccount,
 } from './restaurant.service.js';
+import { searchUnified } from '../../search/services/search.service.js';
 import { uniquePhone } from '../../../../utils/testIds.js';
 
 /**
@@ -355,4 +356,53 @@ test('restaurants the admin positioned come first, in that order, then the rest'
 
     const { restaurants: byRating } = await listApprovedRestaurants({ sortBy: 'rating', limit: 1000 });
     assert.ok(indexIn(byRating)(first) >= 0, 'a sort the customer picks still works');
+});
+
+test('closed restaurants are listed after open ones, and paging follows that order', async () => {
+    const unique = `Sunk${stamp()}`;
+    const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    // Equal opening and closing times mean open around the clock, so the test
+    // does not depend on when it runs.
+    const allDay = DAYS.map((day) => ({ day, isOpen: true, openingTime: '00:00', closingTime: '00:00' }));
+    const withTimings = async (restaurant, timings) => {
+        await prisma.foodRestaurantOutletTimings.create({ data: { restaurantId: restaurant.id, timings } });
+        return restaurant;
+    };
+
+    // Created oldest first, so newest-first alone would put both closed ones
+    // ahead of the open one.
+    const open = await withTimings(await makeRestaurant({ restaurantName: `${unique} Open` }), allDay);
+    const offline = await withTimings(
+        await makeRestaurant({ restaurantName: `${unique} Offline`, isAcceptingOrders: false }),
+        allDay,
+    );
+    const shut = await withTimings(
+        await makeRestaurant({ restaurantName: `${unique} Shut` }),
+        DAYS.map((day) => ({ day, isOpen: false })),
+    );
+
+    const { restaurants, total } = await listApprovedRestaurants({ search: unique, sortBy: 'newest' });
+    assert.equal(total, 3);
+    assert.deepEqual(
+        restaurants.map((r) => r.id),
+        [open.id, shut.id, offline.id],
+        'open first; the closed ones keep the newest-first order among themselves',
+    );
+    assert.deepEqual(restaurants.map((r) => r.isOpen), [true, false, false], 'each card says whether it is open');
+
+    // The page is cut after the reorder, so page 1 holds the open one.
+    const pageOne = await listApprovedRestaurants({ search: unique, sortBy: 'newest', limit: 1, page: 1 });
+    const pageTwo = await listApprovedRestaurants({ search: unique, sortBy: 'newest', limit: 1, page: 2 });
+    assert.equal(pageOne.total, 3);
+    assert.equal(pageOne.restaurants[0].id, open.id);
+    assert.equal(pageTwo.restaurants[0].id, shut.id);
+
+    // Unified search sinks them the same way.
+    const { data } = await searchUnified({ q: unique });
+    assert.equal(data.restaurants[0].id, open.id);
+    assert.equal(data.restaurants[0].isOpen, true);
+    assert.deepEqual(
+        new Set(data.restaurants.slice(1).map((r) => r.id)),
+        new Set([offline.id, shut.id]),
+    );
 });

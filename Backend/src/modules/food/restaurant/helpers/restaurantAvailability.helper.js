@@ -313,3 +313,27 @@ export function shouldAutoTurnOffAcceptingOrders(restaurant, now = new Date()) {
   void now;
   return false;
 }
+
+/**
+ * Whether a restaurant counts as open on the customer's listings right now:
+ * taking orders (the manual online toggle) and inside its outlet timings. The
+ * same rule as the restaurant app's online badge, so the two never disagree.
+ */
+export function isRestaurantOpenForListing(restaurant, now = new Date()) {
+  return getRestaurantOperationalStatus(restaurant, now).isEffectivelyOnline;
+}
+
+/**
+ * Open restaurants first, closed ones after, each group in the order it came
+ * in (a stable partition, not a re-sort) -- the way 6amMart sank closed stores
+ * to the bottom. `now` is fixed for the whole list so nothing flips mid-sort.
+ */
+export function sortOpenRestaurantsFirst(restaurants = [], now = new Date()) {
+  if (!Array.isArray(restaurants)) return [];
+  const open = [];
+  const closed = [];
+  for (const restaurant of restaurants) {
+    (isRestaurantOpenForListing(restaurant, now) ? open : closed).push(restaurant);
+  }
+  return [...open, ...closed];
+}
