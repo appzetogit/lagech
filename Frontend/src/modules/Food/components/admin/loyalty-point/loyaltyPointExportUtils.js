@@ -1,4 +1,5 @@
 // Export utility functions for loyalty point reports
+import { formatDateTime } from "@food/utils/dateTime"
 export const exportLoyaltyPointsToCSV = (transactions, filename = "loyalty_points_report") => {
   const headers = ["SI", "Transaction ID", "Customer", "Credit", "Debit", "Balance", "Transaction Type", "Reference", "Created At"]
   const rows = transactions.map((transaction) => [
@@ -78,7 +79,7 @@ export const exportLoyaltyPointsToPDF = (transactions, filename = "loyalty_point
     </head>
     <body>
       <h1>Loyalty Points Report</h1>
-      <p>Generated on: ${new Date().toLocaleString()}</p>
+      <p>Generated on: ${formatDateTime(new Date())}</p>
       <table>
         <thead>
           <tr>

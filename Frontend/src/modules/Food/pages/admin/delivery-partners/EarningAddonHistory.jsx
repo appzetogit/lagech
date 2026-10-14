@@ -23,6 +23,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
+import { formatDateTime, formatTime } from "@food/utils/dateTime"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -136,13 +137,7 @@ export default function EarningAddonHistory() {
     try {
       const date = new Date(dateString)
       if (isNaN(date.getTime())) return dateString
-      return date.toLocaleDateString('en-IN', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      })
+      return formatDateTime(date)
     } catch (error) {
       return dateString
     }
@@ -328,7 +323,7 @@ export default function EarningAddonHistory() {
           doc.setFontSize(16)
           doc.text('Earning Addon History Report', 14, 15)
           doc.setFontSize(10)
-          doc.text(`Exported on: ${new Date().toLocaleString('en-GB')} | Total Records: ${data.length}`, 14, 22)
+          doc.text(`Exported on: ${formatDateTime(new Date())} | Total Records: ${data.length}`, 14, 22)
 
           autoTable(doc, {
             head: [headers],
@@ -591,7 +586,7 @@ export default function EarningAddonHistory() {
                               <span className="text-sm text-slate-700">{formatDate(item.date || item.completedAt)}</span>
                               {item.completedAt && (
                                 <span className="text-xs text-slate-400 mt-0.5">
-                                  {new Date(item.completedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                                  {formatTime(item.completedAt)}
                                 </span>
                               )}
                             </div>

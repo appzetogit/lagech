@@ -4,6 +4,7 @@ import {
   UtensilsCrossed, ArrowUpDown, Loader2, RefreshCw, AlertCircle, Eye, X
 } from "@food/components/admin/theme/icons";
 import { adminAPI } from "@food/api";
+import { formatDateTime } from "@food/utils/dateTime";
 
 export default function UnregisteredRestaurants() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -86,17 +87,7 @@ export default function UnregisteredRestaurants() {
     }
   };
 
-  const formatDate = (dateStr) => {
-    if (!dateStr) return "N/A";
-    const date = new Date(dateStr);
-    return date.toLocaleDateString("en-IN", {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
+  const formatDate = (dateStr) => formatDateTime(dateStr, "N/A");
 
   return (
     <div className="p-4 lg:p-6 bg-slate-50 min-h-screen font-sans">

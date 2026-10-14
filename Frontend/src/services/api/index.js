@@ -1351,6 +1351,16 @@ export const adminAPI = {
       params: { status: "approved", ...params },
       contextModule: "admin",
     }),
+  /**
+   * The Restaurants list, as the old panel had it: approved restaurants and the
+   * ones an admin switched off (shown with the switch off). Join requests stay
+   * on Joining Request.
+   */
+  getListedRestaurants: (params = {}) =>
+    apiClient.get("/food/admin/restaurants", {
+      params: { status: "listed", ...params },
+      contextModule: "admin",
+    }),
 
   /** Delivery Boy Commission Rules (admin) */
   getCommissionRules: () =>

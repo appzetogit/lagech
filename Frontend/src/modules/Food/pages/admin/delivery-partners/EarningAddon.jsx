@@ -4,6 +4,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
+import { formatDate } from "@food/utils/dateTime"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -462,14 +463,14 @@ export default function EarningAddon() {
                         {visibleColumns.startDate && (
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className="text-sm text-slate-700">
-                              {new Date(addon.startDate).toLocaleDateString()}
+                              {formatDate(addon.startDate)}
                             </span>
                           </td>
                         )}
                         {visibleColumns.endDate && (
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className="text-sm text-slate-700">
-                              {new Date(addon.endDate).toLocaleDateString()}
+                              {formatDate(addon.endDate)}
                             </span>
                           </td>
                         )}

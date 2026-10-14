@@ -3,6 +3,7 @@ import { Settings, Building, ShoppingBag, Download, ChevronDown, FileText, FileS
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
 import { exportDisbursementsToCSV, exportDisbursementsToExcel, exportDisbursementsToPDF, exportDisbursementsToJSON } from "./disbursementExportUtils"
+import { formatDateTime } from "@food/utils/dateTime"
 
 export default function DisbursementPage({ 
   title, 
@@ -260,7 +261,7 @@ export default function DisbursementPage({
                       </span>
                     </div>
                     <p className="text-sm text-slate-500">
-                      Created at {disbursement.createdAt}
+                      Created at {formatDateTime(disbursement.createdAt, disbursement.createdAt)}
                     </p>
                   </div>
 

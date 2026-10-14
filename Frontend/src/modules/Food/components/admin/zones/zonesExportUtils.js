@@ -1,4 +1,5 @@
 // Export utility functions for zones
+import { formatDateTime } from "@food/utils/dateTime"
 export const exportZonesToCSV = (zones, filename = "zones") => {
   const headers = ["SI", "Zone ID", "Name", "Display Name", "Restaurants", "Deliverymen", "Default Status", "Status"]
   const rows = zones.map((zone, index) => [
@@ -86,7 +87,7 @@ export const exportZonesToPDF = (zones, filename = "zones") => {
       </head>
       <body>
         <h1>${filename}</h1>
-        <p>Generated on: ${new Date().toLocaleString()}</p>
+        <p>Generated on: ${formatDateTime(new Date())}</p>
         <table>
           <thead>
             <tr>

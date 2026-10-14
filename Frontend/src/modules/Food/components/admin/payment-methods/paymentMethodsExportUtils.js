@@ -1,4 +1,5 @@
 // Export utility functions for payment methods
+import { formatDateTime } from "@food/utils/dateTime"
 export const exportPaymentMethodsToCSV = (methods, filename = "payment_methods") => {
   const headers = ["SI", "Payment Method Name", "Payment Info", "Required Info From Customer", "Status"]
   const rows = methods.map((method, index) => [
@@ -70,7 +71,7 @@ export const exportPaymentMethodsToPDF = (methods, filename = "payment_methods")
     </head>
     <body>
       <h1>Payment Methods Report</h1>
-      <p>Generated on: ${new Date().toLocaleString()}</p>
+      <p>Generated on: ${formatDateTime(new Date())}</p>
       <table>
         <thead>
           <tr>

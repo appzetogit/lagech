@@ -6,6 +6,7 @@ import { getGoogleMapsApiKey } from "@food/utils/googleMapsApiKey"
 import { Loader } from "@googlemaps/js-api-loader"
 import { subscribeAllDeliveryLocations } from "@food/realtimeTracking"
 import bikeLogo from "@food/assets/bikelogo.png"
+import { formatTime } from "@food/utils/dateTime"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -512,7 +513,7 @@ export default function DeliveryBoyViewMap() {
               </div>
               ${lastUpdate ? `
                 <div style="margin-top: 8px; font-size: 12px; color: #94a3b8;">
-                  Last updated: ${new Date(lastUpdate).toLocaleTimeString()}
+                  Last updated: ${formatTime(lastUpdate)}
                 </div>
               ` : ''}
             </div>

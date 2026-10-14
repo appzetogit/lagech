@@ -3,19 +3,14 @@ import { Link } from "react-router-dom"
 import { Loader2, Package, Play, Receipt, Save, Settings2 } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminAPI } from "@food/api"
+import { formatDateTime } from "@food/utils/dateTime"
 
 const formatCurrency = (amount) =>
   `₹${Number(amount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
 const formatDate = (d) => {
   if (!d) return "—"
-  try {
-    return new Date(d).toLocaleString("en-IN", {
-      day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true,
-    })
-  } catch {
-    return String(d)
-  }
+  return formatDateTime(d, String(d))
 }
 
 export const BATCH_STATUS = {

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { Clock, Loader2, Radio, AlertTriangle, Search } from "@food/components/admin/theme/icons"
 import { adminAPI } from "@food/api"
+import { formatShortDateTime } from "@food/utils/dateTime"
 
 /**
  * When each rider went online and offline, on a screen of its own.
@@ -10,15 +11,7 @@ import { adminAPI } from "@food/api"
  * pick a rider, pick a range, read the shifts.
  */
 
-const fmt = (value) =>
-  value
-    ? new Date(value).toLocaleString(undefined, {
-        day: "2-digit",
-        month: "short",
-        hour: "2-digit",
-        minute: "2-digit",
-      })
-    : "—"
+const fmt = (value) => formatShortDateTime(value, "—")
 
 const fmtDuration = (minutes) => {
   const total = Math.max(0, Number(minutes) || 0)

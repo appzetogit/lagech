@@ -6,6 +6,7 @@ import {
 import { adminAPI, restaurantAPI } from "@food/api"
 import ExportMenu from "@food/components/admin/ExportMenu"
 import { exportDate } from "@food/utils/listExport"
+import { formatDateTime } from "@food/utils/dateTime"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -1145,13 +1146,7 @@ export default function JoiningRequest() {
                             <div>
                               <p className="text-xs text-slate-500 mb-1">Registration Date & Time</p>
                               <p className="font-medium text-slate-900">
-                                {new Date(r.createdAt).toLocaleString('en-IN', {
-                                  year: 'numeric',
-                                  month: 'long',
-                                  day: 'numeric',
-                                  hour: '2-digit',
-                                  minute: '2-digit'
-                                })}
+                                {formatDateTime(r.createdAt)}
                               </p>
                             </div>
                           </div>
@@ -1165,7 +1160,7 @@ export default function JoiningRequest() {
                         {r.approvedAt != null && (
                           <div>
                             <p className="text-xs text-slate-500 mb-1">Approved At</p>
-                            <p className="font-medium text-slate-900">{new Date(r.approvedAt).toLocaleString('en-IN')}</p>
+                            <p className="font-medium text-slate-900">{formatDateTime(r.approvedAt)}</p>
                           </div>
                         )}
                         {r.businessModel && (
@@ -1204,7 +1199,7 @@ export default function JoiningRequest() {
                         <p className="text-sm text-red-800">{r.rejectionReason}</p>
                         {r.rejectedAt && (
                           <p className="text-xs text-red-600 mt-2">
-                            Rejected on: {new Date(r.rejectedAt).toLocaleString('en-IN')}
+                            Rejected on: {formatDateTime(r.rejectedAt)}
                           </p>
                         )}
                       </div>

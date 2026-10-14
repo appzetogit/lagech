@@ -9,6 +9,7 @@ import { AdapterDateFns } from "@mui/x-date-pickers/AdapterDateFns"
 import { useCompanyName } from "@food/hooks/useCompanyName"
 import { restaurantAPI } from "@food/api"
 import { toast } from "sonner"
+import { formatClock } from "@food/utils/dateTime"
 
 const debugLog = (...args) => {}
 const debugError = (...args) => {}
@@ -32,14 +33,7 @@ const timeToString = (date) => {
   return `${hours}:${minutes}`
 }
 
-const formatTime12Hour = (time24) => {
-  if (!time24) return "09:00 AM"
-  const [hours, minutes] = time24.split(":").map(Number)
-  const period = hours >= 12 ? "PM" : "AM"
-  const hours12 = hours % 12 || 12
-  const minutesStr = minutes.toString().padStart(2, "0")
-  return `${hours12}:${minutesStr} ${period}`
-}
+const formatTime12Hour = (time24) => formatClock(time24, "09:00 AM")
 
 const getDefaultDays = () => ({
   Monday: { isOpen: true, openingTime: "09:00", closingTime: "22:00" },

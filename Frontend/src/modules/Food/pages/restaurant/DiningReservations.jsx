@@ -6,6 +6,7 @@ import { diningAPI, restaurantAPI } from "@food/api"
 import Loader from "@food/components/Loader"
 import { Badge } from "@food/components/ui/badge"
 import { toast } from "sonner"
+import { formatClock } from "@food/utils/dateTime"
 const debugError = (...args) => { }
 
 const getRestaurantFromResponse = (response) =>
@@ -796,7 +797,7 @@ export default function DiningReservations() {
                                                                 </div>
                                                                 <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
                                                                     <Clock className="w-4 h-4 text-blue-500" />
-                                                                    {booking.timeSlot}
+                                                                    {formatClock(booking.timeSlot, "")}
                                                                 </div>
                                                             </div>
                                                         </td>
@@ -914,7 +915,7 @@ export default function DiningReservations() {
                                                     </div>
                                                     <div className="flex items-center gap-2">
                                                         <Clock className="w-4 h-4 text-blue-500" />
-                                                        <span className="text-xs font-bold text-slate-700">{booking.timeSlot}</span>
+                                                        <span className="text-xs font-bold text-slate-700">{formatClock(booking.timeSlot, "")}</span>
                                                     </div>
                                                     <div className="flex items-center gap-2">
                                                         <Users className="w-4 h-4 text-blue-500" />

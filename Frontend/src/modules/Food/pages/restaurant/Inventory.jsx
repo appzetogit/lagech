@@ -28,6 +28,7 @@ import { useNavigate } from "react-router-dom"
 import { restaurantAPI, uploadAPI } from "@food/api"
 import { isFlutterBridgeAvailable, openGallery } from "@food/utils/imageUploadUtils"
 import { toast } from "sonner"
+import { formatClock, formatShortDateTime } from "@food/utils/dateTime"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -242,13 +243,7 @@ const getRuleStatusLabel = (rule) => {
     return "Out of stock"
   }
 
-  const formatted = resumeAt.toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  })
+  const formatted = formatShortDateTime(resumeAt)
 
   if (rule.mode === "specific-time") return `Out of stock until ${formatted}`
   if (rule.mode === "next-business-day") return `Back next business day at ${formatted}`
@@ -1788,7 +1783,7 @@ export default function Inventory() {
     if (!time) return ""
     const minute = time.minute.padStart(2, '0')
     const period = time.period.toUpperCase()
-    return `${time.hour}:${minute} ${period}`
+    return formatClock(`${time.hour}:${minute} ${period}`, "")
   }
 
   // Handle time picker confirm

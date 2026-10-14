@@ -4,6 +4,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { toast } from "sonner"
 import { adminAPI } from "@food/api"
 import { adminOrderReportsAPI, saveDownload } from "@food/api/adminOrderReports"
+import { formatDateTime } from "@food/utils/dateTime"
 
 /**
  * The per-order money report, as the old panel's Transaction report and Order
@@ -366,7 +367,7 @@ export default function OrderMoneyReport({ variant = "transaction", title, icon:
                       <td className={td}>{row.sl}</td>
                       <td className={`${td} font-medium text-slate-900`}>
                         {row.orderId}
-                        <div className="text-[11px] text-slate-400">{new Date(row.date).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</div>
+                        <div className="text-[11px] text-slate-400">{formatDateTime(row.date)}</div>
                       </td>
                       <td className={td}>{row.restaurant}</td>
                       <td className={td}>{row.customerName}</td>

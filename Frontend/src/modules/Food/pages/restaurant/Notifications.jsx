@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom"
 import { ArrowLeft, Bell, RefreshCw, X } from "lucide-react"
 import { restaurantAPI } from "@food/api"
 import useNotificationInbox from "@food/hooks/useNotificationInbox"
+import { formatShortDateTime } from "@food/utils/dateTime"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -94,15 +95,7 @@ export default function Notifications() {
           orderId: order.orderId || "N/A",
           message: getStatusLabel(order.orderStatus || order.status),
           timeValue: timestamp ? new Date(timestamp).getTime() : 0,
-          time: timestamp
-            ? new Date(timestamp).toLocaleString("en-IN", {
-                day: "2-digit",
-                month: "short",
-                hour: "2-digit",
-                minute: "2-digit",
-                hour12: true,
-              })
-            : "N/A",
+          time: formatShortDateTime(timestamp, "N/A"),
         }
       })
       .filter((item) => item.id && !dismissedIds.includes(item.id))
@@ -113,15 +106,7 @@ export default function Notifications() {
       source: "broadcast",
       read: item.read,
       timeValue: item.createdAt ? new Date(item.createdAt).getTime() : 0,
-      time: item.createdAt
-        ? new Date(item.createdAt).toLocaleString("en-IN", {
-            day: "2-digit",
-            month: "short",
-            hour: "2-digit",
-            minute: "2-digit",
-            hour12: true,
-          })
-        : "N/A",
+      time: formatShortDateTime(item.createdAt, "N/A"),
     }))
 
     return [...broadcastRows, ...orderNotifications].sort((a, b) => b.timeValue - a.timeValue)

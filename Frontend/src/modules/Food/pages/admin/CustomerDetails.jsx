@@ -23,6 +23,7 @@ import { fetchAllPages, exportDate, exportMoney } from "@food/utils/listExport"
 import { printOrderInvoice } from "@food/utils/printInvoice"
 import { adminAPI } from "@food/api"
 import { customerExtrasAPI, dataOf, errorMessage } from "@food/api/adminCustomerExtras"
+import { formatDateTime } from "@food/utils/dateTime"
 
 /**
  * Customers -> a customer, laid out like the old panel's (6amMart) customer
@@ -37,14 +38,6 @@ const HISTORY_PAGE_SIZE = 10
 const money = (value) =>
   `₹${Number(value || 0).toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
 
-const formatDateTime = (value) => {
-  if (!value) return "-"
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return String(value)
-  const date = d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
-  const time = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: true }).toLowerCase()
-  return `${date} ${time}`
-}
 
 // The admin order list's status names, so a customer's orders read the same.
 const ORDER_STATUS = {

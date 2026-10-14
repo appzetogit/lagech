@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import { Bell, Menu, ChevronDown, Calendar, Download, FileText, Wallet, X, Info, ArrowUpRight, History, TrendingUp, Receipt } from "lucide-react"
 import BottomNavOrders from "@food/components/restaurant/BottomNavOrders"
 import { restaurantAPI } from "@food/api"
+import { formatDate as formatPanelDate, formatDateTime as formatPanelDateTime } from "@food/utils/dateTime"
 const debugLog = (...args) => { }
 const debugWarn = (...args) => { }
 const debugError = (...args) => { }
@@ -291,19 +292,7 @@ export default function HubFinance() {
     return status.charAt(0).toUpperCase() + status.slice(1)
   }
 
-  const formatDateTime = (dateValue) => {
-    if (!dateValue) return 'N/A'
-    const date = new Date(dateValue)
-    if (Number.isNaN(date.getTime())) return 'N/A'
-    return date.toLocaleString('en-IN', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true
-    })
-  }
+  const formatDateTime = (dateValue) => formatPanelDateTime(dateValue, 'N/A')
 
   // Parse date range string to extract start and end dates
   const parseDateRange = (dateRangeStr) => {
@@ -586,7 +575,7 @@ export default function HubFinance() {
           <h1>Finance Report</h1>
           <p>${reportData.restaurantName}</p>
           <p>ID: ${reportData.restaurantId}</p>
-          <p>Generated on: ${new Date().toLocaleString('en-IN')}</p>
+          <p>Generated on: ${formatPanelDateTime(new Date())}</p>
         </div>
 
         <div class="section">
@@ -626,7 +615,7 @@ export default function HubFinance() {
               </thead>
               <tbody>
                 ${reportData.allOrders.map(order => {
-      const orderDate = order.createdAt ? new Date(order.createdAt).toLocaleDateString('en-IN') : (order.deliveredAt ? new Date(order.deliveredAt).toLocaleDateString('en-IN') : 'N/A')
+      const orderDate = formatPanelDate(order.createdAt || order.deliveredAt, 'N/A')
       const foodItems = order.foodNames || (order.items && order.items.map(item => item.name).join(', ')) || 'N/A'
       const itemQuantities = order.items ? order.items.map(item => (item.quantity || 1).toString()).join(', ') : 'N/A'
       const orderAmount = order.totalAmount || order.orderTotal || order.amount || 0
@@ -1450,7 +1439,7 @@ export default function HubFinance() {
                           <p className="text-xs text-gray-500 mt-1">{item.remarks}</p>
                         ) : null}
                         <p className="text-xs text-gray-500 mt-1">
-                          {item?.createdAt ? new Date(item.createdAt).toLocaleString() : ""}
+                          {formatPanelDateTime(item?.createdAt, "")}
                         </p>
                       </div>
                     ))}

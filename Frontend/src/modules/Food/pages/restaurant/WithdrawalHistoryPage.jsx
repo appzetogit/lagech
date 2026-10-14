@@ -13,6 +13,7 @@ import {
 } from "lucide-react"
 import BottomNavOrders from "@food/components/restaurant/BottomNavOrders"
 import { restaurantAPI } from "@food/api"
+import { formatDateTime as formatPanelDateTime } from "@food/utils/dateTime"
 
 const debugError = (...args) => {}
 
@@ -37,17 +38,7 @@ function formatAmount(amount) {
 }
 
 function formatDateTime(dateValue) {
-  if (!dateValue) return "N/A"
-  const date = new Date(dateValue)
-  if (Number.isNaN(date.getTime())) return "N/A"
-  return date.toLocaleString("en-IN", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true,
-  })
+  return formatPanelDateTime(dateValue, "N/A")
 }
 
 function statusBadgeClass(status) {

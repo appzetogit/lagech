@@ -3,6 +3,7 @@ import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { CANCELLED_ORDER_STATUSES } from '../../orders/services/order.helpers.js';
 import { logger } from '../../../../utils/logger.js';
+import { LISTED_RESTAURANT_WHERE } from './restaurantListing.js';
 
 /**
  * The admin dashboard: headline totals, a twelve-month trend, and the badge
@@ -180,7 +181,9 @@ export async function getDashboardStats(query = {}) {
             },
         }),
         monthlyTrend(orderWhere),
-        prisma.foodRestaurant.count({ where: { ...restaurantWhere, status: 'approved' } }),
+        // The old dashboard's store count: the Restaurants list, i.e. approved
+        // plus switched off by an admin -- not join requests.
+        prisma.foodRestaurant.count({ where: { AND: [restaurantWhere, LISTED_RESTAURANT_WHERE] } }),
         prisma.foodRestaurant.count({ where: { ...restaurantWhere, status: 'pending' } }),
         prisma.foodDeliveryPartner.count({ where: { status: 'approved' } }),
         prisma.foodDeliveryPartner.count({ where: { status: 'pending' } }),

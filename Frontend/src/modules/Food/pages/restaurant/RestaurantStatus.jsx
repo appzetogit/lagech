@@ -6,6 +6,7 @@ import { ArrowLeft, Settings, ChevronRight } from "lucide-react"
 import { Switch } from "@food/components/ui/switch"
 import { Card, CardContent } from "@food/components/ui/card"
 import { restaurantAPI } from "@food/api"
+import { formatClock } from "@food/utils/dateTime"
 import {
   getRestaurantOperationalStatus,
   broadcastRestaurantOperationalStatus,
@@ -244,14 +245,7 @@ export default function RestaurantStatus() {
   }
 
   // Format time from 24-hour to 12-hour format
-  const formatTime12Hour = (time24) => {
-    if (!time24) return ""
-    const [hours, minutes] = time24.split(':').map(Number)
-    const period = hours >= 12 ? 'pm' : 'am'
-    const hours12 = hours % 12 || 12
-    const minutesStr = minutes.toString().padStart(2, '0')
-    return `${hours12}:${minutesStr} ${period}`
-  }
+  const formatTime12Hour = (time24) => formatClock(time24, "")
 
   // Get delivery timings for current day (outlet timings only)
   const getCurrentDayTimings = () => {

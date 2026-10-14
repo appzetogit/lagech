@@ -14,6 +14,7 @@ import {
   Copy
 } from "lucide-react"
 import { restaurantAPI } from "@food/api"
+import { formatDate } from "@food/utils/dateTime"
 import { toast } from "sonner"
 
 export default function CouponListPage() {
@@ -236,9 +237,9 @@ export default function CouponListPage() {
                         <div className="col-span-2 flex items-center gap-1.5">
                           <Calendar className="w-3.5 h-3.5 text-gray-400" />
                           <p className="text-xs text-gray-500">
-                            {coupon.startDate ? new Date(coupon.startDate).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "Now"}
+                            {formatDate(coupon.startDate, "Now")}
                             {" → "}
-                            {coupon.endDate ? new Date(coupon.endDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "Forever"}
+                            {formatDate(coupon.endDate, "Forever")}
                           </p>
                         </div>
                       )}

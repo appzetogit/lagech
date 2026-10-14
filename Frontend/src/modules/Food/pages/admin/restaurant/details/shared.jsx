@@ -1,5 +1,6 @@
 import { ChevronLeft, ChevronRight, Loader2 } from "@food/components/admin/theme/icons"
 import { resolveMediaUrl } from "../../../../../../shared/utils/mediaUrl.js"
+import { formatDate as sharedFormatDate, formatDateTime as sharedFormatDateTime } from "@food/utils/dateTime"
 
 /**
  * Building blocks for the restaurant details page tabs: cards, an empty
@@ -12,11 +13,9 @@ export const errorMessage = (err, fallback) => err?.response?.data?.message || e
 export const rupees = (value) =>
   `₹${Number(value || 0).toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
 
-export const formatDate = (value) =>
-  value ? new Date(value).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "-"
+export const formatDate = (value) => sharedFormatDate(value, "-")
 
-export const formatDateTime = (value) =>
-  value ? new Date(value).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "-"
+export const formatDateTime = (value) => sharedFormatDateTime(value, "-")
 
 export const mediaUrl = (value) => resolveMediaUrl(value) || ""
 

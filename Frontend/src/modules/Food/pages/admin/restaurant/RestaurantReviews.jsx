@@ -5,28 +5,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { exportReviewsToCSV, exportReviewsToExcel, exportReviewsToPDF, exportReviewsToJSON } from "@food/components/admin/deliveryman/deliverymanExportUtils"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
+import { formatDateTime as fmtDateTime } from "@food/utils/dateTime"
 
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
 
-const formatDateTime = (dateString) => {
-  if (!dateString) return "N/A"
-  try {
-    const date = new Date(dateString)
-    if (isNaN(date.getTime())) return "Invalid Date"
-    return new Intl.DateTimeFormat('en-GB', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true
-    }).format(date)
-  } catch (e) {
-    return "N/A"
-  }
-}
+const formatDateTime = (dateString) => fmtDateTime(dateString, "N/A")
 
 export default function RestaurantReviews() {
   const [searchQuery, setSearchQuery] = useState("")

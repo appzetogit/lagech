@@ -1,4 +1,5 @@
 // Export utility functions for SEO pages
+import { formatDateTime } from "@food/utils/dateTime"
 export const exportSEOPagesToCSV = (pages, filename = "seo_pages") => {
   const headers = ["SI", "Page Name"]
   const rows = pages.map((page, index) => [
@@ -64,7 +65,7 @@ export const exportSEOPagesToPDF = (pages, filename = "seo_pages") => {
     </head>
     <body>
       <h1>SEO Pages Report</h1>
-      <p>Generated on: ${new Date().toLocaleString()}</p>
+      <p>Generated on: ${formatDateTime(new Date())}</p>
       <table>
         <thead>
           <tr>

@@ -3,6 +3,7 @@ import { Search, Download, ChevronDown, DollarSign, Calendar, Filter, Loader2, F
 import { adminAPI } from "@food/api"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { toast } from "sonner"
+import { formatDateTime } from "@food/utils/dateTime"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -20,17 +21,7 @@ const formatNumberForExport = (amount) => {
   })
 }
 
-const formatDate = (dateString) => {
-  if (!dateString) return 'N/A'
-  const date = new Date(dateString)
-  return date.toLocaleDateString('en-IN', { 
-    day: '2-digit', 
-    month: 'short', 
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-  })
-}
+const formatDate = (dateString) => formatDateTime(dateString, 'N/A')
 
 export default function DeliveryEarnings() {
   const [searchQuery, setSearchQuery] = useState("")
@@ -223,7 +214,7 @@ export default function DeliveryEarnings() {
             doc.setFontSize(16)
             doc.text("Delivery Earnings Report", 14, 14)
             doc.setFontSize(10)
-            doc.text(`Exported on: ${new Date().toLocaleString("en-IN")} | Total Records: ${data.length}`, 14, 22)
+            doc.text(`Exported on: ${formatDateTime(new Date())} | Total Records: ${data.length}`, 14, 22)
 
             const tableHeaders = headers.map((h) => h.label)
             const tableRows = data.map((row) => headers.map((h) => row[h.key] ?? ""))

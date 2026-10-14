@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { toast } from "sonner"
 import { uploadAPI } from "@food/api"
+import { formatDateTime } from "@food/utils/dateTime"
 
 /** ISO instant -> value for <input type="datetime-local"> in the admin's own time. */
 export const toLocalInput = (iso) => {
@@ -14,8 +15,7 @@ export const toLocalInput = (iso) => {
 /** datetime-local value -> ISO instant (the browser reads it as local time). */
 export const fromLocalInput = (value) => (value ? new Date(value).toISOString() : "")
 
-export const formatWhen = (iso) =>
-  iso ? new Date(iso).toLocaleString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }) : ""
+export const formatWhen = (iso) => formatDateTime(iso, "")
 
 export const STATE_BADGE = {
   running: "bg-emerald-100 text-emerald-800",

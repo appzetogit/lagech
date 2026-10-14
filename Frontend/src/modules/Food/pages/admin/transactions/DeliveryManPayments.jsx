@@ -4,6 +4,7 @@ import { emptyDeliveryManPayments } from "@food/utils/adminFallbackData"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
 import { exportTransactionsToCSV, exportTransactionsToExcel, exportTransactionsToPDF, exportTransactionsToJSON } from "@food/components/admin/transactions/transactionsExportUtils"
+import { formatDateTime } from "@food/utils/dateTime"
 
 export default function DeliveryManPayments() {
   const [formData, setFormData] = useState({
@@ -76,7 +77,7 @@ export default function DeliveryManPayments() {
               formData.deliveryman === "jhon-doe" ? "Jhon Doe" :
               formData.deliveryman === "jerome-bell" ? "Jerome Bell" :
               formData.deliveryman === "kathryn-murphy" ? "Kathryn Murphy" : "Robert Fox",
-        receivedAt: new Date().toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }),
+        receivedAt: formatDateTime(new Date()),
         amount: parseFloat(formData.amount),
         method: formData.method,
         reference: formData.reference || "N/A",

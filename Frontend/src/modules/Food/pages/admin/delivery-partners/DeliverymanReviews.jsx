@@ -7,6 +7,7 @@ import ExportMenu from "@food/components/admin/ExportMenu"
 import { fetchAllPages, exportDate } from "@food/utils/listExport"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
+import { formatDateTime as formatPanelDateTime } from "@food/utils/dateTime"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -132,16 +133,7 @@ export default function DeliverymanReviews() {
   // Format date and time
   const formatDateTime = (dateString) => {
     if (!dateString) return 'N/A'
-    try {
-      const date = new Date(dateString)
-      const day = date.getDate().toString().padStart(2, '0')
-      const month = date.toLocaleDateString('en-US', { month: 'short' }).toUpperCase()
-      const year = date.getFullYear()
-      const time = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
-      return `${day} ${month} ${year}, ${time}`
-    } catch (e) {
-      return 'Invalid Date'
-    }
+    return formatPanelDateTime(dateString, 'Invalid Date')
   }
 
   // Fetch deliveryman reviews from API

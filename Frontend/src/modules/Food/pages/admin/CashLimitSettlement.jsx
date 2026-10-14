@@ -4,6 +4,7 @@ import { adminAPI } from "@food/api"
 import { toast } from "sonner"
 import ExportMenu from "@food/components/admin/ExportMenu"
 import { exportDate, exportMoney, fetchAllPages } from "@food/utils/listExport"
+import { formatDateTime } from "@food/utils/dateTime"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -14,21 +15,7 @@ const formatCurrency = (amount) => {
   return `\u20B9${Number(amount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
-const formatDate = (d) => {
-  if (!d) return "—"
-  try {
-    return new Date(d).toLocaleString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: true
-    })
-  } catch {
-    return String(d)
-  }
-}
+const formatDate = (d) => formatDateTime(d, "—")
 
 const METHOD_LABELS = { cash: "Cash", upi: "UPI", bank_transfer: "Bank transfer", razorpay: "Online" }
 

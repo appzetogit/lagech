@@ -1,4 +1,5 @@
 // Export utility functions for notifications
+import { formatDateTime } from "@food/utils/dateTime"
 export const exportNotificationsToCSV = (notifications, filename = "notifications") => {
   const headers = ["SI", "Topic", "Description", "Push Notification", "Mail", "SMS"]
   const rows = notifications.map((notif, index) => [
@@ -72,7 +73,7 @@ export const exportNotificationsToPDF = (notifications, filename = "notification
     </head>
     <body>
       <h1>Notifications Report</h1>
-      <p>Generated on: ${new Date().toLocaleString()}</p>
+      <p>Generated on: ${formatDateTime(new Date())}</p>
       <table>
         <thead>
           <tr>

@@ -4,6 +4,7 @@ import { adminAPI } from "@food/api"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
 import { Textarea } from "@food/components/ui/textarea"
+import { formatDate as fmtDate, formatDateTime as fmtDateTime } from "@food/utils/dateTime"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -164,23 +165,9 @@ export default function DeliverySupportTickets() {
     }
   }
 
-  const formatDate = (dateString) => {
-    if (!dateString) return "N/A"
-    const date = new Date(dateString)
-    return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
-  }
+  const formatDate = (dateString) => fmtDate(dateString, "N/A")
 
-  const formatDateTime = (dateString) => {
-    if (!dateString) return "N/A"
-    const date = new Date(dateString)
-    return date.toLocaleString('en-GB', { 
-      day: '2-digit', 
-      month: 'short', 
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    })
-  }
+  const formatDateTime = (dateString) => fmtDateTime(dateString, "N/A")
 
   return (
     <div className="p-4 lg:p-6 bg-slate-50 min-h-screen">

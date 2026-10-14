@@ -32,6 +32,7 @@ import {
   formatTime12,
 } from "@food/components/admin/orders/EditOrderInfoDialogs"
 import bikeLogo from "@food/assets/bikelogo.png"
+import { formatDateTime } from "@food/utils/dateTime"
 
 /**
  * Admin Order Details, as the old panel's /admin/order/details/{id}: the order
@@ -75,7 +76,7 @@ const rupee = (value) => {
 }
 
 /** "14 Oct 2026, 03:50 PM" */
-const formatPlaced = formatTime12
+const formatPlaced = (value) => formatDateTime(value, "")
 
 /** On/off switch, the admin panel's usual one. */
 function Switch({ checked, onChange, disabled, label }) {

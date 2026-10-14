@@ -49,6 +49,12 @@ import {
   stopRestaurantAlert,
   unlockRestaurantAlertAudio,
 } from "@food/utils/restaurantAlertSession";
+import {
+  formatClock,
+  formatDateTime,
+  formatShortDateTime,
+  formatTime,
+} from "@food/utils/dateTime";
 const debugLog = (...args) => { };
 const debugWarn = (...args) => { };
 const debugError = (...args) => { };
@@ -119,15 +125,7 @@ const transformOrderForList = (order) => ({
   customerName: order.userId?.name || order.customerName || "Customer",
   type: "Home Delivery",
   tableOrToken: null,
-  timePlaced: new Date(getAllOrdersTimestamp(order)).toLocaleDateString(
-    "en-US",
-    {
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    },
-  ),
+  timePlaced: formatShortDateTime(getAllOrdersTimestamp(order)),
   eta: null,
   itemsSummary:
     order.items?.map((item) => `${item.quantity}x ${item.name}`).join(", ") ||
@@ -142,7 +140,8 @@ const transformOrderForList = (order) => ({
     ? new Date(order.tracking.preparing.timestamp)
     : new Date(order.createdAt || Date.now()),
   initialETA: order.estimatedDeliveryTime || 30,
-  sortTimestamp: new Date(getAllOrdersTimestamp(order)).getTime(),
+  // Newest placed first within each status, like the old panel.
+  sortTimestamp: new Date(order?.createdAt || Date.now()).getTime(),
 });
 
 // Shared short-lived cache to collapse duplicate getOrders() calls across sections
@@ -201,10 +200,7 @@ function CompletedOrders({ onSelectOrder, refreshToken = 0, searchQuery = "" }) 
             customerName: order.userId?.name || order.customerName || "Customer",
             type: "Home Delivery",
             tableOrToken: null,
-            timePlaced: new Date(order.createdAt).toLocaleTimeString("en-US", {
-              hour: "2-digit",
-              minute: "2-digit",
-            }),
+            timePlaced: formatTime(order.createdAt),
             deliveredAt:
               order.deliveredAt || order.updatedAt || order.createdAt,
             itemsSummary:
@@ -282,15 +278,7 @@ function CompletedOrders({ onSelectOrder, refreshToken = 0, searchQuery = "" }) 
       ) : (
         <div>
           {orders.filter((o) => matchesOrderSearch(o, searchQuery)).map((order) => {
-            const deliveredDate = order.deliveredAt
-              ? new Date(order.deliveredAt).toLocaleDateString("en-US", {
-                month: "short",
-                day: "numeric",
-                year: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-              })
-              : "N/A";
+            const deliveredDate = formatDateTime(order.deliveredAt, "N/A");
 
             return (
               <div
@@ -408,10 +396,7 @@ function CancelledOrders({ onSelectOrder, refreshToken = 0, searchQuery = "" }) 
             customerName: order.userId?.name || order.customerName || "Customer",
             type: "Home Delivery",
             tableOrToken: null,
-            timePlaced: new Date(order.createdAt).toLocaleTimeString("en-US", {
-              hour: "2-digit",
-              minute: "2-digit",
-            }),
+            timePlaced: formatTime(order.createdAt),
             cancelledAt:
               order.cancelledAt || order.updatedAt || order.createdAt,
             cancelledBy: order.cancelledBy || "unknown",
@@ -492,15 +477,7 @@ function CancelledOrders({ onSelectOrder, refreshToken = 0, searchQuery = "" }) 
       ) : (
         <div>
           {orders.filter((o) => matchesOrderSearch(o, searchQuery)).map((order) => {
-            const cancelledDate = order.cancelledAt
-              ? new Date(order.cancelledAt).toLocaleDateString("en-US", {
-                month: "short",
-                day: "numeric",
-                year: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-              })
-              : "N/A";
+            const cancelledDate = formatDateTime(order.cancelledAt, "N/A");
 
             const cancelledByText =
               order.cancelledBy === "user"
@@ -742,7 +719,7 @@ function TableBookings() {
                 </div>
                 <div className="flex items-center gap-1">
                   <Clock className="w-3.5 h-3.5 text-gray-400" />
-                  <span>{booking.timeSlot}</span>
+                  <span>{formatClock(booking.timeSlot, "")}</span>
                 </div>
                 <div className="flex items-center gap-1">
                   <Users className="w-3.5 h-3.5 text-gray-400" />
@@ -876,7 +853,6 @@ function AllOrders({ onSelectOrder, onCancel, searchQuery = "" }) {
               ...order,
               status: "ready",
               eta: null,
-              sortTimestamp: Date.now(),
             }
             : order,
         ),
@@ -1075,7 +1051,7 @@ export default function OrdersMain() {
       scheduledAt && scheduledAt > Date.now() + 30 * 60000;
     if (isFutureScheduled) {
       toast.info(
-        `New scheduled order received for ${new Date(scheduledAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}`,
+        `New scheduled order received for ${formatTime(scheduledAt)}`,
       );
       requestOrdersRefresh();
       return false;
@@ -1633,15 +1609,7 @@ export default function OrdersMain() {
       doc.text(`Order ID: ${orderToPrint.orderId || "N/A"}`, 20, 45);
       doc.setFont("helvetica", "normal");
 
-      const orderDate = orderToPrint.createdAt
-        ? new Date(orderToPrint.createdAt).toLocaleString("en-GB", {
-            day: "numeric",
-            month: "short",
-            year: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-          })
-        : new Date().toLocaleString("en-GB");
+      const orderDate = formatDateTime(orderToPrint.createdAt || new Date());
 
       doc.text(`Date: ${orderDate}`, 20, 52);
 
@@ -2904,10 +2872,7 @@ function PreparingOrders({
                   ? "Home Delivery"
                   : "Express Delivery",
               tableOrToken: null,
-              timePlaced: new Date(order.createdAt).toLocaleTimeString(
-                "en-US",
-                { hour: "2-digit", minute: "2-digit" },
-              ),
+              timePlaced: formatTime(order.createdAt),
               initialETA, // Store initial ETA in minutes
               preparingTimestamp, // Store when order started preparing
               itemsSummary:
@@ -3209,10 +3174,7 @@ function ReadyOrders({ onSelectOrder, refreshToken = 0, searchQuery = "" }) {
                 ? "Home Delivery"
                 : "Express Delivery",
             tableOrToken: null,
-            timePlaced: new Date(order.createdAt).toLocaleTimeString("en-US", {
-              hour: "2-digit",
-              minute: "2-digit",
-            }),
+            timePlaced: formatTime(order.createdAt),
             eta: null, // Don't show ETA for ready orders
             itemsSummary:
               order.items
@@ -3328,10 +3290,7 @@ const OutForDeliveryOrders = ({ onSelectOrder, refreshToken = 0, searchQuery = "
                 ? "Home Delivery"
                 : "Express Delivery",
             tableOrToken: null,
-            timePlaced: new Date(order.createdAt).toLocaleTimeString("en-US", {
-              hour: "2-digit",
-              minute: "2-digit",
-            }),
+            timePlaced: formatTime(order.createdAt),
             eta: null,
             itemsSummary:
               order.items

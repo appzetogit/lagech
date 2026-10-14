@@ -3,6 +3,7 @@ import { exportToCSV, exportToExcel, exportToPDF, exportToJSON } from "./ordersE
 import lagechLogo from "@food/assets/lagech-logo.png"
 import { getCachedSettings, loadBusinessSettings } from "@food/utils/businessSettings"
 import { restaurantLabel } from "@food/utils/entityLabels"
+import { formatDate, formatDateTime } from "@food/utils/dateTime"
 const debugError = () => {}
 
 
@@ -300,7 +301,7 @@ export function useOrdersManagement(orders, statusKey, title, options = {}) {
       const orderId = order.orderId || order.id || order.subscriptionId || "N/A"
       const orderDate = order.date && order.time
         ? `${order.date}, ${order.time}`
-        : (order.date || new Date().toLocaleDateString())
+        : (order.date || formatDate(new Date()))
 
       const settings = getCachedSettings() || await loadBusinessSettings()
       const companyName = settings?.companyName || "Lagech Food"
@@ -575,7 +576,7 @@ export function useOrdersManagement(orders, statusKey, title, options = {}) {
       doc.line(14, footerY - 6, pageWidth - 14, footerY - 6)
       doc.setFontSize(9)
       doc.setTextColor(100, 116, 139)
-      doc.text(`Generated on ${new Date().toLocaleString()}`, 14, footerY)
+      doc.text(`Generated on ${formatDateTime(new Date())}`, 14, footerY)
       doc.text("Includes customer, restaurant, and delivery partner details.", pageWidth - 14, footerY, { align: "right" })
 
       const filename = `Invoice_${orderId}_${new Date().toISOString().split("T")[0]}.pdf`

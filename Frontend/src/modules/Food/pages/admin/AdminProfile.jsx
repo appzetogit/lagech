@@ -12,6 +12,7 @@ import {
 } from "@food/components/ui/card";
 import { toast } from "sonner";
 import { User, Mail, Phone, Save, Loader2, Upload, X, Pencil, Eye, EyeOff } from "@food/components/admin/theme/icons";
+import { formatDate, formatDateTime } from "@food/utils/dateTime";
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -713,7 +714,7 @@ export default function AdminProfile() {
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-neutral-600">Last Login</span>
                   <span className="text-neutral-900">
-                    {new Date(profile.lastLogin).toLocaleString()}
+                    {formatDateTime(profile.lastLogin)}
                   </span>
                 </div>
               )}
@@ -727,7 +728,7 @@ export default function AdminProfile() {
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-neutral-600">Member Since</span>
                   <span className="text-neutral-900">
-                    {new Date(profile.createdAt).toLocaleDateString()}
+                    {formatDate(profile.createdAt)}
                   </span>
                 </div>
               )}

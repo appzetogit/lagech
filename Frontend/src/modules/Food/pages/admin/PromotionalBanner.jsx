@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react"
 import { Edit, Upload, Info, Trash2, Plus, Calendar, Link as LinkIcon, Save, X, Loader2, Image as ImageIcon } from "@food/components/admin/theme/icons"
 import api from "@food/api"
 import { resolveMediaUrl } from "../../../../shared/utils/mediaUrl.js"
+import { formatDate } from "@food/utils/dateTime"
 
 const debugError = (...args) => {}
 
@@ -331,9 +332,9 @@ export default function PromotionalBanner() {
                       <div className="flex items-center gap-2 text-xs text-slate-500">
                         <Calendar className="w-3.5 h-3.5" />
                         <span>
-                          {banner.startDate ? new Date(banner.startDate).toLocaleDateString() : 'Start'} 
+                          {formatDate(banner.startDate, 'Start')} 
                           {' - '} 
-                          {banner.endDate ? new Date(banner.endDate).toLocaleDateString() : 'End'}
+                          {formatDate(banner.endDate, 'End')}
                         </span>
                       </div>
                     )}

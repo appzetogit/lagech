@@ -1,4 +1,5 @@
 import { restaurantLabel } from "@food/utils/entityLabels"
+import { formatDateTime } from "@food/utils/dateTime"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -239,13 +240,7 @@ export const exportToPDF = async (orders, filename = "orders") => {
     // Add export info
     doc.setFontSize(10)
     doc.setTextColor(100, 100, 100)
-    const exportDate = new Date().toLocaleDateString('en-GB', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    })
+    const exportDate = formatDateTime(new Date())
     doc.text(`Exported on: ${exportDate} | Total Records: ${orders.length}`, 148, 22, { align: 'center' })
     
     let headers, tableData

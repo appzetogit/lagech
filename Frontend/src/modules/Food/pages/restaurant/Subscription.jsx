@@ -13,6 +13,7 @@ import {
 } from "lucide-react"
 import BottomNavOrders from "@food/components/restaurant/BottomNavOrders"
 import { restaurantAPI } from "@food/api"
+import { formatDateTime } from "@food/utils/dateTime"
 
 const debugError = (...args) => {}
 
@@ -149,7 +150,7 @@ function InvoiceCard({ invoice }) {
                     </div>
                     <div className="flex items-center justify-between mt-1">
                       <p className="text-[10px] text-gray-500">
-                        {tx.createdAt ? new Date(tx.createdAt).toLocaleString() : ""}
+                        {formatDateTime(tx.createdAt, "")}
                         {tx.processedBy?.role === "ADMIN" ? " • by Admin" : ""}
                       </p>
                       <p className="text-[10px] text-gray-500">
@@ -406,7 +407,7 @@ export default function Subscription() {
                       </p>
                       {tx.remarks ? <p className="text-xs text-gray-500 mt-1 italic">{tx.remarks}</p> : null}
                       <p className="text-[10px] text-gray-400 mt-1">
-                        {tx.createdAt ? new Date(tx.createdAt).toLocaleString() : ""}
+                        {formatDateTime(tx.createdAt, "")}
                         {tx.processedBy?.role === "ADMIN" ? " • by Admin" : ""}
                       </p>
                     </div>

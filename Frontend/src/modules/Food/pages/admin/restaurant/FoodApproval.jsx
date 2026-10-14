@@ -11,6 +11,7 @@ import {
 } from "@food/components/ui/dialog"
 import { adminAPI } from "@food/api"
 import { toast } from "sonner"
+import { formatDateTime } from "@food/utils/dateTime"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -325,7 +326,7 @@ export default function FoodApproval() {
                             {request.price !== null && request.price !== undefined ? `Rs ${request.price}` : '-'}
                           </td>
                           <td className="px-3 py-3 whitespace-nowrap text-sm text-gray-500">
-                            {request.requestedAt ? new Date(request.requestedAt).toLocaleDateString() : '-'}
+                            {formatDateTime(request.requestedAt)}
                           </td>
                           <td className="px-3 py-3 whitespace-nowrap text-right text-sm">
                             <div className="flex justify-end gap-1.5">
@@ -422,7 +423,7 @@ export default function FoodApproval() {
                     {selectedRequest.requestedAt && (
                         <div>
                             <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Requested On</label>
-                            <p className="text-sm text-gray-700">{new Date(selectedRequest.requestedAt).toLocaleString()}</p>
+                            <p className="text-sm text-gray-700">{formatDateTime(selectedRequest.requestedAt)}</p>
                         </div>
                     )}
                 </div>

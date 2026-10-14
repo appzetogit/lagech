@@ -4,6 +4,7 @@ import { Eye, Loader2, PiggyBank, X } from "@food/components/admin/theme/icons"
 import { toast } from "sonner"
 import { adminSystemExtrasAPI } from "@food/api/adminSystemExtras"
 import { rupees } from "./ReportShell"
+import { formatDateTime } from "@food/utils/dateTime"
 import ExportMenu from "@food/components/admin/ExportMenu"
 import { exportDate, exportMoney, fetchAllPages } from "@food/utils/listExport"
 import { daysAgo, isoDay, DisbursementTabs } from "./disbursementShared"
@@ -38,12 +39,7 @@ const EXPORT_COLUMNS = [
   { label: "Note", value: (r) => r.note },
 ]
 
-const fmt = (value) => {
-  const d = new Date(value)
-  return Number.isNaN(d.getTime())
-    ? "-"
-    : d.toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
-}
+const fmt = (value) => formatDateTime(value)
 
 /**
  * Disbursement Report -> Delivery men: every payout line the Delivery Man

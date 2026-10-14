@@ -10,6 +10,7 @@ import {
 } from "@food/components/admin/theme/icons";
 import { toast } from "sonner";
 import { adminAPI } from "@food/api";
+import { formatDateTime } from "@food/utils/dateTime";
 
 const statusClass = {
   open: "bg-orange-100 text-orange-700",
@@ -213,7 +214,7 @@ export default function OrderReassignmentRequests() {
                           {request.status?.replaceAll("_", " ")}
                         </span>
                         <span className="text-xs text-slate-400">
-                          {new Date(request.createdAt).toLocaleString("en-IN")}
+                          {formatDateTime(request.createdAt)}
                         </span>
                       </div>
 

@@ -13,6 +13,7 @@ import {
 } from "@food/components/admin/theme/icons";
 import { toast } from "sonner";
 import { adminAPI } from "@food/api";
+import { formatDateTime } from "@food/utils/dateTime";
 
 const formatMoney = (value) =>
   `₹${Number(value || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -367,7 +368,7 @@ function InvoiceDrawer({ invoiceId, onClose, onChanged }) {
                       </div>
                       <div className="flex items-center justify-between mt-1 text-[10px] text-slate-500">
                         <span>
-                          {tx.createdAt ? new Date(tx.createdAt).toLocaleString() : ""}
+                          {formatDateTime(tx.createdAt, "")}
                           {tx.processedBy?.role === "ADMIN"
                             ? ` • Admin${tx.processedBy?.name ? ` (${tx.processedBy.name})` : ""}`
                             : " • System"}

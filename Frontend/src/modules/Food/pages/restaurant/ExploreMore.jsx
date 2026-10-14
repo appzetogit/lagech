@@ -39,6 +39,7 @@ import { logoutRestaurantSession } from "@food/utils/restaurantLogout"
 import BottomNavOrders from "@food/components/restaurant/BottomNavOrders"
 import DeleteAccountModal from "@food/components/DeleteAccountModal"
 import { toast } from "sonner"
+import { formatClock } from "@food/utils/dateTime"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -624,7 +625,7 @@ export default function ExploreMore() {
   }
 
   const formatTime = (time) => {
-    return `${time.hour}:${time.minute} ${time.period.toUpperCase()}`
+    return formatClock(`${time.hour}:${time.minute} ${time.period.toUpperCase()}`, "")
   }
 
   const formatDate = (date) => {

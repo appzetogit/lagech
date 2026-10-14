@@ -4,6 +4,7 @@ import { toast } from "sonner"
 
 import { chatAPI } from "@food/api"
 import { useChatSocket } from "@food/hooks/useChatSocket"
+import { formatShortDateTime } from "@food/utils/dateTime"
 
 /**
  * The support inbox.
@@ -47,16 +48,7 @@ const timeAgo = (value) => {
   return new Date(value).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })
 }
 
-const clockTime = (value) =>
-  value
-    ? new Date(value).toLocaleString("en-GB", {
-        day: "2-digit",
-        month: "short",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
-      })
-    : ""
+const clockTime = (value) => formatShortDateTime(value, "")
 
 const initialsOf = (name) =>
   String(name || "")

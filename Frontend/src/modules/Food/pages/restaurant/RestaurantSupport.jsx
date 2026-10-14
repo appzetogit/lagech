@@ -4,6 +4,7 @@ import { ChevronLeft, Loader2, Send } from "lucide-react"
 import { restaurantAPI } from "@food/api"
 import BottomNavOrders from "@food/components/restaurant/BottomNavOrders"
 import SupportChat from "@food/components/shared/SupportChat"
+import { formatDateTime } from "@food/utils/dateTime"
 import { toast } from "sonner"
 
 const CATEGORY_OPTIONS = [
@@ -267,7 +268,7 @@ export default function RestaurantSupport() {
                 <div key={ticket._id} className="rounded-xl border border-slate-200 p-3 md:p-4 hover:border-slate-300 transition-colors">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-xs font-semibold text-slate-500">
-                      #{String(ticket._id).slice(-6)} • {new Date(ticket.createdAt).toLocaleString()}
+                      #{String(ticket._id).slice(-6)} • {formatDateTime(ticket.createdAt)}
                     </p>
                     <span className={`text-[11px] px-2 py-0.5 rounded-full border font-semibold capitalize ${getStatusStyle(ticket.status)}`}>
                       {ticket.status}

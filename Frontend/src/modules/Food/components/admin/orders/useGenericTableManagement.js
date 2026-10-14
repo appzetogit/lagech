@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react"
 import { exportToCSV, exportToExcel, exportToPDF } from "./ordersExportUtils"
 import { restaurantLabel } from "@food/utils/entityLabels"
+import { formatDateTime } from "@food/utils/dateTime"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -157,7 +158,7 @@ export function useGenericTableManagement(data, title, searchFields = []) {
         if (rawDate) {
           const d = new Date(rawDate)
           if (!isNaN(d.getTime())) {
-            displayDate = d.toLocaleString()
+            displayDate = formatDateTime(d)
           } else {
             displayDate = rawDate
           }

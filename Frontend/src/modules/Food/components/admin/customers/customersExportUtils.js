@@ -1,3 +1,5 @@
+import { formatDateTime } from "@food/utils/dateTime"
+
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -6,14 +8,7 @@ const formatJoiningDateTime = (value) => {
   if (!value) return "N/A"
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return String(value)
-  return date.toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true,
-  })
+  return formatDateTime(date)
 }
 
 // Export utility functions for customers
@@ -144,13 +139,7 @@ export const exportCustomersToPDF = (customers, filename = "customers") => {
         
         // Add export info
         doc.setFontSize(10)
-        const exportDate = new Date().toLocaleDateString('en-GB', {
-          day: 'numeric',
-          month: 'short',
-          year: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit'
-        })
+        const exportDate = formatDateTime(new Date())
         doc.text(`Exported on: ${exportDate} | Total Records: ${customers.length}`, 14, 22)
 
         // Prepare table data
