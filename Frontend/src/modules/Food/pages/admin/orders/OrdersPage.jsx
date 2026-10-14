@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react"
-import { useSearchParams } from "react-router-dom"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import io from "socket.io-client"
 import { FileText, Package } from "@food/components/admin/theme/icons"
 import { adminAPI } from "@food/api"
@@ -12,7 +12,6 @@ import { usePaginationParams } from "@food/hooks/usePaginationParams"
 import OrdersTopbar from "@food/components/admin/orders/OrdersTopbar"
 import OrdersTable from "@food/components/admin/orders/OrdersTable"
 import FilterPanel from "@food/components/admin/orders/FilterPanel"
-import ViewOrderDialog from "@food/components/admin/orders/ViewOrderDialog"
 import SettingsDialog from "@food/components/admin/orders/SettingsDialog"
 import RefundModal from "@food/components/admin/orders/RefundModal"
 import CancelOrderDialog from "@food/components/admin/orders/CancelOrderDialog"
@@ -807,12 +806,8 @@ export default function OrdersPage({ statusKey = "all" }) {
     setIsFilterOpen,
     isSettingsOpen,
     setIsSettingsOpen,
-    isViewOrderOpen,
-    setIsViewOrderOpen,
-    selectedOrder,
     visibleColumns,
     handleExport,
-    handleViewOrder,
     handlePrintOrder,
     toggleColumn,
     resetColumns,
@@ -1047,17 +1042,25 @@ export default function OrdersPage({ statusKey = "all" }) {
     }
   }, [playDefaultRing, showBrowserNotification])
 
+  // The eye and the order id open the full Order Details page, as in the old panel.
+  const navigate = useNavigate()
+  const handleViewOrder = useCallback(
+    (order) => {
+      const target = order?.id || order?._id || order?.orderId
+      if (target) navigate(`/admin/food/orders/details/${encodeURIComponent(target)}`)
+    },
+    [navigate],
+  )
+
   const [searchParams] = useSearchParams()
   const orderIdFromUrl = searchParams.get("orderId")
 
+  // Older links (?orderId=) opened the details dialog; they open the page now.
   useEffect(() => {
-    if (orderIdFromUrl && normalizedOrders.length > 0) {
-      const order = normalizedOrders.find(o => o.id === orderIdFromUrl || o._id === orderIdFromUrl || o.orderId === orderIdFromUrl)
-      if (order) {
-        handleViewOrder(order)
-      }
+    if (orderIdFromUrl) {
+      navigate(`/admin/food/orders/details/${encodeURIComponent(orderIdFromUrl)}`, { replace: true })
     }
-  }, [orderIdFromUrl, normalizedOrders, handleViewOrder])
+  }, [orderIdFromUrl, navigate])
 
   const handleAcceptOrder = async (order) => {
     const orderIdToUse = order.id || order._id || order.orderId
@@ -1463,12 +1466,6 @@ export default function OrdersPage({ statusKey = "all" }) {
             : {}),
           actions: "Actions",
         }}
-      />
-      <ViewOrderDialog
-        isOpen={isViewOrderOpen}
-        onOpenChange={setIsViewOrderOpen}
-        order={selectedOrder}
-        onOrderChanged={() => fetchOrdersRef.current?.({ silent: true, withRingCheck: false, force: true })}
       />
       <RefundModal
         isOpen={refundModalOpen}

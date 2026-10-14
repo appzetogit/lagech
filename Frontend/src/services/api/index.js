@@ -910,6 +910,11 @@ export const adminAPI = {
     apiClient.get(`/food/admin/orders/${String(orderId)}`, {
       contextModule: "admin",
     }),
+  /** Order Details page: { order, details (prev/next, counts, rider location), bill (receipt items + lines) }. */
+  getOrderDetails: (orderId) =>
+    apiClient.get(`/food/admin/orders/${encodeURIComponent(String(orderId))}/details`, {
+      contextModule: "admin",
+    }),
   /** Invoice data (JSON) or, with { format: "html", size: "thermal" | "a4" }, the printable page as text. */
   getOrderInvoice: (orderId, params = {}) =>
     apiClient.get(`/food/admin/orders/${encodeURIComponent(String(orderId))}/invoice`, {

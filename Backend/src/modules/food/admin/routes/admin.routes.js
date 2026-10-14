@@ -566,6 +566,8 @@ router.get(
 // Before /orders/:orderId, which would otherwise take "dispatch-board" as an order id.
 router.get('/orders/dispatch-board', adminController.getDispatchBoard);
 router.get('/orders/:orderId', orderController.getOrderByIdAdminController);
+// The full-page Order Details: the order plus counts, neighbours and the rider's last location.
+router.get('/orders/:orderId/details', orderController.getOrderDetailsAdminController);
 // Printable invoice: JSON, or ?format=html (thermal 80 mm; &size=a4).
 router.get('/orders/:orderId/invoice', orderController.getOrderInvoiceAdminController);
 router.patch('/orders/:orderId/accept', orderController.acceptOrderAdminController);

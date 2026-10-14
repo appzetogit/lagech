@@ -292,7 +292,13 @@ export default function OrdersTable({
                 )}
                 {visibleColumns.orderId && (
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <span className="text-sm font-medium text-slate-900">{order.orderId}</span>
+                    {onViewOrder ? (
+                      <button type="button" onClick={() => onViewOrder(order)} className="text-sm font-medium text-blue-600 hover:underline">
+                        {order.orderId}
+                      </button>
+                    ) : (
+                      <span className="text-sm font-medium text-slate-900">{order.orderId}</span>
+                    )}
                   </td>
                 )}
                 {visibleColumns.orderDate && (

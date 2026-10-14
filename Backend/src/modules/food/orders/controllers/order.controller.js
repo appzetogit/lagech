@@ -3,6 +3,7 @@ import { sendResponse } from '../../../../utils/response.js';
 import * as orderService from '../services/order.service.js';
 import * as foodOrderPaymentService from '../services/foodOrderPayment.service.js';
 import * as orderInvoiceService from '../services/orderInvoice.service.js';
+import { getAdminOrderDetailsExtras } from '../services/adminOrderDetails.service.js';
 import { emailOrderPlaced } from '../../../../core/notifications/emailEvents.js';
 import {
     validateCalculateOrderDto,
@@ -394,6 +395,24 @@ export async function getOrderByIdAdminController(req, res, next) {
         const orderId = req.params.orderId;
         const order = await orderService.getOrderById(orderId, { admin: true });
         return sendResponse(res, 200, 'Order retrieved', { order });
+    } catch (err) {
+        next(err);
+    }
+}
+
+/**
+ * GET /food/admin/orders/:orderId/details -- the order (as GET /orders/:orderId)
+ * plus the Order Details page's extras: previous/next order, the customer's and
+ * store's order counts, the deliveryman's delivered count and last location.
+ * `bill` is the printed receipt's items and lines, so the page and the receipt
+ * never disagree on a number.
+ */
+export async function getOrderDetailsAdminController(req, res, next) {
+    try {
+        const order = await orderService.getOrderById(req.params.orderId, { admin: true });
+        const details = await getAdminOrderDetailsExtras(order.id || order._id);
+        const { items, lines, total, payment } = orderInvoiceService.buildInvoice(order, { copy: 'admin' });
+        return sendResponse(res, 200, 'Order retrieved', { order, details, bill: { items, lines, total, payment } });
     } catch (err) {
         next(err);
     }
