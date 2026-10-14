@@ -10,6 +10,9 @@
  *     -> rider withdrawals
  *   - restaurant withdrawals and daily payouts (`withdraw_requests`)
  *     -> restaurant withdrawals
+ *   - the store disbursement runs (`disbursements`, `disbursement_details`)
+ *     -> payout batches, with their completed lines linked and their
+ *        pending lines (scheduled, not paid) as pending payout lines
  *
  * Then the balances. Balances here are worked out from orders and those
  * records; the old wallets were running totals that also absorbed admin edits,
@@ -37,6 +40,7 @@
  */
 import { prisma } from '../../../src/config/prisma.js';
 import { getWalletSummaries } from '../../../src/modules/food/restaurant/services/restaurantFinance.service.js';
+import { batchStatusFor } from '../../../src/modules/food/restaurant/services/restaurantPayout.service.js';
 import { loadIdMap, recordId } from '../idMap.mjs';
 import { NOT_IN_BASELINE, changedColumns, guardedUpdate, same } from '../sync.mjs';
 
@@ -424,7 +428,8 @@ const restaurantWithdrawalData = (row, restaurantId) => {
             : {
                 accountHolderName: fields.account_holder_name || '',
                 accountNumber: fields.account_number || '',
-                ifscCode: fields.ifsc_code || fields.ifsc || '',
+                // The old form's key was misspelt "ifsc_cod".
+                ifscCode: fields.ifsc_cod || fields.ifsc_code || fields.ifsc || '',
             },
         adminNote: note(`${row.type} #${row.id}${row.transaction_note && row.type !== 'disbursement' ? ` · ${row.transaction_note}` : ''}`),
         processedAt: row.approved === 0 ? null : row.updated_at,
@@ -434,11 +439,169 @@ const restaurantWithdrawalData = (row, restaurantId) => {
 
 const RESTAURANT_REQUESTS_SQL = 'SELECT * FROM withdraw_requests WHERE vendor_id IS NOT NULL ORDER BY id';
 
+// ── store disbursements ──
+//
+// The old daily payout ("Store Disbursement"): a `disbursements` row per run
+// and a `disbursement_details` line per store. A line the old admin completed
+// also became a `withdraw_requests` row (type disbursement, transaction_note =
+// the line id), which the loop below imports as an approved withdrawal -- so a
+// completed line is never imported a second time from here. Pending lines are
+// scheduled but NOT paid: the old wallet already holds them back
+// (pending_withdraw), and they come over as pending payout lines that do the
+// same here, for the admin to complete or cancel. Cancelled lines come over
+// for the record; they hold back nothing.
+
+const STORE_DISBURSEMENTS_SQL = "SELECT * FROM disbursements WHERE created_for = 'store' ORDER BY id";
+const STORE_DISBURSEMENT_LINES_SQL = `
+    SELECT d.*, m.method_name, m.method_fields
+    FROM disbursement_details d
+    LEFT JOIN disbursement_withdrawal_methods m ON m.id = d.payment_method
+    WHERE d.store_id IS NOT NULL
+    ORDER BY d.id`;
+const BATCH_STATUSES = ['pending', 'partially_completed', 'completed', 'canceled'];
+
+export const payoutBatchData = (row, lineCount) => ({
+    legacyNumber: Number(row.id),
+    // Unique like a day here, and never one: today's run here still happens.
+    runDate: `L${row.id}`.slice(0, 10),
+    cutoffAt: row.created_at || new Date(0),
+    status: BATCH_STATUSES.includes(row.status) ? row.status : 'pending',
+    totalAmount: money(row.total_amount),
+    restaurantCount: lineCount,
+    triggeredBy: 'legacy',
+    createdAt: row.created_at || undefined,
+});
+
+/** Where an old line was to be paid, in the shape the payout pages read. */
+const lineBankDetails = (row) => {
+    let fields = {};
+    try {
+        fields = JSON.parse(row.method_fields || '{}') || {};
+    } catch {
+        fields = {};
+    }
+    const upi = Boolean(fields.upi_id) || /upi/i.test(row.method_name || '');
+    const payoutMethod = {
+        methodName: row.method_name || 'Previous system method',
+        fields: Object.entries(fields)
+            .filter(([, value]) => String(value ?? '').trim())
+            .map(([key, value]) => ({
+                key,
+                label: key === 'ifsc_cod' ? 'IFSC code' : key.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase()),
+                value: String(value),
+            })),
+    };
+    return upi
+        ? { paymentMethod: 'upi', bankDetails: { upiId: fields.upi_id || '', name: fields.name || '', payoutMethod } }
+        : {
+            paymentMethod: 'bank_transfer',
+            bankDetails: {
+                accountHolderName: fields.account_holder_name || '',
+                accountNumber: fields.account_number || '',
+                ifscCode: fields.ifsc_cod || fields.ifsc_code || fields.ifsc || '',
+                payoutMethod,
+            },
+        };
+};
+
+export const payoutLineData = (row, restaurantId, batchId) => ({
+    restaurantId,
+    amount: money(row.disbursement_amount),
+    status: DISBURSEMENT_STATUS[row.status] || 'pending',
+    source: 'disbursement',
+    batchId,
+    ...lineBankDetails(row),
+    adminNote: note(`disbursement #${row.disbursement_id}, line #${row.id}`),
+    processedAt: row.status === 'pending' ? null : row.updated_at,
+    createdAt: row.created_at,
+});
+
+/**
+ * The old store disbursements as payout batches, and their pending and
+ * cancelled lines as payout lines.
+ *
+ * @returns {Promise<{ batchOfLine: Map<string, string>, lineIds: Map<string, string>, batchIds: Set<string> }>}
+ *   old line id -> new batch id; old line id -> new withdrawal id (lines
+ *   imported here); every new batch id this touched.
+ */
+async function importStoreDisbursements(mysql, report, ctx, restaurants) {
+    const batchMap = await loadIdMap('restaurant_payout_batch');
+    const lineMap = await loadIdMap('restaurant_payout_line');
+    const [runs] = await mysql.query(STORE_DISBURSEMENTS_SQL);
+    const [lines] = await mysql.query(STORE_DISBURSEMENT_LINES_SQL);
+    const baseLines = ctx.sync ? byKey((await ctx.baseline.query(STORE_DISBURSEMENT_LINES_SQL))[0]) : null;
+
+    const linesPerRun = new Map();
+    for (const line of lines) linesPerRun.set(String(line.disbursement_id), (linesPerRun.get(String(line.disbursement_id)) || 0) + 1);
+
+    for (const run of runs) {
+        const data = payoutBatchData(run, linesPerRun.get(String(run.id)) || 0);
+        // A sync adds new runs; one brought over before follows its lines
+        // (below), not the old row.
+        if (ctx.sync && batchMap.has(String(run.id))) {
+            report.done('restaurant_payout_batch', 'unchanged');
+            continue;
+        }
+        report.done('restaurant_payout_batch',
+            await upsertTracked('restaurant_payout_batch', run.id, batchMap, prisma.foodRestaurantPayoutBatch, data));
+    }
+
+    const batchOfLine = new Map();
+    for (const line of lines) {
+        const batchId = batchMap.get(String(line.disbursement_id));
+        if (batchId) batchOfLine.set(String(line.id), batchId);
+        const restaurantId = restaurants.get(String(line.store_id));
+        const who = `store ${line.store_id}`;
+        // Completed lines arrive as the withdrawal the old admin's "complete"
+        // created -- unless the line came over while still pending, in which
+        // case that line is what moves to paid.
+        if (line.status === 'completed' && !lineMap.has(String(line.id))) continue;
+        if (!batchId || !restaurantId || money(line.disbursement_amount) < 1) {
+            report.skip('restaurant_payout_line', line.id, who,
+                !batchId ? 'disbursement not imported' : restaurantId ? 'under ₹1' : 'restaurant not imported');
+            continue;
+        }
+        const data = payoutLineData(line, restaurantId, batchId);
+        let outcome;
+        if (ctx.sync) {
+            const was = baseLines.get(String(line.id));
+            outcome = await syncTracked(report, 'restaurant_payout_line', line.id, lineMap, prisma.foodRestaurantWithdrawal, data,
+                was ? payoutLineData(was, restaurantId, batchId) : null,
+                { guard: ['status'], compare: ['amount'] });
+            if (!outcome) continue;
+            if (outcome === 'created' || outcome === 'updated') ctx.affect?.('restaurant', restaurantId);
+        } else {
+            outcome = await upsertTracked('restaurant_payout_line', line.id, lineMap, prisma.foodRestaurantWithdrawal, data);
+        }
+        if (outcome === 'created' && data.status === 'pending') {
+            report.warn('restaurant_payout_line', line.id, who,
+                `old disbursement #${line.disbursement_id}: ₹${data.amount} scheduled but not paid; imported PENDING -- complete it here once paid, or cancel it`);
+        }
+        report.done('restaurant_payout_line', outcome);
+    }
+    return { batchOfLine, lineIds: lineMap, batchIds: new Set(batchMap.values()) };
+}
+
+/** An imported batch's status, from its lines here (kept as it was when it has none). */
+async function settleLegacyBatchStatuses(batchIds) {
+    for (const id of batchIds) {
+        const lines = await prisma.foodRestaurantWithdrawal.findMany({ where: { batchId: id }, select: { status: true } });
+        if (!lines.length) continue;
+        await prisma.foodRestaurantPayoutBatch.updateMany({
+            where: { id },
+            data: { status: batchStatusFor(lines.map((l) => l.status)) },
+        });
+    }
+}
+
 async function importRestaurantMoney(mysql, report, ctx = {}) {
     const restaurants = await loadIdMap('restaurant');
     const withdrawals = await loadIdMap('restaurant_withdrawal');
     const withdrawalAdjust = await loadIdMap('restaurant_withdrawal_adjust');
     const storeByVendor = await storeOwners(mysql);
+
+    // Before the withdrawals: a completed line's withdrawal is linked to its run.
+    const disbursements = await importStoreDisbursements(mysql, report, ctx, restaurants);
 
     const [requests] = await mysql.query(RESTAURANT_REQUESTS_SQL);
     const baseRequests = ctx.sync ? byKey((await ctx.baseline.query(RESTAURANT_REQUESTS_SQL))[0]) : null;
@@ -450,6 +613,16 @@ async function importRestaurantMoney(mysql, report, ctx = {}) {
             continue;
         }
         const data = restaurantWithdrawalData(row, restaurantId);
+        const lineId = row.type === 'disbursement' ? String(row.transaction_note || '') : '';
+        const batchId = lineId ? disbursements.batchOfLine.get(lineId) : null;
+        if (batchId) data.batchId = batchId;
+        // The old admin completed a line that came over while pending: this
+        // request IS that line, now paid -- the same row, never a second one.
+        const sameLine = lineId && disbursements.lineIds.get(lineId);
+        if (sameLine && !withdrawals.has(String(row.id))) {
+            await recordId('restaurant_withdrawal', row.id, sameLine);
+            withdrawals.set(String(row.id), sameLine);
+        }
         let outcome;
         if (ctx.sync) {
             const was = baseRequests.get(String(row.id));
@@ -464,8 +637,17 @@ async function importRestaurantMoney(mysql, report, ctx = {}) {
         } else {
             outcome = await upsertTracked('restaurant_withdrawal', row.id, withdrawals, prisma.foodRestaurantWithdrawal, data);
         }
+        // A sync leaves rows imported before alone, but linking one to its
+        // run moves no money.
+        if (batchId && ctx.sync && withdrawals.has(String(row.id))) {
+            await prisma.foodRestaurantWithdrawal.updateMany({
+                where: { id: withdrawals.get(String(row.id)), batchId: null },
+                data: { batchId },
+            });
+        }
         report.done('restaurant_withdrawal', outcome);
     }
+    await settleLegacyBatchStatuses(disbursements.batchIds);
 
     // A sync never recomputes opening balances: see the file comment.
     if (ctx.sync) return;

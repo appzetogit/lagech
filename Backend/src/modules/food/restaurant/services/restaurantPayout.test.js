@@ -2,11 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+    batchListWhere,
     batchStatusFor,
     isPayoutDue,
     istClock,
+    istDayStart,
     payoutCutoff,
     resolvePayee,
+    statusTotals,
 } from './restaurantPayout.service.js';
 
 /**
@@ -59,4 +62,41 @@ test('batch status follows its lines', () => {
     assert.equal(batchStatusFor(['rejected']), 'canceled');
     assert.equal(batchStatusFor(['approved', 'pending']), 'partially_completed');
     assert.equal(batchStatusFor(['approved', 'rejected']), 'partially_completed');
+});
+
+test('monthly runs only on the 1st (India), as the old panel did', () => {
+    const monthly = { ...DAILY, frequency: 'monthly' };
+    // 21:40 UTC on 30 Sep is 03:10 IST on 1 Oct.
+    assert.equal(isPayoutDue(monthly, new Date('2026-09-30T21:40:00Z')), true, '1 Oct, 03:10 IST');
+    assert.equal(isPayoutDue(monthly, new Date('2026-09-30T21:30:00Z')), false, '1 Oct, 03:00 IST: before the time');
+    assert.equal(isPayoutDue(monthly, new Date('2026-10-01T21:40:00Z')), false, '2 Oct');
+    assert.equal(istClock(new Date('2026-09-30T21:40:00Z')).monthDay, 1);
+});
+
+test('list filters: Indian calendar days, status tab and "#number" search', () => {
+    assert.equal(istDayStart('2026-10-14').toISOString(), '2026-10-13T18:30:00.000Z');
+    assert.equal(istDayStart('14/10/2026'), null);
+
+    const where = batchListWhere({ from: '2026-10-01', to: '2026-10-14', status: 'pending', search: '#1117' });
+    assert.equal(where.status, 'pending');
+    assert.equal(where.createdAt.gte.toISOString(), '2026-09-30T18:30:00.000Z');
+    // "to" includes the whole of that day.
+    assert.equal(where.createdAt.lt.toISOString(), '2026-10-14T18:30:00.000Z');
+    assert.deepEqual(where.OR, [{ number: 1117, legacyNumber: null }, { legacyNumber: 1117 }]);
+    assert.deepEqual(batchListWhere({ search: 'abc' }).OR, [{ number: -1, legacyNumber: null }, { legacyNumber: -1 }], 'text matches nothing');
+    assert.equal(batchListWhere({}).createdAt, undefined);
+    assert.throws(() => batchListWhere({ status: 'paid' }), /Unknown disbursement status/);
+});
+
+test('line totals use the old panel words', () => {
+    const totals = statusTotals([
+        { status: 'approved', _sum: { amount: '100.10' }, _count: { _all: 2 } },
+        { status: 'pending', _sum: { amount: 50 }, _count: { _all: 1 } },
+        { status: 'rejected', _sum: { amount: null }, _count: { _all: 0 } },
+    ]);
+    assert.deepEqual(totals, {
+        pending: { count: 1, amount: 50 },
+        completed: { count: 2, amount: 100.1 },
+        canceled: { count: 0, amount: 0 },
+    });
 });

@@ -10,7 +10,8 @@ import { emailWithdrawalDecision } from '../../../../core/notifications/emailEve
 /**
  * Automatic restaurant payouts, run the way the previous system ran them.
  *
- * Once a day (or once a week) the job works out what each approved restaurant
+ * Once a day (or once a week, or on the 1st of the month -- the old panel's
+ * "disbursement time period") the job works out what each approved restaurant
  * is owed and writes one payout line per restaurant into a batch. Nothing is
  * transferred: the admin pays each line by bank transfer or UPI and marks it
  * paid, or cancels it. A line is an ordinary withdrawal with source
@@ -30,7 +31,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 const money = (value) => Math.round((Number(value) || 0) * 100) / 100;
 
-export const PAYOUT_FREQUENCIES = ['daily', 'weekly'];
+export const PAYOUT_FREQUENCIES = ['daily', 'weekly', 'monthly'];
 export const PAYOUT_METHODS = ['bank', 'upi'];
 
 const DEFAULT_SETTINGS = {
@@ -57,7 +58,7 @@ export async function updatePayoutSettings(body = {}) {
     const data = {};
     if (body.isEnabled !== undefined) data.isEnabled = body.isEnabled === true || body.isEnabled === 'true';
     if (body.frequency !== undefined) {
-        if (!PAYOUT_FREQUENCIES.includes(body.frequency)) throw new ValidationError('Frequency must be daily or weekly');
+        if (!PAYOUT_FREQUENCIES.includes(body.frequency)) throw new ValidationError('Frequency must be daily, weekly or monthly');
         data.frequency = body.frequency;
     }
     if (body.weekday !== undefined) {
@@ -97,6 +98,7 @@ export function istClock(now = new Date()) {
     return {
         runDate,
         weekday: shifted.getUTCDay(),
+        monthDay: shifted.getUTCDate(),
         minutes: shifted.getUTCHours() * 60 + shifted.getUTCMinutes(),
         // Midnight at the start of that Indian day, as a real instant.
         startOfDay: new Date(Date.parse(`${runDate}T00:00:00.000Z`) - IST_OFFSET_MINUTES * 60 * 1000),
@@ -112,6 +114,8 @@ export function isPayoutDue(settings, now = new Date()) {
     if (!settings.isEnabled) return false;
     const clock = istClock(now);
     if (settings.frequency === 'weekly' && clock.weekday !== settings.weekday) return false;
+    // Monthly runs on the 1st, as the old panel's cron line did ("M H 1 * *").
+    if (settings.frequency === 'monthly' && clock.monthDay !== 1) return false;
     const [hours, minutes] = String(settings.runTime).split(':').map(Number);
     return clock.minutes >= hours * 60 + minutes;
 }
@@ -299,42 +303,146 @@ export async function syncBatchStatus(batchId, db = prisma) {
     });
 }
 
+/** The old panel's words for a line: completed / canceled rather than approved / rejected. */
+export const LINE_STATUS_WORDS = { pending: 'pending', approved: 'completed', rejected: 'canceled' };
+const LINE_STATUS_FROM_WORD = { pending: 'pending', completed: 'approved', approved: 'approved', canceled: 'rejected', rejected: 'rejected' };
+export const BATCH_STATUSES = ['pending', 'partially_completed', 'completed', 'canceled'];
+
 const serializeBatch = (b) => ({
     ...b,
-    title: `Payout #${b.number}`,
+    // "Disbursement # 1117" in the old panel. A batch brought over from it
+    // keeps its old number.
+    title: `Disbursement #${b.legacyNumber ?? b.number}`,
+    isLegacy: b.legacyNumber !== null && b.legacyNumber !== undefined,
     totalAmount: Number(b.totalAmount),
 });
+
+/** An Indian calendar day 'YYYY-MM-DD' -> the instant it starts, or null. */
+export function istDayStart(value) {
+    const text = String(value || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
+    const time = Date.parse(`${text}T00:00:00.000Z`);
+    if (Number.isNaN(time)) return null;
+    return new Date(time - IST_OFFSET_MINUTES * 60 * 1000);
+}
+
+/** createdAt between two Indian calendar days, both included. */
+const createdBetween = (from, to) => {
+    const start = istDayStart(from);
+    const end = istDayStart(to);
+    if (!start && !end) return null;
+    return { ...(start ? { gte: start } : {}), ...(end ? { lt: new Date(end.getTime() + DAY_MS) } : {}) };
+};
+
+/** The batch filter of the list page: status tab, date range, "#number" search. */
+export function batchListWhere(query = {}) {
+    // Runs that found nobody to pay are kept (they mark the day as done) but
+    // are noise in the list.
+    const where = { restaurantCount: { gt: 0 } };
+    if (query.status && query.status !== 'all') {
+        if (!BATCH_STATUSES.includes(String(query.status))) throw new ValidationError('Unknown disbursement status');
+        where.status = String(query.status);
+    }
+    const created = createdBetween(query.from, query.to);
+    if (created) where.createdAt = created;
+    const search = String(query.search || '').replace(/^#/, '').trim();
+    if (search) {
+        const number = /^\d{1,9}$/.test(search) ? Number(search) : -1;
+        // A batch brought over is known by its old number only; its own
+        // `number` is never shown.
+        where.OR = [{ number, legacyNumber: null }, { legacyNumber: number }];
+    }
+    return where;
+}
+
+/** groupBy on status -> { pending, completed, canceled }, each { count, amount }. */
+export const statusTotals = (groups) => {
+    const out = {
+        pending: { count: 0, amount: 0 },
+        completed: { count: 0, amount: 0 },
+        canceled: { count: 0, amount: 0 },
+    };
+    for (const g of groups) {
+        const key = LINE_STATUS_WORDS[g.status];
+        if (!key) continue;
+        out[key].count += g._count?._all || 0;
+        out[key].amount = money(out[key].amount + Number(g._sum?.amount || 0));
+    }
+    return out;
+};
 
 export async function listPayoutBatches(query = {}) {
     const limit = Math.min(Math.max(parseInt(query.limit, 10) || 20, 1), 100);
     const page = Math.max(parseInt(query.page, 10) || 1, 1);
-    // Runs that found nobody to pay are kept (they mark the day as done) but
-    // are noise in the list.
-    const where = { restaurantCount: { gt: 0 } };
-    if (query.status && query.status !== 'all') where.status = String(query.status);
+    const where = batchListWhere(query);
 
-    const [rows, total] = await Promise.all([
+    const [rows, total, overall, lineTotals] = await Promise.all([
         prisma.foodRestaurantPayoutBatch.findMany({
             where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * limit, take: limit,
         }),
         prisma.foodRestaurantPayoutBatch.count({ where }),
+        prisma.foodRestaurantPayoutBatch.aggregate({ where, _sum: { totalAmount: true } }),
+        // Across every batch the filters match, not just this page: the
+        // cards above the list.
+        prisma.foodRestaurantWithdrawal.groupBy({
+            by: ['status'],
+            where: { batch: { is: where } },
+            _sum: { amount: true },
+            _count: { _all: true },
+        }),
     ]);
 
-    // Paid so far, per batch, so the list shows progress without opening each.
-    const paid = rows.length
+    // Paid / waiting / cancelled per batch, so the list shows progress
+    // without opening each.
+    const perBatch = rows.length
         ? await prisma.foodRestaurantWithdrawal.groupBy({
-            by: ['batchId'],
-            where: { batchId: { in: rows.map((r) => r.id) }, status: 'approved' },
+            by: ['batchId', 'status'],
+            where: { batchId: { in: rows.map((r) => r.id) } },
             _sum: { amount: true },
+            _count: { _all: true },
         })
         : [];
-    const paidBy = new Map(paid.map((p) => [p.batchId, Number(p._sum.amount) || 0]));
+    const byBatch = new Map();
+    for (const g of perBatch) byBatch.set(g.batchId, [...(byBatch.get(g.batchId) || []), g]);
 
     return {
-        batches: rows.map((b) => ({ ...serializeBatch(b), paidAmount: paidBy.get(b.id) || 0 })),
+        batches: rows.map((b) => {
+            const lines = statusTotals(byBatch.get(b.id) || []);
+            return {
+                ...serializeBatch(b),
+                paidAmount: lines.completed.amount,
+                pendingAmount: lines.pending.amount,
+                canceledAmount: lines.canceled.amount,
+                lines,
+            };
+        }),
+        summary: {
+            count: total,
+            totalAmount: money(overall._sum.totalAmount),
+            ...statusTotals(lineTotals),
+        },
         pagination: { total, page, limit, pages: Math.ceil(total / limit) || 1 },
     };
 }
+
+/** One line as the pages show it, with the old panel's status word beside ours. */
+const lineOut = (w) => ({
+    id: w.id,
+    restaurantId: w.restaurantId,
+    restaurantName: w.restaurant?.restaurantName || 'N/A',
+    ownerName: w.restaurant?.ownerName || '',
+    ownerPhone: w.restaurant?.ownerPhone || '',
+    amount: Number(w.amount),
+    status: w.status,
+    disbursementStatus: LINE_STATUS_WORDS[w.status] || w.status,
+    paymentMethod: w.paymentMethod,
+    bankDetails: w.bankDetails || {},
+    transactionId: w.transactionId || '',
+    adminNote: w.adminNote || '',
+    rejectionReason: w.rejectionReason || '',
+    createdAt: w.createdAt,
+    processedAt: w.processedAt,
+});
 
 export async function getPayoutBatch(batchId, query = {}) {
     if (!isId(batchId)) throw new ValidationError('Invalid payout batch');
@@ -342,32 +450,85 @@ export async function getPayoutBatch(batchId, query = {}) {
     if (!batch) throw new ValidationError('Payout batch not found');
 
     const where = { batchId: batch.id };
-    if (query.status && query.status !== 'all') where.status = String(query.status);
+    if (query.status && query.status !== 'all') {
+        const status = LINE_STATUS_FROM_WORD[String(query.status)];
+        if (!status) throw new ValidationError('Unknown disbursement status');
+        where.status = status;
+    }
     const search = String(query.search || '').trim();
     if (search) where.restaurant = { restaurantName: { contains: search, mode: 'insensitive' } };
 
-    const lines = await prisma.foodRestaurantWithdrawal.findMany({
-        where,
-        orderBy: { amount: 'desc' },
-        include: { restaurant: { select: { id: true, restaurantName: true, ownerName: true, ownerPhone: true } } },
-    });
+    const [lines, groups] = await Promise.all([
+        prisma.foodRestaurantWithdrawal.findMany({
+            where,
+            orderBy: { amount: 'desc' },
+            include: { restaurant: { select: { id: true, restaurantName: true, ownerName: true, ownerPhone: true } } },
+        }),
+        prisma.foodRestaurantWithdrawal.groupBy({
+            by: ['status'],
+            where: { batchId: batch.id },
+            _sum: { amount: true },
+            _count: { _all: true },
+        }),
+    ]);
 
     return {
         batch: serializeBatch(batch),
-        payouts: lines.map((w) => ({
-            id: w.id,
-            restaurantId: w.restaurantId,
-            restaurantName: w.restaurant?.restaurantName || 'N/A',
-            ownerName: w.restaurant?.ownerName || '',
-            ownerPhone: w.restaurant?.ownerPhone || '',
-            amount: Number(w.amount),
-            status: w.status,
-            paymentMethod: w.paymentMethod,
-            bankDetails: w.bankDetails || {},
-            transactionId: w.transactionId || '',
-            adminNote: w.adminNote || '',
-            processedAt: w.processedAt,
-        })),
+        // Over every line of the batch, whatever the filter.
+        summary: statusTotals(groups),
+        payouts: lines.map(lineOut),
+    };
+}
+
+/**
+ * A restaurant's own disbursement lines (the old store panel's "Disbursement"
+ * page): every payout the runs created for it, newest first, with the run's
+ * number and where it was paid.
+ */
+export async function listRestaurantDisbursements(restaurantId, query = {}) {
+    if (!isId(restaurantId)) throw new ValidationError('Invalid restaurant');
+    const limit = Math.min(Math.max(parseInt(query.limit, 10) || 20, 1), 100);
+    const page = Math.max(parseInt(query.page, 10) || 1, 1);
+
+    const scope = { restaurantId: String(restaurantId), source: 'disbursement' };
+    const where = { ...scope };
+    if (query.status && query.status !== 'all') {
+        const status = LINE_STATUS_FROM_WORD[String(query.status)];
+        if (!status) throw new ValidationError('Unknown disbursement status');
+        where.status = status;
+    }
+    const created = createdBetween(query.from, query.to);
+    if (created) where.createdAt = created;
+
+    const [rows, total, groups] = await Promise.all([
+        prisma.foodRestaurantWithdrawal.findMany({
+            where,
+            orderBy: { createdAt: 'desc' },
+            skip: (page - 1) * limit,
+            take: limit,
+            include: { batch: { select: { id: true, number: true, legacyNumber: true } } },
+        }),
+        prisma.foodRestaurantWithdrawal.count({ where }),
+        prisma.foodRestaurantWithdrawal.groupBy({
+            by: ['status'],
+            where: scope,
+            _sum: { amount: true },
+            _count: { _all: true },
+        }),
+    ]);
+
+    return {
+        disbursements: rows.map((w) => {
+            const { restaurantName, ownerName, ownerPhone, ...line } = lineOut(w);
+            return {
+                ...line,
+                batchId: w.batchId,
+                title: w.batch ? `Disbursement #${w.batch.legacyNumber ?? w.batch.number}` : 'Disbursement',
+            };
+        }),
+        // Over all of this restaurant's lines, whatever the filter.
+        summary: statusTotals(groups),
+        pagination: { total, page, limit, pages: Math.ceil(total / limit) || 1 },
     };
 }
 
@@ -376,9 +537,11 @@ export async function getPayoutBatch(batchId, query = {}) {
  * panel's checkboxes did. Each line is claimed only if still pending, so a
  * line someone else decided in the meantime is reported, not overwritten.
  */
-export async function decidePayouts(batchId, { ids = [], status, transactionId, adminNote } = {}) {
+export async function decidePayouts(batchId, { ids = [], status: asked, transactionId, adminNote } = {}) {
     if (!isId(batchId)) throw new ValidationError('Invalid payout batch');
-    if (!['approved', 'rejected'].includes(status)) throw new ValidationError('Status must be approved (paid) or rejected (cancelled)');
+    // 'completed' / 'canceled' as the old panel said them, or ours.
+    const status = LINE_STATUS_FROM_WORD[String(asked || '')];
+    if (!['approved', 'rejected'].includes(status)) throw new ValidationError('Status must be completed (paid) or canceled');
     const wanted = [...new Set((Array.isArray(ids) ? ids : []).map(String))].filter(isId);
     if (!wanted.length) throw new ValidationError('Select at least one payout');
 

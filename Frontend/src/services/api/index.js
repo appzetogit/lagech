@@ -1556,6 +1556,9 @@ export const restaurantAPI = {
     apiClient.get("/food/restaurant/withdrawals", {
       contextModule: "restaurant"
     }),
+  /** This restaurant's daily payout lines (old store panel: Disbursement). */
+  getDisbursements: (params = {}) =>
+    apiClient.get("/food/restaurant/disbursements", { params, contextModule: "restaurant" }),
   /** Advertisement requests: sent here, decided by the admin. */
   getMyAdvertisements: () => apiClient.get("/food/restaurant/advertisements", { contextModule: "restaurant" }),
   requestAdvertisement: (body) => apiClient.post("/food/restaurant/advertisements", body, { contextModule: "restaurant" }),

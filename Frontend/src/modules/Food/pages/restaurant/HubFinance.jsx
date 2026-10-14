@@ -1105,13 +1105,22 @@ export default function HubFinance() {
             <div className="md:col-start-2">
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-base font-bold text-gray-900 md:text-lg md:tracking-tight">Withdrawal requests</h2>
-                <button
-                  type="button"
-                  onClick={() => navigate("/food/restaurant/withdrawal-history")}
-                  className="hidden md:inline-flex text-xs font-semibold text-[#4f6f9a] hover:underline"
-                >
-                  View all
-                </button>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => navigate("/food/restaurant/disbursements")}
+                    className="inline-flex text-xs font-semibold text-[#4f6f9a] hover:underline"
+                  >
+                    Disbursements
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate("/food/restaurant/withdrawal-history")}
+                    className="hidden md:inline-flex text-xs font-semibold text-[#4f6f9a] hover:underline"
+                  >
+                    View all
+                  </button>
+                </div>
               </div>
               <div className="bg-white rounded-lg p-4 md:rounded-2xl md:border md:border-[#d6dce4] md:shadow-[0_18px_40px_-34px_rgba(20,24,32,0.35)]">
                 {loadingWithdrawals ? (

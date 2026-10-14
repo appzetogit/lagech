@@ -97,7 +97,7 @@ function WithdrawalCard({ request, index }) {
       <div className="flex items-start justify-between gap-3 pl-2">
         <div className="min-w-0 flex-1">
           <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#5c6775]">
-            {request.source === "disbursement" ? "Daily payout" : "Withdrawal"}
+            {request.source === "disbursement" ? request.disbursementTitle || "Daily payout" : "Withdrawal"}
           </p>
           <p className="mt-1 text-2xl font-black tracking-tight tabular-nums text-[#141820]">
             {formatAmount(request.amount)}
@@ -143,6 +143,7 @@ export default function WithdrawalHistoryPage() {
           status: normalizeStatus(h.status),
           requestedAt: h.createdAt || h.requestedAt,
           source: h.source || "manual",
+          disbursementTitle: h.disbursementTitle || "",
           processedAt: h.processedAt,
           rejectionReason: h.rejectionReason || h.reason || "",
         }))
