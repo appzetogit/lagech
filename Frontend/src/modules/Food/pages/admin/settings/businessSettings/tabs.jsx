@@ -210,6 +210,12 @@ export function OrderTab() {
                 <NumberField label="Free delivery over (₹)" value={v.freeDelivery.minSubtotal} onChange={(x) => area.set(["freeDelivery", "minSubtotal"], x)} step="0.01" />
               </div>
             )}
+            <SwitchRow
+              label="Delivery OTP"
+              hint="The customer's app shows a 4-digit code once the rider picks the order up, and the rider must enter it before marking the order delivered. When off, no code is made and the rider completes the delivery directly. Each order keeps the rule it was picked up under, so switching this never strands a delivery on the road. Takeaway pickup codes are not affected."
+              checked={v.deliveryOtp !== false}
+              onChange={(x) => area.set("deliveryOtp", x)}
+            />
             <SwitchRow label="Extra packaging charge" hint="Restaurants may set their own packaging charge in the restaurant app, charged on every order or when the customer asks for it. It is the restaurant's money, with no commission. When off, nothing is charged." checked={v.extraPackagingCharge} onChange={(x) => area.set("extraPackagingCharge", x)} />
             <div className="grid gap-4 sm:grid-cols-2 mt-3">
               <Field label="Who confirms the order" hint="Restaurant: the restaurant accepts each new order within the acceptance time, or it is cancelled. Deliveryman: a delivery order is confirmed as soon as it is placed and paid, riders are looked for at once and the restaurant is alerted to prepare it (no acceptance timer). Takeaway orders are always accepted by the restaurant.">

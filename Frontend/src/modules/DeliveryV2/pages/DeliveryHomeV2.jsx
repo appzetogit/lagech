@@ -100,7 +100,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
   const navigate = useNavigate();
   const { isOnline, toggleOnline, setOnline, activeOrder, tripStatus, setRiderLocation, setActiveOrder, updateTripStatus, clearActiveOrder, routeDurationMins } = useDeliveryStore();
   const { isWithinRange, distanceToTarget, displayDistanceMeters, distanceLabel } = useProximityCheck();
-  const { acceptOrder, reachPickup, pickUpOrder, reachDrop, completeDelivery, resetTrip } = useOrderManager();
+  const { acceptOrder, reachPickup, pickUpOrder, reachDrop, completeDelivery, needsHandoverOtp, resetTrip } = useOrderManager();
   const { newOrder, clearNewOrder, clearAllOffers, orderStatusUpdate, clearOrderStatusUpdate, isConnected: isSocketConnected, emitLocation } = useDeliveryNotifications();
   const companyName = useCompanyName();
   const { unreadCount: notificationUnreadCount } = useNotificationInbox("delivery", { limit: 20 });
@@ -1080,13 +1080,20 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                            className="w-full max-w-[400px] bg-[#111111]/95 backdrop-blur-xl border border-white/10 p-2 rounded-[32px] shadow-[0_24px_50px_rgba(0,0,0,0.8)]"
                          >
                             <button 
-                              onClick={() => setShowVerification(true)} 
+                              onClick={() => {
+                                // No code needed for this order: complete straight away.
+                                if (!needsHandoverOtp(activeOrder)) {
+                                  completeDelivery(null).catch(() => {});
+                                  return;
+                                }
+                                setShowVerification(true);
+                              }}
                               className="w-full bg-gradient-to-br from-emerald-400 to-emerald-600 border border-emerald-400/30 text-white rounded-[26px] py-4 font-black text-[13px] tracking-[0.2em] transform transition-all active:scale-[0.98] flex items-center justify-center gap-3 relative overflow-hidden group shadow-[0_8px_20px_rgba(16,185,129,0.3)]"
                             >
                               <div className="absolute inset-0 bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                               <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:animate-[shimmer_1.5s_infinite]" />
                               <CheckCircle2 className="w-[20px] h-[20px] relative z-10 drop-shadow-md" /> 
-                              <span className="relative z-10 drop-shadow-md">VERIFY & COMPLETE</span>
+                              <span className="relative z-10 drop-shadow-md">{needsHandoverOtp(activeOrder) ? 'VERIFY & COMPLETE' : 'COMPLETE DELIVERY'}</span>
                             </button>
                          </motion.div>
                       </div>

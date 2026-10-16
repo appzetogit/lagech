@@ -286,6 +286,15 @@ order before pickup with `PATCH /orders/:orderId/reject` works as before whateve
 
 The drop OTP is never exposed to the partner in any response. The customer reads it out; the partner types it into verify-drop-otp.
 
+**The admin can switch the drop OTP off** (Business Settings → Order → Delivery OTP; on by default). It is decided per order when the rider picks it up, so read it from the order, not from settings:
+
+- `deliveryVerification.dropOtp.required` (also flat as `dropOtpRequired`) on the order returned by `confirm-pickup` and `reached-drop`.
+- `true` → show the code screen and call `verify-drop-otp`, then `complete`, as before.
+- `false` → no code exists for this order. Skip the code screen and call `complete` straight away (no `otp` in the body). The button should read "Complete delivery".
+- Missing (older backend) → treat as `true`.
+
+An app that always shows the code screen still works when it is off: `verify-drop-otp` accepts any code for such an order. The customer has no code to read out, though, so update the app to skip the screen.
+
 ---
 
 ### `GET /food/delivery/orders/:orderId/route`
