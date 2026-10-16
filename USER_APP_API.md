@@ -233,7 +233,7 @@ published record — client prices are ignored.
 | GET | `/v1/food/orders` | Order history (paged) |
 | GET | `/v1/food/orders/:orderId` | Single order |
 | GET | `/v1/food/orders/:orderId/route` | **Live tracking route — see §6** |
-| GET | `/v1/food/orders/:orderId/drop-otp` | Handover OTP |
+| GET | `/v1/food/orders/:orderId/drop-otp` | Handover OTP: `{ otp: "1234", required: true }`, or `{ otp: null, required: false }` when the admin has switched the delivery OTP off for this order — then hide the "share this code with your rider" card |
 | GET | `/v1/food/orders/:orderId/payments` | Payment ledger |
 | PATCH | `/v1/food/orders/:orderId/cancel` | Cancel |
 | PATCH | `/v1/food/orders/:orderId/ratings` | **Ratings — see §7** |

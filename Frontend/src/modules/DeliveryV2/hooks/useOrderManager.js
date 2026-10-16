@@ -15,6 +15,17 @@ const canonicalOrderId = (order) =>
  * useOrderManager - Professional hook for real-world trip lifecycle actions.
  * Connects directly to the backend API services.
  */
+/**
+ * Whether the rider must enter the customer's handover code for this order
+ * (Business Settings > Order > Delivery OTP, fixed per order at pickup).
+ * Unknown means yes, as before the switch existed: with it off the server
+ * accepts any code, so asking is never a dead end.
+ */
+export const needsHandoverOtp = (order) => {
+  const flag = order?.deliveryVerification?.dropOtp?.required ?? order?.dropOtpRequired;
+  return flag !== false;
+};
+
 export const useOrderManager = () => {
   const {
     activeOrder, tripStatus, updateTripStatus, clearActiveOrder, setActiveOrder, riderLocation
@@ -164,6 +175,15 @@ export const useOrderManager = () => {
     try {
       const response = await deliveryAPI.confirmReachedDrop(orderId);
       if (response?.data?.success) {
+        // Keep the server's word on whether this order needs the customer's code.
+        const fresh = response.data?.data?.order || response.data?.data;
+        if (fresh?.deliveryVerification || fresh?.dropOtpRequired !== undefined) {
+          setActiveOrder({
+            ...activeOrder,
+            deliveryVerification: fresh.deliveryVerification ?? activeOrder?.deliveryVerification,
+            dropOtpRequired: fresh.dropOtpRequired ?? activeOrder?.dropOtpRequired,
+          });
+        }
         updateTripStatus('REACHED_DROP');
         // toast.info('Arrived at Customer Location');
       } else {
@@ -176,19 +196,21 @@ export const useOrderManager = () => {
   };
 
   /**
-   * Finalize Delivery with OTP Check
+   * Finalize Delivery, checking the customer's code when the order needs one
+   * (Business Settings > Order > Delivery OTP).
    */
   const completeDelivery = async (otp) => {
     const orderId = canonicalOrderId(activeOrder);
+    const needsOtp = needsHandoverOtp(activeOrder);
     try {
-      // 1. Verify OTP first
-      const verifyRes = await deliveryAPI.verifyDropOtp(orderId, otp);
+      // 1. Verify OTP first, when this order has one
+      const verifyRes = needsOtp ? await deliveryAPI.verifyDropOtp(orderId, otp) : { data: { success: true } };
       
       if (verifyRes?.data?.success) {
         let finalOrder = verifyRes.data?.data?.order || activeOrder;
         
         // 2. Mark as complete
-        const completeRes = await deliveryAPI.completeDelivery(orderId, { otp, rating: 5 });
+        const completeRes = await deliveryAPI.completeDelivery(orderId, needsOtp ? { otp, rating: 5 } : { rating: 5 });
         if (completeRes.data?.success && completeRes.data?.data?.order) {
           finalOrder = completeRes.data.data.order;
         } else {
@@ -222,6 +244,7 @@ export const useOrderManager = () => {
     pickUpOrder,
     reachDrop,
     completeDelivery,
+    needsHandoverOtp,
     resetTrip,
   };
 };
