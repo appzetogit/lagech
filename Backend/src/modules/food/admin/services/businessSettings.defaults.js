@@ -131,6 +131,10 @@ const cleanOrder = (value) => {
         homeDelivery,
         takeaway,
         scheduledOrder: bool(input.scheduledOrder, false),
+        // The customer reads a 4-digit code to the rider before the order can be
+        // marked delivered. Decided per order at pickup, so switching it never
+        // strands a delivery already on the road.
+        deliveryOtp: bool(input.deliveryOtp, true),
         scheduleSlotMinutes: num(input.scheduleSlotMinutes, { min: 5, max: 240, fallback: 30, integer: true, label: 'Time slot interval' }),
         freeDelivery,
         extraPackagingCharge: bool(input.extraPackagingCharge, false),

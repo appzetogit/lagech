@@ -1576,7 +1576,7 @@ export async function getDropOtpUser(orderId, userId) {
 
   const row = await prisma.foodOrder.findFirst({
     where: { ...identity, userId: String(userId) },
-    select: { deliveryOtp: true, deliveryPhase: true, orderStatus: true },
+    select: { deliveryOtp: true, deliveryPhase: true, orderStatus: true, dropOtpRequired: true },
   });
   if (!row) throw new NotFoundError("Order not found");
 
@@ -1589,7 +1589,9 @@ export async function getDropOtpUser(orderId, userId) {
     );
   }
 
-  return { otp: row.deliveryOtp };
+  // Delivery OTP switched off for this order (Business Settings > Order).
+  if (!row.dropOtpRequired || !row.deliveryOtp) return { otp: null, required: false };
+  return { otp: row.deliveryOtp, required: true };
 }
 
 /**

@@ -288,6 +288,8 @@ export async function getPublicBusinessSettings() {
             homeDelivery: order.homeDelivery,
             takeaway: order.takeaway,
             scheduledOrder: order.scheduledOrder,
+            /** Riders ask for the customer's handover code. Each order's own rule is deliveryVerification.dropOtp.required. */
+            deliveryOtp: order.deliveryOtp,
             scheduleSlotMinutes: order.scheduleSlotMinutes,
             freeDeliveryOver: order.freeDelivery.enabled ? order.freeDelivery.minSubtotal : null,
             /** Restaurants may add an extra packaging charge (per restaurant: order-options). */

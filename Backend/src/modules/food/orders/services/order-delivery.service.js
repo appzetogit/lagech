@@ -807,6 +807,21 @@ export async function confirmReachedPickupDelivery(orderId, deliveryPartnerId) {
   return updated;
 }
 
+/**
+ * Business Settings > Order > Delivery OTP (on unless switched off). Read when
+ * the rider picks the order up and stored on the order as dropOtpRequired, so
+ * an order keeps the rule it started with.
+ */
+async function deliveryOtpEnabled() {
+  try {
+    const { deliveryOtp } = await getBusinessSettings('business_order');
+    return deliveryOtp !== false;
+  } catch {
+    // Unreadable settings: keep the safer behaviour.
+    return true;
+  }
+}
+
 export async function confirmPickupDelivery(orderId, deliveryPartnerId, billImageUrl) {
   const { row } = await loadOrder(orderId);
   assertOwnedBy(row, deliveryPartnerId);
@@ -818,11 +833,14 @@ export async function confirmPickupDelivery(orderId, deliveryPartnerId, billImag
     throw new ValidationError(`Order is already at status '${from}'. Cannot re-mark as '${nextStatus}'.`);
   }
 
-  // Pre-generate the handover OTP so the customer sees it as soon as food is on the way.
+  // Pre-generate the handover OTP so the customer sees it as soon as food is on the
+  // way. With the admin switch off, no code is made and none is asked for.
   const existingOtp = String(row.deliveryOtp || '').trim();
   const otpPatch = existingOtp
     ? {}
-    : { deliveryOtp: generateFourDigitDeliveryOtp(), dropOtpRequired: true, dropOtpVerified: false };
+    : (await deliveryOtpEnabled())
+      ? { deliveryOtp: generateFourDigitDeliveryOtp(), dropOtpRequired: true, dropOtpVerified: false }
+      : { dropOtpRequired: false, dropOtpVerified: false };
 
   const updated = toOrder(await prisma.foodOrder.update({
     where: { id: row.id },
@@ -874,14 +892,24 @@ export async function confirmReachedDropDelivery(orderId, deliveryPartnerId) {
   // pickup (getDropOtpUser exposes it from 'picked_up' onwards), so re-rolling it
   // here invalidated the code the customer reads out — the rider then got "Invalid OTP".
   const existingOtp = String(row.deliveryOtp || '').trim();
+  // The rule was fixed at pickup; only an order that skipped pickup reads the
+  // switch now.
+  const otpOn = existingOtp
+    ? true
+    : row.pickedUpAt
+      ? Boolean(row.dropOtpRequired)
+      : await deliveryOtpEnabled();
 
   const updated = toOrder(await prisma.foodOrder.update({
     where: { id: row.id },
     data: {
-      ...(existingOtp ? {} : { deliveryOtp: generateFourDigitDeliveryOtp() }),
-      // Arm the OTP gate at drop regardless (the early return above covers verified).
-      dropOtpRequired: true,
-      dropOtpVerified: false,
+      ...(otpOn
+        ? {
+          ...(existingOtp ? {} : { deliveryOtp: generateFourDigitDeliveryOtp() }),
+          dropOtpRequired: true,
+          dropOtpVerified: false,
+        }
+        : { dropOtpRequired: false }),
       deliveryPhase: 'at_drop',
       deliveryStatus: 'reached_drop',
       reachedDropAt: row.reachedDropAt || new Date(),
@@ -905,7 +933,7 @@ export async function confirmReachedDropDelivery(orderId, deliveryPartnerId) {
     orderMongoId: row.id,
     orderId: row.id,
     deliveryPartnerId,
-    dropOtpRequired: true,
+    dropOtpRequired: otpOn,
     dropOtpVerified: false,
   });
 
@@ -922,6 +950,9 @@ export async function verifyDropOtpDelivery(orderId, deliveryPartnerId, otp) {
   if (!otpStr) throw new ValidationError('OTP is required');
 
   if (!row.dropOtpRequired) {
+    // Delivery OTP is switched off for this order: nothing to check. An older
+    // rider app that always asks for a code still gets through.
+    if (row.pickedUpAt || row.reachedDropAt) return { order: sanitizeOrderForDeliveryPartner(order) };
     throw new ValidationError(
       'OTP verification is not active for this order. Confirm reached drop first.',
     );
