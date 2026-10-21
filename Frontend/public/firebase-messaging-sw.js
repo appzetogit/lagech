@@ -313,6 +313,24 @@ self.addEventListener("push", (event) => {
   }
 });
 
+// Initialise from the registration URL during startup, so a worker that the
+// browser restarts cold for a push (mobile Chrome does this for every push once
+// the page is backgrounded or the screen is locked) still has messaging set up.
+// Push listeners only count if added during this first evaluation. Kept after the
+// "push" listener above so that one still runs first and can intercept dirty
+// payloads before the SDK renders them.
+(() => {
+  const params = new URLSearchParams(self.location.search);
+  const config = {};
+  ["apiKey", "authDomain", "projectId", "appId", "messagingSenderId", "storageBucket", "measurementId"].forEach(
+    (key) => {
+      const value = sanitize(params.get(key));
+      if (value) config[key] = value;
+    },
+  );
+  initializeFirebaseInServiceWorker(config);
+})();
+
 self.addEventListener("notificationclick", (event) => {
   pushDebugLog(PUSH_DEBUG_PREFIX, "Notification click received", {
     data: event?.notification?.data || {},
