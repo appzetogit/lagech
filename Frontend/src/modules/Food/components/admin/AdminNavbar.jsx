@@ -407,7 +407,11 @@ export default function AdminNavbar({ onMenuClick }) {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <div className="flex items-center gap-2 pl-3 border-l border-neutral-200 cursor-pointer hover:bg-neutral-100 rounded-md px-2 py-1 transition-colors">
-
+                  {/* The name block below is desktop-only; without this the trigger
+                      is empty on a phone and Profile/Settings/Logout are unreachable. */}
+                  <span className="md:hidden w-8 h-8 rounded-full bg-neutral-100 border border-neutral-300 flex items-center justify-center" aria-label="Account menu">
+                    <User className="w-4 h-4 text-neutral-700" />
+                  </span>
                   <div className="hidden md:block">
                     <p className="text-sm font-medium text-neutral-900">
                       {adminData?.name || "Admin User"}
