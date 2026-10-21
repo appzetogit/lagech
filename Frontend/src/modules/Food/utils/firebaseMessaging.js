@@ -570,6 +570,23 @@ async function getFirebasePublicEnv() {
   return publicEnvPromise;
 }
 
+// The worker reads its Firebase config from its own URL so it can initialise at
+// startup. Mobile Chrome kills an idle worker within seconds and restarts it
+// cold for each push; a config that only arrives by postMessage from an open page
+// is gone by then, messaging never initialises, and the push is dropped silently.
+// The push subscription belongs to the registration's scope, not the script URL,
+// so moving existing installs to this URL keeps their FCM tokens valid.
+function getServiceWorkerUrl(config = {}) {
+  const params = new URLSearchParams();
+  ["apiKey", "authDomain", "projectId", "appId", "messagingSenderId", "storageBucket", "measurementId"].forEach(
+    (key) => {
+      const value = sanitize(config[key]);
+      if (value) params.set(key, value);
+    },
+  );
+  return `/firebase-messaging-sw.js?${params.toString()}`;
+}
+
 function passFirebaseConfigToServiceWorker(registration, config) {
   if (!registration || !config) return;
   const payload = {
@@ -772,10 +789,9 @@ export async function resolveDeviceFcmToken(moduleName = "user", options = {}) {
       return { token: null, platform: "web" };
     }
 
-    let registration = await navigator.serviceWorker.getRegistration("/firebase-messaging-sw.js");
-    if (!registration) {
-      registration = await navigator.serviceWorker.register("/firebase-messaging-sw.js");
-    }
+    // Always register: a no-op for the same URL, and it moves installs still on
+    // the old config-less URL onto the one the worker can initialise from.
+    let registration = await navigator.serviceWorker.register(getServiceWorkerUrl(firebasePublicEnv));
     // Wait until the SW is active — getToken often fails on a non-ready registration.
     if (navigator.serviceWorker.ready) {
       registration = (await navigator.serviceWorker.ready) || registration;
@@ -1030,7 +1046,7 @@ export async function registerWebPushForCurrentModule(pathname = window.location
         return;
       }
 
-      let registration = await navigator.serviceWorker.register("/firebase-messaging-sw.js");
+      let registration = await navigator.serviceWorker.register(getServiceWorkerUrl(firebasePublicEnv));
       if (navigator.serviceWorker.ready) {
         registration = (await navigator.serviceWorker.ready) || registration;
       }
