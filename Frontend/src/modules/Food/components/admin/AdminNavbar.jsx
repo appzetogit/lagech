@@ -269,7 +269,7 @@ export default function AdminNavbar({ onMenuClick }) {
   return (
     <>
       <header className="sticky top-0 z-50 bg-white shadow-[0_4px_10px_rgba(0,0,0,0.05)]">
-        <div className="flex items-center justify-between px-6 py-3">
+        <div className="flex items-center justify-between px-3 sm:px-6 py-3">
           {/* Left: Logo and Mobile Menu */}
           <div className="flex items-center gap-3">
             <button
@@ -310,7 +310,17 @@ export default function AdminNavbar({ onMenuClick }) {
           <AdminAreaNav />
 
           {/* Search, as in the previous panel: "Search or Ctrl+K" */}
-          <div className="flex-1 flex justify-end min-w-[190px] max-w-xs mx-4">
+          {/* Below sm the full box would push the bell and the account menu
+              (Logout) off a phone screen, so it collapses to an icon there. */}
+          <button
+            type="button"
+            onClick={() => setSearchOpen(true)}
+            className="sm:hidden ml-auto mr-2 h-10 w-10 rounded-full flex items-center justify-center text-[#677788] hover:bg-neutral-100"
+            aria-label="Search"
+          >
+            <Search className="w-5 h-5" />
+          </button>
+          <div className="hidden sm:flex flex-1 justify-end min-w-[190px] max-w-xs mx-4">
             <button
               onClick={() => setSearchOpen(true)}
               className="flex items-center gap-2 px-4 py-2.5 rounded-[5px] bg-[#F3F4F5] text-[#677788] cursor-pointer hover:bg-[#E7EAF3] transition-colors w-full"
@@ -324,7 +334,7 @@ export default function AdminNavbar({ onMenuClick }) {
           </div>
 
           {/* Right: User Profile */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
             <button
               type="button"
               onClick={() => navigate("/admin/food/chattings")}
