@@ -28,6 +28,15 @@ export default function AdminPushPrompt() {
     return () => clearInterval(id)
   }, [])
 
+  useEffect(() => {
+    // /admin/* is routed outside the Food app, whose page-load registration
+    // never runs here. Without this an admin whose token the backend dropped
+    // (FCM reported it dead) had no way back: permission is already granted,
+    // so the bar below with its "Turn on" tap never shows again.
+    if (permission !== "granted") return
+    registerWebPushForCurrentModule(window.location.pathname).catch(() => {})
+  }, [permission])
+
   if (permission === "unsupported" || permission === "granted") return null
 
   const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent)
